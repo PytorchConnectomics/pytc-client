@@ -4,3 +4,4 @@
 *.pclprof
 *.png
 node_modules/
+pytc/
