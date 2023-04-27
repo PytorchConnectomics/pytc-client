@@ -10,9 +10,11 @@ function Visualization() {
 
   useEffect(() => {
     const fetchNeuroglancerViewer = async () => {
-      console.log(context.currentImage);
       try {
-        const res = await getNeuroglancerViewer(context.currentImage);
+        const res = await getNeuroglancerViewer(
+          context.currentImage,
+          context.currentLabel
+        );
         console.log(res);
         setViewer(res);
       } catch (e) {

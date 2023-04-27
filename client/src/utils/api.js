@@ -1,15 +1,19 @@
 import axios from "axios";
-export async function getNeuroglancerViewer(file) {
+export async function getNeuroglancerViewer(image, label) {
   try {
-    console.log(file);
     const fmData = new FormData();
-    fmData.append("file", file);
+    fmData.append("image", image);
+    fmData.append("label", label);
 
     const res = await axios.post(
       `${process.env.REACT_APP_API_PROTOCOL}://${process.env.REACT_APP_API_URL}/neuroglancer`,
-      fmData
+      fmData,
+      {
+        headers: {
+          "Content-Type": "multipart/form-data",
+        },
+      }
     );
-    console.log(file, res.data);
     return res.data;
   } catch (error) {
     if (error.response) {

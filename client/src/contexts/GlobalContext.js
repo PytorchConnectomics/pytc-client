@@ -3,11 +3,19 @@ import React, { useState } from "react";
 export const AppContext = React.createContext(null);
 
 export const ContextWrapper = (props) => {
-  const [images, setImages] = useState([]);
+  const [files, setFiles] = useState([]);
   const [currentImage, setCurrentImage] = useState(null);
+  const [currentLabel, setCurrentLabel] = useState(null);
   return (
     <AppContext.Provider
-      value={{ images, setImages, currentImage, setCurrentImage }}
+      value={{
+        files,
+        setFiles,
+        currentImage,
+        setCurrentImage,
+        currentLabel,
+        setCurrentLabel,
+      }}
     >
       {props.children}
     </AppContext.Provider>

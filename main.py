@@ -15,7 +15,7 @@ app.add_middleware(
 )
 
 @app.post("/neuroglancer")
-async def neuroglancer(file: UploadFile = File(...)):
+async def neuroglancer(image: UploadFile = File(...), label: UploadFile = File(...)):
     import neuroglancer
     import numpy as np
     import imageio
@@ -34,22 +34,26 @@ async def neuroglancer(file: UploadFile = File(...)):
         names=['z', 'y', 'x'],
         units=['nm', 'nm', 'nm'],
         scales=[30, 6, 6])
-
     try:
-        img_data = file.file.read()
+        img_data = image.file.read()
+        label_data = label.file.read()
     except Exception:
         return {"message": "There was an error uploading the file"}
     finally:
-        file.file.close()
+        image.file.close()
+        label.file.close()
+
 
     im = imageio.volread(img_data)
+    if label_data:
+        gt = imageio.volread(label_data)
 
     def ngLayer(data, res, oo=[0, 0, 0], tt='segmentation'):
         return neuroglancer.LocalVolume(data, dimensions=res, volume_type=tt, voxel_offset=oo)
 
     with viewer.txn() as s:
         s.layers.append(name='im', layer=ngLayer(im, res, tt='image'))
-        # s.layers.append(name='gt',layer=ngLayer(gt,res,tt='segmentation'))
+        s.layers.append(name='gt',layer=ngLayer(gt, res,tt='segmentation'))
 
     print(viewer)
     return str(viewer)
