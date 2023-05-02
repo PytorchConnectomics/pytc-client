@@ -50,7 +50,7 @@ function Dragger() {
       multiple={true}
       onChange={onChange}
       customRequest={uploadImage}
-      beforeUpload={beforeUpload}
+      // beforeUpload={beforeUpload}
       style={{ maxHeight: "20vh" }}
     >
       <p className="ant-upload-drag-icon">
