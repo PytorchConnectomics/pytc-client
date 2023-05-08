@@ -1,5 +1,5 @@
 import React, { useState } from "react";
-import Dataloader from "../views/Dataloader";
+import DataLoader from "./DataLoader";
 import Visualization from "../views/Visualization";
 import ModelTraining from "../views/ModelTraining";
 import { Layout, Menu, theme } from "antd";
@@ -30,7 +30,8 @@ function Views() {
   return (
     <Layout
       style={{
-        minHeight: "100vh",
+        minHeight: "99vh",
+        minWidth: "90vw",
       }}
     >
       <Sider
@@ -40,14 +41,14 @@ function Views() {
         theme="light"
         collapsedWidth="0"
       >
-        <div
-          style={{
-            height: 32,
-            margin: 16,
-            background: "rgba(255, 255, 255, 0.2)",
-          }}
-        />
-        <Dataloader />
+        {/*<div*/}
+        {/*  style={{*/}
+        {/*    height: 32,*/}
+        {/*    margin: 16,*/}
+        {/*    background: "rgba(255, 255, 255, 0.2)",*/}
+        {/*  }}*/}
+        {/*/>*/}
+        <DataLoader />
       </Sider>
       <Layout className="site-layout">
         <Content
