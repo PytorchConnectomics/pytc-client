@@ -27,8 +27,7 @@ function Dragger() {
       console.log("error");
       message.error(`${info.file.name} file upload failed.`);
     } else if (status === "removed") {
-      console.log("removed");
-      message.alert(`${info.file.name} file removed.`);
+      console.log(info.fileList);
       context.setFiles([...info.fileList]);
     }
   };
@@ -63,12 +62,11 @@ function Dragger() {
   return (
     <>
       <Dragger
-        name="file"
         multiple={true}
         onChange={onChange}
         customRequest={uploadImage}
         onPreview={handlePreview}
-        listType="picture"
+        listType="picture-card"
         style={{ maxHeight: "20vh" }}
       >
         <p className="ant-upload-drag-icon">

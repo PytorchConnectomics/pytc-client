@@ -3,6 +3,7 @@ import Dragger from "../components/Dragger";
 import { Button, Space, Select, Divider } from "antd";
 import { ArrowRightOutlined } from "@ant-design/icons";
 import { AppContext } from "../contexts/GlobalContext";
+import "./DataLoader.css";
 
 function DataLoader() {
   const context = useContext(AppContext);
@@ -45,6 +46,7 @@ function DataLoader() {
           options={fileList}
           placeholder="Select image"
           size="middle"
+          allowClear={true}
         />
         <label>Label:</label>
         <Select
@@ -52,6 +54,7 @@ function DataLoader() {
           options={fileList}
           placeholder="Select label"
           size="middle"
+          allowClear={true}
         />
         <Button
           type="primary"
