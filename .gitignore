@@ -5,3 +5,4 @@
 *.png
 node_modules/
 pytc/
+logs/

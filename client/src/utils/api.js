@@ -20,3 +20,37 @@ export async function getNeuroglancerViewer(image, label) {
     throw error;
   }
 }
+
+export async function startModelTraining() {
+  try {
+    const res = await axios.get(
+      `${process.env.REACT_APP_API_PROTOCOL}://${process.env.REACT_APP_API_URL}/start_model_training`
+    );
+    return res.data;
+  } catch (error) {
+    if (error.response) {
+      throw new Error(
+        `${error.response.status}: ${error.response.data?.detail?.error}`
+      );
+    }
+    throw error;
+  }
+}
+
+export function stopModelTraining() {}
+
+export async function startTensorboard() {
+  try {
+    const res = await axios.get(
+      `${process.env.REACT_APP_API_PROTOCOL}://${process.env.REACT_APP_API_URL}/start_tensorboard`
+    );
+    return res.data;
+  } catch (error) {
+    if (error.response) {
+      throw new Error(
+        `${error.response.status}: ${error.response.data?.detail?.error}`
+      );
+    }
+    throw error;
+  }
+}
