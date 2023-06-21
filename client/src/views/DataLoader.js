@@ -21,11 +21,11 @@ function DataLoader() {
     console.log(`selected ${value}`);
     setCurrentLabel(context.files.find((file) => file.uid === value));
   };
-  const [fileList, setFileList] = useState([]);
+  // const [fileList, setFileList] = useState([]);
 
   useEffect(() => {
     if (context.files) {
-      setFileList(
+      context.setFileList(
         context.files.map((file) => ({
           label: file.name,
           value: file.uid,
@@ -43,7 +43,7 @@ function DataLoader() {
         <label>Image:</label>
         <Select
           onChange={handleImageChange}
-          options={fileList}
+          options={context.fileList}
           placeholder="Select image"
           size="middle"
           allowClear={true}
@@ -51,7 +51,7 @@ function DataLoader() {
         <label>Label:</label>
         <Select
           onChange={handleLabelChange}
-          options={fileList}
+          options={context.fileList}
           placeholder="Select label"
           size="middle"
           allowClear={true}

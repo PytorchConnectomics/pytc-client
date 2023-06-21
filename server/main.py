@@ -68,9 +68,12 @@ async def neuroglancer(image: str = Form(...), label: str = Form(...)):
     print(viewer)
     return str(viewer)
 
-@app.get("/start_model_training")
-def start_model_training():
-    start()
+@app.post("/start_model_training")
+# async def start_model_training(args: str = Form(...)):
+async def start_model_training(args):
+    print("start_model")
+    print(args)
+    start(args)
 
 @app.get('/start_tensorboard')
 async def start_tensorboard():

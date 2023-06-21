@@ -23,8 +23,13 @@ export async function getNeuroglancerViewer(image, label) {
 
 export async function startModelTraining() {
   try {
-    const res = await axios.get(
-      `${process.env.REACT_APP_API_PROTOCOL}://${process.env.REACT_APP_API_URL}/start_model_training`
+    // let fmData = new FormData();
+    // fmData.append("configBase", "--config-base configs/SNEMI/SNEMI-Base.yaml");
+
+    let fmData = "--config-base configs/SNEMI/SNEMI-Base.yaml";
+    const res = await axios.post(
+      `${process.env.REACT_APP_API_PROTOCOL}://${process.env.REACT_APP_API_URL}/start_model_training`,
+      fmData
     );
     return res.data;
   } catch (error) {
