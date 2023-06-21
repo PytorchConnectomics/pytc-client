@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useContext, useState } from "react";
 import {
   Button,
   Cascader,
@@ -17,12 +17,20 @@ import {
   startModelTraining,
   startTensorboard,
 } from "../utils/api";
+import Configurator from "../components/Configurator";
+import { AppContext } from "../contexts/GlobalContext";
 
 function ModelTraining() {
+  const context = useContext(AppContext);
   const [isTraining, setIsTraining] = useState(false);
   const [tensorboardURL, setTensorboardURL] = useState(null);
   const handleStartButton = () => {
     try {
+      // let fmData = new FormData();
+      // fmData.append(
+      //   "configBase",
+      //   "--config-base configs/SNEMI/SNEMI-Base.yaml"
+      // );
       const res = startModelTraining();
       console.log(res);
     } catch (e) {
@@ -41,7 +49,6 @@ function ModelTraining() {
       console.log(e);
     }
   };
-  console.log(tensorboardURL);
   const [componentSize, setComponentSize] = useState("default");
   const onFormLayoutChange = ({ size }) => {
     setComponentSize(size);
@@ -51,76 +58,13 @@ function ModelTraining() {
     <>
       <div>
         {"ModelTraining"}
-
-        <Form
-          labelCol={{
-            span: 4,
-          }}
-          wrapperCol={{
-            span: 14,
-          }}
-          layout="horizontal"
-          size="default"
-          style={{
-            maxWidth: 600,
-          }}
-        >
-          <Form.Item label="Model">
-            <Input />
-          </Form.Item>
-          <Form.Item label="Select">
-            <Select>
-              <Select.Option value="demo">Demo</Select.Option>
-            </Select>
-          </Form.Item>
-          <Form.Item label="TreeSelect">
-            <TreeSelect
-              treeData={[
-                {
-                  title: "Light",
-                  value: "light",
-                  children: [
-                    {
-                      title: "Bamboo",
-                      value: "bamboo",
-                    },
-                  ],
-                },
-              ]}
-            />
-          </Form.Item>
-          <Form.Item label="Cascader">
-            <Cascader
-              options={[
-                {
-                  value: "zhejiang",
-                  label: "Zhejiang",
-                  children: [
-                    {
-                      value: "hangzhou",
-                      label: "Hangzhou",
-                    },
-                  ],
-                },
-              ]}
-            />
-          </Form.Item>
-          <Form.Item label="DatePicker">
-            <DatePicker />
-          </Form.Item>
-          <Form.Item label="InputNumber">
-            <InputNumber />
-          </Form.Item>
-          <Form.Item label="Switch" valuePropName="checked">
-            <Switch />
-          </Form.Item>
-          <Form.Item label="Button">
-            <Button>Button</Button>
-          </Form.Item>
-        </Form>
-
-        <Button onClick={handleStartButton}>Start Trainig</Button>
-        <Button onClick={handleStopButton}>Stop Training</Button>
+        <Configurator fileList={context.files} />
+        <Button onClick={handleStartButton} disabled={!context.trainingConfig}>
+          Start Training
+        </Button>
+        <Button onClick={handleStopButton} disabled={!isTraining}>
+          Stop Training
+        </Button>
         <Button onClick={handleTensorboardButton}>Tensorboard</Button>
       </div>
       {tensorboardURL && (
