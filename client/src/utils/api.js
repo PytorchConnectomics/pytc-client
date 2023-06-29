@@ -1,8 +1,12 @@
 import axios from "axios";
-export async function getNeuroglancerViewer(image, label) {
-  console.log(image, label);
+export async function getNeuroglancerViewer(image, label, im_path, lab_path) {
+  console.log(image, label, im_path, lab_path);
   try {
     let fmData = new FormData();
+
+    image = im_path + image;
+    label = lab_path + label;
+
     fmData.append("image", image.name);
     fmData.append("label", label.name);
 

@@ -9,7 +9,9 @@ function Visualization() {
   useEffect(() => {
     const fetchNeuroglancerViewer = async (image, label) => {
       try {
-        const res = await getNeuroglancerViewer(image, label);
+        const im_path = context.currentImagePath;
+        const lab_path = context.currentLabelPath;
+        const res = await getNeuroglancerViewer(image, label, im_path, lab_path);
         console.log(res);
         setViewer(res);
       } catch (e) {
@@ -18,7 +20,8 @@ function Visualization() {
     };
 
     if (context.currentImage && !viewer) {
-      fetchNeuroglancerViewer(context.currentImage, context.currentLabel);
+      fetchNeuroglancerViewer(context.currentImage, context.currentLabel, context.currentImagePath,
+          context.currentLabelPath);
     }
   }, [context.currentImage, context.currentLabel]);
 
