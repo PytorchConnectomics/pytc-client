@@ -4,3 +4,7 @@ python-multipart>=0.0.6
 torch>=2.0.1
 torchvision>=0.15.2
 transformers>=4.29.0
+numpy
+neuroglancer>=2.36
+tensorboard>=2.13.0
+argparse>=1.4.0
