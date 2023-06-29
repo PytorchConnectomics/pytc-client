@@ -1,4 +1,4 @@
-from fastapi import File, UploadFile, FastAPI, Form
+from fastapi import File, UploadFile, FastAPI, Form, Request
 from fastapi.middleware.cors import CORSMiddleware
 import uvicorn
 import numpy as np
@@ -69,11 +69,11 @@ async def neuroglancer(image: str = Form(...), label: str = Form(...)):
     return str(viewer)
 
 @app.post("/start_model_training")
-# async def start_model_training(args: str = Form(...)):
-async def start_model_training(args):
+async def start_model_training(req: Request):
+    req = await req.json()
     print("start_model")
-    print(args)
-    start(args)
+    log_dir = req['log_dir']
+    start(log_dir)
 
 @app.get('/start_tensorboard')
 async def start_tensorboard():
