@@ -35,6 +35,8 @@ function ModelTraining() {
       console.log(res);
     } catch (e) {
       console.log(e);
+    } finally {
+      setIsTraining(true);
     }
   };
 
