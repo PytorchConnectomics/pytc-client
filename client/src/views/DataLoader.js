@@ -5,14 +5,15 @@ import { ArrowRightOutlined } from "@ant-design/icons";
 import { AppContext } from "../contexts/GlobalContext";
 import "./DataLoader.css";
 import axios from "axios";
+import { getNeuroglancerViewer } from "../utils/api";
 
 function DataLoader() {
   const context = useContext(AppContext);
   const [currentImage, setCurrentImage] = useState(null);
   const [currentLabel, setCurrentLabel] = useState(null);
 
-  const [currentImagePath,setCurrentImagePath] = useState('');
-  const [currentLabelPath, setCurrentLabelPath] = useState('');
+  const [currentImagePath, setCurrentImagePath] = useState("");
+  const [currentLabelPath, setCurrentLabelPath] = useState("");
 
   /*const getImagePath = async () => {
     const data = { currentImagePath }
@@ -32,6 +33,25 @@ function DataLoader() {
     }
   };*/
 
+  const fetchNeuroglancerViewer = async (
+    currentImage,
+    currentLabel,
+    currentImagePath,
+    currentLabelPath
+  ) => {
+    try {
+      const res = await getNeuroglancerViewer(
+        currentImage,
+        currentLabel,
+        currentImagePath,
+        currentLabelPath
+      );
+      console.log(res);
+      context.setViewer(res);
+    } catch (e) {
+      console.log(e);
+    }
+  };
   const handleButtonClick = async (event) => {
     event.preventDefault();
 
@@ -39,17 +59,13 @@ function DataLoader() {
     context.setCurrentLabel(currentLabel);
     context.setCurrentImagePath(currentImagePath);
     context.setCurrentLabelPath(currentLabelPath);
-
-    try {
-      const response_im = await axios.post('http://localhost:8000/neuroglancer',
-          { input1: currentImagePath });
-      const response_lab = await axios.post('http://localhost:8000/neuroglancer',
-          { input2: currentLabelPath });
-      console.log(response_im.data);
-      console.log(response_lab.data)
-    } catch (error) {
-      console.error(error);
-    }
+    // console.log(currentImage, currentLabel, currentImagePath, currentLabelPath);
+    fetchNeuroglancerViewer(
+      currentImage,
+      currentLabel,
+      currentImagePath,
+      currentLabelPath
+    );
   };
   const handleImageChange = (value) => {
     console.log(`selected ${value}`);
@@ -62,13 +78,13 @@ function DataLoader() {
 
   const handleImagePath = (e) => {
     setCurrentImagePath(e.target.value);
-  }
+  };
 
   const handleLabelPath = (e) => {
     setCurrentLabelPath(e.target.value);
-  }
+  };
 
-/*  const handleImagePath = async () => {
+  /*  const handleImagePath = async () => {
     try {
       const response = await axios.post('http://localhost:8000/neuroglancer',
           {currentImagePath})
@@ -87,8 +103,6 @@ function DataLoader() {
       console.error(error)
     }
   }*/
-
-
 
   const [fileList, setFileList] = useState([]);
 
@@ -109,7 +123,8 @@ function DataLoader() {
         <Dragger />
       </Space>
       <Space wrap size="middle">
-        <label>Image:
+        <label>
+          Image:
           <Select
             onChange={handleImageChange}
             options={fileList}
@@ -118,14 +133,18 @@ function DataLoader() {
             allowClear={true}
           />
         </label>
-        <label> Image Path:
-          <textarea className= "textarea"
-            value = {currentImagePath}
-            placeholder = "Enter Image Base Path..."
-                    onChange={handleImagePath}
+        <label>
+          {" "}
+          Image Path:
+          <textarea
+            className="textarea"
+            value={currentImagePath}
+            placeholder="Enter Image Base Path..."
+            onChange={handleImagePath}
           />
         </label>
-        <label>Label:
+        <label>
+          Label:
           <Select
             onChange={handleLabelChange}
             options={fileList}
@@ -134,11 +153,14 @@ function DataLoader() {
             allowClear={true}
           />
         </label>
-        <label> Label Path:
-          <textarea className= "textarea"
-            value = {currentLabelPath}
-            placeholder = "Enter Label Base Path..."
-                    onChange={handleLabelPath}
+        <label>
+          {" "}
+          Label Path:
+          <textarea
+            className="textarea"
+            value={currentLabelPath}
+            placeholder="Enter Label Base Path..."
+            onChange={handleLabelPath}
           />
         </label>
         <Button
