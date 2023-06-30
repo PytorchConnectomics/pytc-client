@@ -7,7 +7,8 @@ export const ContextWrapper = (props) => {
   const [currentImage, setCurrentImage] = useState(null);
   const [currentLabel, setCurrentLabel] = useState(null);
   const [currentImagePath, setCurrentImagePath] = useState(null);
-  const [currentLabelPath, setCurrentLabelPath] = useState(null)
+  const [currentLabelPath, setCurrentLabelPath] = useState(null);
+  const [viewer, setViewer] = useState(null);
   return (
     <AppContext.Provider
       value={{
@@ -17,10 +18,12 @@ export const ContextWrapper = (props) => {
         setCurrentImage,
         currentLabel,
         setCurrentLabel,
-          currentImagePath,
-          setCurrentImagePath,
-          currentLabelPath,
-          setCurrentLabelPath,
+        currentImagePath,
+        setCurrentImagePath,
+        currentLabelPath,
+        setCurrentLabelPath,
+        viewer,
+        setViewer,
       }}
     >
       {props.children}
