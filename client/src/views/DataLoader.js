@@ -52,7 +52,7 @@ function DataLoader() {
       console.log(e);
     }
   };
-  const handleButtonClick = async (event) => {
+  const handleVisualizeButtonClick = async (event) => {
     event.preventDefault();
 
     context.setCurrentImage(currentImage);
@@ -165,7 +165,7 @@ function DataLoader() {
         </label>
         <Button
           type="primary"
-          onClick={handleButtonClick}
+          onClick={handleVisualizeButtonClick}
           icon={<ArrowRightOutlined />}
         >
           Visualize
