@@ -42,7 +42,20 @@ export async function startModelTraining() {
   }
 }
 
-export function stopModelTraining() {}
+export async function stopModelTraining() {
+  try{
+    const res = await axios.post(
+    `${process.env.REACT_APP_API_PROTOCOL}://${process.env.REACT_APP_API_URL}/stop_model_training`);
+    return;
+  } catch(error){
+    if (error.response) {
+      throw new Error(
+        `${error.response.status}: ${error.response.data?.detail?.error}`
+      );
+    }
+    throw error;
+  }
+}
 
 export async function startTensorboard() {
   try {
