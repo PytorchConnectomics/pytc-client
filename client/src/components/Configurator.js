@@ -1,6 +1,7 @@
 import React, { useState } from "react";
 import { Steps, Button, theme, message } from "antd";
 import YamlFileUploader from "./YamlFileUploader";
+import YamlFileEditor from "./YamlFileEditor";
 import InputSelector from "./InputSelector";
 
 function Configurator(props) {
@@ -26,7 +27,7 @@ function Configurator(props) {
     },
     {
       title: "Advanced Configuration",
-      // content: <Advanced />,
+     content: <YamlFileEditor/>,
     },
   ];
 

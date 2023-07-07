@@ -37,13 +37,14 @@ const YamlFileUploader = () => {
           {/*<p>{file.name}</p>*/}
         </div>
       )}
+      {/*
       {context.trainingConfig && (
         <Input.TextArea
           value={context.trainingConfig}
           // onChange={this.handleTextChange}
           autoSize={{ minRows: 4, maxRows: 8 }}
         />
-      )}
+      )}*/}
     </div>
   );
 };
