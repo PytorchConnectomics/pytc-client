@@ -4,6 +4,7 @@ import { UploadOutlined } from "@ant-design/icons";
 import yaml from "js-yaml";
 import { AppContext } from "../contexts/GlobalContext";
 
+{/* WORKING ON MAKING TEXT CHANGES STICK*/}
 const YamlFileEditor = () => {
     const context = useContext(AppContext);
     const [yamlContent, setYamlContent] = useState("");
