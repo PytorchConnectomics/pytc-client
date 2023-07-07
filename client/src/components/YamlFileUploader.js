@@ -14,7 +14,6 @@ const YamlFileUploader = () => {
 
   const [yamlContent, setYamlContent] = useState("");
 
-
   // const [yamlContents, setYamlContents] = useState("");
 
   const handleFileUpload = (file) => {
@@ -192,7 +191,6 @@ const YamlFileUploader = () => {
         cols={50}
       />
     </div>
-    
   );
 };
 

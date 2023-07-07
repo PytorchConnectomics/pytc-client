@@ -12,8 +12,6 @@ const YamlFileEditor = () => {
     const handleTextAreaChange = (event) => {
         const updatedYamlContent = event.target.value;
         setYamlContent(updatedYamlContent);
-    
-     
         try {
           const updatedYamlData = yaml.safeLoad(updatedYamlContent);
           // Update specific YAML values based on the updated YAML data
@@ -25,7 +23,6 @@ const YamlFileEditor = () => {
     useEffect(() => {
         setYamlContent(context.trainingConfig);
       }, [context.uploadedYamlFile, context.trainingConfig]);
-
     return (
         <div>
           {context.trainingConfig && (
