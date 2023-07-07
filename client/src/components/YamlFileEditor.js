@@ -1,5 +1,5 @@
 import React, { useContext, useState } from "react";
-import { Upload, Button, message, Input } from "antd";
+import { Upload, Button, message, Input, Slider, Col, Row, InputNumber } from "antd";
 import { UploadOutlined } from "@ant-design/icons";
 import yaml from "js-yaml";
 import { AppContext } from "../contexts/GlobalContext";
@@ -10,8 +10,7 @@ const YamlFileEditor = () => {
         <div>
           {context.trainingConfig && (
             <div>
-              <h2>Uploaded File:</h2>
-              {/*<p>{file.name}</p>*/}
+              <h2>{context.uploadedYamlFile.name}</h2>
             </div>
           )}
           {context.trainingConfig && (
