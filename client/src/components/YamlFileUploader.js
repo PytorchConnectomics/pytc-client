@@ -7,10 +7,9 @@ import { AppContext } from "../contexts/GlobalContext";
 const YamlFileUploader = () => {
   const context = useContext(AppContext);
   // const [yamlContents, setYamlContents] = useState("");
-  const [uploadedYamlFile, setUploadedYamlFile] = useState("");
 
   const handleFileUpload = (file) => {
-    setUploadedYamlFile(file);
+    context.setUploadedYamlFile(file);
     const reader = new FileReader();
     reader.onload = (e) => {
       try {
@@ -35,7 +34,7 @@ const YamlFileUploader = () => {
       </Upload>
       {context.trainingConfig && (
         <div>
-          <h2>Uploaded File: {uploadedYamlFile.name}</h2>
+          <h2>Uploaded File: {context.uploadedYamlFile.name}</h2>
         </div>
       )}
       {/*
