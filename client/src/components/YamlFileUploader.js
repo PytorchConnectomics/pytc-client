@@ -1,4 +1,4 @@
-import React, { useContext, useState } from "react";
+import React, { useContext, useState, useEffect } from "react";
 import { Upload, Button, message, InputNumber, Slider, Row, Col } from "antd";
 import { UploadOutlined } from "@ant-design/icons";
 import yaml from "js-yaml";
@@ -11,6 +11,8 @@ const YamlFileUploader = () => {
   const [numCPUs, setNumCPUs] = useState(0);
   const [samplesPerBatch, setSamplesPerBatch] = useState(0);
   const [learningRate, setLearningRate] = useState(0);
+
+  const [yamlContent, setYamlContent] = useState("");
 
 
   // const [yamlContents, setYamlContents] = useState("");
@@ -37,10 +39,10 @@ const YamlFileUploader = () => {
     reader.readAsText(file);
   };
 
-  const handleSliderChange = (property, newValue) => {
+  const handleSliderChange = (location, property, newValue) => {
     // Update the respective property based on the parameter
     switch (property) {
-      case 'SYSTEM.NUM_GPUS':
+      case 'NUM_GPUS':
         setNumGPUs(newValue);
         break;
       case 'SYSTEM.NUM_CPUS':
@@ -65,7 +67,7 @@ const YamlFileUploader = () => {
           const yamlData = yaml.safeLoad(contents);
 
           // Update the property value in the YAML data
-          yamlData[property] = newValue;
+          yamlData[location][property] = newValue;
 
           context.setTrainingConfig(
             yaml.safeDump(yamlData, { indent: 2 }).replace(/^\s*\n/gm, "")
@@ -75,8 +77,37 @@ const YamlFileUploader = () => {
         }
       };
       reader.readAsText(context.uploadedYamlFile);
+
+      updateYamlData(property, newValue);
+      setYamlContent(context.trainingConfig);
     }
   };
+
+  const updateYamlData = (property, value) => {
+    const updatedYamlData = { ...context.yamlData, [property]: value };
+    const updatedYamlContent = yaml.safeDump(updatedYamlData, { indent: 2 }).replace(/^\s*\n/gm, "");
+    setYamlContent(updatedYamlContent);
+    context.setTrainingConfig(updatedYamlContent);
+  };
+
+  const handleTextAreaChange = (event) => {
+    const updatedYamlContent = event.target.value;
+    setYamlContent(updatedYamlContent);
+
+    try {
+      const updatedYamlData = yaml.safeLoad(updatedYamlContent);
+      // Update specific YAML values based on the updated YAML data
+      updateYamlData('SYSTEM.NUM_GPUS', updatedYamlData.SYSTEM.NUM_GPUS);
+      updateYamlData('SYSTEM.NUM_CPUS', updatedYamlData.SYSTEM.NUM_CPUS);
+      // Update other YAML values as needed
+    } catch (error) {
+      message.error("Error parsing YAML content.");
+    }
+  };
+
+  useEffect(() => {
+    setYamlContent(context.trainingConfig);
+  }, [context.uploadedYamlFile, context.trainingConfig]);
 
   return (
     <div>
@@ -101,7 +132,7 @@ const YamlFileUploader = () => {
             max={8}
             marks={{1:1,4:4,8:8}}
             defaultValue={numGPUs}
-            onChange={(newValue) => handleSliderChange('SYSTEM.NUM_GPUS', newValue)}
+            onChange={(newValue) => handleSliderChange('SYSTEM','NUM_GPUS', newValue)}
             step={1}
           /> 
           </div>
@@ -114,7 +145,7 @@ const YamlFileUploader = () => {
             max={8}
             marks={{1:1,4:4,8:8}}
             defaultValue={numCPUs}
-            onChange={(newValue) => handleSliderChange('SYSTEM.NUM_CPUS', newValue)}
+            onChange={(newValue) => handleSliderChange('SYSTEM','NUM_CPUS', newValue)}
             step={1}
           /> 
           </div>
@@ -131,7 +162,7 @@ const YamlFileUploader = () => {
             max={.1}
             marks={{.01:.01,.1:.1}}
             defaultValue={learningRate}
-            onChange={(newValue) => handleSliderChange('SOLVER_BASE_LR', newValue)}
+            onChange={(newValue) => handleSliderChange('SOLVER','BASE_LR', newValue)}
             step={.01}
           /> 
           </div>
@@ -146,7 +177,7 @@ const YamlFileUploader = () => {
             max={16}
             marks={{2:2,8:8,16:16}}
             defaultValue={samplesPerBatch}
-            onChange={(newValue) => handleSliderChange('SOLVER.SAMPLES_PER_BATCH', newValue)}
+            onChange={(newValue) => handleSliderChange('SOLVER','SAMPLES_PER_BATCH', newValue)}
             step={1}
           />
           </div> 
@@ -154,7 +185,14 @@ const YamlFileUploader = () => {
       </Row>
       </div>
       )}
+      <textarea
+        value={yamlContent}
+        onChange={handleTextAreaChange}
+        rows={10}
+        cols={50}
+      />
     </div>
+    
   );
 };
 
