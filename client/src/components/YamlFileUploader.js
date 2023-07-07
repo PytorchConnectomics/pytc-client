@@ -1,11 +1,18 @@
 import React, { useContext, useState } from "react";
-import { Upload, Button, message, Input } from "antd";
+import { Upload, Button, message, InputNumber, Slider, Row, Col } from "antd";
 import { UploadOutlined } from "@ant-design/icons";
 import yaml from "js-yaml";
 import { AppContext } from "../contexts/GlobalContext";
 
 const YamlFileUploader = () => {
   const context = useContext(AppContext);
+
+  const [numGPUs, setNumGPUs] = useState(4);
+  const [numCPUs, setNumCPUs] = useState(0);
+  const [samplesPerBatch, setSamplesPerBatch] = useState(0);
+  const [learningRate, setLearningRate] = useState(0);
+
+
   // const [yamlContents, setYamlContents] = useState("");
 
   const handleFileUpload = (file) => {
@@ -18,11 +25,57 @@ const YamlFileUploader = () => {
         context.setTrainingConfig(
           yaml.safeDump(yamlData, { indent: 2 }).replace(/^\s*\n/gm, "")
         );
+          setNumGPUs(yamlData.SYSTEM.NUM_GPUS);
+          setNumCPUs(yamlData.SYSTEM.NUM_CPUS);
+          setLearningRate(yamlData.SOLVER.BASE_LR);
+          setSamplesPerBatch(yamlData.SOLVER.SAMPLES_PER_BATCH)
+
       } catch (error) {
         message.error("Error reading YAML file.");
       }
     };
     reader.readAsText(file);
+  };
+
+  const handleSliderChange = (property, newValue) => {
+    // Update the respective property based on the parameter
+    switch (property) {
+      case 'SYSTEM.NUM_GPUS':
+        setNumGPUs(newValue);
+        break;
+      case 'SYSTEM.NUM_CPUS':
+        setNumCPUs(newValue);
+        break;
+      case 'SOLVER_BASE_LR':
+        setLearningRate(newValue);
+        break;
+      case 'SOLVER.SAMPLES_PER_BATCH':
+        setSamplesPerBatch(newValue);
+        break;
+      default:
+        break;
+    }
+
+    // Update the YAML file if it has been uploaded
+    if (context.uploadedYamlFile) {
+      const reader = new FileReader();
+      reader.onload = (e) => {
+        try {
+          const contents = e.target.result;
+          const yamlData = yaml.safeLoad(contents);
+
+          // Update the property value in the YAML data
+          yamlData[property] = newValue;
+
+          context.setTrainingConfig(
+            yaml.safeDump(yamlData, { indent: 2 }).replace(/^\s*\n/gm, "")
+          );
+        } catch (error) {
+          message.error("Error reading YAML file.");
+        }
+      };
+      reader.readAsText(context.uploadedYamlFile);
+    }
   };
 
   return (
@@ -34,17 +87,73 @@ const YamlFileUploader = () => {
       </Upload>
       {context.trainingConfig && (
         <div>
-          <h2>Uploaded File: {context.uploadedYamlFile.name}</h2>
+          <h3>Uploaded File: {context.uploadedYamlFile.name}</h3>
         </div>
       )}
-      {/*
       {context.trainingConfig && (
-        <Input.TextArea
-          value={context.trainingConfig}
-          // onChange={this.handleTextChange}
-          autoSize={{ minRows: 4, maxRows: 8 }}
-        />
-      )}*/}
+      <div>
+      <Row>
+        <Col span={8}
+          offset={2}>
+            <div><h4>Number of GPUs</h4>
+          <Slider
+            min={1}
+            max={8}
+            marks={{1:1,4:4,8:8}}
+            defaultValue={numGPUs}
+            onChange={(newValue) => handleSliderChange('SYSTEM.NUM_GPUS', newValue)}
+            step={1}
+          /> 
+          </div>
+        </Col>      
+        <Col span={8}
+        offset={4}>
+          <div><h4>Number of CPUs</h4>
+          <Slider
+            min={1}
+            max={8}
+            marks={{1:1,4:4,8:8}}
+            defaultValue={numCPUs}
+            onChange={(newValue) => handleSliderChange('SYSTEM.NUM_CPUS', newValue)}
+            step={1}
+          /> 
+          </div>
+        </Col>
+        </Row>
+      <Row>
+        <Col 
+          span={8}
+          offset={2}>
+            <div>
+              <h4>Learning Rate:</h4>
+          <Slider
+            min={.01}
+            max={.1}
+            marks={{.01:.01,.1:.1}}
+            defaultValue={learningRate}
+            onChange={(newValue) => handleSliderChange('SOLVER_BASE_LR', newValue)}
+            step={.01}
+          /> 
+          </div>
+        </Col>
+        <Col 
+          span={8}
+          offset={4}>
+          <div>
+            <h4>Samples Per Batch:</h4>
+          <Slider
+            min={2}
+            max={16}
+            marks={{2:2,8:8,16:16}}
+            defaultValue={samplesPerBatch}
+            onChange={(newValue) => handleSliderChange('SOLVER.SAMPLES_PER_BATCH', newValue)}
+            step={1}
+          />
+          </div> 
+        </Col>
+      </Row>
+      </div>
+      )}
     </div>
   );
 };
