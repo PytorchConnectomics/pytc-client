@@ -19,10 +19,11 @@ export async function getNeuroglancerViewer(
     return res.data;
   } catch (error) {
     message.error(`Invalid Data Path(s). Be sure to include all "/" and that data path is correct.`);
+
     /*if (error.response) {
-      /!*throw new Error(
-        `${error.response.status}: ${error.response.data?.detail?.error}`
-      );*!/
+      throw new Error(
+          `${error.response.status}: ${error.response.data?.detail?.error}`
+      );
 
     }
     throw error;*/
