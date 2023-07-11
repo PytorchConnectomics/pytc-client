@@ -3,6 +3,7 @@ from fastapi.middleware.cors import CORSMiddleware
 import uvicorn
 import numpy as np
 from utils.io import readVol
+from services.model import start, stop, initialize_tensorboard
 
 app = FastAPI()
 
@@ -68,10 +69,27 @@ async def neuroglancer(req: Request):
     print(viewer)
     return str(viewer)
 
+@app.post("/start_model_training")
+async def start_model_training(req: Request):
+    req = await req.json()
+    print("start_model")
+    log_dir = req['log_dir']
+    start(log_dir)
+    
 
-def start():
+
+@app.post("/stop_model_training")
+async def stop_model_training(req:Request):
+    print("Stop model training")
+    return stop()
+
+@app.get('/start_tensorboard')
+async def start_tensorboard():
+    return initialize_tensorboard()
+
+def run():
     uvicorn.run("main:app", host="127.0.0.1", port=4242, reload=True, log_level="info", app_dir="/")
 
 
 if __name__ == "__main__":
-    start()
+    run()
