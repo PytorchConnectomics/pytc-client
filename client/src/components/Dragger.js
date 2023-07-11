@@ -67,7 +67,7 @@ function Dragger() {
         customRequest={uploadImage}
         onPreview={handlePreview}
         listType="picture-card"
-        style={{ maxHeight: "20vh" }}
+        style={{ maxHeight: "20vh", maxWidth: "10vw%" }}
       >
         <p className="ant-upload-drag-icon">
           <InboxOutlined />

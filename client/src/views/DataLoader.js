@@ -75,40 +75,11 @@ function DataLoader() {
     console.log(`selected ${value}`);
     setCurrentLabel(context.files.find((file) => file.uid === value));
   };
-
-  const handleImagePath = (e) => {
-    setCurrentImagePath(e.target.value);
-  };
-
-  const handleLabelPath = (e) => {
-    setCurrentLabelPath(e.target.value);
-  };
-
-  /*  const handleImagePath = async () => {
-    try {
-      const response = await axios.post('http://localhost:8000/neuroglancer',
-          {currentImagePath})
-      setCurrentImagePath(response.data)
-    } catch (error) {
-      console.error(error)
-    }
-  }
-
-  const handleLabelPath = async () => {
-    try {
-      const response = await axios.post('http://localhost:8000/neuroglancer',
-          {currentLabelPath})
-      setCurrentLabelPath(response.data)
-    } catch (error) {
-      console.error(error)
-    }
-  }*/
-
   const [fileList, setFileList] = useState([]);
 
   useEffect(() => {
     if (context.files) {
-      setFileList(
+      context.setFileList(
         context.files.map((file) => ({
           label: file.name,
           value: file.uid,
@@ -123,46 +94,22 @@ function DataLoader() {
         <Dragger />
       </Space>
       <Space wrap size="middle">
-        <label>
-          Image:
-          <Select
-            onChange={handleImageChange}
-            options={fileList}
-            placeholder="Select image"
-            size="middle"
-            allowClear={true}
-          />
-        </label>
-        <label>
-          {" "}
-          Image Path:
-          <textarea
-            className="textarea"
-            value={currentImagePath}
-            placeholder="Enter Image Base Path..."
-            onChange={handleImagePath}
-          />
-        </label>
-        <label>
-          Label:
-          <Select
-            onChange={handleLabelChange}
-            options={fileList}
-            placeholder="Select label"
-            size="middle"
-            allowClear={true}
-          />
-        </label>
-        <label>
-          {" "}
-          Label Path:
-          <textarea
-            className="textarea"
-            value={currentLabelPath}
-            placeholder="Enter Label Base Path..."
-            onChange={handleLabelPath}
-          />
-        </label>
+        <label>Image:</label>
+        <Select
+          onChange={handleImageChange}
+          options={fileList}
+          placeholder="Select image"
+          size="middle"
+          allowClear={true}
+        />
+        <label>Label:</label>
+        <Select
+          onChange={handleLabelChange}
+          options={fileList}
+          placeholder="Select label"
+          size="middle"
+          allowClear={true}
+        />
         <Button
           type="primary"
           onClick={handleVisualizeButtonClick}

@@ -4,26 +4,26 @@ export const AppContext = React.createContext(null);
 
 export const ContextWrapper = (props) => {
   const [files, setFiles] = useState([]);
+  const [fileList, setFileList] = useState([]);
   const [currentImage, setCurrentImage] = useState(null);
   const [currentLabel, setCurrentLabel] = useState(null);
-  const [currentImagePath, setCurrentImagePath] = useState(null);
-  const [currentLabelPath, setCurrentLabelPath] = useState(null);
-  const [viewer, setViewer] = useState(null);
+  const [trainingConfig, setTrainingConfig] = useState(null);
+  const [uploadedYamlFile, setUploadedYamlFile] = useState("");
   return (
     <AppContext.Provider
       value={{
         files,
         setFiles,
+        fileList,
+        setFileList,
         currentImage,
         setCurrentImage,
         currentLabel,
         setCurrentLabel,
-        currentImagePath,
-        setCurrentImagePath,
-        currentLabelPath,
-        setCurrentLabelPath,
-        viewer,
-        setViewer,
+        trainingConfig,
+        setTrainingConfig,
+        uploadedYamlFile, 
+        setUploadedYamlFile
       }}
     >
       {props.children}
