@@ -75,6 +75,13 @@ async def start_model_training(req: Request):
     print("start_model")
     log_dir = req['log_dir']
     start(log_dir)
+    
+
+
+@app.post("/stop_model_training")
+async def stop_model_training(req:Request):
+    print("Stop model training")
+    return stop()
 
 @app.get('/start_tensorboard')
 async def start_tensorboard():
