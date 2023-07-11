@@ -1,6 +1,8 @@
 import os
 import signal
 import subprocess
+import psutil
+
 
 
 def start(log_dir):
@@ -10,12 +12,21 @@ def start(log_dir):
     # command = ['python', path] + arguments
     # subprocess.call(command)
 
-    ## MNIST Example
-    path = 'server/test/mnist.py'
-    command = ['python', path, log_dir]
-    subprocess.call(command)
+    ## MNIST example
+    filepath = 'test/mnist.py'
+    process = subprocess.Popen(['python3', filepath], shell=False)
 
 def stop():
+    running_processes = psutil.process_iter()
+    # Find all Python processes
+    python_processes = [p for p in running_processes if p.name().lower() == 'python']
+    cmd_to_stop= 'test/mnist.py'# Needs to be replaced by 'pytorch_connectomics/scripts/main.py' once it's used in function start()
+    # Find the training process
+    for process in python_processes:
+      cmdstring=(process.cmdline())
+      if cmd_to_stop in cmdstring[1]:
+          process.terminate()
+          break;
     return {"stop"}
 
 
