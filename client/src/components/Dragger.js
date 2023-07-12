@@ -1,6 +1,6 @@
 import React, { useState, useContext } from "react";
-import { message, Upload, Modal } from "antd";
-import { InboxOutlined } from "@ant-design/icons";
+import {message, Upload, Modal } from "antd";
+import {InboxOutlined} from "@ant-design/icons";
 import { AppContext } from "../contexts/GlobalContext";
 
 function Dragger() {
@@ -59,6 +59,10 @@ function Dragger() {
     );
   };
 
+  const listItemStyle = {
+    width: "185px"
+  };
+
   return (
     <>
       <Dragger
@@ -67,7 +71,10 @@ function Dragger() {
         customRequest={uploadImage}
         onPreview={handlePreview}
         listType="picture-card"
-        style={{ maxHeight: "20vh", maxWidth: "10vw%" }}
+        style = {{ maxHeight: "20vh", maxWidth: "10vw%" }}
+        itemRender={(originNode, file) => (
+          <div style={listItemStyle}>{originNode}</div>
+        )}
       >
         <p className="ant-upload-drag-icon">
           <InboxOutlined />
