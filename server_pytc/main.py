@@ -1,7 +1,7 @@
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 import uvicorn
-from services.model import start, stop, initialize_tensorboard
+from services.model import start, stop, initialize_tensorboard, get_tensorboard
 
 app = FastAPI()
 
@@ -37,6 +37,9 @@ async def stop_model_training():
 async def start_tensorboard():
     return initialize_tensorboard()
 
+@app.get('/get_tensorboard_url')
+async def get_tensorboard_url():
+    return get_tensorboard()
 
 def run():
     uvicorn.run("main:app", host="127.0.0.1", port=4243, reload=True, log_level="info", app_dir="/")

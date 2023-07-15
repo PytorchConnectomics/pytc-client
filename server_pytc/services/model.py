@@ -13,8 +13,11 @@ def start(log_dir):
     # subprocess.call(command)
 
     ## MNIST example
-    filepath = 'test/mnist.py'
-    process = subprocess.Popen(['python3', filepath], shell=False)
+    # filepath = 'test/mnist.py'
+    # process = subprocess.Popen(['python3', filepath], shell=False)
+    print("start")
+    initialize_tensorboard()
+    print("initialize_tensorboard")
 
 def stop():
     running_processes = psutil.process_iter()
@@ -29,15 +32,18 @@ def stop():
           break;
     return {"stop"}
 
-
+tensorboard_url = None
 def initialize_tensorboard():
     from tensorboard import program
 
     tb = program.TensorBoard()
     tb.configure(argv=[None, '--logdir', './logs'])
-    url = tb.launch()
-    print(f'TensorBoard is running at {url}')
-    return str(url)
+    tensorboard_url = tb.launch()
+    print(f'TensorBoard is running at {tensorboard_url}')
+    # return str(url)
+
+def get_tensorboard():
+    return tensorboard_url
 
 
 def stop_tensorboard():
