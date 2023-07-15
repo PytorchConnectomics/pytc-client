@@ -48,11 +48,12 @@ export async function startModelTraining() {
 }
 
 export async function stopModelTraining() {
-  try{
+  try {
     const res = await axios.post(
-    `${process.env.REACT_APP_API_PROTOCOL}://${process.env.REACT_APP_API_URL}/stop_model_training`);
+      `${process.env.REACT_APP_API_PROTOCOL}://${process.env.REACT_APP_API_URL}/stop_model_training`
+    );
     return;
-  } catch(error){
+  } catch (error) {
     if (error.response) {
       throw new Error(
         `${error.response.status}: ${error.response.data?.detail?.error}`
@@ -62,10 +63,26 @@ export async function stopModelTraining() {
   }
 }
 
-export async function startTensorboard() {
+// export async function startTensorboard() {
+//   try {
+//     const res = await axios.get(
+//       `${process.env.REACT_APP_API_PROTOCOL}://${process.env.REACT_APP_API_URL}/start_tensorboard`
+//     );
+//     return res.data;
+//   } catch (error) {
+//     if (error.response) {
+//       throw new Error(
+//         `${error.response.status}: ${error.response.data?.detail?.error}`
+//       );
+//     }
+//     throw error;
+//   }
+// }
+
+export async function getTensorboardURL() {
   try {
     const res = await axios.get(
-      `${process.env.REACT_APP_API_PROTOCOL}://${process.env.REACT_APP_API_URL}/start_tensorboard`
+      `${process.env.REACT_APP_API_PROTOCOL}://${process.env.REACT_APP_API_URL}/get_tensorboard_url`
     );
     return res.data;
   } catch (error) {

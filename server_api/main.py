@@ -94,7 +94,7 @@ async def start_model_training(req: Request):
         return {"message": "Model training started successfully"}
     else:
         return {"message": "Failed to start model training"}
-    
+
 
 
 @app.post("/stop_model_training")
@@ -115,9 +115,22 @@ async def stop_model_training():
         return {"message": "Failed to stop model training"}
 
 
-@app.get('/start_tensorboard')
-async def start_tensorboard():
-    return initialize_tensorboard()
+@app.get('/get_tensorboard_url')
+async def get_tensorboard_url():
+    return "http://localhost:6006/"
+    # response = requests.get(
+    #     REACT_APP_SERVER_PROTOCOL +
+    #     '://' +
+    #     REACT_APP_SERVER_URL +
+    #     "/get_tensorboard_url")
+    #
+    # if response.status_code == 200:
+    #     # {"message": "Get tensorboard URL successfully"}
+    #     print(response.json())
+    #     return response.json()
+    # else:
+    #     # {"message": "Failed to get tensorboard URL"}
+    #     return None
 
 def run():
     uvicorn.run("main:app", host="127.0.0.1", port=4242, reload=True, log_level="info", app_dir="/")
