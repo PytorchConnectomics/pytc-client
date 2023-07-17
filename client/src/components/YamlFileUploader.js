@@ -3,15 +3,17 @@ import { Upload, Button, message, InputNumber, Slider, Row, Col } from "antd";
 import { UploadOutlined } from "@ant-design/icons";
 import yaml from "js-yaml";
 import { AppContext } from "../contexts/GlobalContext";
+import { YamlContext } from "../contexts/YamlContext";
 
 const YamlFileUploader = () => {
   const context = useContext(AppContext);
-
-  const [numGPUs, setNumGPUs] = useState(4);
-  const [numCPUs, setNumCPUs] = useState(0);
-  const [samplesPerBatch, setSamplesPerBatch] = useState(0);
-  const [learningRate, setLearningRate] = useState(0);
-
+  const YAMLContext = useContext(YamlContext);
+/*
+  const [numGPUs, setNumGPUs] = YAMLContext.numGPUs
+  const [numCPUs, setNumCPUs] = YAMLContext.numCPUs
+  const [samplesPerBatch, setSamplesPerBatch] = YAMLContext.samplesPerBatch
+  const [learningRate, setLearningRate] = YAMLContext.learningRate
+*/
   const [yamlContent, setYamlContent] = useState("");
 
   // const [yamlContents, setYamlContents] = useState("");
@@ -26,10 +28,10 @@ const YamlFileUploader = () => {
         context.setTrainingConfig(
           yaml.safeDump(yamlData, { indent: 2 }).replace(/^\s*\n/gm, "")
         );
-          setNumGPUs(yamlData.SYSTEM.NUM_GPUS);
-          setNumCPUs(yamlData.SYSTEM.NUM_CPUS);
-          setLearningRate(yamlData.SOLVER.BASE_LR);
-          setSamplesPerBatch(yamlData.SOLVER.SAMPLES_PER_BATCH)
+        YAMLContext.setNumGPUs(yamlData.SYSTEM.NUM_GPUS);
+        YAMLContext.setNumCPUs(yamlData.SYSTEM.NUM_CPUS);
+        YAMLContext.setLearningRate(yamlData.SOLVER.BASE_LR);
+        YAMLContext.setSamplesPerBatch(yamlData.SOLVER.SAMPLES_PER_BATCH)
 
       } catch (error) {
         message.error("Error reading YAML file.");
@@ -38,20 +40,23 @@ const YamlFileUploader = () => {
     reader.readAsText(file);
   };
 
+  // Add the values to the global context to ensure that the values will be held on page switching
+  // It shouldnt need a glabal  context but rather make a local YAML context
+
   const handleSliderChange = (location, property, newValue) => {
     // Update the respective property based on the parameter
     switch (property) {
       case 'NUM_GPUS':
-        setNumGPUs(newValue);
+        YAMLContext.setNumGPUs(newValue);
         break;
       case 'SYSTEM.NUM_CPUS':
-        setNumCPUs(newValue);
+        YAMLContext.setNumCPUs(newValue);
         break;
       case 'SOLVER_BASE_LR':
-        setLearningRate(newValue);
+        YAMLContext.setLearningRate(newValue);
         break;
       case 'SOLVER.SAMPLES_PER_BATCH':
-        setSamplesPerBatch(newValue);
+        YAMLContext.setSamplesPerBatch(newValue);
         break;
       default:
         break;
@@ -130,7 +135,7 @@ const YamlFileUploader = () => {
             min={1}
             max={8}
             marks={{1:1,4:4,8:8}}
-            defaultValue={numGPUs}
+            value={YAMLContext.numGPUs}
             onChange={(newValue) => handleSliderChange('SYSTEM','NUM_GPUS', newValue)}
             step={1}
           /> 
@@ -143,7 +148,7 @@ const YamlFileUploader = () => {
             min={1}
             max={8}
             marks={{1:1,4:4,8:8}}
-            defaultValue={numCPUs}
+            value={YAMLContext.numCPUs}
             onChange={(newValue) => handleSliderChange('SYSTEM','NUM_CPUS', newValue)}
             step={1}
           /> 
@@ -160,7 +165,7 @@ const YamlFileUploader = () => {
             min={.01}
             max={.1}
             marks={{.01:.01,.1:.1}}
-            defaultValue={learningRate}
+            value={YAMLContext.learningRate}
             onChange={(newValue) => handleSliderChange('SOLVER','BASE_LR', newValue)}
             step={.01}
           /> 
@@ -175,7 +180,7 @@ const YamlFileUploader = () => {
             min={2}
             max={16}
             marks={{2:2,8:8,16:16}}
-            defaultValue={samplesPerBatch}
+            value={YAMLContext.samplesPerBatch}
             onChange={(newValue) => handleSliderChange('SOLVER','SAMPLES_PER_BATCH', newValue)}
             step={1}
           />
