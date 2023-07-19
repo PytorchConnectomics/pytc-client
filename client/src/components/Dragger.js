@@ -1,5 +1,5 @@
 import React, { useState, useContext } from "react";
-import {message, Upload, Modal } from "antd";
+import {message, Upload, Modal, Input, Button, Space } from "antd";
 import {InboxOutlined} from "@ant-design/icons";
 import { AppContext } from "../contexts/GlobalContext";
 
@@ -44,11 +44,34 @@ function Dragger() {
   const [previewOpen, setPreviewOpen] = useState(false);
   const [previewImage, setPreviewImage] = useState("");
   const [previewTitle, setPreviewTitle] = useState("");
+  const [value , setValue] = useState("");
+  const [fileUID , setFileUID] = useState(null);
+
+  const handleText = (event) => {
+    setValue(event.target.value);
+  }
+
+  const handleSubmit = () => {
+    if (value !== "") {
+        context.files.find(targetFile => targetFile.uid === fileUID).name = value;
+        context.fileList.find(targetFile => targetFile.value === fileUID).label = value;
+        setValue("");
+        setPreviewOpen(false);
+    }
+
+  }
+  const handleRevert = () => {
+    let oldName = context.files.find(targetFile => targetFile.uid === fileUID).originFileObj.name;
+    context.files.find(targetFile => targetFile.uid === fileUID).name = oldName;
+    context.fileList.find(targetFile => targetFile.value === fileUID).label = oldName;
+    setPreviewOpen(false);
+  }
 
   const handleCancel = () => setPreviewOpen(false);
 
   const handlePreview = async (file) => {
     console.log(file);
+    setFileUID(file.uid);
     if (!file.url && !file.preview) {
       file.preview = await getBase64(file.originFileObj);
     }
@@ -89,6 +112,19 @@ function Dragger() {
         footer={null}
         onCancel={handleCancel}
       >
+        <Space.Compact style={{ width: '100%' }}>
+          <Input
+            value = {value}
+            placeholder = {"Rename File"}
+            onChange = {handleText}
+          />
+          <Button onClick = {handleSubmit}>
+            Submit
+          </Button>
+          <Button onClick = {handleRevert}>
+            Revert
+          </Button>
+        </Space.Compact>
         <img
           alt="example"
           style={{
