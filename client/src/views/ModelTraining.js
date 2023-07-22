@@ -16,6 +16,7 @@ import {
   getNeuroglancerViewer,
   startModelTraining,
   startTensorboard,
+  stopModelTraining,
 } from "../utils/api";
 import Configurator from "../components/Configurator";
 import { AppContext } from "../contexts/GlobalContext";
@@ -24,7 +25,7 @@ function ModelTraining() {
   const context = useContext(AppContext);
   const [isTraining, setIsTraining] = useState(false);
   const [tensorboardURL, setTensorboardURL] = useState(null);
-  const handleStartButton = () => {
+  const handleStartButton = async() => {
     try {
       // let fmData = new FormData();
       // fmData.append(
@@ -40,7 +41,16 @@ function ModelTraining() {
     }
   };
 
-  const handleStopButton = () => {};
+  const handleStopButton = async () => {
+    try{
+     stopModelTraining();
+    }catch (e){
+      console.log(e);
+    }
+    finally {
+      setIsTraining(false);
+    }
+  };
 
   const handleTensorboardButton = async () => {
     try {
