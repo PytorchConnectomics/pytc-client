@@ -28,8 +28,6 @@ const YamlFileEditor = () => {
       YAMLContext.setNumCPUs(yamlData.SYSTEM.NUM_CPUS);
       YAMLContext.setLearningRate(yamlData.SOLVER.BASE_LR);
       YAMLContext.setSamplesPerBatch(yamlData.SOLVER.SAMPLES_PER_BATCH);
-      // Update specific YAML values based on the updated YAML data
-      // Update other YAML values as needed
     } catch (error) {
       message.error("Error parsing YAML content.");
     }
