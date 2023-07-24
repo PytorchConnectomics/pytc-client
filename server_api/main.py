@@ -1,9 +1,13 @@
-from fastapi import File, UploadFile, FastAPI, Form, Request
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 import uvicorn
-import numpy as np
 from utils.io import readVol
-from services.model import start, stop, initialize_tensorboard
+import requests
+import os
+
+REACT_APP_SERVER_PROTOCOL='http'
+REACT_APP_SERVER_URL='localhost:4243'
+
 
 app = FastAPI()
 
@@ -72,20 +76,61 @@ async def neuroglancer(req: Request):
 @app.post("/start_model_training")
 async def start_model_training(req: Request):
     req = await req.json()
-    print("start_model")
-    log_dir = req['log_dir']
-    start(log_dir)
-    
+    # print("start_model")
+    # log_dir = req['log_dir']
+    # start(log_dir)
+    # data = {
+    #     'log_dir': req['log_dir']
+    # }
+    response = requests.post(
+        # os.environ.get("REACT_APP_SERVER_PROTOCOL") +
+        REACT_APP_SERVER_PROTOCOL +
+        '://' +
+        # os.environ.get("REACT_APP_SERVER_URL") +
+        REACT_APP_SERVER_URL +
+        "/start_model_training", json=req)
+
+    if response.status_code == 200:
+        return {"message": "Model training started successfully"}
+    else:
+        return {"message": "Failed to start model training"}
+
 
 
 @app.post("/stop_model_training")
-async def stop_model_training(req:Request):
-    print("Stop model training")
-    return stop()
+async def stop_model_training():
+    # print("Stop model training")
+    # return stop()
+    response = requests.post(
+        # os.environ.get("REACT_APP_SERVER_PROTOCOL") +
+        REACT_APP_SERVER_PROTOCOL +
+        '://' +
+        # os.environ.get("REACT_APP_SERVER_URL") +
+        REACT_APP_SERVER_URL +
+        "/stop_model_training")
 
-@app.get('/start_tensorboard')
-async def start_tensorboard():
-    return initialize_tensorboard()
+    if response.status_code == 200:
+        return {"message": "Model training stopped successfully"}
+    else:
+        return {"message": "Failed to stop model training"}
+
+
+@app.get('/get_tensorboard_url')
+async def get_tensorboard_url():
+    return "http://localhost:6006/"
+    # response = requests.get(
+    #     REACT_APP_SERVER_PROTOCOL +
+    #     '://' +
+    #     REACT_APP_SERVER_URL +
+    #     "/get_tensorboard_url")
+    #
+    # if response.status_code == 200:
+    #     # {"message": "Get tensorboard URL successfully"}
+    #     print(response.json())
+    #     return response.json()
+    # else:
+    #     # {"message": "Failed to get tensorboard URL"}
+    #     return None
 
 def run():
     uvicorn.run("main:app", host="127.0.0.1", port=4242, reload=True, log_level="info", app_dir="/")

@@ -24,15 +24,16 @@ import { AppContext } from "../contexts/GlobalContext";
 function ModelTraining() {
   const context = useContext(AppContext);
   const [isTraining, setIsTraining] = useState(false);
-  const [tensorboardURL, setTensorboardURL] = useState(null);
-  const handleStartButton = async() => {
+  // const [tensorboardURL, setTensorboardURL] = useState(null);
+  const handleStartButton = async () => {
     try {
       // let fmData = new FormData();
       // fmData.append(
       //   "configBase",
       //   "--config-base configs/SNEMI/SNEMI-Base.yaml"
       // );
-      const res = startModelTraining();
+      console.log(context.uploadedYamlFile);
+      const res = startModelTraining(null, context.uploadedYamlFile.name); // inputs, configurationYaml
       console.log(res);
     } catch (e) {
       console.log(e);
@@ -42,25 +43,24 @@ function ModelTraining() {
   };
 
   const handleStopButton = async () => {
-    try{
-     stopModelTraining();
-    }catch (e){
+    try {
+      stopModelTraining();
+    } catch (e) {
       console.log(e);
-    }
-    finally {
+    } finally {
       setIsTraining(false);
     }
   };
 
-  const handleTensorboardButton = async () => {
-    try {
-      const res = await startTensorboard();
-      console.log(res);
-      setTensorboardURL(res);
-    } catch (e) {
-      console.log(e);
-    }
-  };
+  // const handleTensorboardButton = async () => {
+  //   try {
+  //     const res = await startTensorboard();
+  //     console.log(res);
+  //     setTensorboardURL(res);
+  //   } catch (e) {
+  //     console.log(e);
+  //   }
+  // };
   const [componentSize, setComponentSize] = useState("default");
   const onFormLayoutChange = ({ size }) => {
     setComponentSize(size);
@@ -77,17 +77,8 @@ function ModelTraining() {
         <Button onClick={handleStopButton} disabled={!isTraining}>
           Stop Training
         </Button>
-        <Button onClick={handleTensorboardButton}>Tensorboard</Button>
+        {/*<Button onClick={handleTensorboardButton}>Tensorboard</Button>*/}
       </div>
-      {tensorboardURL && (
-        <iframe
-          width="100%"
-          height="800"
-          frameBorder="0"
-          scrolling="no"
-          src={tensorboardURL}
-        />
-      )}
     </>
   );
 }
