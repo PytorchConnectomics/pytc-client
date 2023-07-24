@@ -20,11 +20,11 @@ def hello():
 
 
 @app.post("/start_model_training")
-async def start_model_training(req: dict):
-    # req = await req.json()
+async def start_model_training(req: Request):
+    req = await req.json()
     print("start_model")
-    log_dir = req['log_dir']
-    start(log_dir)
+    # log_dir = req['log_dir']
+    start(req)
 
 
 @app.post("/stop_model_training")

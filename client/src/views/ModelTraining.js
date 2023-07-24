@@ -32,7 +32,8 @@ function ModelTraining() {
       //   "configBase",
       //   "--config-base configs/SNEMI/SNEMI-Base.yaml"
       // );
-      const res = startModelTraining();
+      console.log(context.uploadedYamlFile);
+      const res = startModelTraining(null, context.uploadedYamlFile.name); // inputs, configurationYaml
       console.log(res);
     } catch (e) {
       console.log(e);
