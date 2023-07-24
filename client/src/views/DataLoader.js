@@ -97,7 +97,7 @@ function DataLoader() {
         <label>Image:</label>
         <Select
           onChange={handleImageChange}
-          options={fileList}
+          options={context.fileList}
           placeholder="Select image"
           size="middle"
           allowClear={true}
@@ -105,7 +105,7 @@ function DataLoader() {
         <label>Label:</label>
         <Select
           onChange={handleLabelChange}
-          options={fileList}
+          options={context.fileList}
           placeholder="Select label"
           size="middle"
           allowClear={true}
