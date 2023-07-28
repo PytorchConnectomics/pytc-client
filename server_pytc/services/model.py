@@ -1,7 +1,6 @@
 import os
 import signal
 import subprocess
-import psutil
 
 
 def start(dict: dict):
@@ -25,18 +24,30 @@ def start(dict: dict):
     print("initialize_tensorboard")
 
 def stop():
-    running_processes = psutil.process_iter()
-    # Find all Python processes
-    python_processes = [p for p in running_processes if p.name().lower() == 'python']
-    # cmd_to_stop= 'test/mnist.py'# Needs to be replaced by 'pytorch_connectomics/scripts/main.py' once it's used in function start()
-    cmd_to_stop = '../pytorch_connectomics/scripts/main.py'
-    # Find the training process
-    for process in python_processes:
-      cmdstring=(process.cmdline())
-      if cmd_to_stop in cmdstring[1]:
-          process.terminate()
-          break;
-    return {"stop"}
+    # running_processes = psutil.process_iter()
+    # # Find all Python processes
+    # python_processes = [p for p in running_processes if p.name().lower() == 'python']
+    # # cmd_to_stop= 'test/mnist.py'# Needs to be replaced by 'pytorch_connectomics/scripts/main.py' once it's used in function start()
+    # cmd_to_stop = '../pytorch_connectomics/scripts/main.py'
+    # # Find the training process
+    # for process in python_processes:
+    #   cmdstring=(process.cmdline())
+    #   if cmd_to_stop in cmdstring[1]:
+    #       process.terminate()
+    #       break;
+    # return {"stop"}
+    import os
+    process_name = "python ../pytorch_connectomics/scripts/main.py"
+    try:
+        process_line = os.popen("ps ax | grep " + process_name + " | grep -v grep")
+        print(process_line)
+        fields = process_line.split()
+        pid = fields[0]
+        print(pid)
+        os.kill(int(pid), signal.SIGKILL)
+        print("Process Successfully Terminated")
+    except:
+        print("Error Encountered while Running Script")
 
 tensorboard_url = None
 def initialize_tensorboard():
