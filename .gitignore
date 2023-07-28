@@ -8,3 +8,4 @@ pytc/
 logs/
 data/
 outputs/
+build/
