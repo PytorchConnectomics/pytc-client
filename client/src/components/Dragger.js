@@ -1,6 +1,6 @@
-import React, { useState, useContext } from "react";
-import {message, Upload, Modal, Input, Button, Space } from "antd";
-import {InboxOutlined} from "@ant-design/icons";
+import React, { useContext, useState } from "react";
+import { Button, Input, message, Modal, Space, Upload } from "antd";
+import { InboxOutlined } from "@ant-design/icons";
 import { AppContext } from "../contexts/GlobalContext";
 
 function Dragger() {
@@ -15,11 +15,13 @@ function Dragger() {
       reader.onerror = (error) => reject(error);
     });
   const onChange = (info) => {
+    console.log(info);
     const { status } = info.file;
     // if (status !== "uploading") {
     //   console.log(info.file, info.fileList);
     // }
     if (status === "done") {
+      console.log(info);
       console.log("done");
       message.success(`${info.file.name} file uploaded successfully.`);
       context.setFiles([...info.fileList]);
@@ -44,28 +46,33 @@ function Dragger() {
   const [previewOpen, setPreviewOpen] = useState(false);
   const [previewImage, setPreviewImage] = useState("");
   const [previewTitle, setPreviewTitle] = useState("");
-  const [value , setValue] = useState("");
-  const [fileUID , setFileUID] = useState(null);
+  const [value, setValue] = useState("");
+  const [fileUID, setFileUID] = useState(null);
 
   const handleText = (event) => {
     setValue(event.target.value);
-  }
+  };
 
   const handleSubmit = () => {
     if (value !== "") {
-        context.files.find(targetFile => targetFile.uid === fileUID).name = value;
-        context.fileList.find(targetFile => targetFile.value === fileUID).label = value;
-        setValue("");
-        setPreviewOpen(false);
+      context.files.find((targetFile) => targetFile.uid === fileUID).name =
+        value;
+      context.fileList.find(
+        (targetFile) => targetFile.value === fileUID
+      ).label = value;
+      setValue("");
+      setPreviewOpen(false);
     }
-
-  }
+  };
   const handleRevert = () => {
-    let oldName = context.files.find(targetFile => targetFile.uid === fileUID).originFileObj.name;
-    context.files.find(targetFile => targetFile.uid === fileUID).name = oldName;
-    context.fileList.find(targetFile => targetFile.value === fileUID).label = oldName;
+    let oldName = context.files.find((targetFile) => targetFile.uid === fileUID)
+      .originFileObj.name;
+    context.files.find((targetFile) => targetFile.uid === fileUID).name =
+      oldName;
+    context.fileList.find((targetFile) => targetFile.value === fileUID).label =
+      oldName;
     setPreviewOpen(false);
-  }
+  };
 
   const handleCancel = () => setPreviewOpen(false);
 
@@ -83,7 +90,7 @@ function Dragger() {
   };
 
   const listItemStyle = {
-    width: "185px"
+    width: "185px",
   };
 
   return (
@@ -94,7 +101,7 @@ function Dragger() {
         customRequest={uploadImage}
         onPreview={handlePreview}
         listType="picture-card"
-        style = {{ maxHeight: "20vh", maxWidth: "10vw%" }}
+        style={{ maxHeight: "20vh", maxWidth: "10vw%" }}
         itemRender={(originNode, file) => (
           <div style={listItemStyle}>{originNode}</div>
         )}
@@ -112,18 +119,14 @@ function Dragger() {
         footer={null}
         onCancel={handleCancel}
       >
-        <Space.Compact style={{ width: '100%' }}>
+        <Space.Compact style={{ width: "100%" }}>
           <Input
-            value = {value}
-            placeholder = {"Rename File"}
-            onChange = {handleText}
+            value={value}
+            placeholder={"Rename File"}
+            onChange={handleText}
           />
-          <Button onClick = {handleSubmit}>
-            Submit
-          </Button>
-          <Button onClick = {handleRevert}>
-            Revert
-          </Button>
+          <Button onClick={handleSubmit}>Submit</Button>
+          <Button onClick={handleRevert}>Revert</Button>
         </Space.Compact>
         <img
           alt="example"
