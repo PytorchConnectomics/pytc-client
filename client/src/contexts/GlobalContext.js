@@ -9,6 +9,8 @@ export const ContextWrapper = (props) => {
   const [currentLabel, setCurrentLabel] = useState(null);
   const [trainingConfig, setTrainingConfig] = useState(null);
   const [uploadedYamlFile, setUploadedYamlFile] = useState("");
+  const [outputPath, setOutputPath] = useState(null);
+  const [logPath, setLogPath] = useState(null);
   return (
     <AppContext.Provider
       value={{
@@ -22,8 +24,12 @@ export const ContextWrapper = (props) => {
         setCurrentLabel,
         trainingConfig,
         setTrainingConfig,
-        uploadedYamlFile, 
-        setUploadedYamlFile
+        uploadedYamlFile,
+        setUploadedYamlFile,
+        outputPath,
+        setOutputPath,
+        logPath,
+        setLogPath,
       }}
     >
       {props.children}

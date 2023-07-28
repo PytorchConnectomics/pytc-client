@@ -1,11 +1,19 @@
-import { Form, Input, InputNumber, Select } from "antd";
-import React, { useContext, useState } from "react";
+import { Form, Input, Select } from "antd";
+import React, { useContext } from "react";
 import { AppContext } from "../contexts/GlobalContext";
 
 function InputSelector(props) {
   const context = useContext(AppContext);
   const { fileList } = props;
   console.log(fileList, context.files);
+
+  const handleLogPathChange = (e) => {
+    context.setLogPath(e.target.value);
+  };
+
+  const handleOutputPathChange = (e) => {
+    context.setOutputPath(e.target.value);
+  };
 
   return (
     <div>
@@ -32,6 +40,26 @@ function InputSelector(props) {
             // onChange={handleImageChange}
             // allowClear={true}
             options={context.fileList}
+            size="middle"
+          />
+        </Form.Item>
+        <Form.Item label="Output Path">
+          <Input
+            style={{
+              width: "100%",
+            }}
+            placeholder="Please type output path"
+            onChange={handleOutputPathChange}
+            size="middle"
+          />
+        </Form.Item>
+        <Form.Item label="Log Path">
+          <Input
+            style={{
+              width: "100%",
+            }}
+            placeholder="Please type training log path"
+            onChange={handleLogPathChange}
             size="middle"
           />
         </Form.Item>

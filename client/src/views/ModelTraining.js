@@ -1,23 +1,6 @@
 import React, { useContext, useState } from "react";
-import {
-  Button,
-  Cascader,
-  DatePicker,
-  Form,
-  Input,
-  InputNumber,
-  Radio,
-  Select,
-  Switch,
-  TreeSelect,
-} from "antd";
-import axios from "axios";
-import {
-  getNeuroglancerViewer,
-  startModelTraining,
-  startTensorboard,
-  stopModelTraining,
-} from "../utils/api";
+import { Button } from "antd";
+import { startModelTraining, stopModelTraining } from "../utils/api";
 import Configurator from "../components/Configurator";
 import { AppContext } from "../contexts/GlobalContext";
 
@@ -33,7 +16,12 @@ function ModelTraining() {
       //   "--config-base configs/SNEMI/SNEMI-Base.yaml"
       // );
       console.log(context.uploadedYamlFile);
-      const res = startModelTraining(null, context.uploadedYamlFile.name); // inputs, configurationYaml
+      const res = startModelTraining(
+        null,
+        context.uploadedYamlFile.name,
+        context.outputPath,
+        context.logPath
+      ); // inputs, configurationYaml
       console.log(res);
     } catch (e) {
       console.log(e);
@@ -71,10 +59,16 @@ function ModelTraining() {
       <div>
         {"ModelTraining"}
         <Configurator fileList={context.files} />
-        <Button onClick={handleStartButton} disabled={!context.trainingConfig}>
+        <Button
+          onClick={handleStartButton}
+          // disabled={!context.trainingConfig}
+        >
           Start Training
         </Button>
-        <Button onClick={handleStopButton} disabled={!isTraining}>
+        <Button
+          onClick={handleStopButton}
+          // disabled={!isTraining}
+        >
           Stop Training
         </Button>
         {/*<Button onClick={handleTensorboardButton}>Tensorboard</Button>*/}
