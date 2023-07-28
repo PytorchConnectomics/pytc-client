@@ -1,5 +1,5 @@
 import React, { useContext, useState } from "react";
-import { Button } from "antd";
+import { Button, Space } from "antd";
 import { startModelTraining, stopModelTraining } from "../utils/api";
 import Configurator from "../components/Configurator";
 import { AppContext } from "../contexts/GlobalContext";
@@ -57,20 +57,22 @@ function ModelTraining() {
   return (
     <>
       <div>
-        {"ModelTraining"}
+        {/*{"ModelTraining"}*/}
         <Configurator fileList={context.files} />
-        <Button
-          onClick={handleStartButton}
-          // disabled={!context.trainingConfig}
-        >
-          Start Training
-        </Button>
-        <Button
-          onClick={handleStopButton}
-          // disabled={!isTraining}
-        >
-          Stop Training
-        </Button>
+        <Space wrap style={{ marginTop: 12 }}>
+          <Button
+            onClick={handleStartButton}
+            // disabled={!context.trainingConfig}
+          >
+            Start Training
+          </Button>
+          <Button
+            onClick={handleStopButton}
+            // disabled={!isTraining}
+          >
+            Stop Training
+          </Button>
+        </Space>
         {/*<Button onClick={handleTensorboardButton}>Tensorboard</Button>*/}
       </div>
     </>

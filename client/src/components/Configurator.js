@@ -1,5 +1,5 @@
 import React, { useState } from "react";
-import { Steps, Button, theme, message } from "antd";
+import { Button, message, Steps, theme } from "antd";
 import YamlFileUploader from "./YamlFileUploader";
 import YamlFileEditor from "./YamlFileEditor";
 import InputSelector from "./InputSelector";
@@ -27,7 +27,7 @@ function Configurator(props) {
     },
     {
       title: "Advanced Configuration",
-     content: <YamlFileEditor/>,
+      content: <YamlFileEditor />,
     },
   ];
 
@@ -40,11 +40,11 @@ function Configurator(props) {
     backgroundColor: token.colorFillAlter,
     borderRadius: token.borderRadiusLG,
     border: `1px dashed ${token.colorBorder}`,
-    marginTop: 0,
+    marginTop: 12,
   };
 
   return (
-    <>
+    <div style={{ marginTop: 12 }}>
       <Steps size="small" current={current} items={items} />
       <div style={contentStyle}>{items[current].content}</div>
       <div style={{ marginTop: 24 }}>
@@ -67,7 +67,7 @@ function Configurator(props) {
           </Button>
         )}
       </div>
-    </>
+    </div>
   );
 }
 
