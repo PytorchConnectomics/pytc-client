@@ -4,7 +4,7 @@ import { AppContext } from "../contexts/GlobalContext";
 
 function InputSelector(props) {
   const context = useContext(AppContext);
-  const { fileList } = props;
+  const { fileList, type } = props;
   console.log(fileList, context.files);
 
   const handleLogPathChange = (e) => {
@@ -53,16 +53,29 @@ function InputSelector(props) {
             size="middle"
           />
         </Form.Item>
-        <Form.Item label="Log Path">
-          <Input
-            style={{
-              width: "100%",
-            }}
-            placeholder="Please type training log path"
-            onChange={handleLogPathChange}
-            size="middle"
-          />
-        </Form.Item>
+        {type == "training" ? (
+          <Form.Item label="Log Path">
+            <Input
+              style={{
+                width: "100%",
+              }}
+              placeholder="Please type training log path"
+              onChange={handleLogPathChange}
+              size="middle"
+            />
+          </Form.Item>
+        ) : (
+          <Form.Item label="Checkpoint Path">
+            <Input
+              style={{
+                width: "100%",
+              }}
+              placeholder="Please type checkpoint path"
+              onChange={handleLogPathChange}
+              size="middle"
+            />
+          </Form.Item>
+        )}
       </Form>
     </div>
   );
