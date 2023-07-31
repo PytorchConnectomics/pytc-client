@@ -41,7 +41,11 @@ export async function startModelTraining(
 ) {
   try {
     let data = JSON.stringify({
-      "config-file": "../pytorch_connectomics/configs/Lucchi-Mitochondria.yaml",
+      arguments: {
+        "config-file":
+          "../pytorch_connectomics/configs/Lucchi-Mitochondria.yaml",
+      },
+      logPath: logPath,
     });
 
     const res = await axios.post(
@@ -97,6 +101,53 @@ export async function getTensorboardURL() {
       `${process.env.REACT_APP_API_PROTOCOL}://${process.env.REACT_APP_API_URL}/get_tensorboard_url`
     );
     return res.data;
+  } catch (error) {
+    if (error.response) {
+      throw new Error(
+        `${error.response.status}: ${error.response.data?.detail?.error}`
+      );
+    }
+    throw error;
+  }
+}
+
+export async function startModelInference(
+  inputs,
+  configurationYamlFile,
+  outputPath,
+  checkpointPath
+) {
+  try {
+    let data = JSON.stringify({
+      arguments: {
+        "config-file":
+          "../pytorch_connectomics/configs/Lucchi-Mitochondria.yaml",
+        inference: "",
+        checkpoint: checkpointPath,
+      },
+    });
+
+    const res = await axios.post(
+      `${process.env.REACT_APP_API_PROTOCOL}://${process.env.REACT_APP_API_URL}/start_model_inference`,
+      data
+    );
+    return res.data;
+  } catch (error) {
+    if (error.response) {
+      throw new Error(
+        `${error.response.status}: ${error.response.data?.detail?.error}`
+      );
+    }
+    throw error;
+  }
+}
+
+export async function stopModelInference() {
+  try {
+    const res = await axios.post(
+      `${process.env.REACT_APP_API_PROTOCOL}://${process.env.REACT_APP_API_URL}/stop_model_inference`
+    );
+    return;
   } catch (error) {
     if (error.response) {
       throw new Error(

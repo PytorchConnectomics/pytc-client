@@ -1,9 +1,9 @@
+import requests
+import uvicorn
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
-import uvicorn
+
 from utils.io import readVol
-import requests
-import os
 
 REACT_APP_SERVER_PROTOCOL='http'
 REACT_APP_SERVER_URL='localhost:4243'
@@ -44,7 +44,7 @@ async def neuroglancer(req: Request):
     res = neuroglancer.CoordinateSpace(
         names=['z', 'y', 'x'],
         units=['nm', 'nm', 'nm'],
-        scales=[30, 6, 6])
+        scales=[30, 6, 6]) # TODO resolution change
     # try:
     #     img_data = file.file.read()
     #     # img_data = image.file.read()
@@ -114,6 +114,32 @@ async def stop_model_training():
     else:
         return {"message": "Failed to stop model training"}
 
+@app.post("/start_model_inference")
+async def start_model_inference(req: Request):
+    req = await req.json()
+    response = requests.post(
+        REACT_APP_SERVER_PROTOCOL +
+        '://' +
+        REACT_APP_SERVER_URL +
+        "/start_model_inference", json=req)
+
+    if response.status_code == 200:
+        return {"message": "Model inference started successfully"}
+    else:
+        return {"message": "Failed to start model inference"}
+
+@app.post("/stop_model_inference")
+async def stop_model_inference():
+    response = requests.post(
+        REACT_APP_SERVER_PROTOCOL +
+        '://' +
+        REACT_APP_SERVER_URL +
+        "/stop_model_inference")
+
+    if response.status_code == 200:
+        return {"message": "Model training stopped successfully"}
+    else:
+        return {"message": "Failed to stop model training"}
 
 @app.get('/get_tensorboard_url')
 async def get_tensorboard_url():

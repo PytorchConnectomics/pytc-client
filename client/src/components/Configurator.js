@@ -5,7 +5,7 @@ import YamlFileEditor from "./YamlFileEditor";
 import InputSelector from "./InputSelector";
 
 function Configurator(props) {
-  const { fileList } = props;
+  const { fileList, type } = props;
   const [current, setCurrent] = useState(0);
 
   const next = () => {
@@ -19,7 +19,7 @@ function Configurator(props) {
   const items = [
     {
       title: "Set Inputs",
-      content: <InputSelector fileList={fileList} />,
+      content: <InputSelector fileList={fileList} type={type} />,
     },
     {
       title: "Base Configuration",
