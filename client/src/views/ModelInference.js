@@ -1,54 +1,38 @@
 import React, { useContext, useState } from "react";
 import { Button, Space } from "antd";
-import { startModelTraining, stopModelTraining } from "../utils/api";
+import { startModelInference, stopModelInference } from "../utils/api";
 import Configurator from "../components/Configurator";
 import { AppContext } from "../contexts/GlobalContext";
 
-function ModelTraining() {
+function ModelInference() {
   const context = useContext(AppContext);
-  const [isTraining, setIsTraining] = useState(false);
-  // const [tensorboardURL, setTensorboardURL] = useState(null);
+  const [isInference, setIsInference] = useState(false);
   const handleStartButton = async () => {
     try {
-      // let fmData = new FormData();
-      // fmData.append(
-      //   "configBase",
-      //   "--config-base configs/SNEMI/SNEMI-Base.yaml"
-      // );
-      console.log(context.uploadedYamlFile);
-      const res = startModelTraining(
+      const res = startModelInference(
         null,
         context.uploadedYamlFile.name,
         context.outputPath,
-        context.logPath
+        context.checkpointPath
       ); // inputs, configurationYaml
       console.log(res);
     } catch (e) {
       console.log(e);
     } finally {
-      setIsTraining(true);
+      setIsInference(true);
     }
   };
 
   const handleStopButton = async () => {
     try {
-      stopModelTraining();
+      stopModelInference();
     } catch (e) {
       console.log(e);
     } finally {
-      setIsTraining(false);
+      setIsInference(false);
     }
   };
 
-  // const handleTensorboardButton = async () => {
-  //   try {
-  //     const res = await startTensorboard();
-  //     console.log(res);
-  //     setTensorboardURL(res);
-  //   } catch (e) {
-  //     console.log(e);
-  //   }
-  // };
   const [componentSize, setComponentSize] = useState("default");
   const onFormLayoutChange = ({ size }) => {
     setComponentSize(size);
@@ -58,7 +42,7 @@ function ModelTraining() {
     <>
       <div>
         {/*{"ModelTraining"}*/}
-        <Configurator fileList={context.files} type="training" />
+        <Configurator fileList={context.files} type="inference" />
         <Space wrap style={{ marginTop: 12 }}>
           <Button
             onClick={handleStartButton}
@@ -73,10 +57,9 @@ function ModelTraining() {
             Stop Training
           </Button>
         </Space>
-        {/*<Button onClick={handleTensorboardButton}>Tensorboard</Button>*/}
       </div>
     </>
   );
 }
 
-export default ModelTraining;
+export default ModelInference;
