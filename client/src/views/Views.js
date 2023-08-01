@@ -3,7 +3,9 @@ import DataLoader from "./DataLoader";
 import Visualization from "../views/Visualization";
 import ModelTraining from "../views/ModelTraining";
 import Monitoring from "../views/Monitoring";
+import ModelInference from "../views/ModelInference";
 import { Layout, Menu, theme } from "antd";
+
 const { Header, Content, Footer, Sider } = Layout;
 
 function Views() {
@@ -14,6 +16,7 @@ function Views() {
   const items = [
     { label: "Visualization", key: "vis" },
     { label: "Model Training", key: "train" },
+    { label: "Model Inference", key: "inference" },
     { label: "Tensorboard", key: "monitor" },
   ];
   const renderMenu = () => {
@@ -21,8 +24,10 @@ function Views() {
       return <Visualization />;
     } else if (current === "train") {
       return <ModelTraining />;
-    } else if (current == "monitor") {
+    } else if (current === "monitor") {
       return <Monitoring />;
+    } else if (current === "inference") {
+      return <ModelInference />;
     }
   };
 

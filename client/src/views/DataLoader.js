@@ -1,10 +1,9 @@
-import React, { useState, useEffect, useContext } from "react";
+import React, { useContext, useEffect, useState } from "react";
 import Dragger from "../components/Dragger";
-import { Button, Space, Select, Divider } from "antd";
+import { Button, Select, Space } from "antd";
 import { ArrowRightOutlined } from "@ant-design/icons";
 import { AppContext } from "../contexts/GlobalContext";
 import "./DataLoader.css";
-import axios from "axios";
 import { getNeuroglancerViewer } from "../utils/api";
 
 function DataLoader() {
@@ -14,24 +13,6 @@ function DataLoader() {
 
   const [currentImagePath, setCurrentImagePath] = useState("");
   const [currentLabelPath, setCurrentLabelPath] = useState("");
-
-  /*const getImagePath = async () => {
-    const data = { currentImagePath }
-    try {
-      const response = await axios.post('/imagepath', {data});
-    } catch(error) {
-      console.error(error);
-    }
-  };
-
-  const getLabelPath = async () => {
-    const data  = { currentLabelPath }
-    try {
-      const response = await axios.post('/labelpath', {data})
-    } catch(error) {
-      console.error(error);
-    }
-  };*/
 
   const fetchNeuroglancerViewer = async (
     currentImage,
@@ -59,7 +40,6 @@ function DataLoader() {
     context.setCurrentLabel(currentLabel);
     context.setCurrentImagePath(currentImagePath);
     context.setCurrentLabelPath(currentLabelPath);
-    // console.log(currentImage, currentLabel, currentImagePath, currentLabelPath);
     fetchNeuroglancerViewer(
       currentImage,
       currentLabel,
@@ -75,7 +55,14 @@ function DataLoader() {
     console.log(`selected ${value}`);
     setCurrentLabel(context.files.find((file) => file.uid === value));
   };
-  const [fileList, setFileList] = useState([]);
+
+  const handleImagePath = (e) => {
+    setCurrentImagePath(e.target.value);
+  };
+
+  const handleLabelPath = (e) => {
+    setCurrentLabelPath(e.target.value);
+  };
 
   useEffect(() => {
     if (context.files) {
@@ -94,22 +81,47 @@ function DataLoader() {
         <Dragger />
       </Space>
       <Space wrap size="middle">
-        <label>Image:</label>
-        <Select
-          onChange={handleImageChange}
-          options={context.fileList}
-          placeholder="Select image"
-          size="middle"
-          allowClear={true}
-        />
-        <label>Label:</label>
-        <Select
-          onChange={handleLabelChange}
-          options={context.fileList}
-          placeholder="Select label"
-          size="middle"
-          allowClear={true}
-        />
+        <label>
+          Image:
+          <Select
+            onChange={handleImageChange}
+            options={context.fileList}
+            placeholder="Select image"
+            size="middle"
+            allowClear={true}
+          />
+        </label>
+        <label>
+          {" "}
+          Image Path:
+          <textarea
+            className="textarea"
+            value={currentImagePath}
+            placeholder="Enter Image Base Path..."
+            onChange={handleImagePath}
+          />
+        </label>
+        <label>
+          Label:
+          <Select
+            onChange={handleLabelChange}
+            options={context.fileList}
+            placeholder="Select label"
+            size="middle"
+            allowClear={true}
+          />
+        </label>
+        <label>
+          {" "}
+          Label Path:
+          <textarea
+            className="textarea"
+            value={currentLabelPath}
+            placeholder="Enter Label Base Path..."
+            onChange={handleLabelPath}
+          />
+        </label>
+
         <Button
           type="primary"
           onClick={handleVisualizeButtonClick}
