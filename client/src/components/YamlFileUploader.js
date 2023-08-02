@@ -118,9 +118,9 @@ const YamlFileUploader = () => {
               <div>
                 <h4>Number of GPUs</h4>
                 <Slider
-                  min={1}
+                  min={0}
                   max={8}
-                  marks={{ 1: 1, 4: 4, 8: 8 }}
+                  marks={{ 0: 0, 4: 4, 8: 8 }}
                   value={YAMLContext.numGPUs}
                   onChange={(newValue) =>
                     handleSliderChange("SYSTEM", "NUM_GPUS", newValue)
