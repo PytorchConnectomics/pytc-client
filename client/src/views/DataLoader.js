@@ -5,7 +5,7 @@ import { ArrowRightOutlined } from "@ant-design/icons";
 import { AppContext } from "../contexts/GlobalContext";
 import "./DataLoader.css";
 import axios from "axios";
-import { getNeuroglancerViewer } from "../utils/api";
+import { getNeuroglancerViewer, checkFiles } from "../utils/api";
 
 function DataLoader() {
   const context = useContext(AppContext);
@@ -77,6 +77,37 @@ function DataLoader() {
   };
   const [fileList, setFileList] = useState([]);
 
+  const [imageFileList, setImageFileList] = useState([]);
+  const [labelFileList, setLabelFileList] = useState([]);
+
+  /*const fileCheck = context.fileList.filter((file) => {
+    const fileName = file.label;
+    let data = checkFiles(fileName);
+    if (data) {
+      setLabelFileList(fileName);
+    } else {
+      setImageFileList(fileName);
+    }
+  });*/
+
+  const imageFiles = context.fileList.filter((file) => {
+    const fileName = file.label;
+    let data = checkFiles(file);
+    if (!data) {
+      return fileName;
+    }
+    //return fileName.includes('im') || fileName.includes('input');
+  });
+
+  const labelFiles = context.fileList.filter((file) => {
+    const fileName = file.label;
+    let data = checkFiles(file);
+    if (data) {
+      return fileName;
+    }
+    //return fileName.includes('im') || fileName.includes('input');
+  });
+
   useEffect(() => {
     if (context.files) {
       context.setFileList(
@@ -97,7 +128,9 @@ function DataLoader() {
         <label>Image:</label>
         <Select
           onChange={handleImageChange}
-          options={fileList}
+          //options = {context.imageFileList}
+          options={imageFiles}
+          //options={context.fileList}
           placeholder="Select image"
           size="middle"
           allowClear={true}
@@ -105,7 +138,9 @@ function DataLoader() {
         <label>Label:</label>
         <Select
           onChange={handleLabelChange}
-          options={fileList}
+          //options = {context.labelFileList}
+          options={labelFiles}
+          //options={context.fileList}
           placeholder="Select label"
           size="middle"
           allowClear={true}
