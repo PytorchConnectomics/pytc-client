@@ -1,3 +1,5 @@
+import io
+
 from fastapi import File, UploadFile, FastAPI, Form, Request
 from fastapi.middleware.cors import CORSMiddleware
 import uvicorn
@@ -19,6 +21,7 @@ app.add_middleware(
 @app.get("/hello")
 def hello():
     return {"hello"}
+
 
 @app.post("/neuroglancer")
 async def neuroglancer(req: Request):
@@ -69,23 +72,49 @@ async def neuroglancer(req: Request):
     print(viewer)
     return str(viewer)
 
+
 @app.post("/start_model_training")
 async def start_model_training(req: Request):
     req = await req.json()
     print("start_model")
     log_dir = req['log_dir']
     start(log_dir)
-    
 
 
 @app.post("/stop_model_training")
-async def stop_model_training(req:Request):
+async def stop_model_training(req: Request):
     print("Stop model training")
     return stop()
+
 
 @app.get('/start_tensorboard')
 async def start_tensorboard():
     return initialize_tensorboard()
+
+
+@app.post('/check_files')
+async def check_files(file: UploadFile = File()):
+    import numpy as np
+    from PIL import Image
+    contents = await file.read()
+
+    image = Image.open(contents)
+
+    image_array = np.array(image)
+
+    unique_values = np.unique(image_array)
+    is_label = np.array_equal(unique_values, np.array([0, 255]))
+
+    if is_label:
+        print("The image is a label")
+        label = True
+    else:
+        print("The image is not a label")
+        label = False
+
+    image.close()
+    return {"label": label}
+
 
 def run():
     uvicorn.run("main:app", host="127.0.0.1", port=4242, reload=True, log_level="info", app_dir="/")
