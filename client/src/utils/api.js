@@ -1,5 +1,6 @@
 import axios from "axios";
-import {message} from "antd";
+import { message } from "antd";
+
 export async function getNeuroglancerViewer(
   image,
   label,
@@ -18,7 +19,9 @@ export async function getNeuroglancerViewer(
     );
     return res.data;
   } catch (error) {
-    message.error(`Invalid Data Path(s). Be sure to include all "/" and that data path is correct.`);
+    message.error(
+      `Invalid Data Path(s). Be sure to include all "/" and that data path is correct.`
+    );
 
     /*if (error.response) {
       throw new Error(
@@ -30,10 +33,19 @@ export async function getNeuroglancerViewer(
   }
 }
 
-export async function startModelTraining() {
+export async function startModelTraining(
+  inputs,
+  configurationYamlFile,
+  outputPath,
+  logPath
+) {
   try {
     let data = JSON.stringify({
-      log_dir: "--log_dir=../../logs/tensorboard/",
+      arguments: {
+        "config-file":
+          "../pytorch_connectomics/configs/Lucchi-Mitochondria.yaml",
+      },
+      logPath: logPath,
     });
 
     const res = await axios.post(
@@ -52,11 +64,12 @@ export async function startModelTraining() {
 }
 
 export async function stopModelTraining() {
-  try{
+  try {
     const res = await axios.post(
-    `${process.env.REACT_APP_API_PROTOCOL}://${process.env.REACT_APP_API_URL}/stop_model_training`);
+      `${process.env.REACT_APP_API_PROTOCOL}://${process.env.REACT_APP_API_URL}/stop_model_training`
+    );
     return;
-  } catch(error){
+  } catch (error) {
     if (error.response) {
       throw new Error(
         `${error.response.status}: ${error.response.data?.detail?.error}`
@@ -66,10 +79,26 @@ export async function stopModelTraining() {
   }
 }
 
-export async function startTensorboard() {
+// export async function startTensorboard() {
+//   try {
+//     const res = await axios.get(
+//       `${process.env.REACT_APP_API_PROTOCOL}://${process.env.REACT_APP_API_URL}/start_tensorboard`
+//     );
+//     return res.data;
+//   } catch (error) {
+//     if (error.response) {
+//       throw new Error(
+//         `${error.response.status}: ${error.response.data?.detail?.error}`
+//       );
+//     }
+//     throw error;
+//   }
+// }
+
+export async function getTensorboardURL() {
   try {
     const res = await axios.get(
-      `${process.env.REACT_APP_API_PROTOCOL}://${process.env.REACT_APP_API_URL}/start_tensorboard`
+      `${process.env.REACT_APP_API_PROTOCOL}://${process.env.REACT_APP_API_URL}/get_tensorboard_url`
     );
     return res.data;
   } catch (error) {
@@ -82,14 +111,64 @@ export async function startTensorboard() {
   }
 }
 
+//<<<<<<< HEAD
 export async function checkFiles(file) {
   try {
     const res = await axios.post(
-        `${process.env.REACT_APP_API_PROTOCOL}://${process.env.REACT_APP_API_URL}/check_files`,
-        file
+      `${process.env.REACT_APP_API_PROTOCOL}://${process.env.REACT_APP_API_URL}/check_files`,
+      file
     );
     return res.data;
-  } catch(error){
+  } catch (error) {
+    if (error.response) {
+      throw new Error(
+        `${error.response.status}: ${error.response.data?.detail?.error}`
+      );
+    }
+    throw error;
+  }
+}
+//}
+//=======
+export async function startModelInference(
+  inputs,
+  configurationYamlFile,
+  outputPath,
+  checkpointPath
+) {
+  try {
+    let data = JSON.stringify({
+      arguments: {
+        "config-file":
+          "../pytorch_connectomics/configs/Lucchi-Mitochondria.yaml",
+        inference: "",
+        checkpoint: checkpointPath,
+      },
+    });
+
+    const res = await axios.post(
+      `${process.env.REACT_APP_API_PROTOCOL}://${process.env.REACT_APP_API_URL}/start_model_inference`,
+      data
+    );
+    return res.data;
+  } catch (error) {
+    if (error.response) {
+      throw new Error(
+        `${error.response.status}: ${error.response.data?.detail?.error}`
+      );
+    }
+    throw error;
+  }
+}
+
+export async function stopModelInference() {
+  try {
+    const res = await axios.post(
+      `${process.env.REACT_APP_API_PROTOCOL}://${process.env.REACT_APP_API_URL}/stop_model_inference`
+    );
+    return;
+  } catch (error) {
+    //>>>>>>> 438a71423abd5c2a128ecec668525c7c8ebe01d3
     if (error.response) {
       throw new Error(
         `${error.response.status}: ${error.response.data?.detail?.error}`
