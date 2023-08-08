@@ -1,11 +1,15 @@
-import React, { useState, useEffect, useContext } from "react";
+import React, { useContext, useEffect, useState } from "react";
 import Dragger from "../components/Dragger";
-import { Button, Space, Select, Divider } from "antd";
+import { Button, Select, Space } from "antd";
 import { ArrowRightOutlined } from "@ant-design/icons";
 import { AppContext } from "../contexts/GlobalContext";
 import "./DataLoader.css";
-import axios from "axios";
+// <<<<<<< HEAD
+//import axios from "axios";
 import { getNeuroglancerViewer, checkFiles } from "../utils/api";
+/*=======
+ import { getNeuroglancerViewer } from "../utils/api";
+>>>>>>> 438a71423abd5c2a128ecec668525c7c8ebe01d3*/
 
 function DataLoader() {
   const context = useContext(AppContext);
@@ -14,24 +18,6 @@ function DataLoader() {
 
   const [currentImagePath, setCurrentImagePath] = useState("");
   const [currentLabelPath, setCurrentLabelPath] = useState("");
-
-  /*const getImagePath = async () => {
-    const data = { currentImagePath }
-    try {
-      const response = await axios.post('/imagepath', {data});
-    } catch(error) {
-      console.error(error);
-    }
-  };
-
-  const getLabelPath = async () => {
-    const data  = { currentLabelPath }
-    try {
-      const response = await axios.post('/labelpath', {data})
-    } catch(error) {
-      console.error(error);
-    }
-  };*/
 
   const fetchNeuroglancerViewer = async (
     currentImage,
@@ -59,7 +45,6 @@ function DataLoader() {
     context.setCurrentLabel(currentLabel);
     context.setCurrentImagePath(currentImagePath);
     context.setCurrentLabelPath(currentLabelPath);
-    // console.log(currentImage, currentLabel, currentImagePath, currentLabelPath);
     fetchNeuroglancerViewer(
       currentImage,
       currentLabel,
@@ -75,7 +60,14 @@ function DataLoader() {
     console.log(`selected ${value}`);
     setCurrentLabel(context.files.find((file) => file.uid === value));
   };
-  const [fileList, setFileList] = useState([]);
+
+  const handleImagePath = (e) => {
+    setCurrentImagePath(e.target.value);
+  };
+
+  const handleLabelPath = (e) => {
+    setCurrentLabelPath(e.target.value);
+  };
 
   const [imageFileList, setImageFileList] = useState([]);
   const [labelFileList, setLabelFileList] = useState([]);
@@ -125,7 +117,8 @@ function DataLoader() {
         <Dragger />
       </Space>
       <Space wrap size="middle">
-        <label>Image:</label>
+        {/*<<<<<<< HEAD*/}
+        {/* <label>Image:</label>
         <Select
           onChange={handleImageChange}
           //options = {context.imageFileList}
@@ -144,7 +137,52 @@ function DataLoader() {
           placeholder="Select label"
           size="middle"
           allowClear={true}
-        />
+        />*/}
+        {/*=======*/}
+        <label>
+          Image:
+          <Select
+            onChange={handleImageChange}
+            //options={context.fileList}
+            options={imageFiles}
+            placeholder="Select image"
+            size="middle"
+            allowClear={true}
+          />
+        </label>
+        <label>
+          {" "}
+          Image Path:
+          <textarea
+            className="textarea"
+            value={currentImagePath}
+            placeholder="Enter Image Base Path..."
+            onChange={handleImagePath}
+          />
+        </label>
+        <label>
+          Label:
+          <Select
+            onChange={handleLabelChange}
+            //options={context.fileList}
+            options={labelFiles}
+            placeholder="Select label"
+            size="middle"
+            allowClear={true}
+          />
+        </label>
+        <label>
+          {" "}
+          Label Path:
+          <textarea
+            className="textarea"
+            value={currentLabelPath}
+            placeholder="Enter Label Base Path..."
+            onChange={handleLabelPath}
+          />
+        </label>
+
+        {/*>>>>>>> 438a71423abd5c2a128ecec668525c7c8ebe01d3*/}
         <Button
           type="primary"
           onClick={handleVisualizeButtonClick}
