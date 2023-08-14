@@ -36,16 +36,18 @@ export async function getNeuroglancerViewer(
 export async function startModelTraining(
   inputs,
   configurationYamlFile,
+  trainingConfig,
   outputPath,
   logPath
 ) {
   try {
     let data = JSON.stringify({
       arguments: {
-        "config-file":
-          "../pytorch_connectomics/configs/Lucchi-Mitochondria.yaml",
+        // "config-file":
+        //   "../pytorch_connectomics/configs/Lucchi-Mitochondria.yaml",
       },
       logPath: logPath,
+      trainingConfig: trainingConfig,
     });
 
     const res = await axios.post(
