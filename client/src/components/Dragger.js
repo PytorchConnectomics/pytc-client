@@ -48,21 +48,33 @@ function Dragger() {
   const [previewTitle, setPreviewTitle] = useState("");
   const [value, setValue] = useState("");
   const [fileUID, setFileUID] = useState(null);
+  const [previewFileFolderPath, setPreviewFileFolderPath] = useState("");
 
   const handleText = (event) => {
     setValue(event.target.value);
   };
 
-  const handleSubmit = () => {
-    if (value !== "") {
-      context.files.find((targetFile) => targetFile.uid === fileUID).name =
-        value;
-      context.fileList.find(
-        (targetFile) => targetFile.value === fileUID
-      ).label = value;
-      setValue("");
-      setPreviewOpen(false);
+  const handleInputFolderPath = (event) => {
+    setPreviewFileFolderPath(event.target.value);
+  };
+  const handleSubmit = (type) => {
+    if (type === "name") {
+      if (value !== "") {
+        context.files.find((targetFile) => targetFile.uid === fileUID).name =
+          value;
+        context.fileList.find(
+          (targetFile) => targetFile.value === fileUID
+        ).label = value;
+        setValue("");
+      }
+    } else if (type === "path") {
+      if (previewFileFolderPath !== "") {
+        context.files.find(
+          (targetFile) => targetFile.uid === fileUID
+        ).folderPath = previewFileFolderPath;
+      }
     }
+    setPreviewOpen(false);
   };
   const handleRevert = () => {
     let oldName = context.files.find((targetFile) => targetFile.uid === fileUID)
@@ -86,6 +98,9 @@ function Dragger() {
     setPreviewOpen(true);
     setPreviewTitle(
       file.name || file.url.substring(file.url.lastIndexOf("/") + 1)
+    );
+    setPreviewFileFolderPath(
+      context.files.find((targetFile) => targetFile.uid === fileUID).folderPath
     );
   };
 
@@ -119,22 +134,32 @@ function Dragger() {
         footer={null}
         onCancel={handleCancel}
       >
-        <Space.Compact style={{ width: "100%" }}>
-          <Input
-            value={value}
-            placeholder={"Rename File"}
-            onChange={handleText}
+        <Space direction="vertical">
+          <Space.Compact block>
+            <Input
+              value={previewFileFolderPath}
+              placeholder={"Please Enter Folder Path of this File"}
+              onChange={handleInputFolderPath}
+            />
+            <Button onClick={() => handleSubmit("path")}>Submit</Button>
+          </Space.Compact>
+          <Space.Compact block>
+            <Input
+              value={value}
+              placeholder={"Rename File"}
+              onChange={handleText}
+            />
+            <Button onClick={() => handleSubmit("name")}>Submit</Button>
+            <Button onClick={handleRevert}>Revert</Button>
+          </Space.Compact>
+          <img
+            alt="example"
+            style={{
+              width: "100%",
+            }}
+            src={previewImage}
           />
-          <Button onClick={handleSubmit}>Submit</Button>
-          <Button onClick={handleRevert}>Revert</Button>
-        </Space.Compact>
-        <img
-          alt="example"
-          style={{
-            width: "100%",
-          }}
-          src={previewImage}
-        />
+        </Space>
       </Modal>
     </>
   );
