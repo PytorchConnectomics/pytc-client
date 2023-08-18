@@ -11,22 +11,9 @@ function DataLoader() {
   const [currentImage, setCurrentImage] = useState(null);
   const [currentLabel, setCurrentLabel] = useState(null);
 
-  // const [currentImagePath, setCurrentImagePath] = useState("");
-  // const [currentLabelPath, setCurrentLabelPath] = useState("");
-
-  const fetchNeuroglancerViewer = async (
-    currentImage,
-    currentLabel
-    // currentImagePath,
-    // currentLabelPath
-  ) => {
+  const fetchNeuroglancerViewer = async (currentImage, currentLabel) => {
     try {
-      const res = await getNeuroglancerViewer(
-        currentImage,
-        currentLabel
-        // currentImagePath,
-        // currentLabelPath
-      );
+      const res = await getNeuroglancerViewer(currentImage, currentLabel);
       console.log(res);
       context.setViewer(res);
     } catch (e) {
@@ -35,17 +22,9 @@ function DataLoader() {
   };
   const handleVisualizeButtonClick = async (event) => {
     event.preventDefault();
-
     context.setCurrentImage(currentImage);
     context.setCurrentLabel(currentLabel);
-    // context.setCurrentImagePath(currentImagePath);
-    // context.setCurrentLabelPath(currentLabelPath);
-    fetchNeuroglancerViewer(
-      currentImage,
-      currentLabel
-      // currentImagePath,
-      // currentLabelPath
-    );
+    fetchNeuroglancerViewer(currentImage, currentLabel);
   };
   const handleImageChange = (value) => {
     console.log(`selected ${value}`);
@@ -55,14 +34,6 @@ function DataLoader() {
     console.log(`selected ${value}`);
     setCurrentLabel(context.files.find((file) => file.uid === value));
   };
-
-  // const handleImagePath = (e) => {
-  //   setCurrentImagePath(e.target.value);
-  // };
-  //
-  // const handleLabelPath = (e) => {
-  //   setCurrentLabelPath(e.target.value);
-  // };
 
   useEffect(() => {
     if (context.files) {
@@ -91,16 +62,6 @@ function DataLoader() {
             allowClear={true}
           />
         </label>
-        {/*<label>*/}
-        {/*  {" "}*/}
-        {/*  Image Path:*/}
-        {/*  <textarea*/}
-        {/*    className="textarea"*/}
-        {/*    value={currentImagePath}*/}
-        {/*    placeholder="Enter Image Base Path..."*/}
-        {/*    onChange={handleImagePath}*/}
-        {/*  />*/}
-        {/*</label>*/}
         <label>
           Label:
           <Select
@@ -111,17 +72,6 @@ function DataLoader() {
             allowClear={true}
           />
         </label>
-        {/*<label>*/}
-        {/*  {" "}*/}
-        {/*  Label Path:*/}
-        {/*  <textarea*/}
-        {/*    className="textarea"*/}
-        {/*    value={currentLabelPath}*/}
-        {/*    placeholder="Enter Label Base Path..."*/}
-        {/*    onChange={handleLabelPath}*/}
-        {/*  />*/}
-        {/*</label>*/}
-
         <Button
           type="primary"
           onClick={handleVisualizeButtonClick}
