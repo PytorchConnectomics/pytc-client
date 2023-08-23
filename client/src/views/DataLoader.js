@@ -38,6 +38,66 @@ function DataLoader() {
       console.log(e);
     }
   };
+
+  const fetchFiles = async (files) => {
+    try {
+      await Promise.all(
+        files.map(async (file) => {
+          try {
+            const data = await checkFiles(file);
+            console.log(data);
+            if (data) {
+              context.setLabelFileList((prevLabelList) => [
+                ...prevLabelList,
+                file,
+              ]);
+              // context.setLabelFileList(file);
+            } else {
+              context.setImageFileList((prevImageList) => [
+                ...prevImageList,
+                file,
+              ]);
+              // context.setImageFileList(file);
+            }
+          } catch (error) {
+            console.error(error);
+          }
+        })
+      );
+    } catch (e) {
+      console.log(e);
+    }
+  };
+
+  /*context.files.map((file) => ({
+        const data = await checkFiles(file);
+        console.log(data);
+        if (data) {
+          setLabelFileList(file);
+        } else {
+          setImageFileList(file);
+        }
+      })*/
+  /*const data = await checkFiles(file);
+      console.log(data);
+      if (data) {
+        setLabelFileList(file);
+      } else {
+        setImageFileList(file);
+      }*/
+
+  const [imageFileList, setImageFileList] = useState([]);
+  const [labelFileList, setLabelFileList] = useState([]);
+
+  /*const fileCheck = context.fileList.filter((file) => {
+    const fileName = file.label;
+    let data = checkFiles(file);
+    if (data) {
+      setLabelFileList(fileName);
+    } else {
+      setImageFileList(fileName);
+    }
+  });*/
   const handleVisualizeButtonClick = async (event) => {
     event.preventDefault();
 
@@ -69,20 +129,7 @@ function DataLoader() {
     setCurrentLabelPath(e.target.value);
   };
 
-  const [imageFileList, setImageFileList] = useState([]);
-  const [labelFileList, setLabelFileList] = useState([]);
-
-  /*const fileCheck = context.fileList.filter((file) => {
-    const fileName = file.label;
-    let data = checkFiles(fileName);
-    if (data) {
-      setLabelFileList(fileName);
-    } else {
-      setImageFileList(fileName);
-    }
-  });*/
-
-  const imageFiles = context.fileList.filter((file) => {
+  /*const imageFiles = context.fileList.filter((file) => {
     const fileName = file.label;
     let data = checkFiles(file);
     if (!data) {
@@ -98,7 +145,7 @@ function DataLoader() {
       return fileName;
     }
     //return fileName.includes('im') || fileName.includes('input');
-  });
+  });*/
 
   useEffect(() => {
     if (context.files) {
@@ -108,6 +155,7 @@ function DataLoader() {
           value: file.uid,
         }))
       );
+      fetchFiles(context.files);
     }
   }, [context.files]);
 
@@ -117,34 +165,12 @@ function DataLoader() {
         <Dragger />
       </Space>
       <Space wrap size="middle">
-        {/*<<<<<<< HEAD*/}
-        {/* <label>Image:</label>
-        <Select
-          onChange={handleImageChange}
-          //options = {context.imageFileList}
-          options={imageFiles}
-          //options={context.fileList}
-          placeholder="Select image"
-          size="middle"
-          allowClear={true}
-        />
-        <label>Label:</label>
-        <Select
-          onChange={handleLabelChange}
-          //options = {context.labelFileList}
-          options={labelFiles}
-          //options={context.fileList}
-          placeholder="Select label"
-          size="middle"
-          allowClear={true}
-        />*/}
-        {/*=======*/}
         <label>
           Image:
           <Select
             onChange={handleImageChange}
             //options={context.fileList}
-            options={imageFiles}
+            options={context.imageFileList}
             placeholder="Select image"
             size="middle"
             allowClear={true}
@@ -165,7 +191,7 @@ function DataLoader() {
           <Select
             onChange={handleLabelChange}
             //options={context.fileList}
-            options={labelFiles}
+            options={context.labelFileList}
             placeholder="Select label"
             size="middle"
             allowClear={true}
