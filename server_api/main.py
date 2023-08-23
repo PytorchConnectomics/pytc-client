@@ -1,3 +1,6 @@
+import io
+import json
+
 import requests
 import uvicorn
 from fastapi import File, UploadFile, FastAPI, Form, Request
@@ -163,27 +166,67 @@ async def get_tensorboard_url():
 
 
 @app.post('/check_files')
-async def check_files(file: UploadFile = File()):
+async def check_files(req: Request):
     import numpy as np
     from PIL import Image
-    contents = await file.read()
+    #contents = await req.body()
 
-    image = Image.open(contents)
+    # data_string = json.dumps(req)
+    # file_object = io.StringIO(data_string)
+    try:
+        image_content = await req.stream()
 
-    image_array = np.array(image)
+        image = Image.open(image_content)
 
-    unique_values = np.unique(image_array)
-    is_label = np.array_equal(unique_values, np.array([0, 255]))
+        image_array = np.array(image)
 
-    if is_label:
-        print("The image is a label")
-        label = True
-    else:
-        print("The image is not a label")
-        label = False
+        unique_values = np.unique(image_array)
+        is_label = np.array_equal(unique_values, np.array([0, 255]))
 
-    image.close()
-    return {"label": label}
+        if is_label:
+            print("The image is a label")
+            label = True
+        else:
+            print("The image is not a label")
+            label = None
+
+        image.close()
+        return {"label": label}
+    except Exception as e:
+        return {"error": str(e)}
+
+# @app.post('/check_files')
+# async def check_files(req: Request):
+#     import numpy as np
+#     from PIL import Image
+#     response = await req.json()
+#     #contents = response.read()
+#
+#     image_data_base64 = response.get("image_data", "")
+#     if not image_data_base64:
+#         return {"error": "No image data provided"}
+#
+#     try:
+#         image_data = base64.b64decode(image_data_base64)
+#         image = Image.open(image_data)
+#
+#         image_array = np.array(image)
+#
+#         unique_values = np.unique(image_array)
+#         is_label = np.array_equal(unique_values, np.array([0, 255]))
+#
+#         if is_label:
+#             print("The image is a label")
+#             label = True
+#         else:
+#             print("The image is not a label")
+#             label = False
+#
+#         image.close()
+#         return {"label": label}
+#
+#     except Exception as e:
+#         return {"error": str(e)}
 
 
 def run():
