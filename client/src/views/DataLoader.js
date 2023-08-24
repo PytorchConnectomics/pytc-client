@@ -6,7 +6,7 @@ import { AppContext } from "../contexts/GlobalContext";
 import "./DataLoader.css";
 import { getNeuroglancerViewer } from "../utils/api";
 
-function DataLoader() {
+function DataLoader(props) {
   const context = useContext(AppContext);
   const [currentImage, setCurrentImage] = useState(null);
   const [currentLabel, setCurrentLabel] = useState(null);
@@ -20,6 +20,7 @@ function DataLoader() {
       console.log(e);
     }
   };
+
   const handleVisualizeButtonClick = async (event) => {
     event.preventDefault();
     context.setCurrentImage(currentImage);

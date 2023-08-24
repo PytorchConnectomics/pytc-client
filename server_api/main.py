@@ -36,7 +36,9 @@ async def neuroglancer(req: Request):
 
     # neuroglancer setting
     ip = 'localhost'  # or public IP of the machine for sharable display
-    port = 9999  # change to an unused port number
+    # port = 9999  # change to an unused port number
+    port = 9999
+    
     neuroglancer.set_server_bind_address(bind_address=ip, bind_port=port)
     viewer = neuroglancer.Viewer()
 
