@@ -16,20 +16,39 @@ function Configurator(props) {
     setCurrent(current - 1);
   };
 
-  const items = [
-    {
-      title: "Set Inputs",
-      content: <InputSelector fileList={fileList} type={type} />,
-    },
-    {
-      title: "Base Configuration",
-      content: <YamlFileUploader />,
-    },
-    {
-      title: "Advanced Configuration",
-      content: <YamlFileEditor />,
-    },
-  ];
+  let items = [];
+  if (props.type === "inference") {
+    items = [
+      {
+        title: "Set Inputs",
+        content: <InputSelector fileList={fileList} type={type} />,
+      },
+      {
+        title: "Base Configuration",
+        content: <YamlFileInference />,
+      },
+      {
+        title: "Advanced Configuration",
+        content: <YamlFileEditor />,
+      },
+    ];
+  }
+  else {
+    items = [
+      {
+        title: "Set Inputs",
+        content: <InputSelector fileList={fileList} type={type} />,
+      },
+      {
+        title: "Base Configuration",
+        content: <YamlFileUploader />,
+      },
+      {
+        title: "Advanced Configuration",
+        content: <YamlFileEditor />,
+      },
+    ];
+  }
 
   const { token } = theme.useToken();
 
