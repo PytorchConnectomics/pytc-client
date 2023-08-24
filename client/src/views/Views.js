@@ -2,31 +2,39 @@ import React, { useState } from "react";
 import DataLoader from "./DataLoader";
 import Visualization from "../views/Visualization";
 import ModelTraining from "../views/ModelTraining";
-import Monitoring from "../views/Monitoring";
 import ModelInference from "../views/ModelInference";
+import Monitoring from "../views/Monitoring";
+import GettingStarted from "../views/GettingStarted";
 import { Layout, Menu, theme } from "antd";
 import { getNeuroglancerViewer } from "../utils/api";
 
 const { Header, Content, Footer, Sider } = Layout;
 
 function Views() {
-  const [current, setCurrent] = useState("vis");
-  const [viewer, setViewer] = useState(null);
+  const [current, setCurrent] = useState("gettingStarted");
+  const [viewers, setViewers] = useState([]);
+  console.log(viewers);
+
   const onClick = (e) => {
     setCurrent(e.key);
   };
+
   const items = [
-    { label: "Visualization", key: "vis" },
-    { label: "Model Training", key: "train" },
+    { label: "Getting Started", key: "gettingStarted" },
+    { label: "Visualization", key: "visualization" },
+    { label: "Model Training", key: "training" },
     { label: "Model Inference", key: "inference" },
-    { label: "Tensorboard", key: "monitor" },
+    { label: "Tensorboard", key: "monitoring" },
   ];
+
   const renderMenu = () => {
-    if (current === "vis") {
-      return <Visualization viewer={viewer} />;
-    } else if (current === "train") {
+    if (current === "gettingStarted") {
+      return <GettingStarted />;
+    } else if (current === "visualization") {
+      return <Visualization viewers={viewers} />;
+    } else if (current === "training") {
       return <ModelTraining />;
-    } else if (current === "monitor") {
+    } else if (current === "monitoring") {
       return <Monitoring />;
     } else if (current === "inference") {
       return <ModelInference />;
@@ -53,11 +61,21 @@ function Views() {
         currentLabelPath
       );
       console.log(res);
-      setViewer(res);
+
+      // check currentIamge.name is exist in viewers
+      setViewers([
+        ...viewers,
+        {
+          key: res,
+          title: currentImage.name,
+          viewer: res,
+        },
+      ]);
     } catch (e) {
       console.log(e);
     }
   };
+
   return (
     <Layout
       style={{
@@ -72,13 +90,6 @@ function Views() {
         theme="light"
         collapsedWidth="0"
       >
-        {/*<div*/}
-        {/*  style={{*/}
-        {/*    height: 32,*/}
-        {/*    margin: 16,*/}
-        {/*    background: "rgba(255, 255, 255, 0.2)",*/}
-        {/*  }}*/}
-        {/*/>*/}
         <DataLoader fetchNeuroglancerViewer={fetchNeuroglancerViewer} />
       </Sider>
       <Layout className="site-layout">
