@@ -27,7 +27,6 @@ def hello():
 @app.post("/neuroglancer")
 async def neuroglancer(req: Request):
     import neuroglancer
-    import random
 
     req = await req.json()
     image = req['image']
@@ -38,9 +37,7 @@ async def neuroglancer(req: Request):
     # neuroglancer setting
     ip = 'localhost'  # or public IP of the machine for sharable display
     # port = 9999  # change to an unused port number
-    random_offset = random.randint(1, 1000)
-    # Add the random number to the default port (9999)
-    port = 9999 + random_offset
+    port = 9999
     
     neuroglancer.set_server_bind_address(bind_address=ip, bind_port=port)
     viewer = neuroglancer.Viewer()
