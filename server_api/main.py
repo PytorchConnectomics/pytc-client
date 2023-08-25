@@ -31,12 +31,12 @@ async def neuroglancer(req: Request):
     req = await req.json()
     image = req['image']
     label = req['label']
+    scales = req['scales']
 
-    print(image, label)
+    print(image, label, scales)
 
     # neuroglancer setting
     ip = 'localhost'  # or public IP of the machine for sharable display
-    # port = 9999  # change to an unused port number
     port = 9999
     
     neuroglancer.set_server_bind_address(bind_address=ip, bind_port=port)
@@ -44,9 +44,9 @@ async def neuroglancer(req: Request):
 
     # SNEMI (# 3d vol dim: z,y,x)
     res = neuroglancer.CoordinateSpace(
-        names=['z', 'y', 'x'],
-        units=['nm', 'nm', 'nm'],
-        scales=[30, 6, 6]) # TODO resolution change
+        names = ['z', 'y', 'x'],
+        units = ['nm', 'nm', 'nm'],
+        scales = scales)
     # try:
     #     img_data = file.file.read()
     #     # img_data = image.file.read()

@@ -43,14 +43,22 @@ function Views() {
 
   const [collapsed, setCollapsed] = useState(false);
 
-  const fetchNeuroglancerViewer = async (currentImage, currentLabel) => {
+  const fetchNeuroglancerViewer = async (
+    currentImage,
+    currentLabel,
+    scales
+  ) => {
     try {
       const exists = viewers.find(
         (viewer) => viewer.key === currentImage.uid + currentLabel.uid
       );
       console.log(exists, viewers);
       if (!exists) {
-        const res = await getNeuroglancerViewer(currentImage, currentLabel);
+        const res = await getNeuroglancerViewer(
+          currentImage,
+          currentLabel,
+          scales
+        );
         console.log(res);
 
         setViewers([
