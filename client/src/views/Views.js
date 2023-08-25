@@ -5,10 +5,10 @@ import ModelTraining from "../views/ModelTraining";
 import ModelInference from "../views/ModelInference";
 import Monitoring from "../views/Monitoring";
 import GettingStarted from "../views/GettingStarted";
-import { Layout, Menu, theme } from "antd";
+import { Layout, Menu } from "antd";
 import { getNeuroglancerViewer } from "../utils/api";
 
-const { Header, Content, Footer, Sider } = Layout;
+const { Content, Sider } = Layout;
 
 function Views() {
   const [current, setCurrent] = useState("gettingStarted");
@@ -31,7 +31,7 @@ function Views() {
     if (current === "gettingStarted") {
       return <GettingStarted />;
     } else if (current === "visualization") {
-      return <Visualization viewers={viewers} />;
+      return <Visualization viewers={viewers} setViewers={setViewers} />;
     } else if (current === "training") {
       return <ModelTraining />;
     } else if (current === "monitoring") {
@@ -42,10 +42,6 @@ function Views() {
   };
 
   const [collapsed, setCollapsed] = useState(false);
-
-  const {
-    token: { colorBgContainer },
-  } = theme.useToken();
 
   const fetchNeuroglancerViewer = async (currentImage, currentLabel) => {
     try {
