@@ -1,13 +1,14 @@
-import React, { useContext, useState, useEffect } from "react";
-import { Upload, Button, message, InputNumber, Slider, Row, Col } from "antd";
+import React, { useContext, useEffect, useState } from "react";
+import { Button, Col, message, Row, Slider, Upload } from "antd";
 import { UploadOutlined } from "@ant-design/icons";
 import yaml from "js-yaml";
 import { AppContext } from "../contexts/GlobalContext";
 import { YamlContext } from "../contexts/YamlContext";
 
-const YamlFileUploader = () => {
+const YamlFileUploader = (props) => {
   const context = useContext(AppContext);
   const YAMLContext = useContext(YamlContext);
+  const { type } = props;
   /*
   const [numGPUs, setNumGPUs] = YAMLContext.numGPUs
   const [numCPUs, setNumCPUs] = YAMLContext.numCPUs
