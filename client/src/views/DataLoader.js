@@ -4,22 +4,12 @@ import { Button, Select, Space } from "antd";
 import { ArrowRightOutlined } from "@ant-design/icons";
 import { AppContext } from "../contexts/GlobalContext";
 import "./DataLoader.css";
-import { getNeuroglancerViewer } from "../utils/api";
 
 function DataLoader(props) {
   const context = useContext(AppContext);
   const [currentImage, setCurrentImage] = useState(null);
   const [currentLabel, setCurrentLabel] = useState(null);
-
-  const fetchNeuroglancerViewer = async (currentImage, currentLabel) => {
-    try {
-      const res = await getNeuroglancerViewer(currentImage, currentLabel);
-      console.log(res);
-      context.setViewer(res);
-    } catch (e) {
-      console.log(e);
-    }
-  };
+  const { fetchNeuroglancerViewer } = props;
 
   const handleVisualizeButtonClick = async (event) => {
     event.preventDefault();
