@@ -47,19 +47,9 @@ function Views() {
     token: { colorBgContainer },
   } = theme.useToken();
 
-  const fetchNeuroglancerViewer = async (
-    currentImage,
-    currentLabel,
-    currentImagePath,
-    currentLabelPath
-  ) => {
+  const fetchNeuroglancerViewer = async (currentImage, currentLabel) => {
     try {
-      const res = await getNeuroglancerViewer(
-        currentImage,
-        currentLabel,
-        currentImagePath,
-        currentLabelPath
-      );
+      const res = await getNeuroglancerViewer(currentImage, currentLabel);
       console.log(res);
 
       // check currentIamge.name is exist in viewers
