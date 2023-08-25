@@ -1,6 +1,6 @@
 import React, { useContext, useEffect, useState } from "react";
 import Dragger from "../components/Dragger";
-import { Button, Select, Space } from "antd";
+import { Button, Input, Select, Space } from "antd";
 import { ArrowRightOutlined } from "@ant-design/icons";
 import { AppContext } from "../contexts/GlobalContext";
 import "./DataLoader.css";
@@ -9,13 +9,18 @@ function DataLoader(props) {
   const context = useContext(AppContext);
   const [currentImage, setCurrentImage] = useState(null);
   const [currentLabel, setCurrentLabel] = useState(null);
+  const [scales, setScales] = useState([30, 6, 6]);
   const { fetchNeuroglancerViewer } = props;
 
   const handleVisualizeButtonClick = async (event) => {
     event.preventDefault();
     context.setCurrentImage(currentImage);
     context.setCurrentLabel(currentLabel);
-    fetchNeuroglancerViewer(currentImage, currentLabel);
+    fetchNeuroglancerViewer(
+      currentImage,
+      currentLabel,
+      scales.split(",").map(Number)
+    );
   };
   const handleImageChange = (value) => {
     console.log(`selected ${value}`);
@@ -24,6 +29,10 @@ function DataLoader(props) {
   const handleLabelChange = (value) => {
     console.log(`selected ${value}`);
     setCurrentLabel(context.files.find((file) => file.uid === value));
+  };
+
+  const handleInputScales = (event) => {
+    setScales(event.target.value);
   };
 
   useEffect(() => {
@@ -61,6 +70,14 @@ function DataLoader(props) {
             placeholder="Select label"
             size="middle"
             allowClear={true}
+          />
+        </label>
+        <label>
+          Scales:
+          <Input
+            placeholder="Input in z, y, x order"
+            allowClear
+            onChange={handleInputScales}
           />
         </label>
         <Button
