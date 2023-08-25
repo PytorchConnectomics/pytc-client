@@ -45,18 +45,23 @@ function Views() {
 
   const fetchNeuroglancerViewer = async (currentImage, currentLabel) => {
     try {
-      const res = await getNeuroglancerViewer(currentImage, currentLabel);
-      console.log(res);
+      const exists = viewers.find(
+        (viewer) => viewer.key === currentImage.uid + currentLabel.uid
+      );
+      console.log(exists, viewers);
+      if (!exists) {
+        const res = await getNeuroglancerViewer(currentImage, currentLabel);
+        console.log(res);
 
-      // check currentIamge.name is exist in viewers
-      setViewers([
-        ...viewers,
-        {
-          key: res,
-          title: currentImage.name,
-          viewer: res,
-        },
-      ]);
+        setViewers([
+          ...viewers,
+          {
+            key: currentImage.uid + currentLabel.uid,
+            title: currentImage.name + " & " + currentLabel.name,
+            viewer: res,
+          },
+        ]);
+      }
     } catch (e) {
       console.log(e);
     }
