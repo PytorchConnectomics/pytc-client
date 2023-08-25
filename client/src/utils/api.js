@@ -3,7 +3,8 @@ import { message } from "antd";
 
 export async function getNeuroglancerViewer(
   image,
-  label
+  label,
+  scales
   // image_path,
   // label_path
 ) {
@@ -12,6 +13,7 @@ export async function getNeuroglancerViewer(
     let data = JSON.stringify({
       image: image.folderPath + image.name,
       label: label.folderPath + label.name,
+      scales: scales,
     });
     const res = await axios.post(
       `${process.env.REACT_APP_API_PROTOCOL}://${process.env.REACT_APP_API_URL}/neuroglancer`,
