@@ -27,7 +27,7 @@ function Configurator(props) {
     },
     {
       title: "Advanced Configuration",
-      content: <YamlFileEditor />,
+      content: <YamlFileEditor type={type} />,
     },
   ];
 
