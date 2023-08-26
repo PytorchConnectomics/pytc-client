@@ -12,6 +12,7 @@ export const ContextWrapper = (props) => {
   const [viewer, setViewer] = useState(null);
 
   const [trainingConfig, setTrainingConfig] = useState(null);
+  const [inferenceConfig, setInferenceConfig] = useState(null);
   const [uploadedYamlFile, setUploadedYamlFile] = useState("");
   const [outputPath, setOutputPath] = useState(null);
   const [logPath, setLogPath] = useState(null);
@@ -34,6 +35,8 @@ export const ContextWrapper = (props) => {
         setViewer,
         trainingConfig,
         setTrainingConfig,
+        inferenceConfig,
+        setInferenceConfig,
         uploadedYamlFile,
         setUploadedYamlFile,
         outputPath,
