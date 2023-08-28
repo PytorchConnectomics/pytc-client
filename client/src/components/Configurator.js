@@ -1,11 +1,13 @@
-import React, { useState } from "react";
+import React, { useContext, useState } from "react";
 import { Button, message, Steps, theme } from "antd";
 import YamlFileUploader from "./YamlFileUploader";
 import YamlFileEditor from "./YamlFileEditor";
 import InputSelector from "./InputSelector";
+import { AppContext } from "../contexts/GlobalContext";
 
 function Configurator(props) {
   const { fileList, type } = props;
+  const context = useContext(AppContext);
   const [current, setCurrent] = useState(0);
 
   const next = () => {
@@ -14,6 +16,11 @@ function Configurator(props) {
 
   const prev = () => {
     setCurrent(current - 1);
+  };
+
+  const handleDoneButton = () => {
+    message.success("Processing complete!");
+    localStorage.setItem("trainingConfig", context.trainingConfig);
   };
 
   const items = [
@@ -54,10 +61,7 @@ function Configurator(props) {
           </Button>
         )}
         {current === items.length - 1 && (
-          <Button
-            type="primary"
-            onClick={() => message.success("Processing complete!")}
-          >
+          <Button type="primary" onClick={handleDoneButton}>
             Done
           </Button>
         )}

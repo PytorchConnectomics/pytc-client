@@ -4,6 +4,7 @@ import { UploadOutlined } from "@ant-design/icons";
 import yaml from "js-yaml";
 import { AppContext } from "../contexts/GlobalContext";
 import { YamlContext } from "../contexts/YamlContext";
+import { findCommonPartOfString } from "../utils/utils";
 
 const YamlFileUploader = (props) => {
   const context = useContext(AppContext);
@@ -108,6 +109,35 @@ const YamlFileUploader = (props) => {
           );
           YAMLContext.setAugNum(yamlData.INFERENCE.AUG_NUM);
         }
+        // update InputSelector's information
+        if (
+          context.inputImage &&
+          context.inputImage.folderPath &&
+          context.inputLabel &&
+          context.inputLabel.folderPath
+        ) {
+          const inputImage =
+            context.inputImage.folderPath + context.inputImage.name;
+          const inputLabel =
+            context.inputLabel.folderPath + context.inputLabel.name;
+
+          const inputPath = findCommonPartOfString(inputImage, inputLabel);
+          yamlData.DATASET.INPUT_PATH = inputPath;
+          yamlData.DATASET.IMAGE_NAME = inputImage.replace(inputPath, "");
+          yamlData.DATASET.LABEL_NAME = inputLabel.replace(inputPath, "");
+          yamlData.DATASET.OUTPUT_PATH = context.outputPath;
+        } else {
+          message.error("Please input folder path of the file in preview");
+        }
+
+        context.setTrainingConfig(
+          yaml.safeDump(yamlData, { indent: 2 }).replace(/^\s*\n/gm, "")
+        );
+        // these are for slider
+        YAMLContext.setNumGPUs(yamlData.SYSTEM.NUM_GPUS);
+        YAMLContext.setNumCPUs(yamlData.SYSTEM.NUM_CPUS);
+        YAMLContext.setLearningRate(yamlData.SOLVER.BASE_LR);
+        YAMLContext.setSamplesPerBatch(yamlData.SOLVER.SAMPLES_PER_BATCH);
       } catch (error) {
         message.error("Error reading YAML file.");
       }
