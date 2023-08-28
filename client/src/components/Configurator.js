@@ -30,11 +30,11 @@ function Configurator(props) {
     },
     {
       title: "Base Configuration",
-      content: <YamlFileUploader />,
+      content: <YamlFileUploader type={type} />,
     },
     {
       title: "Advanced Configuration",
-      content: <YamlFileEditor />,
+      content: <YamlFileEditor type={type} />,
     },
   ];
 
