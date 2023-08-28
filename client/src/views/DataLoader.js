@@ -1,43 +1,17 @@
 import React, { useContext, useEffect, useState } from "react";
 import Dragger from "../components/Dragger";
-import { Button, Select, Space } from "antd";
+import { Button, Input, Select, Space } from "antd";
 import { ArrowRightOutlined } from "@ant-design/icons";
 import { AppContext } from "../contexts/GlobalContext";
 import "./DataLoader.css";
-// <<<<<<< HEAD
-//import axios from "axios";
-import { getNeuroglancerViewer, checkFiles } from "../utils/api";
-/*=======
- import { getNeuroglancerViewer } from "../utils/api";
->>>>>>> 438a71423abd5c2a128ecec668525c7c8ebe01d3*/
+import { checkFiles } from "../utils/api";
 
-function DataLoader() {
+function DataLoader(props) {
   const context = useContext(AppContext);
   const [currentImage, setCurrentImage] = useState(null);
   const [currentLabel, setCurrentLabel] = useState(null);
-
-  const [currentImagePath, setCurrentImagePath] = useState("");
-  const [currentLabelPath, setCurrentLabelPath] = useState("");
-
-  const fetchNeuroglancerViewer = async (
-    currentImage,
-    currentLabel,
-    currentImagePath,
-    currentLabelPath
-  ) => {
-    try {
-      const res = await getNeuroglancerViewer(
-        currentImage,
-        currentLabel,
-        currentImagePath,
-        currentLabelPath
-      );
-      console.log(res);
-      context.setViewer(res);
-    } catch (e) {
-      console.log(e);
-    }
-  };
+  const [scales, setScales] = useState("30,6,6");
+  const { fetchNeuroglancerViewer } = props;
 
   const fetchFiles = async (files) => {
     try {
@@ -69,47 +43,17 @@ function DataLoader() {
     }
   };
 
-  /*context.files.map((file) => ({
-        const data = await checkFiles(file);
-        console.log(data);
-        if (data) {
-          setLabelFileList(file);
-        } else {
-          setImageFileList(file);
-        }
-      })*/
-  /*const data = await checkFiles(file);
-      console.log(data);
-      if (data) {
-        setLabelFileList(file);
-      } else {
-        setImageFileList(file);
-      }*/
-
   const [imageFileList, setImageFileList] = useState([]);
   const [labelFileList, setLabelFileList] = useState([]);
 
-  /*const fileCheck = context.fileList.filter((file) => {
-    const fileName = file.label;
-    let data = checkFiles(file);
-    if (data) {
-      setLabelFileList(fileName);
-    } else {
-      setImageFileList(fileName);
-    }
-  });*/
   const handleVisualizeButtonClick = async (event) => {
     event.preventDefault();
-
     context.setCurrentImage(currentImage);
     context.setCurrentLabel(currentLabel);
-    context.setCurrentImagePath(currentImagePath);
-    context.setCurrentLabelPath(currentLabelPath);
     fetchNeuroglancerViewer(
       currentImage,
       currentLabel,
-      currentImagePath,
-      currentLabelPath
+      scales.split(",").map(Number)
     );
   };
   const handleImageChange = (value) => {
@@ -121,31 +65,9 @@ function DataLoader() {
     setCurrentLabel(context.files.find((file) => file.uid === value));
   };
 
-  const handleImagePath = (e) => {
-    setCurrentImagePath(e.target.value);
+  const handleInputScales = (event) => {
+    setScales(event.target.value);
   };
-
-  const handleLabelPath = (e) => {
-    setCurrentLabelPath(e.target.value);
-  };
-
-  /*const imageFiles = context.fileList.filter((file) => {
-    const fileName = file.label;
-    let data = checkFiles(file);
-    if (!data) {
-      return fileName;
-    }
-    //return fileName.includes('im') || fileName.includes('input');
-  });
-
-  const labelFiles = context.fileList.filter((file) => {
-    const fileName = file.label;
-    let data = checkFiles(file);
-    if (data) {
-      return fileName;
-    }
-    //return fileName.includes('im') || fileName.includes('input');
-  });*/
 
   useEffect(() => {
     if (context.files) {
@@ -165,7 +87,7 @@ function DataLoader() {
         <Dragger />
       </Space>
       <Space wrap size="middle">
-        <label>
+        <label style={{ width: "185px" }}>
           Image:
           <Select
             onChange={handleImageChange}
@@ -174,16 +96,6 @@ function DataLoader() {
             placeholder="Select image"
             size="middle"
             allowClear={true}
-          />
-        </label>
-        <label>
-          {" "}
-          Image Path:
-          <textarea
-            className="textarea"
-            value={currentImagePath}
-            placeholder="Enter Image Base Path..."
-            onChange={handleImagePath}
           />
         </label>
         <label>
@@ -198,17 +110,13 @@ function DataLoader() {
           />
         </label>
         <label>
-          {" "}
-          Label Path:
-          <textarea
-            className="textarea"
-            value={currentLabelPath}
-            placeholder="Enter Label Base Path..."
-            onChange={handleLabelPath}
+          Scales:
+          <Input
+            placeholder="Input in z, y, x order"
+            allowClear
+            onChange={handleInputScales}
           />
         </label>
-
-        {/*>>>>>>> 438a71423abd5c2a128ecec668525c7c8ebe01d3*/}
         <Button
           type="primary"
           onClick={handleVisualizeButtonClick}

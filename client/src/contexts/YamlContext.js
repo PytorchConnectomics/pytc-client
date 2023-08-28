@@ -3,10 +3,16 @@ import React, { useState } from "react";
 export const YamlContext = React.createContext(null);
 
 export const YamlContextWrapper = (props) => {
-    const [numGPUs, setNumGPUs] = useState(0);
-    const [numCPUs, setNumCPUs] = useState(0);
-    const [samplesPerBatch, setSamplesPerBatch] = useState(0);
-    const [learningRate, setLearningRate] = useState(0);
+  // for training
+  const [numGPUs, setNumGPUs] = useState(0);
+  const [numCPUs, setNumCPUs] = useState(0);
+  const [solverSamplesPerBatch, setSolverSamplesPerBatch] = useState(0);
+  const [learningRate, setLearningRate] = useState(0);
+
+  // for inference
+  const [inferenceSamplesPerBatch, setInferenceSamplesPerBatch] = useState(0);
+  const [augNum, setAugNum] = useState(0);
+
   return (
     <YamlContext.Provider
       value={{
@@ -14,10 +20,14 @@ export const YamlContextWrapper = (props) => {
         setNumGPUs,
         numCPUs,
         setNumCPUs,
-        samplesPerBatch,
-        setSamplesPerBatch,
+        solverSamplesPerBatch,
+        setSolverSamplesPerBatch,
         learningRate,
-        setLearningRate
+        setLearningRate,
+        inferenceSamplesPerBatch,
+        setInferenceSamplesPerBatch,
+        augNum,
+        setAugNum,
       }}
     >
       {props.children}

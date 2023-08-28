@@ -1,6 +1,7 @@
 import os
 import signal
 import subprocess
+import tempfile
 
 
 def start(dict: dict):
@@ -11,6 +12,13 @@ def start(dict: dict):
     for key, value in dict['arguments'].items():
         if value is not None:
             command.extend([f"--{key}", str(value)])
+
+    # Write the value to a temporary file
+    with tempfile.NamedTemporaryFile(delete=False, mode='w', suffix='.yaml') as temp_file:
+        temp_file.write(dict['trainingConfig'])
+        temp_filepath = temp_file.name
+        command.extend(["--config-file", str(temp_filepath)])
+
 
     # Execute the command using subprocess.call
     print(command)
