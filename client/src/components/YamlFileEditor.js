@@ -1,10 +1,6 @@
 import React, { useContext, useEffect, useState } from "react";
-<<<<<<< HEAD
 import { Input, message } from "antd";
 import yaml from "js-yaml";
-=======
-import { Input } from "antd";
->>>>>>> main
 import { AppContext } from "../contexts/GlobalContext";
 import { YamlContext } from "../contexts/YamlContext";
 

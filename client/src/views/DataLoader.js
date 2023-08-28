@@ -9,7 +9,7 @@ function DataLoader(props) {
   const context = useContext(AppContext);
   const [currentImage, setCurrentImage] = useState(null);
   const [currentLabel, setCurrentLabel] = useState(null);
-  const [scales, setScales] = useState([30, 6, 6]);
+  const [scales, setScales] = useState("30,6,6");
   const { fetchNeuroglancerViewer } = props;
 
   const handleVisualizeButtonClick = async (event) => {
