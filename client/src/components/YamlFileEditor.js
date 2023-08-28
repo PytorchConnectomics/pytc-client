@@ -14,7 +14,11 @@ const YamlFileEditor = (props) => {
   const handleTextAreaChange = (event) => {
     const updatedYamlContent = event.target.value;
     setYamlContent(updatedYamlContent);
-    context.setTrainingConfig(updatedYamlContent);
+    if (type === "training") {
+      context.setTrainingConfig(updatedYamlContent);
+    } else {
+      context.setInferenceConfig(updatedYamlContent);
+    }
     try {
       const yamlData = yaml.safeLoad(updatedYamlContent);
 
