@@ -4,14 +4,16 @@ import { message } from "antd";
 export async function getNeuroglancerViewer(
   image,
   label,
-  image_path,
-  label_path
+  scales
+  // image_path,
+  // label_path
 ) {
   // console.log(image, label, image_path, label_path);
   try {
     let data = JSON.stringify({
-      image: image_path + image.name,
-      label: label_path + label.name,
+      image: image.folderPath + image.name,
+      label: label.folderPath + label.name,
+      scales: scales,
     });
     const res = await axios.post(
       `${process.env.REACT_APP_API_PROTOCOL}://${process.env.REACT_APP_API_URL}/neuroglancer`,
@@ -36,16 +38,18 @@ export async function getNeuroglancerViewer(
 export async function startModelTraining(
   inputs,
   configurationYamlFile,
+  trainingConfig,
   outputPath,
   logPath
 ) {
   try {
     let data = JSON.stringify({
       arguments: {
-        "config-file":
-          "../pytorch_connectomics/configs/Lucchi-Mitochondria.yaml",
+        // "config-file":
+        //   "../pytorch_connectomics/configs/Lucchi-Mitochondria.yaml",
       },
       logPath: logPath,
+      trainingConfig: trainingConfig,
     });
 
     const res = await axios.post(

@@ -16,9 +16,12 @@ function ModelTraining() {
       //   "--config-base configs/SNEMI/SNEMI-Base.yaml"
       // );
       console.log(context.uploadedYamlFile);
+      const trainingConfig = localStorage.getItem("trainingConfig");
+      console.log(trainingConfig);
       const res = startModelTraining(
         null,
         context.uploadedYamlFile.name,
+        trainingConfig,
         context.outputPath,
         context.logPath
       ); // inputs, configurationYaml

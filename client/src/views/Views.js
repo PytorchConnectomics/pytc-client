@@ -2,29 +2,39 @@ import React, { useState } from "react";
 import DataLoader from "./DataLoader";
 import Visualization from "../views/Visualization";
 import ModelTraining from "../views/ModelTraining";
-import Monitoring from "../views/Monitoring";
 import ModelInference from "../views/ModelInference";
-import { Layout, Menu, theme } from "antd";
+import Monitoring from "../views/Monitoring";
+import GettingStarted from "../views/GettingStarted";
+import { Layout, Menu } from "antd";
+import { getNeuroglancerViewer } from "../utils/api";
 
-const { Header, Content, Footer, Sider } = Layout;
+const { Content, Sider } = Layout;
 
 function Views() {
-  const [current, setCurrent] = useState("vis");
+  const [current, setCurrent] = useState("gettingStarted");
+  const [viewers, setViewers] = useState([]);
+  console.log(viewers);
+
   const onClick = (e) => {
     setCurrent(e.key);
   };
+
   const items = [
-    { label: "Visualization", key: "vis" },
-    { label: "Model Training", key: "train" },
+    { label: "Getting Started", key: "gettingStarted" },
+    { label: "Visualization", key: "visualization" },
+    { label: "Model Training", key: "training" },
     { label: "Model Inference", key: "inference" },
-    { label: "Tensorboard", key: "monitor" },
+    { label: "Tensorboard", key: "monitoring" },
   ];
+
   const renderMenu = () => {
-    if (current === "vis") {
-      return <Visualization />;
-    } else if (current === "train") {
+    if (current === "gettingStarted") {
+      return <GettingStarted />;
+    } else if (current === "visualization") {
+      return <Visualization viewers={viewers} setViewers={setViewers} />;
+    } else if (current === "training") {
       return <ModelTraining />;
-    } else if (current === "monitor") {
+    } else if (current === "monitoring") {
       return <Monitoring />;
     } else if (current === "inference") {
       return <ModelInference />;
@@ -32,9 +42,38 @@ function Views() {
   };
 
   const [collapsed, setCollapsed] = useState(false);
-  const {
-    token: { colorBgContainer },
-  } = theme.useToken();
+
+  const fetchNeuroglancerViewer = async (
+    currentImage,
+    currentLabel,
+    scales
+  ) => {
+    try {
+      const exists = viewers.find(
+        (viewer) => viewer.key === currentImage.uid + currentLabel.uid
+      );
+      console.log(exists, viewers);
+      if (!exists) {
+        const res = await getNeuroglancerViewer(
+          currentImage,
+          currentLabel,
+          scales
+        );
+        console.log(res);
+
+        setViewers([
+          ...viewers,
+          {
+            key: currentImage.uid + currentLabel.uid,
+            title: currentImage.name + " & " + currentLabel.name,
+            viewer: res,
+          },
+        ]);
+      }
+    } catch (e) {
+      console.log(e);
+    }
+  };
 
   return (
     <Layout
@@ -50,14 +89,7 @@ function Views() {
         theme="light"
         collapsedWidth="0"
       >
-        {/*<div*/}
-        {/*  style={{*/}
-        {/*    height: 32,*/}
-        {/*    margin: 16,*/}
-        {/*    background: "rgba(255, 255, 255, 0.2)",*/}
-        {/*  }}*/}
-        {/*/>*/}
-        <DataLoader />
+        <DataLoader fetchNeuroglancerViewer={fetchNeuroglancerViewer} />
       </Sider>
       <Layout className="site-layout">
         <Content

@@ -2,6 +2,7 @@ import React, { useContext, useState } from "react";
 import { Button, Input, message, Modal, Space, Upload } from "antd";
 import { InboxOutlined } from "@ant-design/icons";
 import { AppContext } from "../contexts/GlobalContext";
+import { DEFAULT_IMAGE } from "../utils/utils";
 
 function Dragger() {
   const context = useContext(AppContext);
@@ -15,13 +16,8 @@ function Dragger() {
       reader.onerror = (error) => reject(error);
     });
   const onChange = (info) => {
-    console.log(info);
     const { status } = info.file;
-    // if (status !== "uploading") {
-    //   console.log(info.file, info.fileList);
-    // }
     if (status === "done") {
-      console.log(info);
       console.log("done");
       message.success(`${info.file.name} file uploaded successfully.`);
       context.setFiles([...info.fileList]);
@@ -48,21 +44,34 @@ function Dragger() {
   const [previewTitle, setPreviewTitle] = useState("");
   const [value, setValue] = useState("");
   const [fileUID, setFileUID] = useState(null);
+  const [previewFileFolderPath, setPreviewFileFolderPath] = useState("");
 
   const handleText = (event) => {
     setValue(event.target.value);
   };
 
-  const handleSubmit = () => {
-    if (value !== "") {
-      context.files.find((targetFile) => targetFile.uid === fileUID).name =
-        value;
-      context.fileList.find(
-        (targetFile) => targetFile.value === fileUID
-      ).label = value;
-      setValue("");
-      setPreviewOpen(false);
+  const handleInputFolderPath = (event) => {
+    setPreviewFileFolderPath(event.target.value);
+  };
+  const handleSubmit = (type) => {
+    if (type === "name") {
+      if (value !== "") {
+        context.files.find((targetFile) => targetFile.uid === fileUID).name =
+          value;
+        context.fileList.find(
+          (targetFile) => targetFile.value === fileUID
+        ).label = value;
+        setValue("");
+      }
+    } else if (type === "path") {
+      if (previewFileFolderPath !== "") {
+        context.files.find(
+          (targetFile) => targetFile.uid === fileUID
+        ).folderPath = previewFileFolderPath;
+        setPreviewFileFolderPath("");
+      }
     }
+    setPreviewOpen(false);
   };
   const handleRevert = () => {
     let oldName = context.files.find((targetFile) => targetFile.uid === fileUID)
@@ -77,20 +86,44 @@ function Dragger() {
   const handleCancel = () => setPreviewOpen(false);
 
   const handlePreview = async (file) => {
-    console.log(file);
     setFileUID(file.uid);
     if (!file.url && !file.preview) {
-      file.preview = await getBase64(file.originFileObj);
+      if (file.type !== "image/tiff") {
+        file.preview = await getBase64(file.originFileObj);
+      } else {
+        file.preview = file.thumbUrl;
+      }
     }
     setPreviewImage(file.url || file.preview);
     setPreviewOpen(true);
     setPreviewTitle(
       file.name || file.url.substring(file.url.lastIndexOf("/") + 1)
     );
+    if (
+      context.files.find((targetFile) => targetFile.uid === file.uid) &&
+      context.files.find((targetFile) => targetFile.uid === file.uid).folderPath
+    ) {
+      setPreviewFileFolderPath(
+        context.files.find((targetFile) => targetFile.uid === file.uid)
+          .folderPath
+      );
+    } else {
+      setPreviewFileFolderPath("");
+    }
   };
 
   const listItemStyle = {
     width: "185px",
+  };
+
+  const handleBeforeUpload = (file) => {
+    // Create a URL for the thumbnail using object URL
+    if (file.type !== "image/tiff") {
+      file.thumbUrl = URL.createObjectURL(file);
+    } else {
+      file.thumbUrl = DEFAULT_IMAGE;
+    }
+    return true; // Allow the upload
   };
 
   return (
@@ -99,6 +132,7 @@ function Dragger() {
         multiple={true}
         onChange={onChange}
         customRequest={uploadImage}
+        beforeUpload={handleBeforeUpload}
         onPreview={handlePreview}
         listType="picture-card"
         style={{ maxHeight: "20vh", maxWidth: "10vw%" }}
@@ -119,22 +153,32 @@ function Dragger() {
         footer={null}
         onCancel={handleCancel}
       >
-        <Space.Compact style={{ width: "100%" }}>
-          <Input
-            value={value}
-            placeholder={"Rename File"}
-            onChange={handleText}
+        <Space direction="vertical">
+          <Space.Compact block>
+            <Input
+              value={previewFileFolderPath}
+              placeholder={"Please Enter Folder Path of this File"}
+              onChange={handleInputFolderPath}
+            />
+            <Button onClick={() => handleSubmit("path")}>Submit</Button>
+          </Space.Compact>
+          <Space.Compact block>
+            <Input
+              value={value}
+              placeholder={"Rename File"}
+              onChange={handleText}
+            />
+            <Button onClick={() => handleSubmit("name")}>Submit</Button>
+            <Button onClick={handleRevert}>Revert</Button>
+          </Space.Compact>
+          <img
+            alt="example"
+            style={{
+              width: "100%",
+            }}
+            src={previewImage}
           />
-          <Button onClick={handleSubmit}>Submit</Button>
-          <Button onClick={handleRevert}>Revert</Button>
-        </Space.Compact>
-        <img
-          alt="example"
-          style={{
-            width: "100%",
-          }}
-          src={previewImage}
-        />
+        </Space>
       </Modal>
     </>
   );
