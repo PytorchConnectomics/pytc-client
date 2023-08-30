@@ -13,38 +13,18 @@ function DataLoader(props) {
   const [scales, setScales] = useState("30,6,6");
   const { fetchNeuroglancerViewer } = props;
 
-  const fetchFiles = async (files) => {
+  const fetchFile = async (file) => {
     try {
-      await Promise.all(
-        files.map(async (file) => {
-          try {
-            const data = await checkFiles(file);
-            console.log(data);
-            if (data) {
-              context.setLabelFileList((prevLabelList) => [
-                ...prevLabelList,
-                file,
-              ]);
-              // context.setLabelFileList(file);
-            } else {
-              context.setImageFileList((prevImageList) => [
-                ...prevImageList,
-                file,
-              ]);
-              // context.setImageFileList(file);
-            }
-          } catch (error) {
-            console.error(error);
-          }
-        })
-      );
-    } catch (e) {
-      console.log(e);
+      const data = await checkFiles(file);
+      if (data.label) {
+        context.setLabelFileList((prevLabelList) => [...prevLabelList, file]);
+      } else {
+        context.setImageFileList((prevImageList) => [...prevImageList, file]);
+      }
+    } catch (error) {
+      console.error(error);
     }
   };
-
-  const [imageFileList, setImageFileList] = useState([]);
-  const [labelFileList, setLabelFileList] = useState([]);
 
   const handleVisualizeButtonClick = async (event) => {
     event.preventDefault();
@@ -77,22 +57,23 @@ function DataLoader(props) {
           value: file.uid,
         }))
       );
-      fetchFiles(context.files);
     }
   }, [context.files]);
 
   return (
     <Space wrap size="large" style={{ margin: "7px" }}>
       <Space size="middle">
-        <Dragger />
+        <Dragger fetchFile={fetchFile} />
       </Space>
       <Space wrap size="middle">
         <label style={{ width: "185px" }}>
           Image:
           <Select
             onChange={handleImageChange}
-            //options={context.fileList}
-            options={context.imageFileList}
+            options={context.imageFileList.map((file) => ({
+              label: file.name,
+              value: file.uid,
+            }))}
             placeholder="Select image"
             size="middle"
             allowClear={true}
@@ -102,8 +83,10 @@ function DataLoader(props) {
           Label:
           <Select
             onChange={handleLabelChange}
-            //options={context.fileList}
-            options={context.labelFileList}
+            options={context.labelFileList.map((file) => ({
+              label: file.name,
+              value: file.uid,
+            }))}
             placeholder="Select label"
             size="middle"
             allowClear={true}
