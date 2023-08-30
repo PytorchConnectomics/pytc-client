@@ -168,14 +168,12 @@ async def get_tensorboard_url():
 async def check_files(req: Request):
     import numpy as np
     from PIL import Image
-    #contents = await req.body()
 
-    # data_string = json.dumps(req)
-    # file_object = io.StringIO(data_string)
     try:
-        image_content = await req.stream()
+        im = await req.json()
+        print(im["folderPath"], im["name"])
 
-        image = Image.open(image_content)
+        image = Image.open(im["folderPath"] + im["name"])
 
         image_array = np.array(image)
 
@@ -187,46 +185,12 @@ async def check_files(req: Request):
             label = True
         else:
             print("The image is not a label")
-            label = None
+            label = False
 
         image.close()
         return {"label": label}
     except Exception as e:
         return {"error": str(e)}
-
-# @app.post('/check_files')
-# async def check_files(req: Request):
-#     import numpy as np
-#     from PIL import Image
-#     response = await req.json()
-#     #contents = response.read()
-#
-#     image_data_base64 = response.get("image_data", "")
-#     if not image_data_base64:
-#         return {"error": "No image data provided"}
-#
-#     try:
-#         image_data = base64.b64decode(image_data_base64)
-#         image = Image.open(image_data)
-#
-#         image_array = np.array(image)
-#
-#         unique_values = np.unique(image_array)
-#         is_label = np.array_equal(unique_values, np.array([0, 255]))
-#
-#         if is_label:
-#             print("The image is a label")
-#             label = True
-#         else:
-#             print("The image is not a label")
-#             label = False
-#
-#         image.close()
-#         return {"label": label}
-#
-#     except Exception as e:
-#         return {"error": str(e)}
-
 
 def run():
     uvicorn.run("main:app", host="127.0.0.1", port=4242, reload=True, log_level="info", app_dir="/")
