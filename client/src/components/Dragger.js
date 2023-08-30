@@ -4,9 +4,10 @@ import { InboxOutlined } from "@ant-design/icons";
 import { AppContext } from "../contexts/GlobalContext";
 import { DEFAULT_IMAGE } from "../utils/utils";
 
-function Dragger() {
+function Dragger(props) {
   const context = useContext(AppContext);
   const { Dragger } = Upload;
+  const { fetchFile } = props;
 
   const getBase64 = (file) =>
     new Promise((resolve, reject) => {
@@ -70,6 +71,7 @@ function Dragger() {
         ).folderPath = previewFileFolderPath;
         setPreviewFileFolderPath("");
       }
+      fetchFile(context.files.find((targetFile) => targetFile.uid === fileUID));
     }
     setPreviewOpen(false);
   };

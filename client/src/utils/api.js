@@ -115,6 +115,25 @@ export async function getTensorboardURL() {
   }
 }
 
+//<<<<<<< HEAD
+export async function checkFiles(file) {
+  try {
+    const res = await axios.post(
+      `${process.env.REACT_APP_API_PROTOCOL}://${process.env.REACT_APP_API_URL}/check_files`,
+      file
+    );
+    return res.data;
+  } catch (error) {
+    if (error.response) {
+      throw new Error(
+        `${error.response.status}: ${error.response.data?.detail?.error}`
+      );
+    }
+    throw error;
+  }
+}
+//}
+//=======
 export async function startModelInference(
   inputs,
   configurationYamlFile,
@@ -153,6 +172,7 @@ export async function stopModelInference() {
     );
     return;
   } catch (error) {
+    //>>>>>>> 438a71423abd5c2a128ecec668525c7c8ebe01d3
     if (error.response) {
       throw new Error(
         `${error.response.status}: ${error.response.data?.detail?.error}`

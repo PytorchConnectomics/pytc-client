@@ -13,8 +13,12 @@ export const ContextWrapper = (props) => {
   const [trainingConfig, setTrainingConfig] = useState(null);
   const [inferenceConfig, setInferenceConfig] = useState(null);
   const [uploadedYamlFile, setUploadedYamlFile] = useState("");
-  const [outputPath, setOutputPath] = useState("");
-  const [logPath, setLogPath] = useState("");
+  const [imageFileList, setImageFileList] = useState([]);
+  const [labelFileList, setLabelFileList] = useState([]);
+
+  const [outputPath, setOutputPath] = useState(null);
+  const [logPath, setLogPath] = useState(null);
+
   return (
     <AppContext.Provider
       value={{
@@ -34,6 +38,10 @@ export const ContextWrapper = (props) => {
         setViewer,
         trainingConfig,
         setTrainingConfig,
+        imageFileList,
+        setImageFileList,
+        labelFileList,
+        setLabelFileList,
         inferenceConfig,
         setInferenceConfig,
         uploadedYamlFile,
