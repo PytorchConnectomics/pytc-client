@@ -4,6 +4,7 @@ import { Button, Input, Select, Space } from "antd";
 import { ArrowRightOutlined } from "@ant-design/icons";
 import { AppContext } from "../contexts/GlobalContext";
 import "./DataLoader.css";
+import { checkFiles } from "../utils/api";
 
 function DataLoader(props) {
   const context = useContext(AppContext);
@@ -11,6 +12,19 @@ function DataLoader(props) {
   const [currentLabel, setCurrentLabel] = useState(null);
   const [scales, setScales] = useState("30,6,6");
   const { fetchNeuroglancerViewer } = props;
+
+  const fetchFile = async (file) => {
+    try {
+      const data = await checkFiles(file);
+      if (data.label) {
+        context.setLabelFileList((prevLabelList) => [...prevLabelList, file]);
+      } else {
+        context.setImageFileList((prevImageList) => [...prevImageList, file]);
+      }
+    } catch (error) {
+      console.error(error);
+    }
+  };
 
   const handleVisualizeButtonClick = async (event) => {
     event.preventDefault();
@@ -49,14 +63,17 @@ function DataLoader(props) {
   return (
     <Space wrap size="large" style={{ margin: "7px" }}>
       <Space size="middle">
-        <Dragger />
+        <Dragger fetchFile={fetchFile} />
       </Space>
       <Space wrap size="middle">
         <label style={{ width: "185px" }}>
           Image:
           <Select
             onChange={handleImageChange}
-            options={context.fileList}
+            options={context.imageFileList.map((file) => ({
+              label: file.name,
+              value: file.uid,
+            }))}
             placeholder="Select image"
             size="middle"
             allowClear={true}
@@ -66,7 +83,10 @@ function DataLoader(props) {
           Label:
           <Select
             onChange={handleLabelChange}
-            options={context.fileList}
+            options={context.labelFileList.map((file) => ({
+              label: file.name,
+              value: file.uid,
+            }))}
             placeholder="Select label"
             size="middle"
             allowClear={true}

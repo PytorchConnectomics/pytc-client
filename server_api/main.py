@@ -5,9 +5,8 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from utils.io import readVol
 
-REACT_APP_SERVER_PROTOCOL='http'
-REACT_APP_SERVER_URL='localhost:4243'
-
+REACT_APP_SERVER_PROTOCOL = 'http'
+REACT_APP_SERVER_URL = 'localhost:4243'
 
 app = FastAPI()
 
@@ -23,6 +22,7 @@ app.add_middleware(
 @app.get("/hello")
 def hello():
     return {"hello"}
+
 
 @app.post("/neuroglancer")
 async def neuroglancer(req: Request):
@@ -75,6 +75,7 @@ async def neuroglancer(req: Request):
     print(viewer)
     return str(viewer)
 
+
 @app.post("/start_model_training")
 async def start_model_training(req: Request):
     req = await req.json()
@@ -98,7 +99,6 @@ async def start_model_training(req: Request):
         return {"message": "Failed to start model training"}
 
 
-
 @app.post("/stop_model_training")
 async def stop_model_training():
     # print("Stop model training")
@@ -116,6 +116,7 @@ async def stop_model_training():
     else:
         return {"message": "Failed to stop model training"}
 
+
 @app.post("/start_model_inference")
 async def start_model_inference(req: Request):
     req = await req.json()
@@ -130,6 +131,7 @@ async def start_model_inference(req: Request):
     else:
         return {"message": "Failed to start model inference"}
 
+
 @app.post("/stop_model_inference")
 async def stop_model_inference():
     response = requests.post(
@@ -142,6 +144,7 @@ async def stop_model_inference():
         return {"message": "Model training stopped successfully"}
     else:
         return {"message": "Failed to stop model training"}
+
 
 @app.get('/get_tensorboard_url')
 async def get_tensorboard_url():
@@ -159,6 +162,35 @@ async def get_tensorboard_url():
     # else:
     #     # {"message": "Failed to get tensorboard URL"}
     #     return None
+
+
+@app.post('/check_files')
+async def check_files(req: Request):
+    import numpy as np
+    from PIL import Image
+
+    try:
+        im = await req.json()
+        print(im["folderPath"], im["name"])
+
+        image = Image.open(im["folderPath"] + im["name"])
+
+        image_array = np.array(image)
+
+        unique_values = np.unique(image_array)
+        is_label = np.array_equal(unique_values, np.array([0, 255]))
+
+        if is_label:
+            print("The image is a label")
+            label = True
+        else:
+            print("The image is not a label")
+            label = False
+
+        image.close()
+        return {"label": label}
+    except Exception as e:
+        return {"error": str(e)}
 
 def run():
     uvicorn.run("main:app", host="127.0.0.1", port=4242, reload=True, log_level="info", app_dir="/")
