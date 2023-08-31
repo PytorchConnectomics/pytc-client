@@ -1,14 +1,7 @@
 import axios from "axios";
 import { message } from "antd";
 
-export async function getNeuroglancerViewer(
-  image,
-  label,
-  scales
-  // image_path,
-  // label_path
-) {
-  // console.log(image, label, image_path, label_path);
+export async function getNeuroglancerViewer(image, label, scales) {
   try {
     let data = JSON.stringify({
       image: image.folderPath + image.name,
@@ -24,14 +17,6 @@ export async function getNeuroglancerViewer(
     message.error(
       `Invalid Data Path(s). Be sure to include all "/" and that data path is correct.`
     );
-
-    /*if (error.response) {
-      throw new Error(
-          `${error.response.status}: ${error.response.data?.detail?.error}`
-      );
-
-    }
-    throw error;*/
   }
 }
 
@@ -45,8 +30,9 @@ export async function startModelTraining(
   try {
     let data = JSON.stringify({
       arguments: {
-        // "config-file":
-        //   "../pytorch_connectomics/configs/Lucchi-Mitochondria.yaml",
+        // nproc_per_node: 4,
+        // master_port: 2345,
+        // distributed: "",
       },
       logPath: logPath,
       trainingConfig: trainingConfig,
@@ -115,7 +101,6 @@ export async function getTensorboardURL() {
   }
 }
 
-//<<<<<<< HEAD
 export async function checkFiles(file) {
   try {
     const res = await axios.post(
@@ -132,22 +117,22 @@ export async function checkFiles(file) {
     throw error;
   }
 }
-//}
-//=======
+
 export async function startModelInference(
   inputs,
   configurationYamlFile,
+  inferenceConfig,
   outputPath,
   checkpointPath
 ) {
   try {
     let data = JSON.stringify({
       arguments: {
-        "config-file":
-          "../pytorch_connectomics/configs/Lucchi-Mitochondria.yaml",
-        inference: "",
+        // inference: " ",
         checkpoint: checkpointPath,
       },
+      outputPath: outputPath,
+      inferenceConfig: inferenceConfig,
     });
 
     const res = await axios.post(
@@ -172,7 +157,6 @@ export async function stopModelInference() {
     );
     return;
   } catch (error) {
-    //>>>>>>> 438a71423abd5c2a128ecec668525c7c8ebe01d3
     if (error.response) {
       throw new Error(
         `${error.response.status}: ${error.response.data?.detail?.error}`
