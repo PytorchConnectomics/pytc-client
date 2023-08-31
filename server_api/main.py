@@ -47,20 +47,7 @@ async def neuroglancer(req: Request):
         names = ['z', 'y', 'x'],
         units = ['nm', 'nm', 'nm'],
         scales = scales)
-    # try:
-    #     img_data = file.file.read()
-    #     # img_data = image.file.read()
-    #     # label_data = label.file.read()
-    # except Exception:
-    #     return {"message": "There was an error uploading the file"}
-    # finally:
-    #     file.file.close()
-    #     # image.file.close()
-    #     # label.file.close()
 
-    # im = imageio.volread(img_data)
-    # if label_data:
-    #     gt = imageio.volread(label_data)
     im = readVol(image, image_type="im")
     gt = readVol(label, image_type="im")
 
@@ -79,17 +66,9 @@ async def neuroglancer(req: Request):
 @app.post("/start_model_training")
 async def start_model_training(req: Request):
     req = await req.json()
-    # print("start_model")
-    # log_dir = req['log_dir']
-    # start(log_dir)
-    # data = {
-    #     'log_dir': req['log_dir']
-    # }
     response = requests.post(
-        # os.environ.get("REACT_APP_SERVER_PROTOCOL") +
         REACT_APP_SERVER_PROTOCOL +
         '://' +
-        # os.environ.get("REACT_APP_SERVER_URL") +
         REACT_APP_SERVER_URL +
         "/start_model_training", json=req)
 
@@ -101,13 +80,9 @@ async def start_model_training(req: Request):
 
 @app.post("/stop_model_training")
 async def stop_model_training():
-    # print("Stop model training")
-    # return stop()
     response = requests.post(
-        # os.environ.get("REACT_APP_SERVER_PROTOCOL") +
         REACT_APP_SERVER_PROTOCOL +
         '://' +
-        # os.environ.get("REACT_APP_SERVER_URL") +
         REACT_APP_SERVER_URL +
         "/stop_model_training")
 
@@ -141,9 +116,9 @@ async def stop_model_inference():
         "/stop_model_inference")
 
     if response.status_code == 200:
-        return {"message": "Model training stopped successfully"}
+        return {"message": "Model inference stopped successfully"}
     else:
-        return {"message": "Failed to stop model training"}
+        return {"message": "Failed to stop model inference"}
 
 
 @app.get('/get_tensorboard_url')

@@ -2,7 +2,8 @@ import uvicorn
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 
-from services.model import start, stop, initialize_tensorboard, get_tensorboard, startInference, stopInference
+from services.model import initialize_tensorboard, get_tensorboard, start_training, stop_training, start_inference, \
+    stop_inference
 
 app = FastAPI()
 
@@ -25,13 +26,13 @@ async def start_model_training(req: Request):
     req = await req.json()
     print("start_model")
     # log_dir = req['log_dir']
-    start(req)
+    start_training(req)
 
 
 @app.post("/stop_model_training")
 async def stop_model_training():
     print("Stop model training")
-    return stop()
+    return stop_training()
 
 
 @app.get('/start_tensorboard')
@@ -47,13 +48,13 @@ async def start_model_inference(req: Request):
     req = await req.json()
     print("start model inference")
     # log_dir = req['log_dir']
-    startInference(req)
+    start_inference(req)
 
 
 @app.post("/stop_model_inference")
 async def stop_model_inference():
     print("Stop model inference")
-    return stopInference()
+    return stop_inference()
 
 
 def run():

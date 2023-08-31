@@ -17,6 +17,10 @@ function InputSelector(props) {
     context.setOutputPath(e.target.value);
   };
 
+  const handleCheckpointPathChange = (e) => {
+    context.setCheckpointPath(e.target.value);
+  };
+
   const handleImageChange = (value) => {
     console.log(`selected ${value}`);
     context.setInputImage(context.files.find((file) => file.uid === value));
@@ -95,7 +99,7 @@ function InputSelector(props) {
                 width: "100%",
               }}
               placeholder="Please type checkpoint path"
-              onChange={handleLogPathChange}
+              onChange={handleCheckpointPathChange}
               size="middle"
             />
           </Form.Item>

@@ -4,7 +4,7 @@ import subprocess
 import tempfile
 
 
-def start(dict: dict):
+def start_training(dict: dict):
     path = '../pytorch_connectomics/scripts/main.py'
 
     command = ['python', path]
@@ -27,23 +27,11 @@ def start(dict: dict):
     except subprocess.CalledProcessError as e:
         print(f"Error occurred: {e}")
 
-    print("start")
+    print("start_training")
     initialize_tensorboard(dict['logPath'])
     print("initialize_tensorboard")
 
-def stop():
-    # running_processes = psutil.process_iter()
-    # # Find all Python processes
-    # python_processes = [p for p in running_processes if p.name().lower() == 'python']
-    # # cmd_to_stop= 'test/mnist.py'# Needs to be replaced by 'pytorch_connectomics/scripts/main.py' once it's used in function start()
-    # cmd_to_stop = '../pytorch_connectomics/scripts/main.py'
-    # # Find the training process
-    # for process in python_processes:
-    #   cmdstring=(process.cmdline())
-    #   if cmd_to_stop in cmdstring[1]:
-    #       process.terminate()
-    #       break;
-    # return {"stop"}
+def stop_training():
     import os
     process_name = "python ../pytorch_connectomics/scripts/main.py"
     try:
@@ -78,10 +66,6 @@ def get_tensorboard():
 
 
 def stop_tensorboard():
-    # Find the process ID of TensorBoard
-    # process = subprocess.Popen(['pgrep', '-f', 'tensorboard'], stdout=subprocess.PIPE)
-    # output, _ = process.communicate()
-    # pid = output.strip().decode()
     process_name = "tensorboard"
     try:
         process_line = os.popen("ps ax | grep " + process_name + " | grep -v grep")
@@ -94,15 +78,20 @@ def stop_tensorboard():
     except:
         print("Error Encountered while Running Script")
 
-def startInference(dict: dict):
+def start_inference(dict: dict):
     path = '../pytorch_connectomics/scripts/main.py'
 
-    command = ['python', path]
+    command = ['python', path, '--inference']
+
+    # Write the value to a temporary file
+    with tempfile.NamedTemporaryFile(delete=False, mode='w', suffix='.yaml') as temp_file:
+        temp_file.write(dict['inferenceConfig'])
+        temp_filepath = temp_file.name
+        command.extend(["--config-file", str(temp_filepath)])
 
     for key, value in dict['arguments'].items():
         if value is not None:
             command.extend([f"--{key}", str(value)])
-
     # Execute the command using subprocess.call
     print(command)
     try:
@@ -110,9 +99,9 @@ def startInference(dict: dict):
     except subprocess.CalledProcessError as e:
         print(f"Error occurred: {e}")
 
-    print("start")
+    print("start_inference")
 
-def stopInference():
+def stop_inference():
     import os
     process_name = "python ../pytorch_connectomics/scripts/main.py"
     try:
@@ -127,6 +116,3 @@ def stopInference():
         print("Error Encountered while Running Script")
 
     stop_tensorboard()
-
-if __name__ == "__main__":
-    start()
