@@ -12,7 +12,6 @@ function ModelInference() {
       const inferenceConfig = localStorage.getItem("inferenceConfig");
 
       const res = startModelInference(
-        null,
         context.uploadedYamlFile.name,
         inferenceConfig,
         context.outputPath,
