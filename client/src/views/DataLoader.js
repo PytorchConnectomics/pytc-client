@@ -1,10 +1,12 @@
 import React, { useContext, useEffect, useState } from "react";
 import Dragger from "../components/Dragger";
-import { Button, Input, Select, Space } from "antd";
+import { Button, Input, Select, Space, Typography } from "antd";
 import { ArrowRightOutlined } from "@ant-design/icons";
 import { AppContext } from "../contexts/GlobalContext";
 import "./DataLoader.css";
 import { checkFiles } from "../utils/api";
+
+const { Title } = Typography;
 
 function DataLoader(props) {
   const context = useContext(AppContext);
@@ -61,53 +63,60 @@ function DataLoader(props) {
   }, [context.files]);
 
   return (
-    <Space wrap size="large" style={{ margin: "7px" }}>
-      <Space size="middle">
-        <Dragger fetchFile={fetchFile} />
-      </Space>
-      <Space wrap size="middle">
-        <label style={{ width: "185px" }}>
-          Image:
-          <Select
-            onChange={handleImageChange}
-            options={context.imageFileList.map((file) => ({
-              label: file.name,
-              value: file.uid,
-            }))}
-            placeholder="Select image"
-            size="middle"
-            allowClear={true}
-          />
-        </label>
-        <label>
-          Label:
-          <Select
-            onChange={handleLabelChange}
-            options={context.labelFileList.map((file) => ({
-              label: file.name,
-              value: file.uid,
-            }))}
-            placeholder="Select label"
-            size="middle"
-            allowClear={true}
-          />
-        </label>
-        <label>
-          Scales:
-          <Input
-            placeholder="Input in z, y, x order"
-            allowClear
-            onChange={handleInputScales}
-          />
-        </label>
-        <Button
-          type="primary"
-          onClick={handleVisualizeButtonClick}
-          icon={<ArrowRightOutlined />}
-        >
-          Visualize
-        </Button>
-      </Space>
+    <Space
+      direction="vertical"
+      size="small"
+      align="start"
+      style={{ margin: "7px", display: "flex" }}
+    >
+      <Dragger fetchFile={fetchFile} />
+      <Title level={5} style={{ marginBottom: "-5px" }}>
+        Image
+      </Title>
+      <Select
+        onChange={handleImageChange}
+        options={context.imageFileList.map((file) => ({
+          label: file.name,
+          value: file.uid,
+        }))}
+        style={{ width: "185px" }}
+        placeholder="Select image"
+        size="middle"
+        allowClear={true}
+      />
+
+      <Title level={5} style={{ marginTop: "0px", marginBottom: "-5px" }}>
+        Label
+      </Title>
+      <Select
+        onChange={handleLabelChange}
+        options={context.labelFileList.map((file) => ({
+          label: file.name,
+          value: file.uid,
+        }))}
+        style={{ width: "185px" }}
+        placeholder="Select label"
+        size="middle"
+        allowClear={true}
+      />
+
+      <Title level={5} style={{ marginTop: "0px", marginBottom: "-5px" }}>
+        Scales
+      </Title>
+      <Input
+        placeholder="Input in z, y, x order"
+        allowClear
+        onChange={handleInputScales}
+        style={{ width: "185px" }}
+      />
+      <Button
+        type="primary"
+        onClick={handleVisualizeButtonClick}
+        icon={<ArrowRightOutlined />}
+        style={{ width: "185px" }}
+      >
+        Visualize
+      </Button>
     </Space>
   );
 }
