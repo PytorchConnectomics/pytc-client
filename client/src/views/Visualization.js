@@ -1,5 +1,11 @@
 import React, { useState } from "react";
-import { Tabs } from "antd";
+import { Button, Tabs, Timeline } from "antd";
+import {
+  ArrowRightOutlined,
+  DownOutlined,
+  EyeOutlined,
+  InboxOutlined,
+} from "@ant-design/icons";
 
 function Visualization(props) {
   const { viewers, setViewers } = props;
@@ -37,28 +43,75 @@ function Visualization(props) {
   };
 
   return (
-    <div>
-      <Tabs
-        closeIcon={true}
-        type="editable-card"
-        hideAdd={true}
-        onEdit={handleEdit}
-        activeKey={activeKey}
-        onChange={handleChange}
-        items={viewers.map((viewer) => ({
-          label: viewer.title,
-          key: viewer.key,
-          children: (
-            <iframe
-              width="100%"
-              height="800"
-              frameBorder="0"
-              scrolling="no"
-              src={viewer.viewer}
-            />
-          ),
-        }))}
-      />
+    <div style={{ marginTop: "20px" }}>
+      {viewers.length > 0 ? (
+        <Tabs
+          closeIcon={true}
+          type="editable-card"
+          hideAdd={true}
+          onEdit={handleEdit}
+          activeKey={activeKey}
+          onChange={handleChange}
+          items={viewers.map((viewer) => ({
+            label: viewer.title,
+            key: viewer.key,
+            children: (
+              <iframe
+                width="100%"
+                height="800"
+                frameBorder="0"
+                scrolling="no"
+                src={viewer.viewer}
+              />
+            ),
+          }))}
+        />
+      ) : (
+        <Timeline
+          mode="left"
+          items={[
+            {
+              children: (
+                <>
+                  <InboxOutlined /> Upload your files
+                </>
+              ),
+            },
+            {
+              children: (
+                <>
+                  Input folder path of file in <EyeOutlined /> preview
+                </>
+              ),
+            },
+            {
+              children: (
+                <>
+                  <DownOutlined /> Select your image and label in dropdown menus
+                </>
+              ),
+            },
+            {
+              children: "Input scales of image in z,y,x order",
+            },
+            {
+              children: (
+                <>
+                  Click{" "}
+                  <Button
+                    type="primary"
+                    size="small"
+                    icon={<ArrowRightOutlined />}
+                  >
+                    Visualize
+                  </Button>{" "}
+                  button to render image and label in Neuroglancer
+                </>
+              ),
+            },
+          ]}
+        />
+      )}
     </div>
   );
 }
