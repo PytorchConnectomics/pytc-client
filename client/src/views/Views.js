@@ -79,7 +79,7 @@ function Views() {
       }}
     >
       <Sider
-        collapsible
+        // collapsible
         collapsed={collapsed}
         onCollapse={(value) => setCollapsed(value)}
         theme="light"
