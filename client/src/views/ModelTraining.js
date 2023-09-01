@@ -19,12 +19,11 @@ function ModelTraining() {
       const trainingConfig = localStorage.getItem("trainingConfig");
       console.log(trainingConfig);
       const res = startModelTraining(
-        null,
         context.uploadedYamlFile.name,
         trainingConfig,
         context.outputPath,
         context.logPath
-      ); // inputs, configurationYaml
+      );
       console.log(res);
     } catch (e) {
       console.log(e);

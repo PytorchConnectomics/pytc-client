@@ -4,14 +4,13 @@ import Visualization from "../views/Visualization";
 import ModelTraining from "../views/ModelTraining";
 import ModelInference from "../views/ModelInference";
 import Monitoring from "../views/Monitoring";
-import GettingStarted from "../views/GettingStarted";
 import { Layout, Menu } from "antd";
 import { getNeuroglancerViewer } from "../utils/api";
 
 const { Content, Sider } = Layout;
 
 function Views() {
-  const [current, setCurrent] = useState("gettingStarted");
+  const [current, setCurrent] = useState("visualization");
   const [viewers, setViewers] = useState([]);
   console.log(viewers);
 
@@ -20,7 +19,6 @@ function Views() {
   };
 
   const items = [
-    { label: "Getting Started", key: "gettingStarted" },
     { label: "Visualization", key: "visualization" },
     { label: "Model Training", key: "training" },
     { label: "Model Inference", key: "inference" },
@@ -28,9 +26,7 @@ function Views() {
   ];
 
   const renderMenu = () => {
-    if (current === "gettingStarted") {
-      return <GettingStarted />;
-    } else if (current === "visualization") {
+    if (current === "visualization") {
       return <Visualization viewers={viewers} setViewers={setViewers} />;
     } else if (current === "training") {
       return <ModelTraining />;

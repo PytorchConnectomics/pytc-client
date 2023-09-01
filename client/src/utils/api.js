@@ -21,7 +21,6 @@ export async function getNeuroglancerViewer(image, label, scales) {
 }
 
 export async function startModelTraining(
-  inputs,
   configurationYamlFile,
   trainingConfig,
   outputPath,
@@ -119,7 +118,6 @@ export async function checkFiles(file) {
 }
 
 export async function startModelInference(
-  inputs,
   configurationYamlFile,
   inferenceConfig,
   outputPath,
