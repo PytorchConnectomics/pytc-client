@@ -32,17 +32,13 @@ function InputSelector(props) {
   };
 
   return (
-    <div>
+    <div style={{ marginTop: "10px" }}>
       <Form
         labelCol={{
-          span: 4,
+          span: 5,
         }}
         wrapperCol={{
           span: 14,
-        }}
-        layout="horizontal"
-        style={{
-          maxWidth: 600,
         }}
       >
         <Form.Item label="Input Image">
@@ -81,7 +77,7 @@ function InputSelector(props) {
             size="middle"
           />
         </Form.Item>
-        {type == "training" ? (
+        {type === "training" ? (
           <Form.Item label="Log Path">
             <Input
               style={{

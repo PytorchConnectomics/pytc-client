@@ -254,7 +254,7 @@ const YamlFileUploader = (props) => {
   ]);
 
   return (
-    <div>
+    <div style={{ margin: "10px" }}>
       <Upload beforeUpload={handleFileUpload} showUploadList={false}>
         <Button icon={<UploadOutlined />} size="small">
           Upload YAML File
