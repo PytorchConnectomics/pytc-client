@@ -99,6 +99,27 @@ const YamlFileUploader = (props) => {
           YAMLContext.setSolverSamplesPerBatch(
             yamlData.SOLVER.SAMPLES_PER_BATCH
           );
+
+          // update InputSelector's information
+          if (
+            context.inputImage &&
+            context.inputImage.folderPath &&
+            context.inputLabel &&
+            context.inputLabel.folderPath
+          ) {
+            const inputImage =
+              context.inputImage.folderPath + context.inputImage.name;
+            const inputLabel =
+              context.inputLabel.folderPath + context.inputLabel.name;
+
+            const inputPath = findCommonPartOfString(inputImage, inputLabel);
+            yamlData.DATASET.INPUT_PATH = inputPath;
+            yamlData.DATASET.IMAGE_NAME = inputImage.replace(inputPath, "");
+            yamlData.DATASET.LABEL_NAME = inputLabel.replace(inputPath, "");
+            yamlData.DATASET.OUTPUT_PATH = context.outputPath;
+          } else {
+            message.error("Please input folder path of the file in preview");
+          }
         } else {
           // type === "inference"
           context.setInferenceConfig(
@@ -108,26 +129,27 @@ const YamlFileUploader = (props) => {
             yamlData.INFERENCE.SAMPLES_PER_BATCH
           );
           YAMLContext.setAugNum(yamlData.INFERENCE.AUG_NUM);
-        }
-        // update InputSelector's information
-        if (
-          context.inputImage &&
-          context.inputImage.folderPath &&
-          context.inputLabel &&
-          context.inputLabel.folderPath
-        ) {
-          const inputImage =
-            context.inputImage.folderPath + context.inputImage.name;
-          const inputLabel =
-            context.inputLabel.folderPath + context.inputLabel.name;
 
-          const inputPath = findCommonPartOfString(inputImage, inputLabel);
-          yamlData.DATASET.INPUT_PATH = inputPath;
-          yamlData.DATASET.IMAGE_NAME = inputImage.replace(inputPath, "");
-          yamlData.DATASET.LABEL_NAME = inputLabel.replace(inputPath, "");
-          yamlData.DATASET.OUTPUT_PATH = context.outputPath;
-        } else {
-          message.error("Please input folder path of the file in preview");
+          // update InputSelector's information
+          if (
+            context.inputImage &&
+            context.inputImage.folderPath &&
+            context.inputLabel &&
+            context.inputLabel.folderPath
+          ) {
+            const inputImage =
+              context.inputImage.folderPath + context.inputImage.name;
+            const inputLabel =
+              context.inputLabel.folderPath + context.inputLabel.name;
+
+            const inputPath = findCommonPartOfString(inputImage, inputLabel);
+            // yamlData.INFERENCE.INPUT_PATH = inputPath;
+            // yamlData.DATASET.IMAGE_NAME = inputImage.replace(inputPath, "");
+            // yamlData.DATASET.LABEL_NAME = inputLabel.replace(inputPath, "");
+            // yamlData.DATASET.OUTPUT_PATH = context.outputPath;
+          } else {
+            message.error("Please input folder path of the file in preview");
+          }
         }
 
         context.setTrainingConfig(
@@ -232,7 +254,7 @@ const YamlFileUploader = (props) => {
   ]);
 
   return (
-    <div>
+    <div style={{ margin: "10px" }}>
       <Upload beforeUpload={handleFileUpload} showUploadList={false}>
         <Button icon={<UploadOutlined />} size="small">
           Upload YAML File

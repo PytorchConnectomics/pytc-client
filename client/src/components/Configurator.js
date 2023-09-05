@@ -20,7 +20,11 @@ function Configurator(props) {
 
   const handleDoneButton = () => {
     message.success("Processing complete!");
-    localStorage.setItem("trainingConfig", context.trainingConfig);
+    if (type === "training") {
+      localStorage.setItem("trainingConfig", context.trainingConfig);
+    } else {
+      localStorage.setItem("inferenceConfig", context.inferenceConfig);
+    }
   };
 
   const items = [
@@ -55,6 +59,11 @@ function Configurator(props) {
       <Steps size="small" current={current} items={items} />
       <div style={contentStyle}>{items[current].content}</div>
       <div style={{ marginTop: 24 }}>
+        {current > 0 && (
+          <Button style={{ margin: "0 8px" }} onClick={() => prev()}>
+            Previous
+          </Button>
+        )}
         {current < items.length - 1 && (
           <Button type="primary" onClick={() => next()}>
             Next
@@ -63,11 +72,6 @@ function Configurator(props) {
         {current === items.length - 1 && (
           <Button type="primary" onClick={handleDoneButton}>
             Done
-          </Button>
-        )}
-        {current > 0 && (
-          <Button style={{ margin: "0 8px" }} onClick={() => prev()}>
-            Previous
           </Button>
         )}
       </div>
