@@ -9,9 +9,11 @@ function ModelInference() {
   const [isInference, setIsInference] = useState(false);
   const handleStartButton = async () => {
     try {
+      const inferenceConfig = localStorage.getItem("inferenceConfig");
+
       const res = startModelInference(
-        null,
         context.uploadedYamlFile.name,
+        inferenceConfig,
         context.outputPath,
         context.checkpointPath
       ); // inputs, configurationYaml
@@ -41,20 +43,19 @@ function ModelInference() {
   return (
     <>
       <div>
-        {/*{"ModelTraining"}*/}
         <Configurator fileList={context.files} type="inference" />
         <Space wrap style={{ marginTop: 12 }}>
           <Button
             onClick={handleStartButton}
             // disabled={!context.trainingConfig}
           >
-            Start Training
+            Start Inference
           </Button>
           <Button
             onClick={handleStopButton}
             // disabled={!isTraining}
           >
-            Stop Training
+            Stop Inference
           </Button>
         </Space>
       </div>

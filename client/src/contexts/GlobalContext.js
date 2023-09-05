@@ -18,6 +18,7 @@ export const ContextWrapper = (props) => {
 
   const [outputPath, setOutputPath] = useState(null);
   const [logPath, setLogPath] = useState(null);
+  const [checkpointPath, setCheckpointPath] = useState(null);
 
   return (
     <AppContext.Provider
@@ -50,6 +51,8 @@ export const ContextWrapper = (props) => {
         setOutputPath,
         logPath,
         setLogPath,
+        checkpointPath,
+        setCheckpointPath,
       }}
     >
       {props.children}

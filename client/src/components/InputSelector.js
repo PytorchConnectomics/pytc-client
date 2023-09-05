@@ -17,6 +17,10 @@ function InputSelector(props) {
     context.setOutputPath(e.target.value);
   };
 
+  const handleCheckpointPathChange = (e) => {
+    context.setCheckpointPath(e.target.value);
+  };
+
   const handleImageChange = (value) => {
     console.log(`selected ${value}`);
     context.setInputImage(context.files.find((file) => file.uid === value));
@@ -28,17 +32,13 @@ function InputSelector(props) {
   };
 
   return (
-    <div>
+    <div style={{ marginTop: "10px" }}>
       <Form
         labelCol={{
-          span: 4,
+          span: 5,
         }}
         wrapperCol={{
           span: 14,
-        }}
-        layout="horizontal"
-        style={{
-          maxWidth: 600,
         }}
       >
         <Form.Item label="Input Image">
@@ -77,7 +77,7 @@ function InputSelector(props) {
             size="middle"
           />
         </Form.Item>
-        {type == "training" ? (
+        {type === "training" ? (
           <Form.Item label="Log Path">
             <Input
               style={{
@@ -95,7 +95,7 @@ function InputSelector(props) {
                 width: "100%",
               }}
               placeholder="Please type checkpoint path"
-              onChange={handleLogPathChange}
+              onChange={handleCheckpointPathChange}
               size="middle"
             />
           </Form.Item>
