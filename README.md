@@ -10,6 +10,17 @@ conda activate pytc
 conda install pytorch torchvision cudatoolkit=11.3 -c pytorch
 ```
 
+Alternatively, dependencies can be installed with native Python via. the following:
+
+```bash
+# Create a venv
+python -m venv .venv
+source .venv/bin/activate
+
+# Install dependencies
+pip install torch torchvision cuda-python
+```
+
 1. Client
 ```
 cd client
