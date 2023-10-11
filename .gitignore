@@ -9,3 +9,4 @@ logs/
 data/
 outputs/
 build/
+.venv
