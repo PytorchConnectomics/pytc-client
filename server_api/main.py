@@ -3,7 +3,7 @@ import uvicorn
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 
-from utils.io import readVol
+from .utils.io import readVol
 
 REACT_APP_SERVER_PROTOCOL = 'http'
 REACT_APP_SERVER_URL = 'localhost:4243'
