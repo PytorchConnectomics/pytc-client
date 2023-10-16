@@ -19,14 +19,18 @@ function Dragger(props) {
   const onChange = (info) => {
     const { status } = info.file;
     if (status === 'done') {
-        console.log('done');
+        console.log('file found at:', info.file.originFileObj.path);
+        
         message.success(`${info.file.name} file uploaded successfully.`);
-        if (process.env.NODE_ENV === 'development' || window.require) { // Check if Electron environment
+        if (window.require) {
             const modifiedFile = { ...info.file, path: info.file.originFileObj.path };
+            setPreviewFileFolderPath(info.file.originFileObj.path);
             context.setFiles([...context.files, modifiedFile]);
+            console.log('set preview file folder path:', info.file.originFileObj.path);
         } else {
             context.setFiles([...info.fileList]);
         }
+        console.log('done');
     } else if (status === 'error') {
         console.log('error');
         message.error(`${info.file.name} file upload failed.`);
@@ -111,10 +115,16 @@ function Dragger(props) {
     setPreviewImage(file.url || file.preview);
     setPreviewOpen(true);
     setPreviewTitle(file.name || file.url.substring(file.url.lastIndexOf('/') + 1));
-    if (context.files.find(targetFile => targetFile.uid === file.uid) && context.files.find(targetFile => targetFile.uid === file.uid).folderPath) {
-        setPreviewFileFolderPath(context.files.find(targetFile => targetFile.uid === file.uid).folderPath);
+    if (
+      context.files.find(targetFile => targetFile.uid === file.uid) && 
+      context.files.find(targetFile => targetFile.uid === file.uid).folderPath) 
+      {
+        setPreviewFileFolderPath(
+          context.files.find(targetFile => targetFile.uid === file.uid)
+          .folderPath
+        );
     } else {
-        setPreviewFileFolderPath('');
+      setPreviewFileFolderPath("");
     }
   };
 
