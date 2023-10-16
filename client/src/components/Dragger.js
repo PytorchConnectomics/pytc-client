@@ -18,16 +18,21 @@ function Dragger(props) {
     });
   const onChange = (info) => {
     const { status } = info.file;
-    if (status === "done") {
-      console.log("done");
-      message.success(`${info.file.name} file uploaded successfully.`);
-      context.setFiles([...info.fileList]);
-    } else if (status === "error") {
-      console.log("error");
-      message.error(`${info.file.name} file upload failed.`);
-    } else if (status === "removed") {
-      console.log(info.fileList);
-      context.setFiles([...info.fileList]);
+    if (status === 'done') {
+        console.log('done');
+        message.success(`${info.file.name} file uploaded successfully.`);
+        if (process.env.NODE_ENV === 'development' || window.require) { // Check if Electron environment
+            const modifiedFile = { ...info.file, path: info.file.originFileObj.path };
+            context.setFiles([...context.files, modifiedFile]);
+        } else {
+            context.setFiles([...info.fileList]);
+        }
+    } else if (status === 'error') {
+        console.log('error');
+        message.error(`${info.file.name} file upload failed.`);
+    } else if (status === 'removed') {
+        console.log(info.fileList);
+        context.setFiles([...info.fileList]);
     }
   };
 
@@ -90,27 +95,26 @@ function Dragger(props) {
   const handlePreview = async (file) => {
     setFileUID(file.uid);
     if (!file.url && !file.preview) {
-      if (file.type !== "image/tiff") {
-        file.preview = await getBase64(file.originFileObj);
-      } else {
-        file.preview = file.thumbUrl;
-      }
+        if (file.type !== 'image/tiff') {
+            if (file.path) { // Use the local path for Electron environment
+                const fs = window.require('fs');
+                const buffer = fs.readFileSync(file.path);
+                const base64 = buffer.toString('base64');
+                file.preview = `data:${file.type};base64,${base64}`;
+            } else {
+                file.preview = await getBase64(file.originFileObj);
+            }
+        } else {
+            file.preview = file.thumbUrl;
+        }
     }
     setPreviewImage(file.url || file.preview);
     setPreviewOpen(true);
-    setPreviewTitle(
-      file.name || file.url.substring(file.url.lastIndexOf("/") + 1)
-    );
-    if (
-      context.files.find((targetFile) => targetFile.uid === file.uid) &&
-      context.files.find((targetFile) => targetFile.uid === file.uid).folderPath
-    ) {
-      setPreviewFileFolderPath(
-        context.files.find((targetFile) => targetFile.uid === file.uid)
-          .folderPath
-      );
+    setPreviewTitle(file.name || file.url.substring(file.url.lastIndexOf('/') + 1));
+    if (context.files.find(targetFile => targetFile.uid === file.uid) && context.files.find(targetFile => targetFile.uid === file.uid).folderPath) {
+        setPreviewFileFolderPath(context.files.find(targetFile => targetFile.uid === file.uid).folderPath);
     } else {
-      setPreviewFileFolderPath("");
+        setPreviewFileFolderPath('');
     }
   };
 
