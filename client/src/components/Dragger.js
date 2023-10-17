@@ -24,9 +24,7 @@ function Dragger(props) {
         message.success(`${info.file.name} file uploaded successfully.`);
         if (window.require) {
             const modifiedFile = { ...info.file, path: info.file.originFileObj.path };
-            setPreviewFileFolderPath(info.file.originFileObj.path);
             context.setFiles([...context.files, modifiedFile]);
-            console.log('set preview file folder path:', info.file.originFileObj.path);
         } else {
             context.setFiles([...info.fileList]);
         }
@@ -74,6 +72,7 @@ function Dragger(props) {
         setValue("");
       }
     } else if (type === "path") {
+      console.log("submitting path", previewFileFolderPath)
       if (previewFileFolderPath !== "") {
         context.files.find(
           (targetFile) => targetFile.uid === fileUID
@@ -124,7 +123,7 @@ function Dragger(props) {
           .folderPath
         );
     } else {
-      setPreviewFileFolderPath("");
+      setPreviewFileFolderPath(file.originFileObj.path);
     }
   };
 
