@@ -4,10 +4,9 @@ import { InboxOutlined } from "@ant-design/icons";
 import { AppContext } from "../contexts/GlobalContext";
 import { DEFAULT_IMAGE } from "../utils/utils";
 
-function Dragger(props) {
+function Dragger() {
   const context = useContext(AppContext);
   const { Dragger } = Upload;
-  const { fetchFile } = props;
 
   const getBase64 = (file) =>
     new Promise((resolve, reject) => {
@@ -47,42 +46,61 @@ function Dragger(props) {
     }
   };
 
+  
   const [previewOpen, setPreviewOpen] = useState(false);
   const [previewImage, setPreviewImage] = useState("");
   const [previewTitle, setPreviewTitle] = useState("");
   const [value, setValue] = useState("");
   const [fileUID, setFileUID] = useState(null);
   const [previewFileFolderPath, setPreviewFileFolderPath] = useState("");
+  const [fileType, setFileType] = useState("Image");
 
   const handleText = (event) => {
     setValue(event.target.value);
   };
 
+  const handleDropdownChange = (event) => { 
+    setFileType(event.target.value);
+  };
+
+  const fetchFile = async (file) => {
+    try {
+      if (fileType === "Label") {
+        context.setLabelFileList((prevLabelList) => [...prevLabelList, file]);
+      } else if (fileType === "Image") {
+        context.setImageFileList((prevImageList) => [...prevImageList, file]);
+      }
+    } catch (error) {
+      console.error(error);
+    }
+  };
+
+  /*
   const handleInputFolderPath = (event) => {
     setPreviewFileFolderPath(event.target.value);
   };
+  */
+
   const handleSubmit = (type) => {
-    if (type === "name") {
-      if (value !== "") {
-        context.files.find((targetFile) => targetFile.uid === fileUID).name =
-          value;
-        context.fileList.find(
-          (targetFile) => targetFile.value === fileUID
-        ).label = value;
-        setValue("");
-      }
-    } else if (type === "path") {
-      console.log("submitting path", previewFileFolderPath)
-      if (previewFileFolderPath !== "") {
-        context.files.find(
-          (targetFile) => targetFile.uid === fileUID
-        ).folderPath = previewFileFolderPath;
-        setPreviewFileFolderPath("");
-      }
-      fetchFile(context.files.find((targetFile) => targetFile.uid === fileUID));
+    console.log("submitting path", previewFileFolderPath)
+    if (previewFileFolderPath !== "") {
+      context.files.find(
+        (targetFile) => targetFile.uid === fileUID
+      ).folderPath = previewFileFolderPath;
+      setPreviewFileFolderPath("");
     }
+    if (value !== "") {
+      context.files.find((targetFile) => targetFile.uid === fileUID).name =
+        value;
+      context.fileList.find(
+        (targetFile) => targetFile.value === fileUID
+      ).label = value;
+      setValue("");
+    }
+    fetchFile(context.files.find((targetFile) => targetFile.uid === fileUID));
     setPreviewOpen(false);
   };
+
   const handleRevert = () => {
     let oldName = context.files.find((targetFile) => targetFile.uid === fileUID)
       .originFileObj.name;
@@ -169,22 +187,22 @@ function Dragger(props) {
         onCancel={handleCancel}
       >
         <Space direction="vertical">
-          <Space.Compact block>
-            <Input
-              value={previewFileFolderPath}
-              placeholder={"Please Enter Folder Path of this File"}
-              onChange={handleInputFolderPath}
-            />
-            <Button onClick={() => handleSubmit("path")}>Submit</Button>
-          </Space.Compact>
+        <Space.Compact block>
+          
+        <select onChange={handleDropdownChange}>
+          <option value="" disabled selected>Please select input filetype</option>
+          <option value="Image">Image</option>
+          <option value="Label">Label</option>
+        </select>
+        <Button onClick={() => handleSubmit()}>Submit</Button>
+        <Button onClick={handleRevert}>Revert</Button>
+      </Space.Compact>
           <Space.Compact block>
             <Input
               value={value}
-              placeholder={"Rename File"}
+              placeholder={"Alternative file name"}
               onChange={handleText}
             />
-            <Button onClick={() => handleSubmit("name")}>Submit</Button>
-            <Button onClick={handleRevert}>Revert</Button>
           </Space.Compact>
           <img
             alt="example"
