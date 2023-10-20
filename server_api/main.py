@@ -46,7 +46,8 @@ async def neuroglancer(req: Request):
     res = neuroglancer.CoordinateSpace(
         names = ['z', 'y', 'x'],
         units = ['nm', 'nm', 'nm'],
-        scales = scales)
+        scales = scales
+    )
 
     im = readVol(image, image_type="im")
     gt = readVol(label, image_type="im")

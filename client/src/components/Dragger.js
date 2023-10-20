@@ -4,6 +4,8 @@ import { InboxOutlined } from "@ant-design/icons";
 import { AppContext } from "../contexts/GlobalContext";
 import { DEFAULT_IMAGE } from "../utils/utils";
 
+const path = require('path');
+
 function Dragger() {
   const context = useContext(AppContext);
   const { Dragger } = Upload;
@@ -15,25 +17,26 @@ function Dragger() {
       reader.onload = () => resolve(reader.result);
       reader.onerror = (error) => reject(error);
     });
+
   const onChange = (info) => {
     const { status } = info.file;
     if (status === 'done') {
-        console.log('file found at:', info.file.originFileObj.path);
-        
-        message.success(`${info.file.name} file uploaded successfully.`);
-        if (window.require) {
-            const modifiedFile = { ...info.file, path: info.file.originFileObj.path };
-            context.setFiles([...context.files, modifiedFile]);
-        } else {
-            context.setFiles([...info.fileList]);
-        }
-        console.log('done');
+      console.log('file found at:', info.file.originFileObj.path);
+      
+      message.success(`${info.file.name} file uploaded successfully.`);
+      if (window.require) {
+          const modifiedFile = { ...info.file, path: info.file.originFileObj.path };
+          context.setFiles([...context.files, modifiedFile]);
+      } else {
+          context.setFiles([...info.fileList]);
+      }
+      console.log('done');
     } else if (status === 'error') {
-        console.log('error');
-        message.error(`${info.file.name} file upload failed.`);
+      console.log('error');
+      message.error(`${info.file.name} file upload failed.`);
     } else if (status === 'removed') {
-        console.log(info.fileList);
-        context.setFiles([...info.fileList]);
+      console.log(info.fileList);
+      context.setFiles([...info.fileList]);
     }
   };
 
@@ -141,7 +144,8 @@ function Dragger() {
           .folderPath
         );
     } else {
-      setPreviewFileFolderPath(file.originFileObj.path);
+      // Directory name with trailing slash
+      setPreviewFileFolderPath(path.dirname(file.originFileObj.path) + "/");
     }
   };
 
