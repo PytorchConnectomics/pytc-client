@@ -3,7 +3,7 @@ import uvicorn
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 
-from .utils.io import readVol
+from utils.io import readVol
 
 REACT_APP_SERVER_PROTOCOL = 'http'
 REACT_APP_SERVER_URL = 'localhost:4243'
@@ -46,7 +46,8 @@ async def neuroglancer(req: Request):
     res = neuroglancer.CoordinateSpace(
         names = ['z', 'y', 'x'],
         units = ['nm', 'nm', 'nm'],
-        scales = scales)
+        scales = scales
+    )
 
     im = readVol(image, image_type="im")
     gt = readVol(label, image_type="im")
@@ -138,7 +139,9 @@ async def get_tensorboard_url():
     #     # {"message": "Failed to get tensorboard URL"}
     #     return None
 
-
+# TODO: Improve on this: basic idea: labels are binary -- black or white?
+# Check the unique values: Assume that the label should have 0 or 255
+# This is temporarily ditched in favor of allowing users to specify whether or not a file is a label or image.
 @app.post('/check_files')
 async def check_files(req: Request):
     import numpy as np

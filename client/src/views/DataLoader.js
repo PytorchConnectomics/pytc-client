@@ -4,7 +4,6 @@ import { Button, Input, Select, Space, Typography } from "antd";
 import { ArrowRightOutlined } from "@ant-design/icons";
 import { AppContext } from "../contexts/GlobalContext";
 import "./DataLoader.css";
-import { checkFiles } from "../utils/api";
 
 const { Title } = Typography;
 
@@ -14,19 +13,6 @@ function DataLoader(props) {
   const [currentLabel, setCurrentLabel] = useState(null);
   const [scales, setScales] = useState("30,6,6");
   const { fetchNeuroglancerViewer } = props;
-
-  const fetchFile = async (file) => {
-    try {
-      const data = await checkFiles(file);
-      if (data.label) {
-        context.setLabelFileList((prevLabelList) => [...prevLabelList, file]);
-      } else {
-        context.setImageFileList((prevImageList) => [...prevImageList, file]);
-      }
-    } catch (error) {
-      console.error(error);
-    }
-  };
 
   const handleVisualizeButtonClick = async (event) => {
     event.preventDefault();
@@ -69,7 +55,7 @@ function DataLoader(props) {
       align="start"
       style={{ margin: "7px", display: "flex" }}
     >
-      <Dragger fetchFile={fetchFile} />
+      <Dragger/>
       <Title level={5} style={{ marginBottom: "-5px" }}>
         Image
       </Title>
