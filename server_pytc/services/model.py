@@ -3,7 +3,7 @@ import signal
 import subprocess
 import tempfile
 
-
+# TODO: Fix this to work with the yaml file path
 def start_training(dict: dict):
     path = '../pytorch_connectomics/scripts/main.py'
 
