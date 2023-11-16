@@ -45,10 +45,10 @@ async def neuroglancer(req: Request):
     print(image, label, scales)
 
     # neuroglancer setting -- bind to this to make accessible outside of container
-    ip = '0.0.0.0'
-    port = 9999
+    ip = "0.0.0.0"
+    port = 4244
     
-    neuroglancer.set_server_bind_address(bind_address=ip, bind_port=port)
+    neuroglancer.set_server_bind_address(ip, port)
     viewer = neuroglancer.Viewer()
 
     # SNEMI (# 3d vol dim: z,y,x)

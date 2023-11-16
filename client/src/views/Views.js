@@ -55,14 +55,15 @@ function Views() {
           currentLabel,
           scales
         );
-        console.log(res);
+        let newUrl = res.replace(/\/\/[^:\/]+/, "//localhost");
+        console.log("Viewer at ", newUrl);
 
         setViewers([
           ...viewers,
           {
             key: currentImage.uid + currentLabel.uid,
             title: currentImage.name + " & " + currentLabel.name,
-            viewer: res,
+            viewer: newUrl,
           },
         ]);
       }
