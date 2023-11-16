@@ -3,7 +3,7 @@
 *.pyc
 *.pclprof
 *.png
-node_modules/
+node_modules
 pytc/
 logs/
 data/
@@ -12,4 +12,3 @@ build/
 .venv
 __pycache__
 .pytest_cache
-samples_pytc/*

@@ -2,6 +2,8 @@ import requests
 import uvicorn
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
+import os
+import pathlib
 
 from utils.io import readVol
 
@@ -18,6 +20,12 @@ app.add_middleware(
     allow_headers=["*"]
 )
 
+def process_path(path):
+    # Get the absolute path of the current script's parent directory
+    current_script_dir = pathlib.Path(__file__).parent
+    # The root of the repository is assumed to be one level up from the current script's directory
+    repo_root = current_script_dir.parent.absolute()
+    return repo_root / path
 
 @app.get("/hello")
 def hello():
@@ -29,14 +37,15 @@ async def neuroglancer(req: Request):
     import neuroglancer
 
     req = await req.json()
-    image = req['image']
-    label = req['label']
+
+    image = process_path(req['image'])
+    label = process_path(req['label'])
     scales = req['scales']
 
     print(image, label, scales)
 
-    # neuroglancer setting
-    ip = 'localhost'  # or public IP of the machine for sharable display
+    # neuroglancer setting -- bind to this to make accessible outside of container
+    ip = '0.0.0.0'
     port = 9999
     
     neuroglancer.set_server_bind_address(bind_address=ip, bind_port=port)
@@ -171,7 +180,7 @@ async def check_files(req: Request):
         return {"error": str(e)}
 
 def run():
-    uvicorn.run("main:app", host="127.0.0.1", port=4242, reload=True, log_level="info", app_dir="/")
+    uvicorn.run("main:app", host="0.0.0.0", port=4242, reload=True, log_level="info", app_dir="/")
 
 
 if __name__ == "__main__":
