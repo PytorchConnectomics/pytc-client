@@ -13,6 +13,7 @@ def mkdir(fn, opt=''):
 
 def readVol(filename, z=None, kk=None, image_type='im'):
     from imageio import imread
+    filename = str(filename)
     # image_type='seg': 1-channel
     if filename[-2:] == 'h5':
         import h5py

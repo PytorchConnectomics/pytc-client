@@ -21,11 +21,22 @@ function Dragger() {
   const onChange = (info) => {
     const { status } = info.file;
     if (status === 'done') {
-      console.log('file found at:', info.file.originFileObj.path);
-      
+      // Keep only the part of the pytc-relative path
+      let pathSegments = info.file.originFileObj.path.split('/');
+      let pytcClientIndex = pathSegments.indexOf('pytc-client');
+      let relativePath = pathSegments.slice(pytcClientIndex).join('/');
+      // Check if 'pytc-client' was found in the path
+      if (pytcClientIndex === -1) {
+        // Handle the error: 'pytc-client' not found
+        console.error("Error: Please upload from the sample folder");
+        message.error(`${info.file.name} file upload failed.`);
+        // Return early since 'pytc-client' is not found
+        return;
+      }
+
       message.success(`${info.file.name} file uploaded successfully.`);
       if (window.require) {
-          const modifiedFile = { ...info.file, path: info.file.originFileObj.path };
+          const modifiedFile = { ...info.file, path: relativePath };
           context.setFiles([...context.files, modifiedFile]);
       } else {
           context.setFiles([...info.fileList]);
@@ -77,12 +88,6 @@ function Dragger() {
       console.error(error);
     }
   };
-
-  /*
-  const handleInputFolderPath = (event) => {
-    setPreviewFileFolderPath(event.target.value);
-  };
-  */
 
   const handleSubmit = (type) => {
     console.log("submitting path", previewFileFolderPath)
@@ -139,14 +144,31 @@ function Dragger() {
       context.files.find(targetFile => targetFile.uid === file.uid) && 
       context.files.find(targetFile => targetFile.uid === file.uid).folderPath) 
       {
-        setPreviewFileFolderPath(
+        processAndSetPath(
           context.files.find(targetFile => targetFile.uid === file.uid)
-          .folderPath
-        );
+        .folderPath)
     } else {
-      // Directory name with trailing slash
-      setPreviewFileFolderPath(path.dirname(file.originFileObj.path) + "/");
+      processAndSetPath(path.dirname(file.originFileObj.path));
     }
+  };
+
+  function processAndSetPath(path) {
+    let pathSegments = path.split('/');
+    let pytcClientIndex = pathSegments.indexOf('samples_pytc');
+
+    // Check if 'pytc-client' was found in the path
+    if (pytcClientIndex === -1) {
+        // Handle the error: 'sample' not found
+        console.error("Error: Please upload from the sample folder");
+        message.error(`${path.name} file upload failed.`);
+        return false;
+    }
+
+    let relativePath = pathSegments.slice(pytcClientIndex).join('/');
+    console.log("file uploaded: ", relativePath);
+    setPreviewFileFolderPath(relativePath + "/");
+
+    return true;
   };
 
   const listItemStyle = {
