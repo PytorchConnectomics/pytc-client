@@ -6,7 +6,7 @@ services:
     ports:
       - "4242:4242"
       - "4243:4243"
-      - "9999:9999"
+      - "4244:4244"
     volumes:
       - .:/app
     command: ./start.sh
