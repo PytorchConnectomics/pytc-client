@@ -12,4 +12,4 @@ build/
 .venv
 __pycache__
 .pytest_cache
-samples_pytc/*
+mnt/
