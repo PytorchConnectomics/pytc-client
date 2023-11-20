@@ -5,7 +5,7 @@ import tempfile
 
 # TODO: Fix this to work with the yaml file path
 def start_training(dict: dict):
-    path = '../pytorch_connectomics/scripts/main.py'
+    path = 'pytorch_connectomics/scripts/main.py'
 
     command = ['python', path]
 
@@ -33,7 +33,7 @@ def start_training(dict: dict):
 
 def stop_training():
     import os
-    process_name = "python ../pytorch_connectomics/scripts/main.py"
+    process_name = "python pytorch_connectomics/scripts/main.py"
     try:
         process_line = os.popen("ps ax | grep " + process_name + " | grep -v grep")
         print(process_line)
@@ -54,7 +54,7 @@ def initialize_tensorboard(logPath):
     tb = program.TensorBoard()
     # tb.configure(argv=[None, '--logdir', './logs'])
     try:
-        tb.configure(argv=[None, '--logdir', logPath])
+        tb.configure(argv=[None, '--logdir', logPath, '--host', '0.0.0.0'])
         tensorboard_url = tb.launch()
         print(f'TensorBoard is running at {tensorboard_url}')
     except:
@@ -79,7 +79,7 @@ def stop_tensorboard():
         print("Error Encountered while Running Script")
 
 def start_inference(dict: dict):
-    path = '../pytorch_connectomics/scripts/main.py'
+    path = 'pytorch_connectomics/scripts/main.py'
 
     command = ['python', path, '--inference']
 
@@ -103,7 +103,7 @@ def start_inference(dict: dict):
 
 def stop_inference():
     import os
-    process_name = "python ../pytorch_connectomics/scripts/main.py"
+    process_name = "python pytorch_connectomics/scripts/main.py"
     try:
         process_line = os.popen("ps ax | grep " + process_name + " | grep -v grep")
         print(process_line)

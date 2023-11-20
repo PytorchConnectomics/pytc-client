@@ -3,3 +3,4 @@ uvicorn>=0.21.1
 python-multipart>=0.0.6
 neuroglancer>=2.36
 imageio>=2.31.1
+tensorboard>=2.4.0
