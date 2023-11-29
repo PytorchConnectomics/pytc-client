@@ -67,7 +67,7 @@ function Dragger() {
   const [value, setValue] = useState("");
   const [fileUID, setFileUID] = useState(null);
   const [previewFileFolderPath, setPreviewFileFolderPath] = useState("");
-  const [fileType, setFileType] = useState("Image");
+  const [fileType, setFileType] = useState("");
 
   const handleText = (event) => {
     setValue(event.target.value);
@@ -90,22 +90,28 @@ function Dragger() {
   };
 
   const handleSubmit = (type) => {
-    console.log("submitting path", previewFileFolderPath)
-    if (previewFileFolderPath !== "") {
-      context.files.find(
-        (targetFile) => targetFile.uid === fileUID
-      ).folderPath = previewFileFolderPath;
+    console.log("submitting path", previewFileFolderPath);
+  
+    const fileInContext = context.files.find((targetFile) => targetFile.uid === fileUID);
+    const fileInFileList = context.fileList.find((targetFile) => targetFile.value === fileUID);
+  
+    if (previewFileFolderPath !== "" && fileInContext) {
+      fileInContext.folderPath = previewFileFolderPath;
       setPreviewFileFolderPath("");
     }
-    if (value !== "") {
-      context.files.find((targetFile) => targetFile.uid === fileUID).name =
-        value;
-      context.fileList.find(
-        (targetFile) => targetFile.value === fileUID
-      ).label = value;
+  
+    if (value !== "" && fileInContext && fileInFileList) {
+      fileInContext.name = value;
+      fileInFileList.label = value;
       setValue("");
     }
-    fetchFile(context.files.find((targetFile) => targetFile.uid === fileUID));
+  
+    if (fileInContext) {
+      fetchFile(fileInContext);
+    } else {
+      message.error("Error: File selection error. Please try again.");
+    }
+  
     setPreviewOpen(false);
   };
 

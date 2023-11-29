@@ -1,24 +1,45 @@
-import React, { useState } from "react";
+import React, { createContext, useState, useEffect } from "react";
 
-export const AppContext = React.createContext(null);
+export const AppContext = createContext(null);
+
+function usePersistedState(key, defaultValue) {
+  const [state, setState] = useState(() => {
+    const storedValue = localStorage.getItem('yourKey');
+    return safeParseJSON(storedValue, defaultValue);
+  });
+
+  useEffect(() => {
+    localStorage.setItem(key, JSON.stringify(state));
+  }, [key, state]);
+
+  return [state, setState];
+}
+
+function safeParseJSON(jsonString, defaultValue) {
+  try {
+    return JSON.parse(jsonString) || defaultValue;
+  } catch (e) {
+    console.error("Error parsing JSON:", e);
+    return defaultValue;
+  }
+}
 
 export const ContextWrapper = (props) => {
-  const [files, setFiles] = useState([]);
-  const [fileList, setFileList] = useState([]);
-  const [currentImage, setCurrentImage] = useState(null);
-  const [currentLabel, setCurrentLabel] = useState(null);
-  const [inputImage, setInputImage] = useState(null);
-  const [inputLabel, setInputLabel] = useState(null);
-  const [viewer, setViewer] = useState(null);
-  const [trainingConfig, setTrainingConfig] = useState(null);
-  const [inferenceConfig, setInferenceConfig] = useState(null);
-  const [uploadedYamlFile, setUploadedYamlFile] = useState("");
-  const [imageFileList, setImageFileList] = useState([]);
-  const [labelFileList, setLabelFileList] = useState([]);
-
-  const [outputPath, setOutputPath] = useState(null);
-  const [logPath, setLogPath] = useState(null);
-  const [checkpointPath, setCheckpointPath] = useState(null);
+  const [files, setFiles] = usePersistedState("files", []);
+  const [fileList, setFileList] = usePersistedState('fileList', []);
+  const [trainingConfig, setTrainingConfig] = usePersistedState('trainingConfig', null);
+  const [inferenceConfig, setInferenceConfig] = usePersistedState('inferenceConfig', null);
+  const [uploadedYamlFile, setUploadedYamlFile] = usePersistedState('uploadedYamlFile', "");
+  const [imageFileList, setImageFileList] = usePersistedState('imageFileList', []);
+  const [labelFileList, setLabelFileList] = usePersistedState('labelFileList', []);
+  const [outputPath, setOutputPath] = usePersistedState('outputPath', null);
+  const [logPath, setLogPath] = usePersistedState('logPath', null);
+  const [checkpointPath, setCheckpointPath] = usePersistedState('checkpointPath', null);
+  const [currentImage, setCurrentImage] = usePersistedState('currentImage', null);
+  const [currentLabel, setCurrentLabel] = usePersistedState('currentLabel', null);
+  const [inputImage, setInputImage] = usePersistedState('inputImage', null);
+  const [inputLabel, setInputLabel] = usePersistedState('inputLabel', null);
+  const [viewer, setViewer] = usePersistedState('viewer', null);
 
   return (
     <AppContext.Provider
