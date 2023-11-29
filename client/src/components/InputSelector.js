@@ -43,40 +43,44 @@ function InputSelector(props) {
       >
         <Form.Item label="Input Image">
           <Select
-            // mode="multiple"
             allowClear
-            style={{
-              width: "100%",
-            }}
+            style={{ width: "100%" }}
             placeholder="Please select"
             onChange={handleImageChange}
-            options={context.fileList}
+            value={context.inputImage ? context.inputImage.uid : undefined}
+            options={context.imageFileList.map((file) => ({
+              label: file.name,
+              value: file.uid,
+            }))}
             size="middle"
           />
         </Form.Item>
         <Form.Item label="Input Label">
           <Select
-            // mode="multiple"
             allowClear
-            style={{
-              width: "100%",
-            }}
+            style={{ width: "100%" }}
             placeholder="Please select"
             onChange={handleLabelChange}
-            options={context.fileList}
+            value={context.inputLabel ? context.inputLabel.uid : undefined}
+            options={context.labelFileList.map((file) => ({
+              label: file.name,
+              value: file.uid,
+            }))}
             size="middle"
           />
         </Form.Item>
-        <Form.Item label="Output Path">
+        {type === "training" ? <Form.Item label="Output Path">
           <Input
             style={{
               width: "100%",
             }}
             placeholder="Please type output path"
+            value={context.outputPath ? context.outputPath : undefined}
             onChange={handleOutputPathChange}
             size="middle"
           />
         </Form.Item>
+          : null}
         {type === "training" ? (
           <Form.Item label="Log Path">
             <Input
@@ -95,6 +99,7 @@ function InputSelector(props) {
                 width: "100%",
               }}
               placeholder="Please type checkpoint path"
+              value={context.outputPath ? context.outputPath : undefined}
               onChange={handleCheckpointPathChange}
               size="middle"
             />
