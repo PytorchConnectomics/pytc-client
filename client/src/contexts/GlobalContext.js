@@ -4,7 +4,7 @@ export const AppContext = createContext(null);
 
 function usePersistedState(key, defaultValue) {
   const [state, setState] = useState(() => {
-    const storedValue = localStorage.getItem('yourKey');
+    const storedValue = localStorage.getItem(key);
     return safeParseJSON(storedValue, defaultValue);
   });
 
