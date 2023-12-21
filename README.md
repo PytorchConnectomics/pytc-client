@@ -51,12 +51,6 @@ cd pytorch_connectomics
 pip install --editable .
 ```
 
-4. Pytc-connectomics Server:
-```
-cd server_pytc
-pip install -r requirements.txt
-```
-
 ## Run Project
 ### To run in production mode
 `./run.sh`
