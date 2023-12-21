@@ -23,6 +23,7 @@ function Dragger() {
     if (status === 'done') {
       // Keep only the part of the pytc-relative path
       let pathSegments = info.file.originFileObj.path.split('/');
+      console.log(pathSegments)
       let pytcClientIndex = pathSegments.indexOf('pytc-client');
       let relativePath = pathSegments.slice(pytcClientIndex).join('/');
       // Check if 'pytc-client' was found in the path
