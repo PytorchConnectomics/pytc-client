@@ -30,7 +30,6 @@ function Dragger() {
         // Handle the error: 'pytc-client' not found
         console.error("Error: Please upload from the sample folder");
         message.error(`${info.file.name} file upload failed.`);
-        // Return early since 'pytc-client' is not found
         return;
       }
 
