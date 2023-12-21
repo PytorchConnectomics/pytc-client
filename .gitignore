@@ -13,3 +13,4 @@ build/
 __pycache__
 .pytest_cache
 mnt/
+samples_pytc/*
