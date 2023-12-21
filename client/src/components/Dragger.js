@@ -28,7 +28,7 @@ function Dragger() {
       // Check if 'pytc-client' was found in the path
       if (pytcClientIndex === -1) {
         // Handle the error: 'pytc-client' not found
-        console.error("Error: Please upload from the sample folder");
+        console.error("Error: Please upload from the sample folder. File path: " + info.file.originFileObj.path);
         message.error(`${info.file.name} file upload failed.`);
         return;
       }
@@ -164,7 +164,7 @@ function Dragger() {
     // Check if 'pytc-client' was found in the path
     if (pytcClientIndex === -1) {
         // Handle the error: 'sample' not found
-        console.error("Error: Please upload from the sample folder");
+        console.error("Error: Please upload from the sample folder. File path: " + path);
         message.error(`${path.name} file upload failed.`);
         return false;
     }
