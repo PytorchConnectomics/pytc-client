@@ -52,24 +52,12 @@ pip install --editable .
 ```
 
 ## Run Project
-### To run in production mode
-`./run.sh`
-
-### To run in development mode
-1. Client:
+### To run
+```
+./start.sh
+```
+In a separate terminal
 ```
 cd client
-npm start
-```
-
-2. API Server:
-```
-cd server_api
-python main.py
-```
-
-3. Pytc-connectomics Server:
-```
-cd server_pytc
-python main.py
+npm run electron
 ```
