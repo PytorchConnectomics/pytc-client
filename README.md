@@ -61,3 +61,9 @@ In a separate terminal
 cd client
 npm run electron
 ```
+
+Next, please move the image and labels that you'd like to train your models off of into the `samples_pytc` folder. 
+Afterwards, upload the images as per the prompts on the applicaation.
+
+Below is a link to a video demo: showing how to set up and run the app:
+https://www.loom.com/share/b31dfa06c5da45868a456fe4a50a9e9c?sid=63117ccf-00e8-43a9-95d3-bcdfa8234ab9
