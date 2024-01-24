@@ -1,0 +1,22 @@
+name: Client App Build and Test
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - 'client/**'
+
+jobs:
+  build-and-test-client:
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Check out the repo
+      uses: actions/checkout@v2
+
+    - name: Build Client App
+      run: |
+        cd client
+        yarn build
+        yarn electron
