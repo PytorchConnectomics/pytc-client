@@ -10,8 +10,7 @@ docker run -it -p 4242:4242 -p 4243:4243 -p 4244:4244 -p 6006:6006 --shm-size=8g
 ```
 
 ## Installation
-0. Create a Virtual Environment
-> For Apple Silicon, please install miniforge3 instead of Anaconda
+0. Create a Virtual Environment via. Conda
 
 ```
 conda create -n pytc python=3.9
@@ -66,4 +65,4 @@ Next, please move the image and labels that you'd like to train your models off 
 Afterwards, upload the images as per the prompts on the applicaation.
 
 Below is a link to a video demo: showing how to set up and run the app:
-https://www.loom.com/share/b31dfa06c5da45868a456fe4a50a9e9c?sid=63117ccf-00e8-43a9-95d3-bcdfa8234ab9
+https://www.loom.com/share/45c09b36bf37408fb3e5a9172e427deb?sid=2777bf8f-a705-4d47-b17a-adf882994168
