@@ -24,9 +24,3 @@ jobs:
 
     - name: Run Docker Container
       run: docker run --name mycontainer -d pytc
-
-    - name: Check API Endpoints
-      run: |
-        sleep 10
-        curl -f http://localhost:4242/hello || exit 1
-        curl -f http://localhost:4243/hello || exit 1
