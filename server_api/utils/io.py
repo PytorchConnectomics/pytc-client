@@ -2,8 +2,9 @@ import os, sys
 import numpy as np
 
 def mkdir(fn, opt=''):
-    if opt == 'parent':  # until the last /
-        fn = fn[:fn.rfind('/')]
+    if opt == 'parent':  # until the last path separator
+        fn = fn[:fn.rfind(os.path.sep)]
+    
     if not os.path.exists(fn):
         if 'all' in opt:
             os.makedirs(fn)
