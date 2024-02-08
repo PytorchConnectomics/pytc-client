@@ -4,6 +4,7 @@ import { InboxOutlined } from "@ant-design/icons";
 import { AppContext } from "../contexts/GlobalContext";
 import { DEFAULT_IMAGE } from "../utils/utils";
 
+const os = require('os');
 const path = require('path');
 
 function Dragger() {
@@ -22,10 +23,11 @@ function Dragger() {
     const { status } = info.file;
     if (status === 'done') {
       // Keep only the part of the pytc-relative path
-      let pathSegments = info.file.originFileObj.path.split('/');
+      let pathSegments = info.file.originFileObj.path.split(path.sep);
+      console.log(path.sep)
       console.log(pathSegments)
       let pytcClientIndex = pathSegments.indexOf('pytc-client');
-      let relativePath = pathSegments.slice(pytcClientIndex).join('/');
+      let relativePath = pathSegments.slice(pytcClientIndex).join(path.sep);
       // Check if 'pytc-client' was found in the path
       if (pytcClientIndex === -1) {
         // Handle the error: 'pytc-client' not found
@@ -145,7 +147,7 @@ function Dragger() {
     }
     setPreviewImage(file.url || file.preview);
     setPreviewOpen(true);
-    setPreviewTitle(file.name || file.url.substring(file.url.lastIndexOf('/') + 1));
+    setPreviewTitle(file.name || file.url.substring(file.url.lastIndexOf(path.sep) + 1));
     if (
       context.files.find(targetFile => targetFile.uid === file.uid) && 
       context.files.find(targetFile => targetFile.uid === file.uid).folderPath) 
@@ -158,21 +160,23 @@ function Dragger() {
     }
   };
 
-  function processAndSetPath(path) {
-    let pathSegments = path.split('/');
+  function processAndSetPath(info) {
+    console.log(info)
+    let pathSegments = info.split(path.sep);
+    console.log(pathSegments)
     let pytcClientIndex = pathSegments.indexOf('samples_pytc');
 
     // Check if 'pytc-client' was found in the path
     if (pytcClientIndex === -1) {
         // Handle the error: 'sample' not found
         console.error("Error: Please upload from the sample folder. File path: " + path);
-        message.error(`${path.name} file upload failed.`);
+        message.error(`${info.name} file upload failed.`);
         return false;
     }
 
-    let relativePath = pathSegments.slice(pytcClientIndex).join('/');
+    let relativePath = pathSegments.slice(pytcClientIndex).join(path.sep);
     console.log("file uploaded: ", relativePath);
-    setPreviewFileFolderPath(relativePath + "/");
+    setPreviewFileFolderPath(relativePath + path.sep);
 
     return true;
   };
