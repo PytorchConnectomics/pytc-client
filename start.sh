@@ -1,5 +1,8 @@
 #!/bin/bash
 
+# Install dependencies in ./server_api
+pip3 install -r server_api/requirements.txt
+
 # Start the API server
 python3 server_api/main.py &
 
