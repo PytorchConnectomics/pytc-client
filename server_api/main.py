@@ -100,7 +100,19 @@ async def stop_model_training():
         return {"message": "Model training stopped successfully"}
     else:
         return {"message": "Failed to stop model training"}
+    
+@app.get('/start_tensorboard')
+async def start_tensorboard(req: Request):
+    response = requests.get(
+        REACT_APP_SERVER_PROTOCOL +
+        '://' +
+        REACT_APP_SERVER_URL +
+        "/start_tensorboard", req)
 
+    if response.status_code == 200:
+        return {"message": "Tensorboard started successfully"}
+    else:
+        return {"message": "Failed to start tensorboard"}
 
 @app.post("/start_model_inference")
 async def start_model_inference(req: Request):
@@ -133,20 +145,18 @@ async def stop_model_inference():
 
 @app.get('/get_tensorboard_url')
 async def get_tensorboard_url():
-    return "http://localhost:6006/"
-    # response = requests.get(
-    #     REACT_APP_SERVER_PROTOCOL +
-    #     '://' +
-    #     REACT_APP_SERVER_URL +
-    #     "/get_tensorboard_url")
-    #
-    # if response.status_code == 200:
-    #     # {"message": "Get tensorboard URL successfully"}
-    #     print(response.json())
-    #     return response.json()
-    # else:
-    #     # {"message": "Failed to get tensorboard URL"}
-    #     return None
+    response = requests.get(
+        REACT_APP_SERVER_PROTOCOL +
+        '://' +
+         REACT_APP_SERVER_URL +
+        "/get_tensorboard_url")
+    if response.status_code == 200:
+        {"message": "Get tensorboard URL successfully"}
+        print(response.json())
+        return response.json()
+    else:
+        {"message": "Failed to get tensorboard URL"}
+        return None
 
 # TODO: Improve on this: basic idea: labels are binary -- black or white?
 # Check the unique values: Assume that the label should have 0 or 255

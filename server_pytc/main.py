@@ -36,8 +36,10 @@ async def stop_model_training():
 
 
 @app.get('/start_tensorboard')
-async def start_tensorboard():
-    return initialize_tensorboard()
+async def start_tensorboard(req: Request):
+    req = await req
+    print("tensorboard starting")
+    return initialize_tensorboard(req)
 
 @app.get('/get_tensorboard_url')
 async def get_tensorboard_url():

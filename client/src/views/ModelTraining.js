@@ -1,6 +1,6 @@
 import React, { useContext, useState } from "react";
 import { Button, Space } from "antd";
-import { startModelTraining, stopModelTraining } from "../utils/api";
+import { startModelTraining, stopModelTraining, startTensorboard } from "../utils/api";
 import Configurator from "../components/Configurator";
 import { AppContext } from "../contexts/GlobalContext";
 
@@ -8,7 +8,7 @@ function ModelTraining() {
   const context = useContext(AppContext);
   const [isTraining, setIsTraining] = useState(false);
   const [trainingStatus, setTrainingStatus] = useState("");
-  // const [tensorboardURL, setTensorboardURL] = useState(null);
+  const [tensorboardURL, setTensorboardURL] = useState(null);
   const handleStartButton = async () => {
     try {
       // let fmData = new FormData();
@@ -51,16 +51,18 @@ function ModelTraining() {
     }
   };
 
-  // const handleTensorboardButton = async () => {
-  //   try {
-  //     const res = await startTensorboard();
-  //     console.log(res);
-  //     setTensorboardURL(res);
-  //   } catch (e) {
-  //     console.log(e);
-  //   }
-  // };
+  const handleTensorboardButton = async () => {
+    try {
+      const res = await startTensorboard(context.logPath);
+      console.log(res);
+      setTensorboardURL(res);
+    } catch (e) {
+      console.log(e);
+    }
+  };
+
   const [componentSize, setComponentSize] = useState("default");
+  
   const onFormLayoutChange = ({ size }) => {
     setComponentSize(size);
   };
@@ -84,7 +86,7 @@ function ModelTraining() {
             Stop Training
           </Button>
         </Space>
-        {/*<Button onClick={handleTensorboardButton}>Tensorboard</Button>*/}
+        {<Button onClick={handleTensorboardButton}>Tensorboard</Button>}
         <p style={{ marginTop: 4 }}>{trainingStatus}</p>
       </div>
     </>

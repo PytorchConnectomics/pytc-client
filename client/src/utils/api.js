@@ -33,8 +33,10 @@ export async function startModelTraining(
         // master_port: 2345,
         // distributed: "",
       },
-      logPath: logPath,
+      uploadedYamlFile: configurationYamlFile,
       trainingConfig: trainingConfig,
+      outputPath: outputPath,
+      logPath: logPath,
     });
 
     const res = await axios.post(
@@ -68,21 +70,23 @@ export async function stopModelTraining() {
   }
 }
 
-// export async function startTensorboard() {
-//   try {
-//     const res = await axios.get(
-//       `${process.env.REACT_APP_API_PROTOCOL}://${process.env.REACT_APP_API_URL}/start_tensorboard`
-//     );
-//     return res.data;
-//   } catch (error) {
-//     if (error.response) {
-//       throw new Error(
-//         `${error.response.status}: ${error.response.data?.detail?.error}`
-//       );
-//     }
-//     throw error;
-//   }
-// }
+export async function startTensorboard(logPath) {
+   try {
+   const res = await axios.get(
+      `${process.env.REACT_APP_API_PROTOCOL}://${process.env.REACT_APP_API_URL}/start_tensorboard`,
+      logPath
+     );
+     console.log(logPath);
+     return res.data;
+   } catch (error) {
+     if (error.response) {
+       throw new Error(
+         `${error.response.status}: ${error.response.data?.detail?.error}`
+       );
+     }
+     throw error;
+   }
+ }
 
 export async function getTensorboardURL() {
   try {
@@ -112,6 +116,7 @@ export async function startModelInference(
         // inference: " ",
         checkpoint: checkpointPath,
       },
+      uploadedYamlFile: configurationYamlFile,
       outputPath: outputPath,
       inferenceConfig: inferenceConfig,
     });
