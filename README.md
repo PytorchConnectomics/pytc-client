@@ -33,6 +33,7 @@ pip install torch torchvision cuda-python
 ```
 cd client
 npm install
+npm run build
 ```
 
 2. API Server:
