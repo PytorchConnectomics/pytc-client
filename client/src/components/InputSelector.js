@@ -88,6 +88,7 @@ function InputSelector(props) {
                 width: "100%",
               }}
               placeholder="Please type training log path"
+              value={context.logPath ? context.logPath : undefined}
               onChange={handleLogPathChange}
               size="middle"
             />
