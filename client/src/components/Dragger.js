@@ -117,6 +117,13 @@ function Dragger() {
     setPreviewOpen(false);
   };
 
+  const handleClearCache = async () => {
+    context.setFileList([]);
+    context.setImageFileList([]);
+    context.setLabelFileList([]);
+    message.success("File list cleared successfully.");
+  };
+
   const handleRevert = () => {
     let oldName = context.files.find((targetFile) => targetFile.uid === fileUID)
       .originFileObj.name;
@@ -216,6 +223,9 @@ function Dragger() {
           Click or drag file to this area to upload
         </p>
       </Dragger>
+      <Button type="default" onClick={handleClearCache}>
+        Clear File Cache
+      </Button>
       <Modal
         open={previewOpen}
         title={previewTitle}
