@@ -29,6 +29,20 @@ source .venv/bin/activate
 pip install torch torchvision cuda-python
 ```
 
+In the rare event that your device does not support CUDA, you may run the following respectively:
+
+```bash
+# If using a conda environment
+conda create -n pytc python=3.9
+conda activate pytc
+conda install pytorch torchvision cudatoolkit=11.3 -c pytorch
+
+# If installing via native python
+python -m venv .venv
+source .venv/bin/activate
+pip install torch torchvision cuda-python
+```
+
 1. Client
 ```
 cd client
