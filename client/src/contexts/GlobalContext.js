@@ -40,7 +40,7 @@ export const ContextWrapper = (props) => {
   const [inputImage, setInputImage] = usePersistedState('inputImage', null);
   const [inputLabel, setInputLabel] = usePersistedState('inputLabel', null);
   const [viewer, setViewer] = usePersistedState('viewer', null);
-  const [tensorBoardURL, setTensorBoardURL] = usePersistedState('viewer', null);
+  const [tensorBoardURL, setTensorBoardURL] = usePersistedState('tensorBoardURL', null);
 
   return (
     <AppContext.Provider
