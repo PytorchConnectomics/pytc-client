@@ -3,8 +3,6 @@ import signal
 import subprocess
 import tempfile
 
-from tensorboard import program
-
 # TODO: Fix this to work with the yaml file path
 def start_training(dict: dict):
     path = 'pytorch_connectomics/scripts/main.py'
@@ -34,6 +32,7 @@ def start_training(dict: dict):
     print("initialize_tensorboard")
 
 def stop_training():
+    import os
     process_name = "python pytorch_connectomics/scripts/main.py"
     try:
         process_line = os.popen("ps ax | grep " + process_name + " | grep -v grep")
@@ -50,6 +49,8 @@ def stop_training():
 
 tensorboard_url = None
 def initialize_tensorboard(logPath):
+    from tensorboard import program
+
     tb = program.TensorBoard()
     # tb.configure(argv=[None, '--logdir', './logs'])
     try:
@@ -101,6 +102,7 @@ def start_inference(dict: dict):
     print("start_inference")
 
 def stop_inference():
+    import os
     process_name = "python pytorch_connectomics/scripts/main.py"
     try:
         process_line = os.popen("ps ax | grep " + process_name + " | grep -v grep")
