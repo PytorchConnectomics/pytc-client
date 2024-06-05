@@ -1,10 +1,13 @@
-import requests
-import uvicorn
-from fastapi import FastAPI, Request
-from fastapi.middleware.cors import CORSMiddleware
+import neuroglancer
+import numpy as np
 import os
 import pathlib
+import requests
+import uvicorn
 
+from fastapi import FastAPI, Request
+from fastapi.middleware.cors import CORSMiddleware
+from PIL import Image
 from utils.io import readVol
 
 REACT_APP_SERVER_PROTOCOL = 'http'
@@ -34,7 +37,6 @@ def hello():
 
 @app.post("/neuroglancer")
 async def neuroglancer(req: Request):
-    import neuroglancer
 
     req = await req.json()
 
@@ -153,9 +155,6 @@ async def get_tensorboard_url():
 # This is temporarily ditched in favor of allowing users to specify whether or not a file is a label or image.
 @app.post('/check_files')
 async def check_files(req: Request):
-    import numpy as np
-    from PIL import Image
-
     try:
         im = await req.json()
         print(im["folderPath"], im["name"])
