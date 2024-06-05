@@ -35,7 +35,7 @@ In the rare event that your device does not support CUDA, you may run the follow
 # If using a conda environment
 conda create -n pytc python=3.9
 conda activate pytc
-conda install pytorch torchvision pytorch
+conda install pytorch torchvision
 
 # If installing via native python
 python -m venv .venv
