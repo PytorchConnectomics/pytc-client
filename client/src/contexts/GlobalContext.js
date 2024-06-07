@@ -1,7 +1,9 @@
 import React, { createContext, useState, useEffect } from "react";
+import localforage from 'localforage';
 
 export const AppContext = createContext(null);
 
+/*
 function usePersistedState(key, defaultValue) {
   const [state, setState] = useState(() => {
     const storedValue = localStorage.getItem(key);
@@ -14,6 +16,23 @@ function usePersistedState(key, defaultValue) {
 
   return [state, setState];
 }
+*/
+// Solve delete button error issue
+function usePersistedState(key, defaultValue) {
+  const [state, setState] = useState(() => {
+    // Use localforage instead of localStorage
+    const storedValue = localforage.getItem(key);
+    return safeParseJSON(storedValue, defaultValue);
+  });
+
+  useEffect(() => {
+    // Use localforage instead of localStorage, delete JSON.stringify() function
+    localforage.setItem(key, state);
+  }, [key, state]);
+
+  return [state, setState];
+}
+
 
 function safeParseJSON(jsonString, defaultValue) {
   try {
