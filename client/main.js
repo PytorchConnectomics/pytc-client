@@ -22,6 +22,8 @@ function createWindow() {
     protocol: 'file:',
     slashes: true
   }));
+
+  // comment out to stop dev tools from opening
   mainWindow.webContents.openDevTools();
   
   mainWindow.on('closed', () => {
