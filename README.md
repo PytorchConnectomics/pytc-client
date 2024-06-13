@@ -68,7 +68,12 @@ pip install --editable .
 ## Run Project
 ### To run
 ```
+# if running on mac or linux:
 ./start.sh
+
+# if running on windows:
+./start.bat
+
 ```
 In a separate terminal
 ```
