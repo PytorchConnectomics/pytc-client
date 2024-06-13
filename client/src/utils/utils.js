@@ -10,10 +10,15 @@ export function findCommonPartOfString(path1, path2) {
   const path2Parts = normalizePath(path2).split('/');
   
   let commonPath = [];
+
+  // check if the OS is case-insensitive (Windows, MacOS)
+  const isCaseInsensitiveOS = os.platform() === 'win32' || os.platform() === 'darwin';
   
   // iterate through parts to find common path
   for (let i = 0; i < Math.min(path1Parts.length, path2Parts.length); i++) {
-    if (path1Parts[i].toLowerCase() === path2Parts[i].toLowerCase()) {
+    if (isCaseInsensitiveOS ? 
+        path1Parts[i].toLowerCase() === path2Parts[i].toLowerCase() :
+        path1Parts[i] === path2Parts[i]) {
       commonPath.push(path1Parts[i]);
     } else {
       break;
