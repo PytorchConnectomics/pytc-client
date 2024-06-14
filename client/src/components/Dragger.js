@@ -120,7 +120,7 @@ function Dragger() {
   const handlePreview = async (file) => {
     setFileUID(file.uid);
     if (!file.url && !file.preview) {
-        if (file.type !== 'image/tiff') {
+        if (file.type !== "image/tiff" || file.type !== "image/tif") {
             if (file.path) { // Use the local path for Electron environment
                 const fs = window.require('fs');
                 const buffer = fs.readFileSync(file.path);
@@ -156,7 +156,7 @@ function Dragger() {
 
   const handleBeforeUpload = (file) => {
     // Create a URL for the thumbnail using object URL
-    if (file.type !== "image/tiff") {
+    if (file.type !== "image/tiff" || file.type !== "image/tif") {
       file.thumbUrl = URL.createObjectURL(file);
     } else {
       file.thumbUrl = DEFAULT_IMAGE;
