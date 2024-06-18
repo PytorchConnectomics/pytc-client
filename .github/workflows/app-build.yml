@@ -25,8 +25,13 @@ jobs:
         cd client
         npm install
 
+    - name: Start Xvfb
+      run: |
+        export DISPLAY=':99.0'
+        Xvfb :99 -screen 0 1024x768x24 &
+
     - name: Build Client App
       run: |
         cd client
         npm run build
-        yarn electron
+        npm run electron
