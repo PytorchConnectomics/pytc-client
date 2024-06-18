@@ -1,5 +1,4 @@
 name: Client App Build and Test
-
 on:
   push:
     branches:
@@ -12,9 +11,16 @@ on:
     paths:
       - 'client/**'
 
+permissions: 
+  contents: write
+
 jobs:
   build-and-test-client:
-    runs-on: ubuntu-latest
+    runs-on: ${{ matrix.os }}
+
+    strategy:
+      matrix:
+      os: [macos-latest, ubuntu-latest, windows-latest]
 
     steps:
     - name: Check out the repo
@@ -25,22 +31,11 @@ jobs:
       with:
         node-version: '16'
 
-    - name: Install Dependencies
-      run: |
-        cd client
-        npm install
+    - name: Compile Electron App
+      uses: samuelmeuli/action-electron-builder@master
+      with:
+          github_token: ${{ secrets.github_token }}
+          package_manager: NPM
+          skip_build: false
 
-    - name: Install and start Xvfb
-      run: |
-        sudo apt-get update
-        sudo apt-get install -y xvfb
-        export DISPLAY=':99.0'
-        Xvfb :99 -screen 0 1280x720x24 > /dev/null 2>&1 &
-
-    - name: Build Client App
-      run: |
-        cd client
-        npm run build
-        npm run electron -- --disable-gpu --disable-software-rasterizer --disable-dev-shm-usage --no-sandbox
-      env:
-        DISPLAY: ':99.0'
+    
