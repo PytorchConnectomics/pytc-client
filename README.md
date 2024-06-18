@@ -12,7 +12,7 @@ docker run -it -p 4242:4242 -p 4243:4243 -p 4244:4244 -p 6006:6006 --shm-size=8g
 ## Installation
 0. Create a Virtual Environment via. Conda
 
-```
+```bash
 conda create -n pytc python=3.9
 conda activate pytc
 conda install pytorch torchvision cudatoolkit=11.3 -c pytorch
@@ -44,14 +44,14 @@ pip install torch torchvision
 ```
 
 1. Client
-```
+```bash
 cd client
 npm install
 npm run build
 ```
 
 2. API Server:
-```
+```bash
 cd server_api
 pip install -r requirements.txt
 ```
@@ -59,7 +59,7 @@ pip install -r requirements.txt
 3. Pytc-connectomics:
 
 In root folder,
-```
+```bash
 git clone https://github.com/zudi-lin/pytorch_connectomics.git
 cd pytorch_connectomics
 pip install --editable .
@@ -67,7 +67,7 @@ pip install --editable .
 
 ## Run Project
 ### To run
-```
+```bash
 # if running on mac or linux:
 ./start.sh
 
@@ -76,7 +76,7 @@ pip install --editable .
 
 ```
 In a separate terminal
-```
+```bash
 cd client
 npm run electron
 ```
