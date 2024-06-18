@@ -24,11 +24,11 @@ jobs:
       with:
         node-version: '16'
 
-    - name: Start DBus
-      run: |
-        sudo dbus-uuidgen > /var/lib/dbus/machine-id
-        sudo mkdir -p /var/run/dbus
-        sudo dbus-daemon --config-file=/usr/share/dbus-1/system.conf --print-address
+    - name: Generate DBus machine ID
+      run: sudo sh -c 'dbus-uuidgen > /var/lib/dbus/machine-id'
+
+    - name: Start DBus daemon
+      run: sudo dbus-daemon --system --fork
 
     - name: Install Dependencies
       run: |
