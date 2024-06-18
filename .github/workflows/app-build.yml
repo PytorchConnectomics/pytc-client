@@ -12,17 +12,9 @@ on:
     paths:
       - 'client/**'
 
-permissions: 
-  contents: write
-
 jobs:
   build-and-test-client:
-    runs-on: ${{ matrix.os }}
-
-    strategy:
-      matrix:
-        os: [macos-latest, ubuntu-latest, windows-latest]
-
+    runs-on: ubuntu-latest
     steps:
     - name: Check out the repo
       uses: actions/checkout@v2
@@ -32,9 +24,28 @@ jobs:
       with:
         node-version: '16'
 
-    - name: Compile Electron App
-      uses: samuelmeuli/action-electron-builder@master
-      with:
-        github_token: ${{ secrets.GITHUB_TOKEN }}
-        package_manager: npm
-        skip_build: false
+    - name: Start DBus
+      run: |
+        sudo dbus-uuidgen > /var/lib/dbus/machine-id
+        sudo mkdir -p /var/run/dbus
+        sudo dbus-daemon --config-file=/usr/share/dbus-1/system.conf --print-address
+
+    - name: Install Dependencies
+      run: |
+        cd client
+        npm install
+
+    - name: Install and start Xvfb
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y xvfb
+        export DISPLAY=':99.0'
+        Xvfb :99 -screen 0 1280x720x24 > /dev/null 2>&1 &
+
+    - name: Build Client App
+      run: |
+        cd client
+        npm run build
+        npm run electron -- --disable-gpu --enable-features=UseOzonePlatform --ozone-platform=headless --disable-software-rasterizer --disable-dev-shm-usage --no-sandbox
+      env:
+        DISPLAY: ':99.0'
