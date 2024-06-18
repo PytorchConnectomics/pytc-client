@@ -1,4 +1,5 @@
 name: Client App Build and Test
+
 on:
   push:
     branches:
@@ -20,7 +21,7 @@ jobs:
 
     strategy:
       matrix:
-      os: [macos-latest, ubuntu-latest, windows-latest]
+        os: [macos-latest, ubuntu-latest, windows-latest]
 
     steps:
     - name: Check out the repo
@@ -34,8 +35,6 @@ jobs:
     - name: Compile Electron App
       uses: samuelmeuli/action-electron-builder@master
       with:
-          github_token: ${{ secrets.github_token }}
-          package_manager: NPM
-          skip_build: false
-
-    
+        github_token: ${{ secrets.GITHUB_TOKEN }}
+        package_manager: npm
+        skip_build: false
