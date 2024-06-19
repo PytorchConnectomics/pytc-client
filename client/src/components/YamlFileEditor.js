@@ -20,7 +20,7 @@ const YamlFileEditor = (props) => {
       context.setInferenceConfig(updatedYamlContent);
     }
     try {
-      const yamlData = yaml.safeLoad(updatedYamlContent);
+      const yamlData = yaml.load(updatedYamlContent);
 
       // YAMLContext.setNumGPUs(yamlData.SYSTEM.NUM_GPUS);
       // YAMLContext.setNumCPUs(yamlData.SYSTEM.NUM_CPUS);
