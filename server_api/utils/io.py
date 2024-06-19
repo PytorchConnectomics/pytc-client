@@ -1,5 +1,8 @@
-import os, sys
+import os
+import sys
+
 import numpy as np
+
 
 def mkdir(fn, opt=''):
     if opt == 'parent':  # until the last path separator

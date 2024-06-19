@@ -1,6 +1,7 @@
+import argparse
+
 import torch
 import torchvision
-import argparse
 
 
 EPOCHS =100 # max number

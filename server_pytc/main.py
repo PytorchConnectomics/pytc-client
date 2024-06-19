@@ -1,9 +1,14 @@
-import uvicorn
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 
-from services.model import initialize_tensorboard, get_tensorboard, start_training, stop_training, start_inference, \
-    stop_inference
+from services.model import (
+    get_tensorboard,
+    initialize_tensorboard,
+    start_inference,
+    start_training,
+    stop_inference,
+    stop_training,
+)
 
 app = FastAPI()
 

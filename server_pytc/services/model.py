@@ -3,6 +3,7 @@ import signal
 import subprocess
 import tempfile
 
+
 def start_training(dict: dict):
     path = 'pytorch_connectomics/scripts/main.py'
 

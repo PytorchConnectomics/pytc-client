@@ -4,9 +4,6 @@ import requests
 import uvicorn
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
-import os
-import pathlib
-
 from utils.io import readVol
 
 REACT_APP_SERVER_PROTOCOL = 'http'

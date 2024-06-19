@@ -4,6 +4,7 @@ from fastapi import FastAPI
 from httpx import AsyncClient
 from server_api.main import app as fastapi_app
 
+
 @pytest.fixture
 async def app() -> FastAPI:
     return fastapi_app
