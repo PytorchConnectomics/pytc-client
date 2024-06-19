@@ -57,6 +57,7 @@
     "prettier": "^3.3.2"
   },
   "overrides": {
-    "nth-check": "$nth-check"
+    "nth-check": "$nth-check",
+    "resolve-url-loader": "^5.0.0"
   }
 }
