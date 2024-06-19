@@ -16,7 +16,7 @@ app.add_middleware(
     allow_origins=["*"],
     allow_credentials=True,
     allow_methods=["*"],
-    allow_headers=["*"]
+    allow_headers=["*"],
 )
 
 
@@ -76,8 +76,8 @@ async def start_model_training(req: Request):
         + "://"
         + REACT_APP_SERVER_URL
         + "/start_model_training",
-        json=req
-        )
+        json=req,
+    )
 
     if response.status_code == 200:
         return {"message": "Model training started successfully"}
@@ -91,7 +91,8 @@ async def stop_model_training():
         REACT_APP_SERVER_PROTOCOL
         + "://"
         + REACT_APP_SERVER_URL
-        + "/stop_model_training")
+        + "/stop_model_training"
+    )
 
     if response.status_code == 200:
         return {"message": "Model training stopped successfully"}
@@ -107,8 +108,8 @@ async def start_model_inference(req: Request):
         + "://"
         + REACT_APP_SERVER_URL
         + "/start_model_inference",
-        json=req
-        )
+        json=req,
+    )
 
     if response.status_code == 200:
         return {"message": "Model inference started successfully"}
@@ -123,7 +124,7 @@ async def stop_model_inference():
         + "://"
         + REACT_APP_SERVER_URL
         + "/stop_model_inference"
-        )
+    )
 
     if response.status_code == 200:
         return {"message": "Model inference stopped successfully"}
@@ -138,7 +139,8 @@ async def get_tensorboard_url():
     #     REACT_APP_SERVER_PROTOCOL +
     #     "://" +
     #     REACT_APP_SERVER_URL +
-    #     "/get_tensorboard_url")
+    #     "/get_tensorboard_url"
+    #   )
     #
     # if response.status_code == 200:
     #     # {"message": "Get tensorboard URL successfully"}
@@ -187,8 +189,8 @@ def run():
         port=4242,
         reload=True,
         log_level="info",
-        app_dir="/"
-        )
+        app_dir="/",
+    )
 
 
 if __name__ == "__main__":

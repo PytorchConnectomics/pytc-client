@@ -14,7 +14,9 @@ def start_training(dict: dict):
             command.extend([f"--{key}", str(value)])
 
     # Write the value to a temporary file
-    with tempfile.NamedTemporaryFile(delete=False, mode="w", suffix=".yaml") as temp_file:
+    with tempfile.NamedTemporaryFile(
+        delete=False, mode="w", suffix=".yaml"
+    ) as temp_file:
         temp_file.write(dict["trainingConfig"])
         temp_filepath = temp_file.name
         command.extend(["--config-file", str(temp_filepath)])
@@ -32,7 +34,6 @@ def start_training(dict: dict):
 
 
 def stop_training():
-    import os
     process_name = "python pytorch_connectomics/scripts/main.py"
     try:
         process_line = os.popen("ps ax | grep " + process_name + " | grep -v grep")
@@ -62,7 +63,8 @@ def initialize_tensorboard(logPath):
         print(f"TensorBoard is running at {tensorboard_url}")
     except Exception as e:
         tensorboard_url = "http://localhost:6006/"
-    # return str(url)
+        print(f"TensorBoard is running at {tensorboard_url} due to {e}")
+        # return str(url)
 
 
 def get_tensorboard():
@@ -110,7 +112,6 @@ def start_inference(dict: dict):
 
 
 def stop_inference():
-    import os
     process_name = "python pytorch_connectomics/scripts/main.py"
     try:
         process_line = os.popen("ps ax | grep " + process_name + " | grep -v grep")
