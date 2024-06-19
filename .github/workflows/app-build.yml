@@ -49,3 +49,4 @@ jobs:
         npm run electron -- --disable-gpu --enable-features=UseOzonePlatform --ozone-platform=headless --disable-software-rasterizer --disable-dev-shm-usage --no-sandbox
       env:
         DISPLAY: ':99.0'
+        ELECTRON_ENABLE_LOGGING: true
