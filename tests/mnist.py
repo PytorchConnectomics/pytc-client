@@ -50,7 +50,7 @@ if __name__ == "__main__":
             running_loss += loss.item()
         print(
             "Epoch {} - Training loss: {}".format(
-                e, running_loss/len(xy_trainPT_loader)
+                e, running_loss / len(xy_trainPT_loader)
             )
         )
         writer.add_scalar("loss vs epoch", running_loss / len(xy_trainPT_loader), e)
