@@ -22,7 +22,7 @@ jobs:
     - name: Set up Node.js
       uses: actions/setup-node@v3
       with:
-        node-version: '16'
+        node-version: '18'
 
     - name: Generate DBus machine ID
       run: sudo sh -c 'dbus-uuidgen > /var/lib/dbus/machine-id'
@@ -46,7 +46,7 @@ jobs:
       run: |
         cd client
         npm run build
-        npm run electron 
+        npm run electron
       env:
         DISPLAY: ':99.0'
         ELECTRON_ENABLE_LOGGING: true
