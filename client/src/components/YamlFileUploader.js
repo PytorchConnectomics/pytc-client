@@ -159,7 +159,7 @@ const YamlFileUploader = (props) => {
         YAMLContext.setNumGPUs(yamlData.SYSTEM.NUM_GPUS);
         YAMLContext.setNumCPUs(yamlData.SYSTEM.NUM_CPUS);
         YAMLContext.setLearningRate(yamlData.SOLVER.BASE_LR);
-        YAMLContext.setSamplesPerBatch(yamlData.SOLVER.SAMPLES_PER_BATCH);
+        YAMLContext.setSolverSamplesPerBatch(yamlData.SOLVER.SAMPLES_PER_BATCH);
       } catch (error) {
         message.error("Error reading YAML file.");
       }
