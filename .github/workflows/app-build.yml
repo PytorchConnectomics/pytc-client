@@ -41,11 +41,11 @@ jobs:
         cd client
         npm run build
         npm run electron &
-        ELECTRON_PID='$!'
+        ELECTRON_PID=$!
         sleep 150 
-        if ps -p '$ELECTRON_PID' > /dev/null; then
+        if ps -p "$ELECTRON_PID" > /dev/null; then
            echo 'Electron app is still running, Ending the process.'
-           kill '$ELECTRON_PID'
+           kill "$ELECTRON_PID"
         else
            echo 'Electron app has exited.'
            exit 1
