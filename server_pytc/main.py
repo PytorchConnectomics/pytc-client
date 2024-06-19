@@ -2,22 +2,22 @@ import uvicorn
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from services.model import (
-    get_tensorboard, 
-    initialize_tensorboard, 
-    start_inference, 
-    start_training, 
-    stop_inference, 
-    stop_training, 
+    get_tensorboard,
+    initialize_tensorboard,
+    start_inference,
+    start_training,
+    stop_inference,
+    stop_training,
 )
 
 app = FastAPI()
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"], 
-    allow_credentials=True, 
-    allow_methods=["*"], 
-    allow_headers=["*"], 
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
 )
 
 
@@ -65,12 +65,12 @@ async def stop_model_inference():
 
 
 def run():
-    uvicorn.run("main:app", 
-        host="0.0.0.0", 
-        port=4243, 
-        reload=True, 
-        log_level="info", 
-        app_dir="/", 
+    uvicorn.run("main:app",
+        host="0.0.0.0",
+        port=4243,
+        reload=True,
+        log_level="info",
+        app_dir="/",
     )
 
 
