@@ -4,14 +4,13 @@ import { InboxOutlined } from "@ant-design/icons";
 import { AppContext } from "../contexts/GlobalContext";
 import { DEFAULT_IMAGE } from "../utils/utils";
 
-const os = require('os');
 const path = require('path');
 
 function Dragger() {
   const context = useContext(AppContext);
   const { Dragger } = Upload;
 
-  const getBase64 = (file) =>
+  const getBase64 = (file) => 
     new Promise((resolve, reject) => {
       const reader = new FileReader();
       reader.readAsDataURL(file);
