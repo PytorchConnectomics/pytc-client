@@ -5,20 +5,19 @@ import tempfile
 
 
 def start_training(dict: dict):
-    path = 'pytorch_connectomics/scripts/main.py'
+    path = "pytorch_connectomics/scripts/main.py"
 
-    command = ['python', path]
+    command = ["python", path]
 
-    for key, value in dict['arguments'].items():
+    for key, value in dict["arguments"].items():
         if value is not None:
             command.extend([f"--{key}", str(value)])
 
     # Write the value to a temporary file
-    with tempfile.NamedTemporaryFile(delete=False, mode='w', suffix='.yaml') as temp_file:
-        temp_file.write(dict['trainingConfig'])
+    with tempfile.NamedTemporaryFile(delete=False, mode="w", suffix=".yaml") as temp_file:
+        temp_file.write(dict["trainingConfig"])
         temp_filepath = temp_file.name
         command.extend(["--config-file", str(temp_filepath)])
-
 
     # Execute the command using subprocess.call
     print(command)
@@ -28,8 +27,9 @@ def start_training(dict: dict):
         print(f"Error occurred: {e}")
 
     print("start_training")
-    initialize_tensorboard(dict['logPath'])
+    initialize_tensorboard(dict["logPath"])
     print("initialize_tensorboard")
+
 
 def stop_training():
     import os
@@ -47,19 +47,23 @@ def stop_training():
 
     stop_tensorboard()
 
+
 tensorboard_url = None
+
+
 def initialize_tensorboard(logPath):
     from tensorboard import program
 
     tb = program.TensorBoard()
-    # tb.configure(argv=[None, '--logdir', './logs'])
+    # tb.configure(argv=[None, "--logdir", "./logs"])
     try:
-        tb.configure(argv=[None, '--logdir', logPath, '--host', '0.0.0.0'])
+        tb.configure(argv=[None, "--logdir", logPath, "--host", "0.0.0.0"])
         tensorboard_url = tb.launch()
-        print(f'TensorBoard is running at {tensorboard_url}')
+        print(f"TensorBoard is running at {tensorboard_url}")
     except:
         tensorboard_url = "http://localhost:6006/"
     # return str(url)
+
 
 def get_tensorboard():
     return tensorboard_url
@@ -78,18 +82,21 @@ def stop_tensorboard():
     except:
         print("Error Encountered while Running Script")
 
-def start_inference(dict: dict):
-    path = 'pytorch_connectomics/scripts/main.py'
 
-    command = ['python', path, '--inference']
+def start_inference(dict: dict):
+    path = "pytorch_connectomics/scripts/main.py"
+
+    command = ["python", path, "--inference"]
 
     # Write the value to a temporary file
-    with tempfile.NamedTemporaryFile(delete=False, mode='w', suffix='.yaml') as temp_file:
-        temp_file.write(dict['inferenceConfig'])
+    with tempfile.NamedTemporaryFile(
+        delete=False, mode="w", suffix=".yaml"
+    ) as temp_file:
+        temp_file.write(dict["inferenceConfig"])
         temp_filepath = temp_file.name
         command.extend(["--config-file", str(temp_filepath)])
 
-    for key, value in dict['arguments'].items():
+    for key, value in dict["arguments"].items():
         if value is not None:
             command.extend([f"--{key}", str(value)])
     # Execute the command using subprocess.call
@@ -100,6 +107,7 @@ def start_inference(dict: dict):
         print(f"Error occurred: {e}")
 
     print("start_inference")
+
 
 def stop_inference():
     import os

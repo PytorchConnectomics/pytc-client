@@ -30,7 +30,7 @@ def hello():
 async def start_model_training(req: Request):
     req = await req.json()
     print("start_model")
-    # log_dir = req['log_dir']
+    # log_dir = req["log_dir"]
     start_training(req)
 
 
@@ -40,11 +40,11 @@ async def stop_model_training():
     return stop_training()
 
 
-@app.get('/start_tensorboard')
+@app.get("/start_tensorboard")
 async def start_tensorboard():
     return initialize_tensorboard()
 
-@app.get('/get_tensorboard_url')
+@app.get("/get_tensorboard_url")
 async def get_tensorboard_url():
     return get_tensorboard()
 
@@ -52,7 +52,7 @@ async def get_tensorboard_url():
 async def start_model_inference(req: Request):
     req = await req.json()
     print("start model inference")
-    # log_dir = req['log_dir']
+    # log_dir = req["log_dir"]
     start_inference(req)
 
 
