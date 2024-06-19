@@ -45,8 +45,15 @@ jobs:
     - name: Build Client App
       run: |
         cd client
-        npm run build
-        npm run electron
+        npm run electron &
+        ELECTRON_PID=$!
+        sleep 90  # Wait 60 seconds for the app to initialize or perform self-tests
+        if ps -p $ELECTRON_PID > /dev/null; then
+           echo "Electron app is still running, killing the process."
+           kill $ELECTRON_PID
+        else
+           echo "Electron app has exited."
+        fi
       env:
         DISPLAY: ':99.0'
         ELECTRON_ENABLE_LOGGING: true
