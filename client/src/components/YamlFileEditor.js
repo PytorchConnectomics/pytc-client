@@ -33,7 +33,9 @@ const YamlFileEditor = (props) => {
   useEffect(() => {
     if (type === "training") {
       setYamlContent(context.trainingConfig);
-    } else {
+    }
+
+    if (type == "inference") {
       setYamlContent(context.inferenceConfig);
     }
   }, [
