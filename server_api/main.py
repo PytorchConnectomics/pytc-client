@@ -1,4 +1,3 @@
-import os
 import pathlib
 
 import requests
@@ -23,12 +22,14 @@ app.add_middleware(
     allow_headers=["*"]
 )
 
+
 def process_path(path):
     # Get the absolute path of the current script's parent directory
     current_script_dir = pathlib.Path(__file__).parent
     # The root of the repository is assumed to be one level up from the current script's directory
     repo_root = current_script_dir.parent.absolute()
     return repo_root / path
+
 
 @app.get("/hello")
 def hello():
@@ -40,29 +41,24 @@ async def neuroglancer(req: Request):
     import neuroglancer
 
     req = await req.json()
-
     image = process_path(req['image'])
     label = process_path(req['label'])
     scales = req['scales']
-
     print(image, label, scales)
-
     # neuroglancer setting -- bind to this to make accessible outside of container
     ip = "0.0.0.0"
     port = 4244
-    
     neuroglancer.set_server_bind_address(ip, port)
     viewer = neuroglancer.Viewer()
-
     # SNEMI (# 3d vol dim: z,y,x)
     res = neuroglancer.CoordinateSpace(
-        names = ['z', 'y', 'x'],
-        units = ['nm', 'nm', 'nm'],
-        scales = scales
+        names=['z', 'y', 'x'],
+        units=['nm', 'nm', 'nm'],
+        scales=scales
     )
-
     im = readVol(image, image_type="im")
     gt = readVol(label, image_type="im")
+
 
     def ngLayer(data, res, oo=[0, 0, 0], tt='segmentation'):
         return neuroglancer.LocalVolume(data, dimensions=res, volume_type=tt, voxel_offset=oo)
@@ -154,6 +150,8 @@ async def get_tensorboard_url():
 # TODO: Improve on this: basic idea: labels are binary -- black or white?
 # Check the unique values: Assume that the label should have 0 or 255
 # This is temporarily ditched in favor of allowing users to specify whether or not a file is a label or image.
+
+
 @app.post('/check_files')
 async def check_files(req: Request):
     import numpy as np
@@ -162,11 +160,8 @@ async def check_files(req: Request):
     try:
         im = await req.json()
         print(im["folderPath"], im["name"])
-
         image = Image.open(im["folderPath"] + im["name"])
-
         image_array = np.array(image)
-
         unique_values = np.unique(image_array)
         is_label = np.array_equal(unique_values, np.array([0, 255]))
 
@@ -181,6 +176,7 @@ async def check_files(req: Request):
         return {"label": label}
     except Exception as e:
         return {"error": str(e)}
+
 
 def run():
     uvicorn.run("main:app", host="0.0.0.0", port=4242, reload=True, log_level="info", app_dir="/")
