@@ -1,6 +1,5 @@
 import torch
 import torchvision
-import numpy as np
 import argparse
 
 
@@ -23,9 +22,9 @@ def model(hidden):
 
 from torch.utils.tensorboard import SummaryWriter # needed for using TensorBoard
 
-model = model(10)
+model_instance  = model(10)
 criterion = torch.nn.NLLLoss() # use the negative log likelihood loss.
-optimizer = torch.optim.SGD(model.parameters(), lr=0.01) # use SGD (Stochastic Gradient Descent gradient descent) optimization algorithm
+optimizer = torch.optim.SGD(model_instance.parameters(), lr=0.01) # use SGD (Stochastic Gradient Descent gradient descent) optimization algorithm
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
