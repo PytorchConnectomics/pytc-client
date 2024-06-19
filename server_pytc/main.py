@@ -1,6 +1,6 @@
+import uvicorn
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
-
 from services.model import (
     get_tensorboard,
     initialize_tensorboard,
@@ -17,7 +17,7 @@ app.add_middleware(
     allow_origins=["*"],
     allow_credentials=True,
     allow_methods=["*"],
-    allow_headers=["*"]
+    allow_headers=["*"],
 )
 
 
@@ -44,9 +44,11 @@ async def stop_model_training():
 async def start_tensorboard():
     return initialize_tensorboard()
 
+
 @app.get("/get_tensorboard_url")
 async def get_tensorboard_url():
     return get_tensorboard()
+
 
 @app.post("/start_model_inference")
 async def start_model_inference(req: Request):

@@ -42,8 +42,8 @@ def stop_training():
         print(pid)
         os.kill(int(pid), signal.SIGKILL)
         print("Process Successfully Terminated")
-    except:
-        print("Error Encountered while Running Script")
+    except Exception as e:
+        print(f"Error Encountered while Running Script {e}")
 
     stop_tensorboard()
 
@@ -60,7 +60,7 @@ def initialize_tensorboard(logPath):
         tb.configure(argv=[None, "--logdir", logPath, "--host", "0.0.0.0"])
         tensorboard_url = tb.launch()
         print(f"TensorBoard is running at {tensorboard_url}")
-    except:
+    except Exception as e:
         tensorboard_url = "http://localhost:6006/"
     # return str(url)
 
@@ -79,8 +79,8 @@ def stop_tensorboard():
         print(pid)
         os.kill(int(pid), signal.SIGKILL)
         print("Process Successfully Terminated")
-    except:
-        print("Error Encountered while Running Script")
+    except Exception as e:
+        print(f"Error Encountered while Running Script {e}")
 
 
 def start_inference(dict: dict):
@@ -120,7 +120,7 @@ def stop_inference():
         print(pid)
         os.kill(int(pid), signal.SIGKILL)
         print("Process Successfully Terminated")
-    except:
-        print("Error Encountered while Running Script")
+    except Exception as e:
+        print(f"Error Encountered while Running Script {e}")
 
     stop_tensorboard()

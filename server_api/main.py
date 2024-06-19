@@ -72,10 +72,10 @@ async def neuroglancer(req: Request):
 async def start_model_training(req: Request):
     req = await req.json()
     response = requests.post(
-        REACT_APP_SERVER_PROTOCOL +
-        "://" +
-        REACT_APP_SERVER_URL +
-        "/start_model_training",
+        REACT_APP_SERVER_PROTOCOL
+        + "://"
+        + REACT_APP_SERVER_URL
+        + "/start_model_training",
         json=req
         )
 
@@ -88,10 +88,10 @@ async def start_model_training(req: Request):
 @app.post("/stop_model_training")
 async def stop_model_training():
     response = requests.post(
-        REACT_APP_SERVER_PROTOCOL +
-        "://" +
-        REACT_APP_SERVER_URL +
-        "/stop_model_training")
+        REACT_APP_SERVER_PROTOCOL
+        + "://"
+        + REACT_APP_SERVER_URL
+        + "/stop_model_training")
 
     if response.status_code == 200:
         return {"message": "Model training stopped successfully"}
@@ -103,10 +103,10 @@ async def stop_model_training():
 async def start_model_inference(req: Request):
     req = await req.json()
     response = requests.post(
-        REACT_APP_SERVER_PROTOCOL +
-        "://" +
-        REACT_APP_SERVER_URL +
-        "/start_model_inference", 
+        REACT_APP_SERVER_PROTOCOL
+        + "://"
+        + REACT_APP_SERVER_URL
+        + "/start_model_inference",
         json=req
         )
 
@@ -119,10 +119,10 @@ async def start_model_inference(req: Request):
 @app.post("/stop_model_inference")
 async def stop_model_inference():
     response = requests.post(
-        REACT_APP_SERVER_PROTOCOL +
-        "://" +
-        REACT_APP_SERVER_URL +
-        "/stop_model_inference"
+        REACT_APP_SERVER_PROTOCOL
+        + "://"
+        + REACT_APP_SERVER_URL
+        + "/stop_model_inference"
         )
 
     if response.status_code == 200:
@@ -181,7 +181,14 @@ async def check_files(req: Request):
 
 
 def run():
-    uvicorn.run("main:app", host="0.0.0.0", port=4242, reload=True, log_level="info", app_dir="/")
+    uvicorn.run(
+        "main:app",
+        host="0.0.0.0",
+        port=4242,
+        reload=True,
+        log_level="info",
+        app_dir="/"
+        )
 
 
 if __name__ == "__main__":

@@ -3,9 +3,8 @@ import argparse
 import torch
 import torchvision
 
-
-EPOCHS =100 # max number
-BATCH_SIZE = 32 # how many images will be used in each epoch
+EPOCHS=100  # max number
+BATCH_SIZE=32  # how many images will be used in each epoch
 
 xy_trainPT = torchvision.datasets.MNIST(root="./data",
                                         train=True,
@@ -14,6 +13,7 @@ xy_trainPT = torchvision.datasets.MNIST(root="./data",
                                         )
 xy_trainPT_loader = torch.utils.data.DataLoader(xy_trainPT, batch_size=BATCH_SIZE)
 
+
 # create a tiny toy model with four layers
 def model(hidden):
     model= torch.nn.Sequential(
@@ -21,16 +21,16 @@ def model(hidden):
         torch.nn.Sigmoid(),
         torch.nn.Linear(hidden,10),
         torch.nn.LogSoftmax(dim=1)
-        )
+    )
     return model
 
 
-from torch.utils.tensorboard import SummaryWriter # needed for using TensorBoard
+from torch.utils.tensorboard import SummaryWriter  # needed for using TensorBoard
 
 model_instance  = model(10)
 criterion = torch.nn.NLLLoss()  # use the negative log likelihood loss.
 optimizer = torch.optim.SGD(
-    model.parameters(), lr=0.01
+    model_instance.parameters(), lr=0.01
 )  # use SGD (Stochastic Gradient Descent gradient descent) optimization algorithm
 
 if __name__ == "__main__":
@@ -53,7 +53,5 @@ if __name__ == "__main__":
             )
         )
         writer.add_scalar("loss vs epoch", running_loss/len(xy_trainPT_loader), e)
-
-
     writer.flush()
     writer.close()

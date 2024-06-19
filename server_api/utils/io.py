@@ -6,8 +6,8 @@ import numpy as np
 
 def mkdir(fn, opt=""):
     if opt == "parent":  # until the last path separator
-        fn = fn[:fn.rfind(os.path.sep)]
-    
+        fn = fn[: fn.rfind(os.path.sep)]
+
     if not os.path.exists(fn):
         if "all" in opt:
             os.makedirs(fn)
@@ -36,10 +36,11 @@ def readVol(filename, z=None, kk=None, image_type="im"):
         if kk is None:
             kk = tmp.info_items()[-1][1]
             if "," in kk:
-                kk = kk[:kk.find(",")]
+                kk = kk[: kk.find(",")]
         out = np.array(tmp[kk][z])
     elif filename[-3:] in ["jpg", "png", "tif", "iff"]:
         import imageio
+
         if z is None:  # image
             out = imageio.imread(filename)
         else:  # volume data (tif)
@@ -90,12 +91,12 @@ def writeH5(filename, dtarray, datasetname="main"):
         for i, dd in enumerate(datasetname):
             ds = fid.create_dataset(
                 dd, dtarray[i].shape, compression="gzip", dtype=dtarray[i].dtype
-                )
+            )
             ds[:] = dtarray[i]
     else:
         ds = fid.create_dataset(
             datasetname, dtarray.shape, compression="gzip", dtype=dtarray.dtype
-            )
+        )
         ds[:] = dtarray
     fid.close()
 
@@ -132,7 +133,6 @@ def writeGif(outname, filenames, ratio=1, duration=0.5):
             else:
                 image = np.stack(
                     [zoom(image[:, :, d], ratio, order=1) for d in range(3)], axis=2
-                    )
+                )
         out[fid] = image
-        
     imageio.mimsave(outname, out, "GIF", duration=duration)
