@@ -44,7 +44,8 @@ def readVol(filename, z=None, kk=None, image_type='im'):
     elif filename[-3:] == 'npy':
         out = np.load(filename)
     else:
-        raise "Can't read the file %s" % filename
+        raise ValueError(f"Can't read the file {filename}")
+
     return out
 
 
