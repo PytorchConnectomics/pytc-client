@@ -72,7 +72,7 @@ def run():
         reload=True,
         log_level="info",
         app_dir="/",
-        )
+    )
 
 
 if __name__ == "__main__":
