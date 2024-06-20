@@ -18,7 +18,7 @@ function Monitoring() {
     if (!tensorboardURL) {
       callGetTensorboardURL();
     }
-  }, []);
+  }, [tensorboardURL]);
 
   return (
     <>

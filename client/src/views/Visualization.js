@@ -57,6 +57,7 @@ function Visualization(props) {
             key: viewer.key,
             children: (
               <iframe
+                title="Viewer Display" 
                 width="100%"
                 height="800"
                 frameBorder="0"

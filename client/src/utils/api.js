@@ -54,7 +54,7 @@ export async function startModelTraining(
 
 export async function stopModelTraining() {
   try {
-    const res = await axios.post(
+    await axios.post(
       `${process.env.REACT_APP_API_PROTOCOL}://${process.env.REACT_APP_API_URL}/stop_model_training`
     );
     return;
@@ -101,7 +101,7 @@ export async function getTensorboardURL() {
 }
 
 export async function startModelInference(
-  configurationYamlFile,
+  // configurationYamlFile,
   inferenceConfig,
   outputPath,
   checkpointPath
@@ -133,7 +133,7 @@ export async function startModelInference(
 
 export async function stopModelInference() {
   try {
-    const res = await axios.post(
+    await axios.post(
       `${process.env.REACT_APP_API_PROTOCOL}://${process.env.REACT_APP_API_URL}/stop_model_inference`
     );
     return;

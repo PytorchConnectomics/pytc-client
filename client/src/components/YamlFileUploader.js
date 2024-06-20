@@ -11,7 +11,7 @@ const YamlFileUploader = (props) => {
   const YAMLContext = useContext(YamlContext);
   const { type } = props;
 
-  const [yamlContent, setYamlContent] = useState("");
+  const [, setYamlContent] = useState("");
 
   const trainingParams = [
     {
@@ -250,7 +250,7 @@ const YamlFileUploader = (props) => {
       setYamlContent(context.trainingConfig);
     }
 
-    if (type == "inference") {
+    if (type === "inference") {
       setYamlContent(context.inferenceConfig);
     }
   }, [
