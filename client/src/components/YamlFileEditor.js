@@ -18,7 +18,8 @@ const YamlFileEditor = (props) => {
       context.setInferenceConfig(updatedYamlContent);
     }
     try {
-      const yamlData = yaml.safeLoad(updatedYamlContent);
+      const yamlData = yaml.load(updatedYamlContent);
+
       // YAMLContext.setNumGPUs(yamlData.SYSTEM.NUM_GPUS);
       // YAMLContext.setNumCPUs(yamlData.SYSTEM.NUM_CPUS);
       // YAMLContext.setLearningRate(yamlData.SOLVER.BASE_LR);
@@ -30,7 +31,9 @@ const YamlFileEditor = (props) => {
   useEffect(() => {
     if (type === "training") {
       setYamlContent(context.trainingConfig);
-    } else {
+    }
+
+    if (type == "inference") {
       setYamlContent(context.inferenceConfig);
     }
   }, [

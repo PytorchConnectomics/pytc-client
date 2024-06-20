@@ -10,7 +10,7 @@ function Dragger() {
   const context = useContext(AppContext);
   const { Dragger } = Upload;
 
-  const getBase64 = (file) =>
+  const getBase64 = (file) => 
     new Promise((resolve, reject) => {
       const reader = new FileReader();
       reader.readAsDataURL(file);

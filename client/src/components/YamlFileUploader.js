@@ -129,7 +129,6 @@ const YamlFileUploader = (props) => {
             yamlData.INFERENCE.SAMPLES_PER_BATCH
           );
           YAMLContext.setAugNum(yamlData.INFERENCE.AUG_NUM);
-
           // update InputSelector's information
           if (
             context.inputImage &&
@@ -144,7 +143,7 @@ const YamlFileUploader = (props) => {
 
             const inputPath = findCommonPartOfString(inputImage, inputLabel);
             // yamlData.INFERENCE.INPUT_PATH = inputPath;
-            // yamlData.DATASET.IMAGE_NAME = inputImage.replace(inputPath, "");
+            yamlData.INFERENCE.IMAGE_NAME = inputImage.replace(inputPath, "");
             // yamlData.DATASET.LABEL_NAME = inputLabel.replace(inputPath, "");
             // yamlData.DATASET.OUTPUT_PATH = context.outputPath;
           } else {
@@ -155,11 +154,15 @@ const YamlFileUploader = (props) => {
         context.setTrainingConfig(
           yaml.dump(yamlData, { indent: 2 }).replace(/^\s*\n/gm, "")
         );
+
+        context.setInferenceConfig(
+          yaml.safeDump(yamlData, { indent: 2 }).replace(/^\s*\n/gm, "")
+        );
         // these are for slider
         YAMLContext.setNumGPUs(yamlData.SYSTEM.NUM_GPUS);
         YAMLContext.setNumCPUs(yamlData.SYSTEM.NUM_CPUS);
         YAMLContext.setLearningRate(yamlData.SOLVER.BASE_LR);
-        YAMLContext.setSamplesPerBatch(yamlData.SOLVER.SAMPLES_PER_BATCH);
+        YAMLContext.setSolverSamplesPerBatch(yamlData.SOLVER.SAMPLES_PER_BATCH);
       } catch (error) {
         message.error("Error reading YAML file.");
       }
@@ -216,6 +219,7 @@ const YamlFileUploader = (props) => {
             );
           }
         } catch (error) {
+          console.log(error);
           message.error("Error reading YAML file.");
         }
       };
@@ -244,7 +248,9 @@ const YamlFileUploader = (props) => {
   useEffect(() => {
     if (type === "training") {
       setYamlContent(context.trainingConfig);
-    } else {
+    }
+
+    if (type == "inference") {
       setYamlContent(context.inferenceConfig);
     }
   }, [
