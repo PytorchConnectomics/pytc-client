@@ -60,10 +60,10 @@ function ModelTraining() {
   //     console.log(e);
   //   }
   // };
-  const [componentSize, setComponentSize] = useState("default");
-  const onFormLayoutChange = ({ size }) => {
-    setComponentSize(size);
-  };
+  // const [componentSize, setComponentSize] = useState("default");
+  // const onFormLayoutChange = ({ size }) => {
+  //   setComponentSize(size);
+  // };
 
   return (
     <>

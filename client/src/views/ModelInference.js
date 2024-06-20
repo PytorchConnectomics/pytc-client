@@ -35,10 +35,11 @@ function ModelInference() {
     }
   };
 
-  const [componentSize, setComponentSize] = useState("default");
-  const onFormLayoutChange = ({ size }) => {
-    setComponentSize(size);
-  };
+  // const [componentSize, setComponentSize] = useState("default");
+  const [componentSize,] = useState("default");
+  // const onFormLayoutChange = ({ size }) => {
+  //   setComponentSize(size);
+  // };
 
   return (
     <>

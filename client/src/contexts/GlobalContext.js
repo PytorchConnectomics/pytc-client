@@ -34,14 +34,14 @@ function usePersistedState(key, defaultValue) {
 }
 
 
-function safeParseJSON(jsonString, defaultValue) {
-  try {
-    return JSON.parse(jsonString) || defaultValue;
-  } catch (e) {
-    console.error("Error parsing JSON:", e);
-    return defaultValue;
-  }
-}
+// function safeParseJSON(jsonString, defaultValue) {
+//   try {
+//     return JSON.parse(jsonString) || defaultValue;
+//   } catch (e) {
+//     console.error("Error parsing JSON:", e);
+//     return defaultValue;
+//   }
+// }
 
 export const ContextWrapper = (props) => {
   const [files, setFiles] = usePersistedState("files", []);
