@@ -51,19 +51,6 @@ function ModelTraining() {
     }
   };
 
-  // const handleTensorboardButton = async () => {
-  //   try {
-  //     const res = await startTensorboard();
-  //     console.log(res);
-  //     setTensorboardURL(res);
-  //   } catch (e) {
-  //     console.log(e);
-  //   }
-  // };
-  const [componentSize, setComponentSize] = useState("default");
-  const onFormLayoutChange = ({ size }) => {
-    setComponentSize(size);
-  };
 
   return (
     <>

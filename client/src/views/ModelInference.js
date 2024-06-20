@@ -6,7 +6,7 @@ import { AppContext } from "../contexts/GlobalContext";
 
 function ModelInference() {
   const context = useContext(AppContext);
-  const [isInference, setIsInference] = useState(false);
+  const [, setIsInference] = useState(false);
   const handleStartButton = async () => {
     try {
       const inferenceConfig = localStorage.getItem("inferenceConfig");
@@ -16,7 +16,7 @@ function ModelInference() {
         inferenceConfig,
         context.outputPath,
         context.checkpointPath
-      ); // inputs, configurationYaml
+      ); 
       console.log(res);
     } catch (e) {
       console.log(e);
@@ -35,10 +35,6 @@ function ModelInference() {
     }
   };
 
-  const [componentSize, setComponentSize] = useState("default");
-  const onFormLayoutChange = ({ size }) => {
-    setComponentSize(size);
-  };
 
   return (
     <>
@@ -47,13 +43,11 @@ function ModelInference() {
         <Space wrap style={{ marginTop: 12 }}>
           <Button
             onClick={handleStartButton}
-            // disabled={!context.trainingConfig}
           >
             Start Inference
           </Button>
           <Button
             onClick={handleStopButton}
-            // disabled={!isTraining}
           >
             Stop Inference
           </Button>

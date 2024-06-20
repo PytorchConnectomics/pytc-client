@@ -4,7 +4,6 @@ import { InboxOutlined } from "@ant-design/icons";
 import { AppContext } from "../contexts/GlobalContext";
 import { DEFAULT_IMAGE } from "../utils/utils";
 
-const os = require('os');
 const path = require('path');
 
 function Dragger() {

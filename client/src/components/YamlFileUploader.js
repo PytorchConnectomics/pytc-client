@@ -11,7 +11,7 @@ const YamlFileUploader = (props) => {
   const YAMLContext = useContext(YamlContext);
   const { type } = props;
 
-  const [yamlContent, setYamlContent] = useState("");
+  const [,setYamlContent] = useState("");
 
   const trainingParams = [
     {
@@ -137,12 +137,12 @@ const YamlFileUploader = (props) => {
             context.inputLabel &&
             context.inputLabel.folderPath
           ) {
-            const inputImage =
-              context.inputImage.folderPath + context.inputImage.name;
-            const inputLabel =
-              context.inputLabel.folderPath + context.inputLabel.name;
+            // const inputImage =
+            //   context.inputImage.folderPath + context.inputImage.name;
+            // const inputLabel =
+            //   context.inputLabel.folderPath + context.inputLabel.name;
 
-            const inputPath = findCommonPartOfString(inputImage, inputLabel);
+            // const inputPath = findCommonPartOfString(inputImage, inputLabel);
             // yamlData.INFERENCE.INPUT_PATH = inputPath;
             // yamlData.DATASET.IMAGE_NAME = inputImage.replace(inputPath, "");
             // yamlData.DATASET.LABEL_NAME = inputLabel.replace(inputPath, "");
@@ -248,6 +248,7 @@ const YamlFileUploader = (props) => {
       setYamlContent(context.inferenceConfig);
     }
   }, [
+    type,
     context.uploadedYamlFile,
     context.trainingConfig,
     context.inferenceConfig,

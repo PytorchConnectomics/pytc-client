@@ -36,17 +36,19 @@ function DataLoader(props) {
   const handleInputScales = (event) => {
     setScales(event.target.value);
   };
-
+  
+  const {files, setFileList} = context;
+  
   useEffect(() => {
-    if (context.files) {
-      context.setFileList(
-        context.files.map((file) => ({
+    if (files) {
+      setFileList(
+        files.map((file) => ({
           label: file.name,
           value: file.uid,
         }))
       );
     }
-  }, [context.files]);
+  }, [files, setFileList]);
 
   return (
     <Space

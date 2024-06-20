@@ -21,17 +21,12 @@ export async function getNeuroglancerViewer(image, label, scales) {
 }
 
 export async function startModelTraining(
-  configurationYamlFile,
   trainingConfig,
-  outputPath,
   logPath
 ) {
   try {
     let data = JSON.stringify({
       arguments: {
-        // nproc_per_node: 4,
-        // master_port: 2345,
-        // distributed: "",
       },
       logPath: logPath,
       trainingConfig: trainingConfig,
@@ -54,7 +49,7 @@ export async function startModelTraining(
 
 export async function stopModelTraining() {
   try {
-    const res = await axios.post(
+    await axios.post(
       `${process.env.REACT_APP_API_PROTOCOL}://${process.env.REACT_APP_API_URL}/stop_model_training`
     );
     return;
@@ -68,21 +63,6 @@ export async function stopModelTraining() {
   }
 }
 
-// export async function startTensorboard() {
-//   try {
-//     const res = await axios.get(
-//       `${process.env.REACT_APP_API_PROTOCOL}://${process.env.REACT_APP_API_URL}/start_tensorboard`
-//     );
-//     return res.data;
-//   } catch (error) {
-//     if (error.response) {
-//       throw new Error(
-//         `${error.response.status}: ${error.response.data?.detail?.error}`
-//       );
-//     }
-//     throw error;
-//   }
-// }
 
 export async function getTensorboardURL() {
   try {
@@ -133,7 +113,7 @@ export async function startModelInference(
 
 export async function stopModelInference() {
   try {
-    const res = await axios.post(
+    await axios.post(
       `${process.env.REACT_APP_API_PROTOCOL}://${process.env.REACT_APP_API_URL}/stop_model_inference`
     );
     return;

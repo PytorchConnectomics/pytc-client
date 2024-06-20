@@ -55,7 +55,7 @@ function Views() {
           currentLabel,
           scales
         );
-        let newUrl = res.replace(/\/\/[^:\/]+/, "//localhost");
+        let newUrl = res.replace(/\/\/[^:/]+/, "//localhost");
         console.log("Viewer at ", newUrl);
 
         setViewers([
