@@ -40,14 +40,16 @@ function ModelInference() {
     <>
       <div>
         <Configurator fileList={context.files} type="inference" />
-        <Space wrap style={{ marginTop: 12 }}>
+        <Space wrap style={{ marginTop: 12 }} size={componentSize}>
           <Button
             onClick={handleStartButton}
+            disabled={isInference}  // Disables the button when inference is running
           >
             Start Inference
           </Button>
           <Button
             onClick={handleStopButton}
+            disabled={!isInference}  // Disables the button when inference is not running
           >
             Stop Inference
           </Button>
