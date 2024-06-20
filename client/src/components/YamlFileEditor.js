@@ -2,11 +2,9 @@ import React, { useContext, useEffect, useState } from "react";
 import { Input, message } from "antd";
 import yaml from "js-yaml";
 import { AppContext } from "../contexts/GlobalContext";
-import { YamlContext } from "../contexts/YamlContext";
 
 const YamlFileEditor = (props) => {
   const context = useContext(AppContext);
-  const YAMLContext = useContext(YamlContext);
   const [yamlContent, setYamlContent] = useState("");
 
   const { type } = props;
@@ -42,6 +40,7 @@ const YamlFileEditor = (props) => {
     context.uploadedYamlFile,
     context.trainingConfig,
     context.inferenceConfig,
+    type
   ]);
 
   return (

@@ -87,11 +87,11 @@ const YamlFileUploader = (props) => {
     reader.onload = (e) => {
       try {
         const contents = e.target.result;
-        const yamlData = yaml.safeLoad(contents);
+        const yamlData = yaml.load(contents);
 
         if (type === "training") {
           context.setTrainingConfig(
-            yaml.safeDump(yamlData, { indent: 2 }).replace(/^\s*\n/gm, "")
+            yaml.dump(yamlData, { indent: 2 }).replace(/^\s*\n/gm, "")
           );
           YAMLContext.setNumGPUs(yamlData.SYSTEM.NUM_GPUS);
           YAMLContext.setNumCPUs(yamlData.SYSTEM.NUM_CPUS);
@@ -123,7 +123,7 @@ const YamlFileUploader = (props) => {
         } else {
           // type === "inference"
           context.setInferenceConfig(
-            yaml.safeDump(yamlData, { indent: 2 }).replace(/^\s*\n/gm, "")
+            yaml.dump(yamlData, { indent: 2 }).replace(/^\s*\n/gm, "")
           );
           YAMLContext.setInferenceSamplesPerBatch(
             yamlData.INFERENCE.SAMPLES_PER_BATCH
@@ -152,7 +152,7 @@ const YamlFileUploader = (props) => {
         }
 
         context.setTrainingConfig(
-          yaml.safeDump(yamlData, { indent: 2 }).replace(/^\s*\n/gm, "")
+          yaml.dump(yamlData, { indent: 2 }).replace(/^\s*\n/gm, "")
         );
 
         context.setInferenceConfig(
@@ -204,18 +204,18 @@ const YamlFileUploader = (props) => {
       reader.onload = (e) => {
         try {
           const contents = e.target.result;
-          const yamlData = yaml.safeLoad(contents);
+          const yamlData = yaml.load(contents);
 
           // Update the property value in the YAML data
           yamlData[location][property] = newValue;
 
           if (type === "training") {
             context.setTrainingConfig(
-              yaml.safeDump(yamlData, { indent: 2 }).replace(/^\s*\n/gm, "")
+              yaml.dump(yamlData, { indent: 2 }).replace(/^\s*\n/gm, "")
             );
           } else {
             context.setInferenceConfig(
-              yaml.safeDump(yamlData, { indent: 2 }).replace(/^\s*\n/gm, "")
+              yaml.dump(yamlData, { indent: 2 }).replace(/^\s*\n/gm, "")
             );
           }
         } catch (error) {
@@ -235,7 +235,7 @@ const YamlFileUploader = (props) => {
   const updateYamlData = (property, value) => {
     const updatedYamlData = { ...context.yamlData, [property]: value };
     const updatedYamlContent = yaml
-      .safeDump(updatedYamlData, { indent: 2 })
+      .dump(updatedYamlData, { indent: 2 })
       .replace(/^\s*\n/gm, "");
     setYamlContent(updatedYamlContent);
     if (type === "training") {
@@ -257,6 +257,7 @@ const YamlFileUploader = (props) => {
     context.uploadedYamlFile,
     context.trainingConfig,
     context.inferenceConfig,
+    type
   ]);
 
   return (
