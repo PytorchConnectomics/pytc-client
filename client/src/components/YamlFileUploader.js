@@ -251,6 +251,7 @@ const YamlFileUploader = (props) => {
     context.uploadedYamlFile,
     context.trainingConfig,
     context.inferenceConfig,
+    type
   ]);
 
   return (

@@ -1,11 +1,9 @@
 import { Form, Input, Select } from "antd";
 import React, { useContext } from "react";
 import { AppContext } from "../contexts/GlobalContext";
-import { YamlContext } from "../contexts/YamlContext";
 
 function InputSelector(props) {
   const context = useContext(AppContext);
-  const YAMLContext = useContext(YamlContext);
   const { fileList, type } = props;
   console.log(fileList, context.files);
 

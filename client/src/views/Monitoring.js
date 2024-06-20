@@ -24,6 +24,7 @@ function Monitoring() {
     <>
       {tensorboardURL && (
         <iframe
+          title="Tensorboard Display"
           width="100%"
           height="800"
           frameBorder="0"
