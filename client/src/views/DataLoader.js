@@ -3,6 +3,7 @@ import Dragger from "../components/Dragger";
 import { Button, Input, Select, Space, Typography } from "antd";
 import { ArrowRightOutlined } from "@ant-design/icons";
 import { AppContext } from "../contexts/GlobalContext";
+import LoadingIndicator from "../components/LoadingIndicator";  //LI
 import "./DataLoader.css";
 
 const { Title } = Typography;
@@ -16,13 +17,15 @@ function DataLoader(props) {
 
   const handleVisualizeButtonClick = async (event) => {
     event.preventDefault();
+    context.setLoading(true); //LI //true
     context.setCurrentImage(currentImage);
     context.setCurrentLabel(currentLabel);
-    fetchNeuroglancerViewer(
+    await fetchNeuroglancerViewer( //LI await
       currentImage,
       currentLabel,
       scales.split(",").map(Number)
     );
+    context.setLoading(false); //LI //false
   };
   const handleImageChange = (value) => {
     console.log(`selected ${value}`);
@@ -49,61 +52,64 @@ function DataLoader(props) {
   }, [context.files]);
 
   return (
-    <Space
-      direction="vertical"
-      size="small"
-      align="start"
-      style={{ margin: "7px", display: "flex" }}
-    >
-      <Dragger/>
-      <Title level={5} style={{ marginBottom: "-5px" }}>
-        Image
-      </Title>
-      <Select
-        onChange={handleImageChange}
-        options={context.imageFileList.map((file) => ({
-          label: file.name,
-          value: file.uid,
-        }))}
-        style={{ width: "185px" }}
-        placeholder="Select image"
-        size="middle"
-        allowClear={true}
-      />
-
-      <Title level={5} style={{ marginTop: "0px", marginBottom: "-5px" }}>
-        Label
-      </Title>
-      <Select
-        onChange={handleLabelChange}
-        options={context.labelFileList.map((file) => ({
-          label: file.name,
-          value: file.uid,
-        }))}
-        style={{ width: "185px" }}
-        placeholder="Select label"
-        size="middle"
-        allowClear={true}
-      />
-
-      <Title level={5} style={{ marginTop: "0px", marginBottom: "-5px" }}>
-        Scales
-      </Title>
-      <Input
-        placeholder="Input in z, y, x order"
-        allowClear
-        onChange={handleInputScales}
-        style={{ width: "185px" }}
-      />
-      <Button
-        type="primary"
-        onClick={handleVisualizeButtonClick}
-        icon={<ArrowRightOutlined />}
-        style={{ width: "185px" }}
+    <div style={{ position: 'relative', height: '100%' }}>
+      {context.loading && <LoadingIndicator />}
+      <Space
+        direction="vertical"
+        size="small"
+        align="start"
+        style={{ margin: "7px", display: "flex" }}
       >
-        Visualize
-      </Button>
-    </Space>
+        <Dragger />
+        <Title level={5} style={{ marginBottom: "-5px" }}>
+          Image
+        </Title>
+        <Select
+          onChange={handleImageChange}
+          options={context.imageFileList.map((file) => ({
+            label: file.name,
+            value: file.uid,
+          }))}
+          style={{ width: "185px" }}
+          placeholder="Select image"
+          size="middle"
+          allowClear={true}
+        />
+
+        <Title level={5} style={{ marginTop: "0px", marginBottom: "-5px" }}>
+          Label
+        </Title>
+        <Select
+          onChange={handleLabelChange}
+          options={context.labelFileList.map((file) => ({
+            label: file.name,
+            value: file.uid,
+          }))}
+          style={{ width: "185px" }}
+          placeholder="Select label"
+          size="middle"
+          allowClear={true}
+        />
+
+        <Title level={5} style={{ marginTop: "0px", marginBottom: "-5px" }}>
+          Scales
+        </Title>
+        <Input
+          placeholder="Input in z, y, x order"
+          allowClear
+          onChange={handleInputScales}
+          style={{ width: "185px" }}
+        />
+        <Button
+          type="primary"
+          onClick={handleVisualizeButtonClick}
+          icon={<ArrowRightOutlined />}
+          style={{ width: "185px" }}
+        >
+          Visualize
+        </Button>
+      </Space>
+    </div> //LI div
   );
 }
 
