@@ -2,11 +2,9 @@ import React, { useContext, useEffect, useState } from "react";
 import { Input, message } from "antd";
 import yaml from "js-yaml";
 import { AppContext } from "../contexts/GlobalContext";
-import { YamlContext } from "../contexts/YamlContext";
 
 const YamlFileEditor = (props) => {
   const context = useContext(AppContext);
-  const YAMLContext = useContext(YamlContext);
   const [yamlContent, setYamlContent] = useState("");
 
   const { type } = props;
@@ -20,7 +18,7 @@ const YamlFileEditor = (props) => {
       context.setInferenceConfig(updatedYamlContent);
     }
     try {
-      const yamlData = yaml.safeLoad(updatedYamlContent);
+      const yamlData = yaml.load(updatedYamlContent);
 
       // YAMLContext.setNumGPUs(yamlData.SYSTEM.NUM_GPUS);
       // YAMLContext.setNumCPUs(yamlData.SYSTEM.NUM_CPUS);
@@ -33,13 +31,16 @@ const YamlFileEditor = (props) => {
   useEffect(() => {
     if (type === "training") {
       setYamlContent(context.trainingConfig);
-    } else {
+    }
+
+    if (type == "inference") {
       setYamlContent(context.inferenceConfig);
     }
   }, [
     context.uploadedYamlFile,
     context.trainingConfig,
     context.inferenceConfig,
+    type
   ]);
 
   return (

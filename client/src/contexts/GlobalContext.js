@@ -3,32 +3,32 @@ import localforage from 'localforage';
 
 export const AppContext = createContext(null);
 
-/*
-function usePersistedState(key, defaultValue) {
-  const [state, setState] = useState(() => {
-    const storedValue = localStorage.getItem(key);
-    return safeParseJSON(storedValue, defaultValue);
-  });
-
-  useEffect(() => {
-    localStorage.setItem(key, JSON.stringify(state));
-  }, [key, state]);
-
-  return [state, setState];
-}
-*/
 // Solve delete button error issue
 function usePersistedState(key, defaultValue) {
-  const [state, setState] = useState(() => {
-    // Use localforage instead of localStorage
-    const storedValue = localforage.getItem(key);
-    return safeParseJSON(storedValue, defaultValue);
-  });
+  const [state, setState] = useState(defaultValue);
+  const [isLoaded, setIsLoaded] = useState(false);
 
   useEffect(() => {
-    // Use localforage instead of localStorage, delete JSON.stringify() function
-    localforage.setItem(key, state);
-  }, [key, state]);
+    // Fetch the stored value asynchronously when the component mounts
+    localforage.getItem(key).then((storedValue) => {
+      if (storedValue !== null) {
+        setState(storedValue);
+      }
+      setIsLoaded(true);
+    }).catch((err) => {
+      console.error("Error retrieving value from localforage:", err);
+      setIsLoaded(true);
+    });
+  }, [key]);
+
+  useEffect(() => {
+    if (isLoaded) {
+      // Save the state to localforage asynchronously whenever it changes
+      localforage.setItem(key, state).catch((err) => {
+        console.error("Error setting value to localforage:", err);
+      });
+    }
+  }, [key, state, isLoaded]);
 
   return [state, setState];
 }

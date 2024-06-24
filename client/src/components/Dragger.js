@@ -4,7 +4,6 @@ import { InboxOutlined } from "@ant-design/icons";
 import { AppContext } from "../contexts/GlobalContext";
 import { DEFAULT_IMAGE } from "../utils/utils";
 
-const os = require('os');
 const path = require('path');
 
 function Dragger() {
@@ -23,24 +22,11 @@ function Dragger() {
   const onChange = (info) => {
     const { status } = info.file;
     if (status === 'done') {
-      // Keep only the part of the pytc-relative path
-      let pathSegments = info.file.originFileObj.path.split(path.sep);
-      console.log(path.sep)
-      console.log(pathSegments)
-      let pytcClientIndex = pathSegments.indexOf('pytc-client');
-      let relativePath = pathSegments.slice(pytcClientIndex).join(path.sep);
-      //setUploading(false); //LI
-      // Check if 'pytc-client' was found in the path
-      if (pytcClientIndex === -1) {
-        // Handle the error: 'pytc-client' not found
-        console.error("Error: Please upload from the sample folder. File path: " + info.file.originFileObj.path);
-        message.error(`${info.file.name} file upload failed.`);
-        return;
-      }
+      console.log('file found at:', info.file.originFileObj.path);
 
       message.success(`${info.file.name} file uploaded successfully.`);
       if (window.require) {
-        const modifiedFile = { ...info.file, path: relativePath };
+        const modifiedFile = { ...info.file, path: info.file.originFileObj.path };
         context.setFiles([...context.files, modifiedFile]);
       } else {
         context.setFiles([...info.fileList]);
@@ -52,9 +38,7 @@ function Dragger() {
     } else if (status === 'removed') {
       console.log(info.fileList);
       context.setFiles([...info.fileList]);
-    } /*else if (status === 'uploading') {
-      setUploading(true); //LI
-    }*/
+    }
   };
 
   const uploadImage = async (options) => {
@@ -73,7 +57,7 @@ function Dragger() {
   const [value, setValue] = useState("");
   const [fileUID, setFileUID] = useState(null);
   const [previewFileFolderPath, setPreviewFileFolderPath] = useState("");
-  const [fileType, setFileType] = useState("");
+  const [fileType, setFileType] = useState("Image");
 
   const handleText = (event) => {
     setValue(event.target.value);
@@ -96,28 +80,22 @@ function Dragger() {
   };
 
   const handleSubmit = (type) => {
-    console.log("submitting path", previewFileFolderPath);
-
-    const fileInContext = context.files.find((targetFile) => targetFile.uid === fileUID);
-    const fileInFileList = context.fileList.find((targetFile) => targetFile.value === fileUID);
-
-    if (previewFileFolderPath !== "" && fileInContext) {
-      fileInContext.folderPath = previewFileFolderPath;
+    console.log("submitting path", previewFileFolderPath)
+    if (previewFileFolderPath !== "") {
+      context.files.find(
+        (targetFile) => targetFile.uid === fileUID
+      ).folderPath = previewFileFolderPath;
       setPreviewFileFolderPath("");
     }
-
-    if (value !== "" && fileInContext && fileInFileList) {
-      fileInContext.name = value;
-      fileInFileList.label = value;
+    if (value !== "") {
+      context.files.find((targetFile) => targetFile.uid === fileUID).name =
+        value;
+      context.fileList.find(
+        (targetFile) => targetFile.value === fileUID
+      ).label = value;
       setValue("");
     }
-
-    if (fileInContext) {
-      fetchFile(fileInContext);
-    } else {
-      message.error("Error: File selection error. Please try again.");
-    }
-
+    fetchFile(context.files.find((targetFile) => targetFile.uid === fileUID));
     setPreviewOpen(false);
   };
 
@@ -144,7 +122,7 @@ function Dragger() {
     context.setLoading(true); //LI
     setFileUID(file.uid);
     if (!file.url && !file.preview) {
-      if (file.type !== 'image/tiff' || file.type !== 'image/tif') {
+      if (file.type !== "image/tiff" || file.type !== "image/tif") {
         if (file.path) { // Use the local path for Electron environment
           const fs = window.require('fs');
           const buffer = fs.readFileSync(file.path);
@@ -159,38 +137,18 @@ function Dragger() {
     }
     setPreviewImage(file.url || file.preview);
     setPreviewOpen(true);
-    setPreviewTitle(file.name || file.url.substring(file.url.lastIndexOf(path.sep) + 1));
+    setPreviewTitle(file.name || file.url.substring(file.url.lastIndexOf('/') + 1));
     if (
       context.files.find(targetFile => targetFile.uid === file.uid) &&
       context.files.find(targetFile => targetFile.uid === file.uid).folderPath) {
-      processAndSetPath(
+      setPreviewFileFolderPath(
         context.files.find(targetFile => targetFile.uid === file.uid)
-          .folderPath)
+          .folderPath
+      );
     } else {
-      processAndSetPath(path.dirname(file.originFileObj.path));
+      // Directory name with trailing slash
+      setPreviewFileFolderPath(path.dirname(file.originFileObj.path) + "/");
     }
-    context.setLoading(false); //LI
-  };
-
-  function processAndSetPath(info) {
-    console.log(info)
-    let pathSegments = info.split(path.sep);
-    console.log(pathSegments)
-    let pytcClientIndex = pathSegments.indexOf('samples_pytc');
-
-    // Check if 'pytc-client' was found in the path
-    if (pytcClientIndex === -1) {
-      // Handle the error: 'sample' not found
-      console.error("Error: Please upload from the sample folder. File path: " + path);
-      message.error(`${info.name} file upload failed.`);
-      return false;
-    }
-
-    let relativePath = pathSegments.slice(pytcClientIndex).join(path.sep);
-    console.log("file uploaded: ", relativePath);
-    setPreviewFileFolderPath(relativePath + path.sep);
-
-    return true;
   };
 
   const listItemStyle = {

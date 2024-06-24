@@ -87,11 +87,11 @@ const YamlFileUploader = (props) => {
     reader.onload = (e) => {
       try {
         const contents = e.target.result;
-        const yamlData = yaml.safeLoad(contents);
+        const yamlData = yaml.load(contents);
 
         if (type === "training") {
           context.setTrainingConfig(
-            yaml.safeDump(yamlData, { indent: 2 }).replace(/^\s*\n/gm, "")
+            yaml.dump(yamlData, { indent: 2 }).replace(/^\s*\n/gm, "")
           );
           YAMLContext.setNumGPUs(yamlData.SYSTEM.NUM_GPUS);
           YAMLContext.setNumCPUs(yamlData.SYSTEM.NUM_CPUS);
@@ -123,13 +123,12 @@ const YamlFileUploader = (props) => {
         } else {
           // type === "inference"
           context.setInferenceConfig(
-            yaml.safeDump(yamlData, { indent: 2 }).replace(/^\s*\n/gm, "")
+            yaml.dump(yamlData, { indent: 2 }).replace(/^\s*\n/gm, "")
           );
           YAMLContext.setInferenceSamplesPerBatch(
             yamlData.INFERENCE.SAMPLES_PER_BATCH
           );
           YAMLContext.setAugNum(yamlData.INFERENCE.AUG_NUM);
-
           // update InputSelector's information
           if (
             context.inputImage &&
@@ -144,7 +143,7 @@ const YamlFileUploader = (props) => {
 
             const inputPath = findCommonPartOfString(inputImage, inputLabel);
             // yamlData.INFERENCE.INPUT_PATH = inputPath;
-            // yamlData.DATASET.IMAGE_NAME = inputImage.replace(inputPath, "");
+            yamlData.INFERENCE.IMAGE_NAME = inputImage.replace(inputPath, "");
             // yamlData.DATASET.LABEL_NAME = inputLabel.replace(inputPath, "");
             // yamlData.DATASET.OUTPUT_PATH = context.outputPath;
           } else {
@@ -153,13 +152,17 @@ const YamlFileUploader = (props) => {
         }
 
         context.setTrainingConfig(
+          yaml.dump(yamlData, { indent: 2 }).replace(/^\s*\n/gm, "")
+        );
+
+        context.setInferenceConfig(
           yaml.safeDump(yamlData, { indent: 2 }).replace(/^\s*\n/gm, "")
         );
         // these are for slider
         YAMLContext.setNumGPUs(yamlData.SYSTEM.NUM_GPUS);
         YAMLContext.setNumCPUs(yamlData.SYSTEM.NUM_CPUS);
         YAMLContext.setLearningRate(yamlData.SOLVER.BASE_LR);
-        YAMLContext.setSamplesPerBatch(yamlData.SOLVER.SAMPLES_PER_BATCH);
+        YAMLContext.setSolverSamplesPerBatch(yamlData.SOLVER.SAMPLES_PER_BATCH);
       } catch (error) {
         message.error("Error reading YAML file.");
       }
@@ -201,21 +204,22 @@ const YamlFileUploader = (props) => {
       reader.onload = (e) => {
         try {
           const contents = e.target.result;
-          const yamlData = yaml.safeLoad(contents);
+          const yamlData = yaml.load(contents);
 
           // Update the property value in the YAML data
           yamlData[location][property] = newValue;
 
           if (type === "training") {
             context.setTrainingConfig(
-              yaml.safeDump(yamlData, { indent: 2 }).replace(/^\s*\n/gm, "")
+              yaml.dump(yamlData, { indent: 2 }).replace(/^\s*\n/gm, "")
             );
           } else {
             context.setInferenceConfig(
-              yaml.safeDump(yamlData, { indent: 2 }).replace(/^\s*\n/gm, "")
+              yaml.dump(yamlData, { indent: 2 }).replace(/^\s*\n/gm, "")
             );
           }
         } catch (error) {
+          console.log(error);
           message.error("Error reading YAML file.");
         }
       };
@@ -231,7 +235,7 @@ const YamlFileUploader = (props) => {
   const updateYamlData = (property, value) => {
     const updatedYamlData = { ...context.yamlData, [property]: value };
     const updatedYamlContent = yaml
-      .safeDump(updatedYamlData, { indent: 2 })
+      .dump(updatedYamlData, { indent: 2 })
       .replace(/^\s*\n/gm, "");
     setYamlContent(updatedYamlContent);
     if (type === "training") {
@@ -244,13 +248,16 @@ const YamlFileUploader = (props) => {
   useEffect(() => {
     if (type === "training") {
       setYamlContent(context.trainingConfig);
-    } else {
+    }
+
+    if (type == "inference") {
       setYamlContent(context.inferenceConfig);
     }
   }, [
     context.uploadedYamlFile,
     context.trainingConfig,
     context.inferenceConfig,
+    type
   ]);
 
   return (
