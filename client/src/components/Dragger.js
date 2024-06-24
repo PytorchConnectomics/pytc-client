@@ -10,6 +10,7 @@ const path = require('path');
 function Dragger() {
   const context = useContext(AppContext);
   const { Dragger } = Upload;
+  const [uploading, setUploading] = useState(false); //LI
 
   const getBase64 = (file) =>
     new Promise((resolve, reject) => {
@@ -28,6 +29,7 @@ function Dragger() {
       console.log(pathSegments)
       let pytcClientIndex = pathSegments.indexOf('pytc-client');
       let relativePath = pathSegments.slice(pytcClientIndex).join(path.sep);
+      //setUploading(false); //LI
       // Check if 'pytc-client' was found in the path
       if (pytcClientIndex === -1) {
         // Handle the error: 'pytc-client' not found
@@ -38,10 +40,10 @@ function Dragger() {
 
       message.success(`${info.file.name} file uploaded successfully.`);
       if (window.require) {
-          const modifiedFile = { ...info.file, path: relativePath };
-          context.setFiles([...context.files, modifiedFile]);
+        const modifiedFile = { ...info.file, path: relativePath };
+        context.setFiles([...context.files, modifiedFile]);
       } else {
-          context.setFiles([...info.fileList]);
+        context.setFiles([...info.fileList]);
       }
       console.log('done');
     } else if (status === 'error') {
@@ -50,7 +52,9 @@ function Dragger() {
     } else if (status === 'removed') {
       console.log(info.fileList);
       context.setFiles([...info.fileList]);
-    }
+    } /*else if (status === 'uploading') {
+      setUploading(true); //LI
+    }*/
   };
 
   const uploadImage = async (options) => {
@@ -62,7 +66,7 @@ function Dragger() {
     }
   };
 
-  
+
   const [previewOpen, setPreviewOpen] = useState(false);
   const [previewImage, setPreviewImage] = useState("");
   const [previewTitle, setPreviewTitle] = useState("");
@@ -75,7 +79,7 @@ function Dragger() {
     setValue(event.target.value);
   };
 
-  const handleDropdownChange = (event) => { 
+  const handleDropdownChange = (event) => {
     setFileType(event.target.value);
   };
 
@@ -93,27 +97,27 @@ function Dragger() {
 
   const handleSubmit = (type) => {
     console.log("submitting path", previewFileFolderPath);
-  
+
     const fileInContext = context.files.find((targetFile) => targetFile.uid === fileUID);
     const fileInFileList = context.fileList.find((targetFile) => targetFile.value === fileUID);
-  
+
     if (previewFileFolderPath !== "" && fileInContext) {
       fileInContext.folderPath = previewFileFolderPath;
       setPreviewFileFolderPath("");
     }
-  
+
     if (value !== "" && fileInContext && fileInFileList) {
       fileInContext.name = value;
       fileInFileList.label = value;
       setValue("");
     }
-  
+
     if (fileInContext) {
       fetchFile(fileInContext);
     } else {
       message.error("Error: File selection error. Please try again.");
     }
-  
+
     setPreviewOpen(false);
   };
 
@@ -137,34 +141,35 @@ function Dragger() {
   const handleCancel = () => setPreviewOpen(false);
 
   const handlePreview = async (file) => {
+    context.setLoading(true); //LI
     setFileUID(file.uid);
     if (!file.url && !file.preview) {
-        if (file.type !== 'image/tiff' || file.type !== 'image/tif') {
-            if (file.path) { // Use the local path for Electron environment
-                const fs = window.require('fs');
-                const buffer = fs.readFileSync(file.path);
-                const base64 = buffer.toString('base64');
-                file.preview = `data:${file.type};base64,${base64}`;
-            } else {
-                file.preview = await getBase64(file.originFileObj);
-            }
+      if (file.type !== 'image/tiff' || file.type !== 'image/tif') {
+        if (file.path) { // Use the local path for Electron environment
+          const fs = window.require('fs');
+          const buffer = fs.readFileSync(file.path);
+          const base64 = buffer.toString('base64');
+          file.preview = `data:${file.type};base64,${base64}`;
         } else {
-            file.preview = file.thumbUrl;
+          file.preview = await getBase64(file.originFileObj);
         }
+      } else {
+        file.preview = file.thumbUrl;
+      }
     }
     setPreviewImage(file.url || file.preview);
     setPreviewOpen(true);
     setPreviewTitle(file.name || file.url.substring(file.url.lastIndexOf(path.sep) + 1));
     if (
-      context.files.find(targetFile => targetFile.uid === file.uid) && 
-      context.files.find(targetFile => targetFile.uid === file.uid).folderPath) 
-      {
-        processAndSetPath(
-          context.files.find(targetFile => targetFile.uid === file.uid)
-        .folderPath)
+      context.files.find(targetFile => targetFile.uid === file.uid) &&
+      context.files.find(targetFile => targetFile.uid === file.uid).folderPath) {
+      processAndSetPath(
+        context.files.find(targetFile => targetFile.uid === file.uid)
+          .folderPath)
     } else {
       processAndSetPath(path.dirname(file.originFileObj.path));
     }
+    context.setLoading(false); //LI
   };
 
   function processAndSetPath(info) {
@@ -175,10 +180,10 @@ function Dragger() {
 
     // Check if 'pytc-client' was found in the path
     if (pytcClientIndex === -1) {
-        // Handle the error: 'sample' not found
-        console.error("Error: Please upload from the sample folder. File path: " + path);
-        message.error(`${info.name} file upload failed.`);
-        return false;
+      // Handle the error: 'sample' not found
+      console.error("Error: Please upload from the sample folder. File path: " + path);
+      message.error(`${info.name} file upload failed.`);
+      return false;
     }
 
     let relativePath = pathSegments.slice(pytcClientIndex).join(path.sep);
@@ -233,16 +238,16 @@ function Dragger() {
         onCancel={handleCancel}
       >
         <Space direction="vertical">
-        <Space.Compact block>
-          
-        <select onChange={handleDropdownChange}>
-          <option value="" disabled selected>Please select input filetype</option>
-          <option value="Image">Image</option>
-          <option value="Label">Label</option>
-        </select>
-        <Button onClick={() => handleSubmit()}>Submit</Button>
-        <Button onClick={handleRevert}>Revert</Button>
-      </Space.Compact>
+          <Space.Compact block>
+
+            <select onChange={handleDropdownChange}>
+              <option value="" disabled selected>Please select input filetype</option>
+              <option value="Image">Image</option>
+              <option value="Label">Label</option>
+            </select>
+            <Button onClick={() => handleSubmit()}>Submit</Button>
+            <Button onClick={handleRevert}>Revert</Button>
+          </Space.Compact>
           <Space.Compact block>
             <Input
               value={value}

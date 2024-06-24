@@ -60,6 +60,7 @@ export const ContextWrapper = (props) => {
   const [inputLabel, setInputLabel] = usePersistedState('inputLabel', null);
   const [viewer, setViewer] = usePersistedState('viewer', null);
   const [tensorBoardURL, setTensorBoardURL] = usePersistedState('tensorBoardURL', null);
+  const [loading, setLoading] = useState(false); //LI
 
   return (
     <AppContext.Provider
@@ -96,6 +97,8 @@ export const ContextWrapper = (props) => {
         setCheckpointPath,
         tensorBoardURL,
         setTensorBoardURL,
+        loading,
+        setLoading,
       }}
     >
       {props.children}
