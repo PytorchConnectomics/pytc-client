@@ -67,21 +67,21 @@ function InputSelector (props) {
             size='middle'
           />
         </Form.Item>
-        {type === 'training'
-          ? (
-            <Form.Item label='Output Path'>
-              <Input
-                style={{
-                  width: '100%'
-                }}
-                placeholder='Please type output path'
-                value={context.outputPath ? context.outputPath : undefined}
-                onChange={handleOutputPathChange}
-                size='middle'
-              />
-            </Form.Item>
-            )
-          : null}
+        {
+          (
+          <Form.Item label='Output Path'>
+            <Input
+              style={{
+                width: '100%'
+              }}
+              placeholder='Please type output path'
+              value={context.outputPath ? context.outputPath : undefined}
+              onChange={handleOutputPathChange}
+              size='middle'
+            />
+          </Form.Item>
+          )
+          }
         {type === 'training'
           ? (
             <Form.Item label='Log Path'>
@@ -103,7 +103,7 @@ function InputSelector (props) {
                   width: '100%'
                 }}
                 placeholder='Please type checkpoint path'
-                value={context.outputPath ? context.outputPath : undefined}
+                value={context.checkpointPath ? context.checkpointPath : undefined}
                 onChange={handleCheckpointPathChange}
                 size='middle'
               />
