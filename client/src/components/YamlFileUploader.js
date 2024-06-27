@@ -143,10 +143,9 @@ const YamlFileUploader = (props) => {
               context.inputLabel.folderPath + context.inputLabel.name
 
             const inputPath = findCommonPartOfString(inputImage, inputLabel)
-            // yamlData.INFERENCE.INPUT_PATH = inputPath;
-            yamlData.INFERENCE.IMAGE_NAME = inputImage.replace(inputPath, '')
-            // yamlData.DATASET.LABEL_NAME = inputLabel.replace(inputPath, "");
-            // yamlData.DATASET.OUTPUT_PATH = context.outputPath;
+            yamlData.DATASET.INPUT_PATH = inputPath;
+            yamlData.INFERENCE.IMAGE_NAME = inputImage.replace(inputPath, "");
+            yamlData.INFERENCE.OUTPUT_PATH = context.outputPath;
           } else {
             message.error('Please input folder path of the file in preview')
           }
