@@ -156,7 +156,7 @@ const YamlFileUploader = (props) => {
         )
 
         context.setInferenceConfig(
-          yaml.safeDump(yamlData, { indent: 2 }).replace(/^\s*\n/gm, '')
+          yaml.dump(yamlData, { indent: 2 }).replace(/^\s*\n/gm, '')
         )
         // these are for slider
         YAMLContext.setNumGPUs(yamlData.SYSTEM.NUM_GPUS)
@@ -164,6 +164,7 @@ const YamlFileUploader = (props) => {
         YAMLContext.setLearningRate(yamlData.SOLVER.BASE_LR)
         YAMLContext.setSolverSamplesPerBatch(yamlData.SOLVER.SAMPLES_PER_BATCH)
       } catch (error) {
+        console.log(error)
         message.error('Error reading YAML file.')
       }
     }
