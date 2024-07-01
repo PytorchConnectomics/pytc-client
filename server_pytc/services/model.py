@@ -43,7 +43,9 @@ def stop_process(process_name):
         os.kill(int(pid), signal.SIGKILL)
         print(f"Process {process_name} Successfully Terminated")
     except Exception as e:
-        print(f"Error Encountered while attempting to stop the process: {process_name}, error: {e}")
+        print(
+            f"Error Encountered while attempting to stop the process: {process_name}, error: {e}"
+        )
 
 
 def stop_training():
