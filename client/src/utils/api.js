@@ -19,11 +19,26 @@ export async function getNeuroglancerViewer (image, label, scales) {
     )
   }
 }
+function handleError(error) {
+  if (error.response) {
+    throw new Error(
+      `${error.response.status}: ${error.response.data?.detail?.data}`
+    )
+  };
+  throw error;
+}
+export async function makeApiRequest(url, method, data = null) {
+  try {
+    const fullUrl = `${process.env.REACT_APP_API_PROTOCOL}://${process.env.REACT_APP_API_URL}/${url}`;
+    const res = await axios[method](url,data);
+    return res.data;
+  } catch (error) {
+    handleError(error);
+  }
+}
 
 export async function startModelTraining (
-  configurationYamlFile,
   trainingConfig,
-  outputPath,
   logPath
 ) {
   try {
@@ -37,18 +52,9 @@ export async function startModelTraining (
       trainingConfig
     })
 
-    const res = await axios.post(
-      `${process.env.REACT_APP_API_PROTOCOL}://${process.env.REACT_APP_API_URL}/start_model_training`,
-      data
-    )
-    return res.data
+    return makeApiRequest('start_model_training','post',data);
   } catch (error) {
-    if (error.response) {
-      throw new Error(
-        `${error.response.status}: ${error.response.data?.detail?.error}`
-      )
-    }
-    throw error
+    handleError(error);
   }
 }
 
@@ -58,12 +64,7 @@ export async function stopModelTraining () {
       `${process.env.REACT_APP_API_PROTOCOL}://${process.env.REACT_APP_API_URL}/stop_model_training`
     )
   } catch (error) {
-    if (error.response) {
-      throw new Error(
-        `${error.response.status}: ${error.response.data?.detail?.error}`
-      )
-    }
-    throw error
+    handleError(error);
   }
 }
 
@@ -84,19 +85,7 @@ export async function stopModelTraining () {
 // }
 
 export async function getTensorboardURL () {
-  try {
-    const res = await axios.get(
-      `${process.env.REACT_APP_API_PROTOCOL}://${process.env.REACT_APP_API_URL}/get_tensorboard_url`
-    )
-    return res.data
-  } catch (error) {
-    if (error.response) {
-      throw new Error(
-        `${error.response.status}: ${error.response.data?.detail?.error}`
-      )
-    }
-    throw error
-  }
+  return makeApiRequest('get_tensorboard_url', 'get');
 }
 
 export async function startModelInference (
@@ -121,12 +110,7 @@ export async function startModelInference (
     )
     return res.data
   } catch (error) {
-    if (error.response) {
-      throw new Error(
-        `${error.response.status}: ${error.response.data?.detail?.error}`
-      )
-    }
-    throw error
+    handleError(error);
   }
 }
 
@@ -136,11 +120,6 @@ export async function stopModelInference () {
       `${process.env.REACT_APP_API_PROTOCOL}://${process.env.REACT_APP_API_URL}/stop_model_inference`
     )
   } catch (error) {
-    if (error.response) {
-      throw new Error(
-        `${error.response.status}: ${error.response.data?.detail?.error}`
-      )
-    }
-    throw error
+    handleError(error);
   }
 }
