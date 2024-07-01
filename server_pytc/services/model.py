@@ -33,8 +33,7 @@ def start_training(dict: dict):
     print("initialize_tensorboard")
 
 
-def stop_training():
-    process_name = "python pytorch_connectomics/scripts/main.py"
+def stop_process(process_name):
     try:
         process_line = os.popen("ps ax | grep " + process_name + " | grep -v grep")
         print(process_line)
@@ -42,10 +41,16 @@ def stop_training():
         pid = fields[0]
         print(pid)
         os.kill(int(pid), signal.SIGKILL)
-        print("Process Successfully Terminated")
+        print(f"Process {process_name} Successfully Terminated")
     except Exception as e:
-        print(f"Error Encountered while Running Script {e}")
+        print(
+            f"Error Encountered while attempting to stop the process: {process_name}, error: {e}"
+        )
 
+
+def stop_training():
+    process_name = "python pytorch_connectomics/scripts/main.py"
+    stop_process(process_name)
     stop_tensorboard()
 
 
@@ -73,16 +78,7 @@ def get_tensorboard():
 
 def stop_tensorboard():
     process_name = "tensorboard"
-    try:
-        process_line = os.popen("ps ax | grep " + process_name + " | grep -v grep")
-        print(process_line)
-        fields = process_line.split()
-        pid = fields[0]
-        print(pid)
-        os.kill(int(pid), signal.SIGKILL)
-        print("Process Successfully Terminated")
-    except Exception as e:
-        print(f"Error Encountered while Running Script {e}")
+    stop_process(process_name)
 
 
 def start_inference(dict: dict):
@@ -113,15 +109,5 @@ def start_inference(dict: dict):
 
 def stop_inference():
     process_name = "python pytorch_connectomics/scripts/main.py"
-    try:
-        process_line = os.popen("ps ax | grep " + process_name + " | grep -v grep")
-        print(process_line)
-        fields = process_line.split()
-        pid = fields[0]
-        print(pid)
-        os.kill(int(pid), signal.SIGKILL)
-        print("Process Successfully Terminated")
-    except Exception as e:
-        print(f"Error Encountered while Running Script {e}")
-
+    stop_process(process_name)
     stop_tensorboard()

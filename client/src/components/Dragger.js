@@ -1,4 +1,4 @@
-/* global FileReader */
+//  global FileReader
 import React, { useContext, useState } from 'react'
 import { Button, Input, message, Modal, Space, Upload } from 'antd'
 import { InboxOutlined } from '@ant-design/icons'

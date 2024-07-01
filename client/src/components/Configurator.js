@@ -1,4 +1,4 @@
-/* global localStorage */
+// global localStorage
 import React, { useContext, useState } from 'react'
 import { Button, message, Steps, theme } from 'antd'
 import YamlFileUploader from './YamlFileUploader'

@@ -2,21 +2,24 @@
 FROM nvidia/cuda:11.1.1-devel-ubi8
 
 # Enable AppStream and install Python 3.9
-RUN yum -y module enable python39
-RUN yum install -y python39
-RUN yum install -y python39-devel
-RUN python3.9 --version || (echo "Python installation failed" && exit 1)
+RUN yum -y module enable python39 && \
+    yum install -y python39-3.9.2 && \
+    yum install -y python39-devel-3.9.2 && \
+    yum clean all && \ 
+    (python3.9 --version || echo "Python installation failed" && exit 1)
+
 # Create a symbolic link to bind python to python3.9
 RUN ln -s /usr/bin/python3.9 /usr/bin/python
 
 # Install pip (if not already included)
+SHELL ["/bin/bash", "-o", "pipefail", "-c"]
 RUN curl -sS https://bootstrap.pypa.io/get-pip.py | python
 
 # Set working directory 
 WORKDIR /app
 
 # Install dependencies
-RUN pip3 install torch torchvision cuda-python
+RUN pip3 install --no-cache-dir torch==1.9.0 torchvision==0.10.0 cuda-python==11.1.1
 
 COPY ./pytorch_connectomics /app/pytorch_connectomics
 COPY ./samples_pytc /app/samples_pytc
@@ -24,11 +27,12 @@ COPY ./server_pytc /app/server_pytc
 COPY ./server_api /app/server_api
 
 WORKDIR /app/pytorch_connectomics
-RUN yum install -y libglvnd-glx
-RUN pip3 install --editable .
+RUN yum install -y libglvnd-glx-1.3.2 && \
+    yum clean all && \
+    pip3 install --no-cache-dir --editable .
 
 WORKDIR /app/server_api
-RUN pip3 install -r requirements.txt
+RUN pip3 install --no-cache-dir -r requirements.txt
 
 WORKDIR /app
 # Copies the startup script, and runs it at CMD
