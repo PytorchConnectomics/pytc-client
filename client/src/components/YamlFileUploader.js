@@ -105,7 +105,6 @@ const YamlFileUploader = (props) => {
     }
   }
 
-
   const handleFileUpload = (file) => {
     context.setUploadedYamlFile(file)
     const reader = new FileReader()
@@ -124,7 +123,7 @@ const YamlFileUploader = (props) => {
           YAMLContext.setSolverSamplesPerBatch(
             yamlData.SOLVER.SAMPLES_PER_BATCH
           )
-          updateInputSelectorInformation(context, yamlData);
+          updateInputSelectorInformation(context, yamlData)
         } else {
           // type === "inference"
           context.setInferenceConfig(
@@ -135,7 +134,7 @@ const YamlFileUploader = (props) => {
           )
           YAMLContext.setAugNum(yamlData.INFERENCE.AUG_NUM)
           // update InputSelector's information
-          updateInputSelectorInformation(context, yamlData);
+          updateInputSelectorInformation(context, yamlData)
         }
 
         context.setTrainingConfig(
