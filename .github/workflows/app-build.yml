@@ -38,6 +38,9 @@ jobs:
           Xvfb :99 -screen 0 1280x720x24 > /dev/null 2>&1 &
 
       - name: Build Client App
+        env:
+          ELECTRON_ENABLE_LOGGING: true
+          DISPLAY: ':99.0'
         run: |
           cd client
           npm run build
@@ -51,6 +54,3 @@ jobs:
             echo 'Electron app has exited.'
             exit 1
           fi
-        env:
-          DISPLAY: ':99.0'
-        ELECTRON_ENABLE_LOGGING: true

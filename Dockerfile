@@ -6,20 +6,20 @@ RUN yum -y module enable python39 && \
     yum install -y python39-3.9.2 && \
     yum install -y python39-devel-3.9.2 && \
     yum clean all && \ 
-    python3.9 --version || (echo "Python installation failed" && exit 1)
+    (python3.9 --version || echo "Python installation failed" && exit 1)
 
 # Create a symbolic link to bind python to python3.9
 RUN ln -s /usr/bin/python3.9 /usr/bin/python
 
 # Install pip (if not already included)
-SHELL ["/bin/bash", "-o", "pipfail", "-c"]
+SHELL ["/bin/bash", "-o", "pipefail", "-c"]
 RUN curl -sS https://bootstrap.pypa.io/get-pip.py | python
 
 # Set working directory 
 WORKDIR /app
 
 # Install dependencies
-RUN pip3 install --np-cache-dir torch==1.9.0 torchvision==0.10.0 cuda-python==11.1.1
+RUN pip3 install --no-cache-dir torch==1.9.0 torchvision==0.10.0 cuda-python==11.1.1
 
 COPY ./pytorch_connectomics /app/pytorch_connectomics
 COPY ./samples_pytc /app/samples_pytc

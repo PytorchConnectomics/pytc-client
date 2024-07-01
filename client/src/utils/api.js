@@ -19,21 +19,21 @@ export async function getNeuroglancerViewer (image, label, scales) {
     )
   }
 }
-function handleError(error) {
+function handleError (error) {
   if (error.response) {
     throw new Error(
       `${error.response.status}: ${error.response.data?.detail?.data}`
     )
   };
-  throw error;
+  throw error
 }
-export async function makeApiRequest(url, method, data = null) {
+export async function makeApiRequest (url, method, data = null) {
   try {
-    const fullUrl = `${process.env.REACT_APP_API_PROTOCOL}://${process.env.REACT_APP_API_URL}/${url}`;
-    const res = await axios[method](url,data);
-    return res.data;
+    // const fullUrl = `${process.env.REACT_APP_API_PROTOCOL}://${process.env.REACT_APP_API_URL}/${url}`;
+    const res = await axios[method](url, data)
+    return res.data
   } catch (error) {
-    handleError(error);
+    handleError(error)
   }
 }
 
@@ -52,9 +52,9 @@ export async function startModelTraining (
       trainingConfig
     })
 
-    return makeApiRequest('start_model_training','post',data);
+    return makeApiRequest('start_model_training', 'post', data)
   } catch (error) {
-    handleError(error);
+    handleError(error)
   }
 }
 
@@ -64,7 +64,7 @@ export async function stopModelTraining () {
       `${process.env.REACT_APP_API_PROTOCOL}://${process.env.REACT_APP_API_URL}/stop_model_training`
     )
   } catch (error) {
-    handleError(error);
+    handleError(error)
   }
 }
 
@@ -85,7 +85,7 @@ export async function stopModelTraining () {
 // }
 
 export async function getTensorboardURL () {
-  return makeApiRequest('get_tensorboard_url', 'get');
+  return makeApiRequest('get_tensorboard_url', 'get')
 }
 
 export async function startModelInference (
@@ -110,7 +110,7 @@ export async function startModelInference (
     )
     return res.data
   } catch (error) {
-    handleError(error);
+    handleError(error)
   }
 }
 
@@ -120,6 +120,6 @@ export async function stopModelInference () {
       `${process.env.REACT_APP_API_PROTOCOL}://${process.env.REACT_APP_API_URL}/stop_model_inference`
     )
   } catch (error) {
-    handleError(error);
+    handleError(error)
   }
 }
