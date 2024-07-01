@@ -32,9 +32,7 @@ def start_training(dict: dict):
     initialize_tensorboard(dict["logPath"])
     print("initialize_tensorboard")
 
-
-def stop_training():
-    process_name = "python pytorch_connectomics/scripts/main.py"
+def stop_process(process_name):
     try:
         process_line = os.popen("ps ax | grep " + process_name + " | grep -v grep")
         print(process_line)
@@ -42,10 +40,14 @@ def stop_training():
         pid = fields[0]
         print(pid)
         os.kill(int(pid), signal.SIGKILL)
-        print("Process Successfully Terminated")
+        print(f"Process {process_name} Successfully Terminated")
     except Exception as e:
-        print(f"Error Encountered while Running Script {e}")
+        print(f"Error Encountered while attempting to stop the process: {process_name}, error: {e}")
 
+
+def stop_training():
+    process_name = "python pytorch_connectomics/scripts/main.py"
+    stop_process(process_name)
     stop_tensorboard()
 
 
@@ -70,19 +72,9 @@ def initialize_tensorboard(logPath):
 def get_tensorboard():
     return tensorboard_url
 
-
 def stop_tensorboard():
     process_name = "tensorboard"
-    try:
-        process_line = os.popen("ps ax | grep " + process_name + " | grep -v grep")
-        print(process_line)
-        fields = process_line.split()
-        pid = fields[0]
-        print(pid)
-        os.kill(int(pid), signal.SIGKILL)
-        print("Process Successfully Terminated")
-    except Exception as e:
-        print(f"Error Encountered while Running Script {e}")
+    stop_process(process_name)
 
 
 def start_inference(dict: dict):
