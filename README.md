@@ -12,7 +12,7 @@ docker run -it -p 4242:4242 -p 4243:4243 -p 4244:4244 -p 6006:6006 --shm-size=8g
 ## Installation
 0. Create a Virtual Environment via. Conda
 
-```
+```bash
 conda create -n pytc python=3.9
 conda activate pytc
 conda install pytorch torchvision cudatoolkit=11.3 -c pytorch
@@ -23,6 +23,7 @@ Alternatively, dependencies can be installed with native Python via. the followi
 ```bash
 # Create a venv
 python -m venv .venv
+# if running in windows, replace the line above with '.\.venv\Scripts\activate.bat'
 source .venv/bin/activate
 
 # Install dependencies
@@ -39,19 +40,27 @@ conda install pytorch torchvision
 
 # If installing via native python
 python -m venv .venv
-source .venv/bin/activate
+source .venv/bin/activate 
+# if running in windows, replace the line above with '.\.venv\Scripts\activate.bat'
 pip install torch torchvision
 ```
 
 1. Client
-```
+```bash
 cd client
 npm install
+#(for windows user, modify the file "pytc-client/client/package.json" before running "npm run build")
+#ATTENTION: modify "pytc-client/client/package.json", NOT "pytc-client/package.json"  
+#In package.json, change the line under the "scripts" key:
+#     "build": "CI=false react-scripts build",
+# to 
+#     "build": "react-scripts build",
+#Because windows doesn't recognize environment variable "CI"
 npm run build
 ```
 
 2. API Server:
-```
+```bash
 cd server_api
 pip install -r requirements.txt
 ```
@@ -59,7 +68,7 @@ pip install -r requirements.txt
 3. Pytc-connectomics:
 
 In root folder,
-```
+```bash
 git clone https://github.com/zudi-lin/pytorch_connectomics.git
 cd pytorch_connectomics
 pip install --editable .
@@ -67,7 +76,7 @@ pip install --editable .
 
 ## Run Project
 ### To run
-```
+```bash
 # if running on mac or linux:
 ./start.sh
 
@@ -76,13 +85,10 @@ pip install --editable .
 
 ```
 In a separate terminal
-```
+```bash
 cd client
 npm run electron
 ```
 
-Next, please move the image and labels that you'd like to train your models off of into the `samples_pytc` folder. 
-Afterwards, upload the images as per the prompts on the applicaation.
-
 Below is a link to a video demo: showing how to set up and run the app:
-https://www.loom.com/share/45c09b36bf37408fb3e5a9172e427deb?sid=2777bf8f-a705-4d47-b17a-adf882994168
+[video demo](https://www.loom.com/share/45c09b36bf37408fb3e5a9172e427deb?sid=2777bf8f-a705-4d47-b17a-adf882994168)

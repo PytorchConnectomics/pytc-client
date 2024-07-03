@@ -1,46 +1,48 @@
-import React, { useContext, useEffect, useState } from "react";
-import { Input, message } from "antd";
-import yaml from "js-yaml";
-import { AppContext } from "../contexts/GlobalContext";
-import { YamlContext } from "../contexts/YamlContext";
+import React, { useContext, useEffect, useState } from 'react'
+import { Input, message } from 'antd'
+import yaml from 'js-yaml'
+import { AppContext } from '../contexts/GlobalContext'
 
 const YamlFileEditor = (props) => {
-  const context = useContext(AppContext);
-  const YAMLContext = useContext(YamlContext);
-  const [yamlContent, setYamlContent] = useState("");
+  const context = useContext(AppContext)
+  const [yamlContent, setYamlContent] = useState('')
 
-  const { type } = props;
+  const { type } = props
 
   const handleTextAreaChange = (event) => {
-    const updatedYamlContent = event.target.value;
-    setYamlContent(updatedYamlContent);
-    if (type === "training") {
-      context.setTrainingConfig(updatedYamlContent);
+    const updatedYamlContent = event.target.value
+    setYamlContent(updatedYamlContent)
+    if (type === 'training') {
+      context.setTrainingConfig(updatedYamlContent)
     } else {
-      context.setInferenceConfig(updatedYamlContent);
+      context.setInferenceConfig(updatedYamlContent)
     }
     try {
-      const yamlData = yaml.safeLoad(updatedYamlContent);
+      // const yamlData = yaml.load(updatedYamlContent);
+      yaml.load(updatedYamlContent)
 
       // YAMLContext.setNumGPUs(yamlData.SYSTEM.NUM_GPUS);
       // YAMLContext.setNumCPUs(yamlData.SYSTEM.NUM_CPUS);
       // YAMLContext.setLearningRate(yamlData.SOLVER.BASE_LR);
       // YAMLContext.setSamplesPerBatch(yamlData.SOLVER.SAMPLES_PER_BATCH);
     } catch (error) {
-      message.error("Error parsing YAML content.");
+      message.error('Error parsing YAML content.')
     }
-  };
+  }
   useEffect(() => {
-    if (type === "training") {
-      setYamlContent(context.trainingConfig);
-    } else {
-      setYamlContent(context.inferenceConfig);
+    if (type === 'training') {
+      setYamlContent(context.trainingConfig)
+    }
+
+    if (type === 'inference') {
+      setYamlContent(context.inferenceConfig)
     }
   }, [
     context.uploadedYamlFile,
     context.trainingConfig,
     context.inferenceConfig,
-  ]);
+    type
+  ])
 
   return (
     <div>
@@ -57,6 +59,6 @@ const YamlFileEditor = (props) => {
         />
       )}
     </div>
-  );
-};
-export default YamlFileEditor;
+  )
+}
+export default YamlFileEditor
