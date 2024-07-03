@@ -1,3 +1,4 @@
+---
 name: Client App Build and Test
 
 on:
@@ -16,40 +17,40 @@ jobs:
   build-and-test-client:
     runs-on: ubuntu-latest
     steps:
-    - name: Check out the repo
-      uses: actions/checkout@v2
+      - name: Check out the repo
+        uses: actions/checkout@v2
 
-    - name: Set up Node.js
-      uses: actions/setup-node@v3
-      with:
-        node-version: '18'
+      - name: Set up Node.js
+        uses: actions/setup-node@v3
+        with:
+          node-version: '18'
 
-    - name: Install Dependencies
-      run: |
-        cd client
-        npm install
+      - name: Install Dependencies
+        run: |
+          cd client
+          npm install
 
-    - name: Install and start Xvfb
-      run: |
-        sudo apt-get update
-        sudo apt-get install -y xvfb
-        export DISPLAY=':99.0'
-        Xvfb :99 -screen 0 1280x720x24 > /dev/null 2>&1 &
+      - name: Install and start Xvfb
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y xvfb
+          export DISPLAY=':99.0'
+          Xvfb :99 -screen 0 1280x720x24 > /dev/null 2>&1 &
 
-    - name: Build Client App
-      run: |
-        cd client
-        npm run build
-        npm run electron &
-        ELECTRON_PID=$!
-        sleep 150 
-        if ps -p "$ELECTRON_PID" > /dev/null; then
-           echo 'Electron app is still running, Ending the process.'
-           kill "$ELECTRON_PID"
-        else
-           echo 'Electron app has exited.'
-           exit 1
-        fi
-      env:
-        DISPLAY: ':99.0'
-        ELECTRON_ENABLE_LOGGING: true
+      - name: Build Client App
+        env:
+          ELECTRON_ENABLE_LOGGING: true
+          DISPLAY: ':99.0'
+        run: |
+          cd client
+          npm run build
+          npm run electron &
+          ELECTRON_PID=$!
+          sleep 150 
+          if ps -p "$ELECTRON_PID" > /dev/null; then
+            echo 'Electron app is still running, Ending the process.'
+            kill "$ELECTRON_PID"
+          else
+            echo 'Electron app has exited.'
+            exit 1
+          fi
