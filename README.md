@@ -49,13 +49,6 @@ pip install torch torchvision
 ```bash
 cd client
 npm install
-#(for windows user, modify the file "pytc-client/client/package.json" before running "npm run build")
-#ATTENTION: modify "pytc-client/client/package.json", NOT "pytc-client/package.json"  
-#In package.json, change the line under the "scripts" key:
-#     "build": "CI=false react-scripts build",
-# to 
-#     "build": "react-scripts build",
-#Because windows doesn't recognize environment variable "CI"
 npm run build
 ```
 
