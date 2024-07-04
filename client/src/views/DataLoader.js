@@ -1,5 +1,5 @@
 import React, { useContext, useEffect, useState } from 'react'
-import Dragger from '../components/Dragger'
+import {Dragger} from '../components/Dragger'
 import { Button, Input, Select, Space, Typography } from 'antd'
 import { ArrowRightOutlined } from '@ant-design/icons'
 import { AppContext } from '../contexts/GlobalContext'
