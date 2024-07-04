@@ -8,9 +8,9 @@ import UTIF from 'utif';
 
 const path = require('path')
 
-function Dragger () {
+export function Dragger () {
   const context = useContext(AppContext)
-  const { Dragger } = Upload
+  // const { Dragger } = Upload
 
   const getBase64 = (file) =>
     new Promise((resolve, reject) => {
@@ -184,26 +184,7 @@ function Dragger () {
   const handlePreview = async (file) => {
     setFileUID(file.uid);
     setPreviewOpen(true);
-    //if (!file.url && !file.preview) {
-        //if (file.type !== "image/tiff" || file.type !== "image/tif") {
-        if (file.type !== "image/tiff" && file.type !== "image/tif") {
-            if (file.path) { // Use the local path for Electron environment
-                file.preview = await getBase64(file);
-                setPreviewImage(file.preview);
-            } else {
-                file.preview = await getBase64(file.originFileObj);
-                setPreviewImage(file.preview);
-            }
-        } else {
-            generateTiffPreview(file.originFileObj, (dataURL) => {
-              console.log("HandlePreview dataURL", dataURL);
-              setPreviewImage(dataURL);
-              file.thumbUrl = dataURL;
-            });
-        }
-    //}
-    //setPreviewImage(file.url || file.preview);
-    //setPreviewOpen(true);
+    setPreviewImage(file.thumbUrl);
     setPreviewTitle(file.name || file.url.substring(file.url.lastIndexOf('/') + 1));
     if (
       context.files.find(targetFile => targetFile.uid === file.uid) &&
@@ -227,13 +208,14 @@ function Dragger () {
     // Create a URL for the thumbnail using object URL
     //if (file.type !== "image/tiff" || file.type !== "image/tif") {
     if (file.type === "image/tiff" || file.type === "image/tif") {
-      generateTiffPreview(file, (dataURL) => {
-        file.thumbUrl = dataURL; 
-        setPreviewImage(dataURL);
-        console.log('file thumbUrl inside callback is', file.thumbUrl);
-      });
-      file.thumbUrl = previewImage || DEFAULT_IMAGE ; 
-      console.log('file thumbUrl is', file.thumbUrl);
+      return new Promise((resolve) => {
+        generateTiffPreview(file, (dataURL) => {
+          file.thumbUrl = dataURL; 
+          console.log('file thumbUrl inside callback is', file.thumbUrl);
+          resolve(file)
+        });
+        console.log('file thumbUrl is', file.thumbUrl);
+      })
     } else {
       file.thumbUrl = URL.createObjectURL(file);
     }
@@ -242,7 +224,7 @@ function Dragger () {
 
   return (
     <>
-      <Dragger
+      <Upload.Dragger 
         multiple
         onChange={onChange}
         customRequest={uploadImage}
@@ -260,7 +242,7 @@ function Dragger () {
         <p className='ant-upload-text'>
           Click or drag file to this area to upload
         </p>
-      </Dragger>
+      </Upload.Dragger>
       <Button type='default' onClick={handleClearCache}>
         Clear File Cache
       </Button>
@@ -301,4 +283,3 @@ function Dragger () {
   )
 }
 
-export default Dragger
