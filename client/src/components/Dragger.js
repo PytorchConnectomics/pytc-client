@@ -10,7 +10,6 @@ const path = require('path')
 
 export function Dragger () {
   const context = useContext(AppContext)
-  // const { Dragger } = Upload
 
   const getBase64 = (file) =>
     new Promise((resolve, reject) => {
@@ -117,7 +116,6 @@ export function Dragger () {
   }
 
   const handleCancel = () => setPreviewOpen(false)
-
   // Function to generate preview for TIFF files
   const generateTiffPreview = (file, callback) => {
     const reader = new FileReader();
@@ -158,12 +156,9 @@ export function Dragger () {
           imageData.data.set(rgba);
           ctx.putImageData(imageData, 0, 0);
 
-          // Set the preview as a data URL
           const dataURL = canvas.toDataURL();
           console.log('Canvas data URL:', dataURL);
-          //setPreviewImage(dataURL); 
 
-          // Call the callback function
           callback(dataURL);
 
         } else {
@@ -206,7 +201,6 @@ export function Dragger () {
   // when click or drag file to this area to upload, below function will be deployed.
   const handleBeforeUpload = (file) => {
     // Create a URL for the thumbnail using object URL
-    //if (file.type !== "image/tiff" || file.type !== "image/tif") {
     if (file.type === "image/tiff" || file.type === "image/tif") {
       return new Promise((resolve) => {
         generateTiffPreview(file, (dataURL) => {
