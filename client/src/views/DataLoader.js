@@ -24,9 +24,9 @@ function DataLoader (props) {
       currentImage,
       currentLabel,
       scales.split(',').map(Number)
-    );
+    )
     context.setLoading(false)
-  };
+  }
   const handleImageChange = (value) => {
     console.log(`selected ${value}`)
     setCurrentImage(context.files.find((image) => image.uid === value))
