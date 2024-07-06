@@ -97,7 +97,7 @@ export const ContextWrapper = (props) => {
         tensorBoardURL,
         setTensorBoardURL,
         loading,
-        setLoading,
+        setLoading
       }}
     >
       {props.children}
