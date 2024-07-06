@@ -11,7 +11,6 @@ const path = require('path')
 export function Dragger () {
   const context = useContext(AppContext)
   const [uploading, setUploading] = useState(false)
-
   const getBase64 = (file) =>
     new Promise((resolve, reject) => {
       const reader = new FileReader()

@@ -23,6 +23,7 @@ Alternatively, dependencies can be installed with native Python via. the followi
 ```bash
 # Create a venv
 python -m venv .venv
+# if running in windows, replace the line above with '.\.venv\Scripts\activate.bat'
 source .venv/bin/activate
 
 # Install dependencies
@@ -39,7 +40,8 @@ conda install pytorch torchvision
 
 # If installing via native python
 python -m venv .venv
-source .venv/bin/activate
+source .venv/bin/activate 
+# if running in windows, replace the line above with '.\.venv\Scripts\activate.bat'
 pip install torch torchvision
 ```
 
@@ -80,9 +82,6 @@ In a separate terminal
 cd client
 npm run electron
 ```
-
-Next, please move the image and labels that you'd like to train your models off of into the `samples_pytc` folder.
-Afterwards, upload the images as per the prompts on the application.
 
 Below is a link to a video demo: showing how to set up and run the app:
 [video demo](https://www.loom.com/share/45c09b36bf37408fb3e5a9172e427deb?sid=2777bf8f-a705-4d47-b17a-adf882994168)
