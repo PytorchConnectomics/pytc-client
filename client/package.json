@@ -11,7 +11,6 @@
     "antd": "^5.18.1",
     "axios": "^1.7.2",
     "buffer": "^6.0.3",
-    "electron": "^27.3.11",
     "js-yaml": "^4.1.0",
     "localforage": "^1.10.0",
     "nth-check": "^2.1.1",
@@ -55,6 +54,7 @@
     "cross-env": "^7.0.3",
     "electron-reload": "^2.0.0-alpha.1",
     "prettier": "^3.3.2",
+    "electron": "^27.3.11",
     "electron-builder": "^22.10.5"
   },
   "build": {
