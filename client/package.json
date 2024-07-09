@@ -29,7 +29,8 @@
     "build": "cross-env CI=false react-scripts build",
     "test": "react-scripts test",
     "eject": "react-scripts eject",
-    "electron": "electron ."
+    "electron": "electron .",
+    "dist": "electron-builder"
   },
   "eslintConfig": {
     "extends": [
@@ -53,7 +54,25 @@
     "@babel/plugin-proposal-private-property-in-object": "^7.16.7",
     "cross-env": "^7.0.3",
     "electron-reload": "^2.0.0-alpha.1",
-    "prettier": "^3.3.2"
+    "prettier": "^3.3.2",
+    "electron-builder": "^22.10.5"
+  },
+  "build": {
+    "appId": "com.example.pytcclient",
+    "mac": {
+      "category": "public.app-category.utilities"
+    },
+    "files": [
+      "dist/**/*",
+      "node_modules/**/*",
+      "package.json"
+    ],
+    "extraResources": [
+      {
+        "from": "../dist/pytc_backend",
+        "to": "pytc_backend"
+      }
+    ]
   },
   "overrides": {
     "nth-check": "$nth-check",
