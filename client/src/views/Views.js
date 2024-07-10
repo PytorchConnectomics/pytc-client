@@ -46,7 +46,7 @@ function Views () {
   ) => {
     try {
       const viewerId = currentImage.uid + currentLabel.uid + JSON.stringify(scales)
-      let updatedViewers = viewers;
+      let updatedViewers = viewers
       const exists = viewers.find(
         (viewer) => viewer.key === currentImage.uid + currentLabel.uid
       )
@@ -60,7 +60,7 @@ function Views () {
         scales
       )
       const newUrl = res.replace(/\/\/[^:/]+/, '//localhost')
-        // console.log('Viewer at ', newUrl)
+      // console.log('Viewer at ', newUrl)
 
       setViewers([
         ...updatedViewers,
