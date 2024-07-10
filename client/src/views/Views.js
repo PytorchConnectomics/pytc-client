@@ -45,28 +45,31 @@ function Views () {
     scales
   ) => {
     try {
+      const viewerId = currentImage.uid + currentLabel.uid + JSON.stringify(scales)
+      let updatedViewers = viewers;
       const exists = viewers.find(
         (viewer) => viewer.key === currentImage.uid + currentLabel.uid
       )
-      console.log(exists, viewers)
-      if (!exists) {
-        const res = await getNeuroglancerViewer(
-          currentImage,
-          currentLabel,
-          scales
-        )
-        const newUrl = res.replace(/\/\/[^:/]+/, '//localhost')
-        console.log('Viewer at ', newUrl)
-
-        setViewers([
-          ...viewers,
-          {
-            key: currentImage.uid + currentLabel.uid,
-            title: currentImage.name + ' & ' + currentLabel.name,
-            viewer: newUrl
-          }
-        ])
+      // console.log(exists, viewers)
+      if (exists) {
+        updatedViewers = viewers.filter((viewer) => viewer.key !== viewerId)
       }
+      const res = await getNeuroglancerViewer(
+        currentImage,
+        currentLabel,
+        scales
+      )
+      const newUrl = res.replace(/\/\/[^:/]+/, '//localhost')
+        // console.log('Viewer at ', newUrl)
+
+      setViewers([
+        ...updatedViewers,
+        {
+          key: viewerId,
+          title: currentImage.name + ' & ' + currentLabel.name,
+          viewer: newUrl
+        }
+      ])
     } catch (e) {
       console.log(e)
     }
