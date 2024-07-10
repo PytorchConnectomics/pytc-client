@@ -52,10 +52,9 @@
   "devDependencies": {
     "@babel/plugin-proposal-private-property-in-object": "^7.16.7",
     "cross-env": "^7.0.3",
-    "electron-reload": "^2.0.0-alpha.1",
-    "prettier": "^3.3.2",
     "electron": "^27.3.11",
-    "electron-builder": "^22.10.5"
+    "electron-builder": "^24.13.3",
+    "prettier": "^3.3.2"
   },
   "build": {
     "appId": "com.example.pytcclient",
