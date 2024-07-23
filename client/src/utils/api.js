@@ -29,7 +29,7 @@ function handleError (error) {
 }
 export async function makeApiRequest (url, method, data = null) {
   try {
-    const fullUrl = `${process.env.REACT_APP_API_PROTOCOL}://${process.env.REACT_APP_API_URL}/${url}`;
+    const fullUrl = `${process.env.REACT_APP_API_PROTOCOL}://${process.env.REACT_APP_API_URL}/${url}`
     const res = await axios[method](fullUrl, data)
     return res.data
   } catch (error) {
