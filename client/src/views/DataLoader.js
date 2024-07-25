@@ -1,8 +1,9 @@
 import React, { useContext, useEffect, useState } from 'react'
-import {Dragger} from '../components/Dragger'
+import { Dragger } from '../components/Dragger'
 import { Button, Input, Select, Space, Typography } from 'antd'
 import { ArrowRightOutlined } from '@ant-design/icons'
 import { AppContext } from '../contexts/GlobalContext'
+import LoadingIndicator from '../components/LoadingIndicator'
 import './DataLoader.css'
 
 const { Title } = Typography
@@ -16,13 +17,15 @@ function DataLoader (props) {
 
   const handleVisualizeButtonClick = async (event) => {
     event.preventDefault()
+    context.setLoading(true)
     context.setCurrentImage(currentImage)
     context.setCurrentLabel(currentLabel)
-    fetchNeuroglancerViewer(
+    await fetchNeuroglancerViewer(
       currentImage,
       currentLabel,
       scales.split(',').map(Number)
     )
+    context.setLoading(false)
   }
   const handleImageChange = (value) => {
     console.log(`selected ${value}`)
