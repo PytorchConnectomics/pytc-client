@@ -93,19 +93,19 @@ function Views () {
           <>
             <Sider
             // collapsible
-            collapsed={collapsed}
-            onCollapse={(value) => setCollapsed(value)}
-            theme='light'
-            collapsedWidth='0'
-          >
-            <DataLoader fetchNeuroglancerViewer={fetchNeuroglancerViewer} />
-          </Sider>
-            <Layout className='site-layout'>
-            <Content
-              style={{
-                margin: '0 16px'
-              }}
+              collapsed={collapsed}
+              onCollapse={(value) => setCollapsed(value)}
+              theme='light'
+              collapsedWidth='0'
             >
+              <DataLoader fetchNeuroglancerViewer={fetchNeuroglancerViewer} />
+            </Sider>
+            <Layout className='site-layout'>
+              <Content
+                style={{
+                  margin: '0 16px'
+                }}
+              >
               <Menu
                 onClick={onClick}
                 selectedKeys={[current]}
@@ -113,8 +113,8 @@ function Views () {
                 items={items}
               />
               {renderMenu()}
-            </Content>
-          </Layout>
+              </Content>
+            </Layout>
           </>
           )}
     </Layout>
