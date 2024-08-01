@@ -12,6 +12,7 @@ const { Content, Sider } = Layout
 function Views () {
   const [current, setCurrent] = useState('visualization')
   const [viewers, setViewers] = useState([])
+  const [isLoading, setIsLoading] = useState(false)
   console.log(viewers)
 
   const onClick = (e) => {
@@ -44,31 +45,38 @@ function Views () {
     currentLabel,
     scales
   ) => {
+    setIsLoading(true)
     try {
+      const viewerId = currentImage.uid + currentLabel.uid + JSON.stringify(scales)
+      let updatedViewers = viewers
       const exists = viewers.find(
-        (viewer) => viewer.key === currentImage.uid + currentLabel.uid
+        // (viewer) => viewer.key === currentImage.uid + currentLabel.uid
+        (viewer) => viewer.key === viewerId
       )
-      console.log(exists, viewers)
-      if (!exists) {
-        const res = await getNeuroglancerViewer(
-          currentImage,
-          currentLabel,
-          scales
-        )
-        const newUrl = res.replace(/\/\/[^:/]+/, '//localhost')
-        console.log('Viewer at ', newUrl)
-
-        setViewers([
-          ...viewers,
-          {
-            key: currentImage.uid + currentLabel.uid,
-            title: currentImage.name + ' & ' + currentLabel.name,
-            viewer: newUrl
-          }
-        ])
+      // console.log(exists, viewers)
+      if (exists) {
+        updatedViewers = viewers.filter((viewer) => viewer.key !== viewerId)
       }
+      const res = await getNeuroglancerViewer(
+        currentImage,
+        currentLabel,
+        scales
+      )
+      const newUrl = res.replace(/\/\/[^:/]+/, '//localhost')
+      console.log('Current Viewer at ', newUrl)
+
+      setViewers([
+        ...updatedViewers,
+        {
+          key: viewerId,
+          title: currentImage.name + ' & ' + currentLabel.name,
+          viewer: newUrl
+        }
+      ])
+      setIsLoading(false)
     } catch (e) {
       console.log(e)
+      setIsLoading(false)
     }
   }
 
@@ -79,30 +87,36 @@ function Views () {
         minWidth: '90vw'
       }}
     >
-      <Sider
-        // collapsible
-        collapsed={collapsed}
-        onCollapse={(value) => setCollapsed(value)}
-        theme='light'
-        collapsedWidth='0'
-      >
-        <DataLoader fetchNeuroglancerViewer={fetchNeuroglancerViewer} />
-      </Sider>
-      <Layout className='site-layout'>
-        <Content
-          style={{
-            margin: '0 16px'
-          }}
-        >
-          <Menu
-            onClick={onClick}
-            selectedKeys={[current]}
-            mode='horizontal'
-            items={items}
-          />
-          {renderMenu()}
-        </Content>
-      </Layout>
+      {isLoading ? (
+        <div>Loading the viewer ...</div>
+      ) : (
+        <React.Fragment>
+          <Sider
+            // collapsible
+            collapsed={collapsed}
+            onCollapse={(value) => setCollapsed(value)}
+            theme='light'
+            collapsedWidth='0'
+          >
+            <DataLoader fetchNeuroglancerViewer={fetchNeuroglancerViewer} />
+          </Sider>
+          <Layout className='site-layout'>
+            <Content
+              style={{
+                margin: '0 16px'
+              }}
+            >
+              <Menu
+                onClick={onClick}
+                selectedKeys={[current]}
+                mode='horizontal'
+                items={items}
+              />
+              {renderMenu()}
+            </Content>
+          </Layout>
+        </React.Fragment>
+      ) }
     </Layout>
   )
 }
