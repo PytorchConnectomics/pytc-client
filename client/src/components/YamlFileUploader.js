@@ -111,7 +111,9 @@ const YamlFileUploader = (props) => {
     reader.onload = (e) => {
       try {
         const contents = e.target.result
+        console.log('File contents:', contents)
         const yamlData = yaml.load(contents)
+        console.log('Parsed YAML data:', yamlData)
 
         if (type === 'training') {
           context.setTrainingConfig(
@@ -142,7 +144,10 @@ const YamlFileUploader = (props) => {
         )
 
         context.setInferenceConfig(
-          yaml.safeDump(yamlData, { indent: 2 }).replace(/^\s*\n/gm, '')
+          //yaml.safeDump(yamlData, { indent: 2 }).replace(/^\s*\n/gm, '')
+          yaml.dump(yamlData, { indent: 2 }).replace(/^\s*\n/gm, '')
+          //yaml.safeDump has been removed in js-yaml version 4. 
+          //Solved 'Error reading YAML file' issue.
         )
         // these are for slider
         YAMLContext.setNumGPUs(yamlData.SYSTEM.NUM_GPUS)
@@ -150,6 +155,7 @@ const YamlFileUploader = (props) => {
         YAMLContext.setLearningRate(yamlData.SOLVER.BASE_LR)
         YAMLContext.setSolverSamplesPerBatch(yamlData.SOLVER.SAMPLES_PER_BATCH)
       } catch (error) {
+        console.error('Error reading YAML file: ', error) // Add this line to log the error
         message.error('Error reading YAML file.')
       }
     }
