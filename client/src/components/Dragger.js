@@ -122,43 +122,32 @@ export function Dragger () {
     reader.onload = function(event) {
       try {
         const buffer = new Uint8Array(event.target.result)
-        console.log('Buffer length: ', buffer.length) //Log buffer length in bytes
-        
+        console.log('Buffer length: ', buffer.length) // Log buffer length in bytes
         const tiffPages = UTIF.decode(buffer)
-     
-        //Check if tiffPages array is not empty
+        // Check if tiffPages array is not empty
         if (tiffPages.length === 0) throw new Error('No TIFF pages found')
-        
         const firstPage = tiffPages[0]
         console.log('First page before decoding:', firstPage) // Log first page object before decoding
-
         // Ensure the firstPage has necessary tags before decoding
-        if (!firstPage.t256 || !firstPage.t257) throw new Error('First page is missing essential tags (width and height)');
-        
+        if (!firstPage.t256 || !firstPage.t257) throw new Error('First page is missing essential tags (width and height)')        
         UTIF.decodeImage(buffer, firstPage) // firstPage before and after decoding, the result is same.
-        console.log('TIFF first page after decoding: ', firstPage) //Log the first page object
-
+        console.log('TIFF first page after decoding: ', firstPage) // Log the first page object
         // Extract width and height from the TIFF tags
         const width = firstPage.t256 ? firstPage.t256[0] : 0
-        const height = firstPage.t257 ? firstPage.t257[0] : 0
-        
+        const height = firstPage.t257 ? firstPage.t257[0] : 0        
         // Check if width and height are valid
         if (width > 0 && height > 0) {
           const rgba = UTIF.toRGBA8(firstPage)  // Uint8Array with RGBA pixels
-
           // Create a canvas to draw the TIFF image
           const canvas = document.createElement('canvas')
           const ctx = canvas.getContext('2d')
           canvas.width = width
           canvas.height = height
           const imageData = ctx.createImageData(width, height)
-
           imageData.data.set(rgba)
           ctx.putImageData(imageData, 0, 0)
-
           const dataURL = canvas.toDataURL()
           console.log('Canvas data URL:', dataURL)
-
           callback(dataURL)
         } else {
           console.error('TIFF image has invalid dimensions:', { width, height })
