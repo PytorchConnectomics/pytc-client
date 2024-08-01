@@ -91,7 +91,7 @@ function Views () {
         ? (<div>Loading the viewer ...</div>)
         : (
           <>
-          <Sider
+            <Sider
             // collapsible
             collapsed={collapsed}
             onCollapse={(value) => setCollapsed(value)}
@@ -100,7 +100,7 @@ function Views () {
           >
             <DataLoader fetchNeuroglancerViewer={fetchNeuroglancerViewer} />
           </Sider>
-          <Layout className='site-layout'>
+            <Layout className='site-layout'>
             <Content
               style={{
                 margin: '0 16px'
@@ -115,7 +115,7 @@ function Views () {
               {renderMenu()}
             </Content>
           </Layout>
-        </>
+          </>
           )}
     </Layout>
   )

@@ -129,7 +129,7 @@ export function Dragger () {
         const firstPage = tiffPages[0]
         console.log('First page before decoding:', firstPage) // Log first page object before decoding
         // Ensure the firstPage has necessary tags before decoding
-        if (!firstPage.t256 || !firstPage.t257) throw new Error('First page is missing essential tags (width and height)')    
+        if (!firstPage.t256 || !firstPage.t257) throw new Error('First page is missing essential tags (width and height)')
         UTIF.decodeImage(buffer, firstPage) // firstPage before and after decoding, the result is same.
         console.log('TIFF first page after decoding: ', firstPage) // Log the first page object
         // Extract width and height from the TIFF tags
