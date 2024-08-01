@@ -87,10 +87,10 @@ function Views () {
         minWidth: '90vw'
       }}
     >
-      {isLoading ? (
-        <div>Loading the viewer ...</div>
-      ) : (
-        <React.Fragment>
+      {isLoading
+        ? (<div>Loading the viewer ...</div>)
+        : (
+        <>
           <Sider
             // collapsible
             collapsed={collapsed}
@@ -115,8 +115,8 @@ function Views () {
               {renderMenu()}
             </Content>
           </Layout>
-        </React.Fragment>
-      ) }
+        </>
+      )}
     </Layout>
   )
 }

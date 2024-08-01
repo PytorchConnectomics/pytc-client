@@ -119,7 +119,7 @@ export function Dragger () {
   // Function to generate preview for TIFF files
   const generateTiffPreview = (file, callback) => {
     const reader = new FileReader()
-    reader.onload = function(event) {
+    reader.onload = function (event) {
       try {
         const buffer = new Uint8Array(event.target.result)
         console.log('Buffer length: ', buffer.length) // Log buffer length in bytes
@@ -129,15 +129,15 @@ export function Dragger () {
         const firstPage = tiffPages[0]
         console.log('First page before decoding:', firstPage) // Log first page object before decoding
         // Ensure the firstPage has necessary tags before decoding
-        if (!firstPage.t256 || !firstPage.t257) throw new Error('First page is missing essential tags (width and height)')        
+        if (!firstPage.t256 || !firstPage.t257) throw new Error('First page is missing essential tags (width and height)')       
         UTIF.decodeImage(buffer, firstPage) // firstPage before and after decoding, the result is same.
         console.log('TIFF first page after decoding: ', firstPage) // Log the first page object
         // Extract width and height from the TIFF tags
         const width = firstPage.t256 ? firstPage.t256[0] : 0
-        const height = firstPage.t257 ? firstPage.t257[0] : 0        
+        const height = firstPage.t257 ? firstPage.t257[0] : 0
         // Check if width and height are valid
         if (width > 0 && height > 0) {
-          const rgba = UTIF.toRGBA8(firstPage)  // Uint8Array with RGBA pixels
+          const rgba = UTIF.toRGBA8(firstPage) // Uint8Array with RGBA pixels
           // Create a canvas to draw the TIFF image
           const canvas = document.createElement('canvas')
           const ctx = canvas.getContext('2d')
@@ -187,18 +187,17 @@ export function Dragger () {
     display: 'inline-block',
     width: '185px',
     height: 'auto',
-    verticalAlign: 'top',
+    verticalAlign: 'top'
   }
-  
   useEffect(() => {
     // Get all elements with the class name "ant-upload-list-item-container"
     const uploadListItemContainers = document.querySelectorAll('.ant-upload-list-item-container')
 
     // Apply styles to each element
     uploadListItemContainers.forEach((element) => {
-        Object.assign(element.style, listItemStyle)
+      Object.assign(element.style, listItemStyle)
     })
-})
+  })
 
   // when click or drag file to this area to upload, below function will be deployed.
   const handleBeforeUpload = (file) => {

@@ -1,4 +1,4 @@
-//  global FileReader
+// global FileReader
 import React, { Fragment, useContext, useEffect, useState } from 'react'
 import { Button, Col, message, Row, Slider, Upload } from 'antd'
 import { UploadOutlined } from '@ant-design/icons'
@@ -144,10 +144,10 @@ const YamlFileUploader = (props) => {
         )
 
         context.setInferenceConfig(
-          //yaml.safeDump(yamlData, { indent: 2 }).replace(/^\s*\n/gm, '')
+          // yaml.safeDump(yamlData, { indent: 2 }).replace(/^\s*\n/gm, '')
           yaml.dump(yamlData, { indent: 2 }).replace(/^\s*\n/gm, '')
-          //yaml.safeDump has been removed in js-yaml version 4. 
-          //Solved 'Error reading YAML file' issue.
+          // yaml.safeDump has been removed in js-yaml version 4.
+          // Solved 'Error reading YAML file' issue.
         )
         // these are for slider
         YAMLContext.setNumGPUs(yamlData.SYSTEM.NUM_GPUS)
