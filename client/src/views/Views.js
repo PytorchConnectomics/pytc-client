@@ -90,7 +90,7 @@ function Views () {
       {isLoading
         ? (<div>Loading the viewer ...</div>)
         : (
-        <>
+          <>
           <Sider
             // collapsible
             collapsed={collapsed}
@@ -116,7 +116,7 @@ function Views () {
             </Content>
           </Layout>
         </>
-      )}
+          )}
     </Layout>
   )
 }
