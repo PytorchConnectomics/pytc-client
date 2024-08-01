@@ -4,7 +4,8 @@ import {
   ArrowRightOutlined,
   DownOutlined,
   EyeOutlined,
-  InboxOutlined
+  InboxOutlined,
+  ReloadOutlined
 } from '@ant-design/icons'
 
 function Visualization (props) {
@@ -42,6 +43,20 @@ function Visualization (props) {
     setActiveKey(newActiveKey)
   }
 
+  const refreshViewer = (key) => {
+    // This function refreshes the viewer specified by the key
+    const updatedViewers = viewers.map((viewer) => {
+      if (viewer.key === key) {
+        // Refresh the viewer URL by adding a refresh request token to it
+        // The refresh request token is only for node.js to force refresh the element
+        // The appended token will be ignored when rendering
+        return {...viewer, viewer: viewer.viewer + '?refresh=' + new Date().getTime() }
+      }
+      return viewer
+    })
+    setViewers(updatedViewers)
+  }
+
   return (
     <div style={{ marginTop: '20px' }}>
       {viewers.length > 0
@@ -54,7 +69,17 @@ function Visualization (props) {
             activeKey={activeKey}
             onChange={handleChange}
             items={viewers.map((viewer) => ({
-              label: viewer.title,
+              label: (
+                <span>
+                  {viewer.title}
+                  <Button
+                  type='link'
+                  icon={<ReloadOutlined />}
+                  onClick={() => refreshViewer(viewer.key)} 
+                  />
+
+                </span>
+              ),
               key: viewer.key,
               children: (
                 <iframe
