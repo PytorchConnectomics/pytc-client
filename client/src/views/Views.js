@@ -106,13 +106,13 @@ function Views () {
                   margin: '0 16px'
                 }}
               >
-              <Menu
-                onClick={onClick}
-                selectedKeys={[current]}
-                mode='horizontal'
-                items={items}
-              />
-              {renderMenu()}
+                <Menu
+                  onClick={onClick}
+                  selectedKeys={[current]}
+                  mode='horizontal'
+                  items={items}
+                />
+                {renderMenu()}
               </Content>
             </Layout>
           </>
