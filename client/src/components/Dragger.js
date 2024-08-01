@@ -11,13 +11,13 @@ const path = require('path')
 export function Dragger () {
   const context = useContext(AppContext)
 
-  const getBase64 = (file) =>
-    new Promise((resolve, reject) => {
-      const reader = new FileReader()
-      reader.readAsDataURL(file)
-      reader.onload = () => resolve(reader.result)
-      reader.onerror = (error) => reject(error)
-    })
+  // const getBase64 = (file) =>
+  //   new Promise((resolve, reject) => {
+  //     const reader = new FileReader()
+  //     reader.readAsDataURL(file)
+  //     reader.onload = () => resolve(reader.result)
+  //     reader.onerror = (error) => reject(error)
+  //   })
 
   const onChange = (info) => {
     const { status } = info.file
@@ -153,32 +153,31 @@ export function Dragger () {
           canvas.height = height
           const imageData = ctx.createImageData(width, height)
 
-          imageData.data.set(rgba);
+          imageData.data.set(rgba)
           ctx.putImageData(imageData, 0, 0)
 
           const dataURL = canvas.toDataURL()
           console.log('Canvas data URL:', dataURL)
 
           callback(dataURL)
-
         } else {
           console.error('TIFF image has invalid dimensions:', { width, height })
           message.error('TIFF image has invalid dimensions.')
-          setPreviewImage(DEFAULT_IMAGE); // Fallback to default image
-          }
+          setPreviewImage(DEFAULT_IMAGE) // Fallback to default image
+        }
       } catch (error) {
         console.error('Failed to generate TIFF preview:', error)
         message.error('Failed to generate TIFF preview.')
-        setPreviewImage(DEFAULT_IMAGE); // Fallback to default image
-      }    
-    };
+        setPreviewImage(DEFAULT_IMAGE) // Fallback to default image
+      }
+    }
     reader.readAsArrayBuffer(file)
-  };
+  }
 
-  //When click preview eye icon, implement handlePreview function
+  // When click preview eye icon, implement handlePreview function
   const handlePreview = async (file) => {
-    setFileUID(file.uid);
-    setPreviewOpen(true);
+    setFileUID(file.uid)
+    setPreviewOpen(true)
     setPreviewImage(file.thumbUrl)
     setPreviewTitle(file.name || file.url.substring(file.url.lastIndexOf('/') + 1))
     if (
@@ -215,13 +214,13 @@ export function Dragger () {
   // when click or drag file to this area to upload, below function will be deployed.
   const handleBeforeUpload = (file) => {
     // Create a URL for the thumbnail using object URL
-    if (file.type === "image/tiff" || file.type === "image/tif") {
+    if (file.type === 'image/tiff' || file.type === 'image/tif') {
       return new Promise((resolve) => {
         generateTiffPreview(file, (dataURL) => {
-          file.thumbUrl = dataURL; 
+          file.thumbUrl = dataURL
           console.log('file thumbUrl inside callback is', file.thumbUrl)
           resolve(file)
-        });
+        })
         console.log('file thumbUrl is', file.thumbUrl)
       })
     } else {
@@ -232,7 +231,7 @@ export function Dragger () {
 
   return (
     <>
-      <Upload.Dragger 
+      <Upload.Dragger
         multiple
         onChange={onChange}
         customRequest={uploadImage}
@@ -290,4 +289,3 @@ export function Dragger () {
     </>
   )
 }
-
