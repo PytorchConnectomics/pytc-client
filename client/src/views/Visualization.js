@@ -50,7 +50,7 @@ function Visualization (props) {
         // Refresh the viewer URL by adding a refresh request token to it
         // The refresh request token is only for node.js to force refresh the element
         // The appended token will be ignored when rendering
-        return {...viewer, viewer: viewer.viewer + '?refresh=' + new Date().getTime() }
+        return { ...viewer, viewer: viewer.viewer + '?refresh=' + new Date().getTime() }
       }
       return viewer
     })
@@ -73,9 +73,9 @@ function Visualization (props) {
                 <span>
                   {viewer.title}
                   <Button
-                  type='link'
-                  icon={<ReloadOutlined />}
-                  onClick={() => refreshViewer(viewer.key)} 
+                    type='link'
+                    icon={<ReloadOutlined />}
+                    onClick={() => refreshViewer(viewer.key)}
                   />
 
                 </span>

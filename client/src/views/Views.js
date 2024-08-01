@@ -87,36 +87,36 @@ function Views () {
         minWidth: '90vw'
       }}
     >
-      {isLoading ? (
-        <div>Loading the viewer ...</div>
-      ) : (
-        <React.Fragment>
-          <Sider
+      {isLoading
+        ? (<div>Loading the viewer ...</div>)
+        : (
+          <>
+            <Sider
             // collapsible
-            collapsed={collapsed}
-            onCollapse={(value) => setCollapsed(value)}
-            theme='light'
-            collapsedWidth='0'
-          >
-            <DataLoader fetchNeuroglancerViewer={fetchNeuroglancerViewer} />
-          </Sider>
-          <Layout className='site-layout'>
-            <Content
-              style={{
-                margin: '0 16px'
-              }}
+              collapsed={collapsed}
+              onCollapse={(value) => setCollapsed(value)}
+              theme='light'
+              collapsedWidth='0'
             >
-              <Menu
-                onClick={onClick}
-                selectedKeys={[current]}
-                mode='horizontal'
-                items={items}
-              />
-              {renderMenu()}
-            </Content>
-          </Layout>
-        </React.Fragment>
-      ) }
+              <DataLoader fetchNeuroglancerViewer={fetchNeuroglancerViewer} />
+            </Sider>
+            <Layout className='site-layout'>
+              <Content
+                style={{
+                  margin: '0 16px'
+                }}
+              >
+                <Menu
+                  onClick={onClick}
+                  selectedKeys={[current]}
+                  mode='horizontal'
+                  items={items}
+                />
+                {renderMenu()}
+              </Content>
+            </Layout>
+          </>
+          )}
     </Layout>
   )
 }
