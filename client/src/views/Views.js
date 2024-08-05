@@ -35,7 +35,7 @@ function Views () {
     } else if (current === 'monitoring') {
       return <Monitoring />
     } else if (current === 'inference') {
-      return <ModelInference isInferring={isInferring} setIsInferring={setIsInferring  }/>
+      return <ModelInference isInferring={isInferring} setIsInferring={setIsInferring} />
     }
   }
 
@@ -81,8 +81,9 @@ function Views () {
     }
   }
 
-  useEffect(() => {//This function makes sure that the inferring will continue when current tab changes
+  useEffect(() => { // This function makes sure that the inferring will continue when current tab changes
     if (current === 'inference' && isInferring) {
+      console.log('Inference process is continuing...')
     }
   }, [current, isInferring])
 
