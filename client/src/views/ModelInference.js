@@ -5,7 +5,7 @@ import { startModelInference, stopModelInference } from '../utils/api'
 import Configurator from '../components/Configurator'
 import { AppContext } from '../contexts/GlobalContext'
 
-function ModelInference ({isInferring, setIsInferring}) {
+function ModelInference ({ isInferring, setIsInferring }) {
   const context = useContext(AppContext)
   // const [isInference, setIsInference] = useState(false)
   const handleStartButton = async () => {
