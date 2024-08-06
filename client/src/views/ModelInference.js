@@ -5,14 +5,15 @@ import { startModelInference, stopModelInference } from '../utils/api'
 import Configurator from '../components/Configurator'
 import { AppContext } from '../contexts/GlobalContext'
 
-function ModelInference () {
+function ModelInference ({ isInferring, setIsInferring }) {
   const context = useContext(AppContext)
-  const [isInference, setIsInference] = useState(false)
+  // const [isInference, setIsInference] = useState(false)
   const handleStartButton = async () => {
     try {
       const inferenceConfig = localStorage.getItem('inferenceConfig')
 
-      const res = startModelInference(
+      // const res = startModelInference(
+      const res = await startModelInference(
         context.uploadedYamlFile.name,
         inferenceConfig,
         context.outputPath,
@@ -22,17 +23,19 @@ function ModelInference () {
     } catch (e) {
       console.log(e)
     } finally {
-      setIsInference(true)
+      // setIsInference(true)
+      setIsInferring(true)
     }
   }
 
   const handleStopButton = async () => {
     try {
-      stopModelInference()
+      await stopModelInference()
     } catch (e) {
       console.log(e)
     } finally {
-      setIsInference(false)
+      // setIsInference(false)
+      setIsInferring(false)
     }
   }
 
@@ -49,13 +52,13 @@ function ModelInference () {
         <Space wrap style={{ marginTop: 12 }} size={componentSize}>
           <Button
             onClick={handleStartButton}
-            disabled={isInference} // Disables the button when inference is running
+            disabled={isInferring} // Disables the button when inference is running
           >
             Start Inference
           </Button>
           <Button
             onClick={handleStopButton}
-            disabled={!isInference} // Disables the button when inference is not running
+            disabled={!isInferring} // Disables the button when inference is not running
           >
             Stop Inference
           </Button>
