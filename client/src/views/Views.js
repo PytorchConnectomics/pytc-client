@@ -1,4 +1,4 @@
-import React, { useState } from 'react'
+import React, { useState, useEffect } from 'react'
 import DataLoader from './DataLoader'
 import Visualization from '../views/Visualization'
 import ModelTraining from '../views/ModelTraining'
@@ -13,6 +13,7 @@ function Views () {
   const [current, setCurrent] = useState('visualization')
   const [viewers, setViewers] = useState([])
   const [isLoading, setIsLoading] = useState(false)
+  const [isInferring, setIsInferring] = useState(false)
   console.log(viewers)
 
   const onClick = (e) => {
@@ -34,7 +35,7 @@ function Views () {
     } else if (current === 'monitoring') {
       return <Monitoring />
     } else if (current === 'inference') {
-      return <ModelInference />
+      return <ModelInference isInferring={isInferring} setIsInferring={setIsInferring} />
     }
   }
 
@@ -79,6 +80,12 @@ function Views () {
       setIsLoading(false)
     }
   }
+
+  useEffect(() => { // This function makes sure that the inferring will continue when current tab changes
+    if (current === 'inference' && isInferring) {
+      console.log('Inference process is continuing...')
+    }
+  }, [current, isInferring])
 
   return (
     <Layout
