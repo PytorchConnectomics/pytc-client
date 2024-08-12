@@ -8,7 +8,7 @@ import './DataLoader.css'
 
 const { Title } = Typography
 
-function DataLoader (props) {
+function DataLoader(props) {
   const context = useContext(AppContext)
   const [currentImage, setCurrentImage] = useState(null)
   const [currentLabel, setCurrentLabel] = useState(null)
@@ -18,14 +18,23 @@ function DataLoader (props) {
   const handleVisualizeButtonClick = async (event) => {
     event.preventDefault()
     context.setLoading(true)
-    context.setCurrentImage(currentImage)
-    context.setCurrentLabel(currentLabel)
+    console.log("Current loading state6:", context.loading);
+    console.log("Loading set to true");
+    //context.setCurrentImage(currentImage)
+    //context.setCurrentLabel(currentLabel)
+    setCurrentImage(currentImage);
+    setCurrentLabel(currentLabel);
     await fetchNeuroglancerViewer(
       currentImage,
       currentLabel,
       scales.split(',').map(Number)
     )
-    context.setLoading(false)
+    /*setTimeout(() => {               //LI
+      context.setLoading(false);
+    }, 2000);*/
+    context.setLoading(false);
+    console.log("Loading set to false");
+    console.log("Current loading state7:", context.loading);
   }
   const handleImageChange = (value) => {
     console.log(`selected ${value}`)
@@ -59,6 +68,7 @@ function DataLoader (props) {
       align='start'
       style={{ margin: '7px', display: 'flex' }}
     >
+      {context.loading && <LoadingIndicator />}
       <Dragger />
       <Title level={5} style={{ marginBottom: '-5px' }}>
         Image

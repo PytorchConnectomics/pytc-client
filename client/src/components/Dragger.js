@@ -8,7 +8,7 @@ import UTIF from 'utif'
 
 const path = require('path')
 
-export function Dragger () {
+export function Dragger() {
   const context = useContext(AppContext)
   const [uploading, setUploading] = useState(false)
   const getBase64 = (file) =>
@@ -21,6 +21,7 @@ export function Dragger () {
 
   const onChange = (info) => {
     const { status } = info.file
+    console.log("onChange called with file status:", status); //LI
     if (status === 'done') {
       console.log('file found at:', info.file.originFileObj.path)
 
@@ -57,6 +58,7 @@ export function Dragger () {
   const [fileUID, setFileUID] = useState(null)
   const [previewFileFolderPath, setPreviewFileFolderPath] = useState('')
   const [fileType, setFileType] = useState('Image')
+
 
   const handleText = (event) => {
     setValue(event.target.value)
@@ -125,7 +127,7 @@ export function Dragger () {
         console.log('Buffer length: ', buffer.length)// Log buffer length in bytes
         const tiffPages = UTIF.decode(buffer)
         // Check if tiffPages array is not empty
-        if (tiffPages.length === 0) throw new Error('No TIFF pages found')        
+        if (tiffPages.length === 0) throw new Error('No TIFF pages found')
         const firstPage = tiffPages[0]
         console.log('First page before decoding:', firstPage) // Log first page object before decoding
         // Ensure the firstPage has necessary tags before decoding
@@ -153,11 +155,15 @@ export function Dragger () {
           console.error('TIFF image has invalid dimensions:', { width, height })
           message.error('TIFF image has invalid dimensions.')
           setPreviewImage(DEFAULT_IMAGE) // Fallback to default image
+          context.setLoading(false)
+          console.log("Current loading state1:", context.loading);
         }
       } catch (error) {
         console.error('Failed to generate TIFF preview:', error)
         message.error('Failed to generate TIFF preview.')
         setPreviewImage(DEFAULT_IMAGE) // Fallback to default image
+        context.setLoading(false)
+        console.log("Current loading state2:", context.loading);
       }
     }
     reader.readAsArrayBuffer(file)
@@ -165,10 +171,9 @@ export function Dragger () {
 
   // When click preview eye icon, implement handlePreview function
   const handlePreview = async (file) => {
-    context.setLoading(true)
+    context.setLoading(true);
+    console.log("Current loading state3:", context.loading);
     setFileUID(file.uid)
-    setPreviewOpen(true)
-    setPreviewImage(file.thumbUrl)
     setPreviewTitle(file.name || file.url.substring(file.url.lastIndexOf('/') + 1))
     if (
       context.files.find(targetFile => targetFile.uid === file.uid) &&
@@ -180,6 +185,21 @@ export function Dragger () {
     } else {
       // Directory name with trailing slash
       setPreviewFileFolderPath(path.dirname(file.originFileObj.path) + '/')
+    }
+    setPreviewOpen(true)
+    setPreviewImage(file.thumbUrl)
+    console.log("File type:", file.type);
+
+    if (file.type === 'image/tiff' || file.type === 'image/tif'
+      || file.type.includes("tiff") || file.type.includes("tif")) {
+      generateTiffPreview(file, (dataURL) => {
+        setPreviewImage(dataURL)
+        context.setLoading(false) // LI(tiff files)
+        console.log("Current loading state4:", context.loading);
+      })
+    } else {
+      context.setLoading(false) // LI(other types of files)
+      console.log("Current loading state5:", context.loading);
     }
   }
 
@@ -258,7 +278,7 @@ export function Dragger () {
             style={{
               width: '100%'
             }}
-            src={previewImage}
+            src={previewImage || DEFAULT_IMAGE}
           />
         </Space>
       </Modal>

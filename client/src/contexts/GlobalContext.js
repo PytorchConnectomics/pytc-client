@@ -4,7 +4,7 @@ import localforage from 'localforage'
 export const AppContext = createContext(null)
 
 // Solve delete button error issue
-function usePersistedState (key, defaultValue) {
+function usePersistedState(key, defaultValue) {
   const [state, setState] = useState(defaultValue)
   const [isLoaded, setIsLoaded] = useState(false)
 
