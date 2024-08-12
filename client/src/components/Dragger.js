@@ -1,5 +1,5 @@
 //  global FileReader
-import React, { useContext, useState } from 'react'
+import React, { useContext, useState, useEffect } from 'react'
 import { Button, Input, message, Modal, Space, Upload } from 'antd'
 import { InboxOutlined } from '@ant-design/icons'
 import { AppContext } from '../contexts/GlobalContext'
@@ -11,13 +11,13 @@ const path = require('path')
 export function Dragger() {
   const context = useContext(AppContext)
   const [uploading, setUploading] = useState(false)
-  const getBase64 = (file) =>
-    new Promise((resolve, reject) => {
-      const reader = new FileReader()
-      reader.readAsDataURL(file)
-      reader.onload = () => resolve(reader.result)
-      reader.onerror = (error) => reject(error)
-    })
+  // const getBase64 = (file) =>
+  //   new Promise((resolve, reject) => {
+  //     const reader = new FileReader()
+  //     reader.readAsDataURL(file)
+  //     reader.onload = () => resolve(reader.result)
+  //     reader.onerror = (error) => reject(error)
+  //   })
 
   const onChange = (info) => {
     const { status } = info.file
@@ -124,7 +124,7 @@ export function Dragger() {
     reader.onload = function (event) {
       try {
         const buffer = new Uint8Array(event.target.result)
-        console.log('Buffer length: ', buffer.length)// Log buffer length in bytes
+        console.log('Buffer length: ', buffer.length) // Log buffer length in bytes
         const tiffPages = UTIF.decode(buffer)
         // Check if tiffPages array is not empty
         if (tiffPages.length === 0) throw new Error('No TIFF pages found')
@@ -174,6 +174,8 @@ export function Dragger() {
     context.setLoading(true);
     console.log("Current loading state3:", context.loading);
     setFileUID(file.uid)
+    setPreviewOpen(true)
+    setPreviewImage(file.thumbUrl)
     setPreviewTitle(file.name || file.url.substring(file.url.lastIndexOf('/') + 1))
     if (
       context.files.find(targetFile => targetFile.uid === file.uid) &&
@@ -186,8 +188,8 @@ export function Dragger() {
       // Directory name with trailing slash
       setPreviewFileFolderPath(path.dirname(file.originFileObj.path) + '/')
     }
-    setPreviewOpen(true)
-    setPreviewImage(file.thumbUrl)
+    //setPreviewOpen(true)
+    //setPreviewImage(file.thumbUrl)
     console.log("File type:", file.type);
 
     if (file.type === 'image/tiff' || file.type === 'image/tif'
@@ -203,9 +205,22 @@ export function Dragger() {
     }
   }
 
+  // Solved the "clear the cache" button for image loading is not reachable when the image preview files are loaded.
   const listItemStyle = {
-    width: '185px'
+    display: 'inline-block',
+    width: '185px',
+    height: 'auto',
+    verticalAlign: 'top'
   }
+  useEffect(() => {
+    // Get all elements with the class name "ant-upload-list-item-container"
+    const uploadListItemContainers = document.querySelectorAll('.ant-upload-list-item-container')
+
+    // Apply styles to each element
+    uploadListItemContainers.forEach((element) => {
+      Object.assign(element.style, listItemStyle)
+    })
+  })
 
   // when click or drag file to this area to upload, below function will be deployed.
   const handleBeforeUpload = (file) => {
@@ -246,7 +261,7 @@ export function Dragger() {
           Click or drag file to this area to upload
         </p>
       </Upload.Dragger>
-      <Button type='default' onClick={handleClearCache}>
+      <Button type='default' style={{ width: '185px' }} onClick={handleClearCache}>
         Clear File Cache
       </Button>
       <Modal
