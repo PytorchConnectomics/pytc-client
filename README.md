@@ -62,8 +62,17 @@ pip install -r requirements.txt
 
 In root folder,
 ```bash
+# The setup script will automatically download pytorch_connectomics at commit 20ccfde (version 1.0)
+./setup_pytorch_connectomics.sh
+cd pytorch_connectomics
+pip install --editable .
+```
+
+Alternatively, you can run this manually:
+```bash
 git clone https://github.com/zudi-lin/pytorch_connectomics.git
 cd pytorch_connectomics
+git checkout 20ccfde
 pip install --editable .
 ```
 
