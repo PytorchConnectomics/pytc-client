@@ -71,65 +71,97 @@ async def neuroglancer(req: Request):
 @app.post("/start_model_training")
 async def start_model_training(req: Request):
     req = await req.json()
-    response = requests.post(
-        REACT_APP_SERVER_PROTOCOL
-        + "://"
-        + REACT_APP_SERVER_URL
-        + "/start_model_training",
-        json=req,
-    )
+    try:
+        response = requests.post(
+            REACT_APP_SERVER_PROTOCOL
+            + "://"
+            + REACT_APP_SERVER_URL
+            + "/start_model_training",
+            json=req,
+            timeout=30  # TODO: Add timeout to prevent hanging
+        )
 
-    if response.status_code == 200:
-        return {"message": "Model training started successfully"}
-    else:
-        return {"message": "Failed to start model training"}
+        if response.status_code == 200:
+            return {"message": "Model training started successfully", "data": response.json()}
+        else:
+            return {"message": f"Failed to start model training: {response.status_code}", "error": response.text}
+    except requests.exceptions.ConnectionError:
+        return {"message": "Failed to connect to PyTC server. Is server_pytc running?", "error": "ConnectionError"}
+    except requests.exceptions.Timeout:
+        return {"message": "Request timed out. PyTC server may be overloaded.", "error": "Timeout"}
+    except Exception as e:
+        return {"message": f"Failed to start model training: {str(e)}", "error": str(e)}
 
 
 @app.post("/stop_model_training")
 async def stop_model_training():
-    response = requests.post(
-        REACT_APP_SERVER_PROTOCOL
-        + "://"
-        + REACT_APP_SERVER_URL
-        + "/stop_model_training"
-    )
+    try:
+        response = requests.post(
+            REACT_APP_SERVER_PROTOCOL
+            + "://"
+            + REACT_APP_SERVER_URL
+            + "/stop_model_training",
+            timeout=30
+        )
 
-    if response.status_code == 200:
-        return {"message": "Model training stopped successfully"}
-    else:
-        return {"message": "Failed to stop model training"}
+        if response.status_code == 200:
+            return {"message": "Model training stopped successfully", "data": response.json()}
+        else:
+            return {"message": f"Failed to stop model training: {response.status_code}", "error": response.text}
+    except requests.exceptions.ConnectionError:
+        return {"message": "Failed to connect to PyTC server. Is server_pytc running?", "error": "ConnectionError"}
+    except requests.exceptions.Timeout:
+        return {"message": "Request timed out.", "error": "Timeout"}
+    except Exception as e:
+        return {"message": f"Failed to stop model training: {str(e)}", "error": str(e)}
 
 
 @app.post("/start_model_inference")
 async def start_model_inference(req: Request):
     req = await req.json()
-    response = requests.post(
-        REACT_APP_SERVER_PROTOCOL
-        + "://"
-        + REACT_APP_SERVER_URL
-        + "/start_model_inference",
-        json=req,
-    )
+    try:
+        response = requests.post(
+            REACT_APP_SERVER_PROTOCOL
+            + "://"
+            + REACT_APP_SERVER_URL
+            + "/start_model_inference",
+            json=req,
+            timeout=30
+        )
 
-    if response.status_code == 200:
-        return {"message": "Model inference started successfully"}
-    else:
-        return {"message": "Failed to start model inference"}
+        if response.status_code == 200:
+            return {"message": "Model inference started successfully", "data": response.json()}
+        else:
+            return {"message": f"Failed to start model inference: {response.status_code}", "error": response.text}
+    except requests.exceptions.ConnectionError:
+        return {"message": "Failed to connect to PyTC server. Is server_pytc running?", "error": "ConnectionError"}
+    except requests.exceptions.Timeout:
+        return {"message": "Request timed out. PyTC server may be overloaded.", "error": "Timeout"}
+    except Exception as e:
+        return {"message": f"Failed to start model inference: {str(e)}", "error": str(e)}
 
 
 @app.post("/stop_model_inference")
 async def stop_model_inference():
-    response = requests.post(
-        REACT_APP_SERVER_PROTOCOL
-        + "://"
-        + REACT_APP_SERVER_URL
-        + "/stop_model_inference"
-    )
+    try:
+        response = requests.post(
+            REACT_APP_SERVER_PROTOCOL
+            + "://"
+            + REACT_APP_SERVER_URL
+            + "/stop_model_inference",
+            timeout=30
+        )
 
-    if response.status_code == 200:
-        return {"message": "Model inference stopped successfully"}
-    else:
-        return {"message": "Failed to stop model inference"}
+        if response.status_code == 200:
+            return {"message": "Model inference stopped successfully", "data": response.json()}
+        else:
+            return {"message": f"Failed to stop model inference: {response.status_code}", "error": response.text}
+    except requests.exceptions.ConnectionError:
+        return {"message": "Failed to connect to PyTC server. Is server_pytc running?", "error": "ConnectionError"}
+    except requests.exceptions.Timeout:
+        return {"message": "Request timed out.", "error": "Timeout"}
+    except Exception as e:
+        return {"message": f"Failed to stop model inference: {str(e)}", "error": str(e)}
 
 
 @app.get("/get_tensorboard_url")
