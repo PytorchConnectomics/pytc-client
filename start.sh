@@ -1,5 +1,13 @@
 #!/bin/bash
 
+# Setup pytorch_connectomics if not already present
+if [ ! -d "pytorch_connectomics" ]; then
+    echo "Setting up pytorch_connectomics..."
+    ./setup_pytorch_connectomics.sh
+    echo "Installing pytorch_connectomics..."
+    cd pytorch_connectomics && pip3 install --editable . && cd ..
+fi
+
 # Install dependencies in ./server_api
 pip3 install -r server_api/requirements.txt
 
