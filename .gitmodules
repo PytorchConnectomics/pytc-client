@@ -1,3 +1,0 @@
-[submodule "pytorch_connectomics"]
-	path = pytorch_connectomics
-	url = https://github.com/zudi-lin/pytorch_connectomics.git

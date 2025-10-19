@@ -1,17 +1,51 @@
 import axios from 'axios'
 import { message } from 'antd'
 
+// TODO: Add proper environment configuration
+const API_PROTOCOL = process.env.REACT_APP_API_PROTOCOL || 'http'
+const API_URL = process.env.REACT_APP_API_URL || 'localhost:4242'
+
+const buildFilePath = (file) => {
+  if (!file) return ''
+  if (file.folderPath) return file.folderPath + file.name
+  if (file.path) return file.path
+  if (file.originFileObj && file.originFileObj.path) {
+    return file.originFileObj.path
+  }
+  return file.name
+}
+
+const hasBrowserFile = (file) =>
+  file && file.originFileObj instanceof File
+
 export async function getNeuroglancerViewer (image, label, scales) {
   try {
+    const url = `${API_PROTOCOL}://${API_URL}/neuroglancer`
+    if (hasBrowserFile(image)) {
+      const formData = new FormData()
+      formData.append(
+        'image',
+        image.originFileObj,
+        image.originFileObj.name || image.name || 'image'
+      )
+      if (label && hasBrowserFile(label)) {
+        formData.append(
+          'label',
+          label.originFileObj,
+          label.originFileObj.name || label.name || 'label'
+        )
+      }
+      formData.append('scales', JSON.stringify(scales))
+      const res = await axios.post(url, formData)
+      return res.data
+    }
+
     const data = JSON.stringify({
-      image: image.folderPath + image.name,
-      label: label.folderPath + label.name,
+      image: buildFilePath(image),
+      label: buildFilePath(label),
       scales
     })
-    const res = await axios.post(
-      `${process.env.REACT_APP_API_PROTOCOL}://${process.env.REACT_APP_API_URL}/neuroglancer`,
-      data
-    )
+    const res = await axios.post(url, data)
     return res.data
   } catch (error) {
     message.error(
@@ -22,15 +56,28 @@ export async function getNeuroglancerViewer (image, label, scales) {
 function handleError (error) {
   if (error.response) {
     throw new Error(
-      `${error.response.status}: ${error.response.data?.detail?.data}`
+      `${error.response.status}: ${error.response.data?.detail?.data || error.response.statusText}`
     )
-  };
+  }
   throw error
 }
+
 export async function makeApiRequest (url, method, data = null) {
   try {
-    const fullUrl = `${process.env.REACT_APP_API_PROTOCOL}://${process.env.REACT_APP_API_URL}/${url}`
-    const res = await axios[method](fullUrl, data)
+    const fullUrl = `${API_PROTOCOL}://${API_URL}/${url}`
+    const config = {
+      method,
+      url: fullUrl,
+      headers: {
+        'Content-Type': 'application/json'
+      }
+    }
+    
+    if (data) {
+      config.data = data
+    }
+    
+    const res = await axios(config)
     return res.data
   } catch (error) {
     handleError(error)
@@ -61,7 +108,7 @@ export async function startModelTraining (
 export async function stopModelTraining () {
   try {
     await axios.post(
-      `${process.env.REACT_APP_API_PROTOCOL}://${process.env.REACT_APP_API_URL}/stop_model_training`
+      `${API_PROTOCOL}://${API_URL}/stop_model_training`
     )
   } catch (error) {
     handleError(error)
@@ -105,7 +152,7 @@ export async function startModelInference (
     })
 
     const res = await axios.post(
-      `${process.env.REACT_APP_API_PROTOCOL}://${process.env.REACT_APP_API_URL}/start_model_inference`,
+      `${API_PROTOCOL}://${API_URL}/start_model_inference`,
       data
     )
     return res.data
@@ -117,7 +164,7 @@ export async function startModelInference (
 export async function stopModelInference () {
   try {
     await axios.post(
-      `${process.env.REACT_APP_API_PROTOCOL}://${process.env.REACT_APP_API_URL}/stop_model_inference`
+      `${API_PROTOCOL}://${API_URL}/stop_model_inference`
     )
   } catch (error) {
     handleError(error)
