@@ -5,17 +5,47 @@ import { message } from 'antd'
 const API_PROTOCOL = process.env.REACT_APP_API_PROTOCOL || 'http'
 const API_URL = process.env.REACT_APP_API_URL || 'localhost:4242'
 
+const buildFilePath = (file) => {
+  if (!file) return ''
+  if (file.folderPath) return file.folderPath + file.name
+  if (file.path) return file.path
+  if (file.originFileObj && file.originFileObj.path) {
+    return file.originFileObj.path
+  }
+  return file.name
+}
+
+const hasBrowserFile = (file) =>
+  file && file.originFileObj instanceof File
+
 export async function getNeuroglancerViewer (image, label, scales) {
   try {
+    const url = `${API_PROTOCOL}://${API_URL}/neuroglancer`
+    if (hasBrowserFile(image)) {
+      const formData = new FormData()
+      formData.append(
+        'image',
+        image.originFileObj,
+        image.originFileObj.name || image.name || 'image'
+      )
+      if (label && hasBrowserFile(label)) {
+        formData.append(
+          'label',
+          label.originFileObj,
+          label.originFileObj.name || label.name || 'label'
+        )
+      }
+      formData.append('scales', JSON.stringify(scales))
+      const res = await axios.post(url, formData)
+      return res.data
+    }
+
     const data = JSON.stringify({
-      image: image.folderPath + image.name,
-      label: label.folderPath + label.name,
+      image: buildFilePath(image),
+      label: buildFilePath(label),
       scales
     })
-    const res = await axios.post(
-      `${API_PROTOCOL}://${API_URL}/neuroglancer`,
-      data
-    )
+    const res = await axios.post(url, data)
     return res.data
   } catch (error) {
     message.error(
