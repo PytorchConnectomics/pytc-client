@@ -1,8 +1,12 @@
+import json
 import pathlib
+import shutil
+import tempfile
+from typing import List, Optional
 
 import requests
 import uvicorn
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, HTTPException, Request, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from utils.io import readVol
 
@@ -21,11 +25,21 @@ app.add_middleware(
 
 
 def process_path(path):
-    # Get the absolute path of the current script"s parent directory
-    current_script_dir = pathlib.Path(__file__).parent
-    # The root of the repository is assumed to be one level up from the current script"s directory
-    repo_root = current_script_dir.parent.absolute()
-    return repo_root / path
+    if not path:
+        return None
+    candidate = pathlib.Path(path).expanduser()
+    if candidate.is_absolute():
+        return candidate
+    return candidate.resolve(strict=False)
+
+
+def save_upload_to_tempfile(upload: UploadFile) -> pathlib.Path:
+    suffix = pathlib.Path(upload.filename or "").suffix
+    with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tmp:
+        upload.file.seek(0)
+        shutil.copyfileobj(upload.file, tmp)
+        temp_path = pathlib.Path(tmp.name)
+    return temp_path
 
 
 @app.get("/hello")
@@ -37,99 +51,169 @@ def hello():
 async def neuroglancer(req: Request):
     import neuroglancer
 
-    req = await req.json()
-    image = process_path(req["image"])
-    label = process_path(req["label"])
-    scales = req["scales"]
-    print(image, label, scales)
-    # neuroglancer setting -- bind to this to make accessible outside of container
-    ip = "0.0.0.0"
-    port = 4244
-    neuroglancer.set_server_bind_address(ip, port)
-    viewer = neuroglancer.Viewer()
-    # SNEMI (# 3d vol dim: z,y,x)
-    res = neuroglancer.CoordinateSpace(
-        names=["z", "y", "x"], units=["nm", "nm", "nm"], scales=scales
-    )
-    im = readVol(image, image_type="im")
-    gt = readVol(label, image_type="im")
+    cleanup_paths: List[pathlib.Path] = []
+    try:
+        content_type = req.headers.get("content-type", "")
+        if "multipart/form-data" in content_type:
+            form = await req.form()
+            image_upload = form.get("image")
+            if not image_upload or not getattr(image_upload, "filename", None):
+                raise HTTPException(status_code=400, detail="Image file is required.")
+            scales_raw = form.get("scales")
+            if scales_raw is None:
+                raise HTTPException(status_code=400, detail="Scales are required.")
+            try:
+                scales = json.loads(scales_raw)
+            except json.JSONDecodeError:
+                raise HTTPException(status_code=400, detail="Scales payload is invalid.")
 
-    def ngLayer(data, res, oo=[0, 0, 0], tt="segmentation"):
-        return neuroglancer.LocalVolume(
-            data, dimensions=res, volume_type=tt, voxel_offset=oo
+            image = save_upload_to_tempfile(image_upload)
+            cleanup_paths.append(image)
+
+            label_upload = form.get("label")
+            label: Optional[pathlib.Path] = None
+            if label_upload and getattr(label_upload, "filename", None):
+                label = save_upload_to_tempfile(label_upload)
+                cleanup_paths.append(label)
+        else:
+            payload = await req.json()
+            image = process_path(payload["image"])
+            label = process_path(payload.get("label"))
+            scales = payload["scales"]
+
+        print(image, label, scales)
+
+        if image is None:
+            raise HTTPException(status_code=400, detail="Image path or file is required.")
+
+        # neuroglancer setting -- bind to this to make accessible outside of container
+        ip = "0.0.0.0"
+        port = 4244
+        neuroglancer.set_server_bind_address(ip, port)
+        viewer = neuroglancer.Viewer()
+        # SNEMI (# 3d vol dim: z,y,x)
+        res = neuroglancer.CoordinateSpace(
+            names=["z", "y", "x"], units=["nm", "nm", "nm"], scales=scales
         )
+        im = readVol(image, image_type="im")
+        gt = readVol(label, image_type="im") if label else None
 
-    with viewer.txn() as s:
-        s.layers.append(name="im", layer=ngLayer(im, res, tt="image"))
-        if label:
-            s.layers.append(name="gt", layer=ngLayer(gt, res, tt="segmentation"))
+        def ngLayer(data, res, oo=[0, 0, 0], tt="segmentation"):
+            return neuroglancer.LocalVolume(
+                data, dimensions=res, volume_type=tt, voxel_offset=oo
+            )
 
-    print(viewer)
-    return str(viewer)
+        with viewer.txn() as s:
+            s.layers.append(name="im", layer=ngLayer(im, res, tt="image"))
+            if gt is not None:
+                s.layers.append(name="gt", layer=ngLayer(gt, res, tt="segmentation"))
+
+        print(viewer)
+        return str(viewer)
+    finally:
+        for path in cleanup_paths:
+            try:
+                path.unlink()
+            except FileNotFoundError:
+                pass
+            except PermissionError:
+                pass
 
 
 @app.post("/start_model_training")
 async def start_model_training(req: Request):
     req = await req.json()
-    response = requests.post(
-        REACT_APP_SERVER_PROTOCOL
-        + "://"
-        + REACT_APP_SERVER_URL
-        + "/start_model_training",
-        json=req,
-    )
+    try:
+        response = requests.post(
+            REACT_APP_SERVER_PROTOCOL
+            + "://"
+            + REACT_APP_SERVER_URL
+            + "/start_model_training",
+            json=req,
+            timeout=30  # TODO: Add timeout to prevent hanging
+        )
 
-    if response.status_code == 200:
-        return {"message": "Model training started successfully"}
-    else:
-        return {"message": "Failed to start model training"}
+        if response.status_code == 200:
+            return {"message": "Model training started successfully", "data": response.json()}
+        else:
+            return {"message": f"Failed to start model training: {response.status_code}", "error": response.text}
+    except requests.exceptions.ConnectionError:
+        return {"message": "Failed to connect to PyTC server. Is server_pytc running?", "error": "ConnectionError"}
+    except requests.exceptions.Timeout:
+        return {"message": "Request timed out. PyTC server may be overloaded.", "error": "Timeout"}
+    except Exception as e:
+        return {"message": f"Failed to start model training: {str(e)}", "error": str(e)}
 
 
 @app.post("/stop_model_training")
 async def stop_model_training():
-    response = requests.post(
-        REACT_APP_SERVER_PROTOCOL
-        + "://"
-        + REACT_APP_SERVER_URL
-        + "/stop_model_training"
-    )
+    try:
+        response = requests.post(
+            REACT_APP_SERVER_PROTOCOL
+            + "://"
+            + REACT_APP_SERVER_URL
+            + "/stop_model_training",
+            timeout=30
+        )
 
-    if response.status_code == 200:
-        return {"message": "Model training stopped successfully"}
-    else:
-        return {"message": "Failed to stop model training"}
+        if response.status_code == 200:
+            return {"message": "Model training stopped successfully", "data": response.json()}
+        else:
+            return {"message": f"Failed to stop model training: {response.status_code}", "error": response.text}
+    except requests.exceptions.ConnectionError:
+        return {"message": "Failed to connect to PyTC server. Is server_pytc running?", "error": "ConnectionError"}
+    except requests.exceptions.Timeout:
+        return {"message": "Request timed out.", "error": "Timeout"}
+    except Exception as e:
+        return {"message": f"Failed to stop model training: {str(e)}", "error": str(e)}
 
 
 @app.post("/start_model_inference")
 async def start_model_inference(req: Request):
     req = await req.json()
-    response = requests.post(
-        REACT_APP_SERVER_PROTOCOL
-        + "://"
-        + REACT_APP_SERVER_URL
-        + "/start_model_inference",
-        json=req,
-    )
+    try:
+        response = requests.post(
+            REACT_APP_SERVER_PROTOCOL
+            + "://"
+            + REACT_APP_SERVER_URL
+            + "/start_model_inference",
+            json=req,
+            timeout=30
+        )
 
-    if response.status_code == 200:
-        return {"message": "Model inference started successfully"}
-    else:
-        return {"message": "Failed to start model inference"}
+        if response.status_code == 200:
+            return {"message": "Model inference started successfully", "data": response.json()}
+        else:
+            return {"message": f"Failed to start model inference: {response.status_code}", "error": response.text}
+    except requests.exceptions.ConnectionError:
+        return {"message": "Failed to connect to PyTC server. Is server_pytc running?", "error": "ConnectionError"}
+    except requests.exceptions.Timeout:
+        return {"message": "Request timed out. PyTC server may be overloaded.", "error": "Timeout"}
+    except Exception as e:
+        return {"message": f"Failed to start model inference: {str(e)}", "error": str(e)}
 
 
 @app.post("/stop_model_inference")
 async def stop_model_inference():
-    response = requests.post(
-        REACT_APP_SERVER_PROTOCOL
-        + "://"
-        + REACT_APP_SERVER_URL
-        + "/stop_model_inference"
-    )
+    try:
+        response = requests.post(
+            REACT_APP_SERVER_PROTOCOL
+            + "://"
+            + REACT_APP_SERVER_URL
+            + "/stop_model_inference",
+            timeout=30
+        )
 
-    if response.status_code == 200:
-        return {"message": "Model inference stopped successfully"}
-    else:
-        return {"message": "Failed to stop model inference"}
+        if response.status_code == 200:
+            return {"message": "Model inference stopped successfully", "data": response.json()}
+        else:
+            return {"message": f"Failed to stop model inference: {response.status_code}", "error": response.text}
+    except requests.exceptions.ConnectionError:
+        return {"message": "Failed to connect to PyTC server. Is server_pytc running?", "error": "ConnectionError"}
+    except requests.exceptions.Timeout:
+        return {"message": "Request timed out.", "error": "Timeout"}
+    except Exception as e:
+        return {"message": f"Failed to stop model inference: {str(e)}", "error": str(e)}
 
 
 @app.get("/get_tensorboard_url")

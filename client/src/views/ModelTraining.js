@@ -12,43 +12,50 @@ function ModelTraining () {
   // const [tensorboardURL, setTensorboardURL] = useState(null);
   const handleStartButton = async () => {
     try {
-      // let fmData = new FormData();
-      // fmData.append(
-      //   "configBase",
-      //   "--config-base configs/SNEMI/SNEMI-Base.yaml"
-      // );
+      // TODO: Validate required context values before starting
+      if (!context.uploadedYamlFile) {
+        setTrainingStatus('Error: Please upload a YAML configuration file first.')
+        return
+      }
+      
+      if (!context.logPath) {
+        setTrainingStatus('Error: Please set output/log path first.')
+        return
+      }
+
       console.log(context.uploadedYamlFile)
-      const trainingConfig = localStorage.getItem('trainingConfig')
+      const trainingConfig = localStorage.getItem('trainingConfig') || context.trainingConfig
       console.log(trainingConfig)
+      
+      setIsTraining(true)
+      setTrainingStatus('Starting training... Please wait, this may take a while.')
+      
+      // TODO: The API call should be non-blocking and return immediately
+      // Real training status should be polled separately
       const res = await startModelTraining(
-        context.uploadedYamlFile.name,
         trainingConfig,
-        context.outputPath,
         context.logPath
       )
       console.log(res)
-      setIsTraining(true)
-      setTrainingStatus('Training in Progress... Please wait, this may take a while.')
+      
+      // TODO: Don't set training complete here - implement proper status polling
+      setTrainingStatus('Training started successfully. Monitoring progress...')
     } catch (e) {
-      console.log(e)
-      setTrainingStatus('Training error! Please inspect console.')
+      console.error('Training start error:', e)
+      setTrainingStatus(`Training error: ${e.message || 'Please check console for details.'}`)
       setIsTraining(false)
-      return
     }
-
-    setIsTraining(false)
-    setTrainingStatus('Training complete!')
   }
 
   const handleStopButton = async () => {
     try {
-      stopModelTraining()
-    } catch (e) {
-      console.log(e)
-      setTrainingStatus('Training error! Please inspect console.')
-    } finally {
+      setTrainingStatus('Stopping training...')
+      await stopModelTraining()
       setIsTraining(false)
-      setTrainingStatus('Training stopped.')
+      setTrainingStatus('Training stopped successfully.')
+    } catch (e) {
+      console.error('Training stop error:', e)
+      setTrainingStatus(`Error stopping training: ${e.message || 'Please check console for details.'}`)
     }
   }
 

@@ -1,5 +1,5 @@
 //  global FileReader
-import React, { useContext, useState, useEffect } from 'react'
+import React, { useContext, useState, useEffect, useRef, useCallback, useMemo } from 'react'
 import { Button, Input, message, Modal, Space, Upload } from 'antd'
 import { InboxOutlined } from '@ant-design/icons'
 import { AppContext } from '../contexts/GlobalContext'
@@ -8,8 +8,78 @@ import UTIF from 'utif'
 
 const path = require('path')
 
+const ensureTrailingSeparator = (dirPath) => {
+  if (!dirPath) return ''
+  return dirPath.endsWith(path.sep) ? dirPath : dirPath + path.sep
+}
+
+const getFolderPath = (uploadFile, originPath) => {
+  if (uploadFile?.folderPath) {
+    return ensureTrailingSeparator(uploadFile.folderPath)
+  }
+  if (!originPath) return ''
+  return ensureTrailingSeparator(path.dirname(originPath))
+}
+
+const enrichFileMetadata = (uploadFile) => {
+  const originPath =
+    uploadFile?.originFileObj?.path ||
+    uploadFile?.path
+  const folderPath = getFolderPath(uploadFile, originPath)
+
+  const enhancedFile = { ...uploadFile }
+  if (originPath) {
+    enhancedFile.path = originPath
+  }
+  if (folderPath) {
+    enhancedFile.folderPath = folderPath
+  }
+  if (!enhancedFile.originalName) {
+    const derivedOriginalName =
+      uploadFile?.originFileObj?.name ||
+      uploadFile?.name ||
+      enhancedFile.name
+    if (derivedOriginalName) {
+      enhancedFile.originalName = derivedOriginalName
+    }
+  }
+  return enhancedFile
+}
+
 export function Dragger () {
   const context = useContext(AppContext)
+  const {
+    setFiles,
+    files,
+    setFileList,
+    setImageFileList,
+    setLabelFileList,
+    resetFileState
+  } = context
+  const objectUrlMapRef = useRef(new Map())
+
+  const revokeObjectUrl = useCallback((uid) => {
+    const url = objectUrlMapRef.current.get(uid)
+    if (url) {
+      URL.revokeObjectURL(url)
+      objectUrlMapRef.current.delete(uid)
+    }
+  }, [])
+
+  const revokeAllObjectUrls = useCallback(() => {
+    objectUrlMapRef.current.forEach((url) => URL.revokeObjectURL(url))
+    objectUrlMapRef.current.clear()
+  }, [])
+
+  const filesByUid = useMemo(() => {
+    const map = new Map()
+    if (Array.isArray(files)) {
+      files.forEach((file) => {
+        map.set(file.uid, file)
+      })
+    }
+    return map
+  }, [files])
 
   // const getBase64 = (file) =>
   //   new Promise((resolve, reject) => {
@@ -22,22 +92,23 @@ export function Dragger () {
   const onChange = (info) => {
     const { status } = info.file
     if (status === 'done') {
-      console.log('file found at:', info.file.originFileObj.path)
+      const originPath =
+        info.file?.originFileObj?.path ||
+        info.file?.path
+      console.log('file found at:', originPath)
 
       message.success(`${info.file.name} file uploaded successfully.`)
-      if (window.require) {
-        const modifiedFile = { ...info.file, path: info.file.originFileObj.path }
-        context.setFiles([...context.files, modifiedFile])
-      } else {
-        context.setFiles([...info.fileList])
-      }
+      const updatedFiles = info.fileList.map(enrichFileMetadata)
+      setFiles(updatedFiles)
       console.log('done')
     } else if (status === 'error') {
       console.log('error')
       message.error(`${info.file.name} file upload failed.`)
+      revokeObjectUrl(info.file.uid)
     } else if (status === 'removed') {
       console.log(info.fileList)
-      context.setFiles([...info.fileList])
+      setFiles(info.fileList.map(enrichFileMetadata))
+      revokeObjectUrl(info.file.uid)
     }
   }
 
@@ -58,6 +129,22 @@ export function Dragger () {
   const [previewFileFolderPath, setPreviewFileFolderPath] = useState('')
   const [fileType, setFileType] = useState('Image')
 
+  useEffect(() => {
+    if (!files || files.length === 0) return
+    const needsFolderPath = files.some(
+      (file) =>
+        !file.folderPath &&
+        (file?.originFileObj?.path || file?.path)
+    )
+    if (needsFolderPath) {
+      setFiles(
+        files.map((file) =>
+          !file.folderPath ? enrichFileMetadata(file) : file
+        )
+      )
+    }
+  }, [files, setFiles])
+
   const handleText = (event) => {
     setValue(event.target.value)
   }
@@ -69,49 +156,86 @@ export function Dragger () {
   const fetchFile = async (file) => {
     try {
       if (fileType === 'Label') {
-        context.setLabelFileList((prevLabelList) => [...prevLabelList, file])
+        setLabelFileList((prevLabelList) => [...prevLabelList, file])
       } else if (fileType === 'Image') {
-        context.setImageFileList((prevImageList) => [...prevImageList, file])
+        setImageFileList((prevImageList) => [...prevImageList, file])
       }
     } catch (error) {
       console.error(error)
     }
   }
 
-  const handleSubmit = (type) => {
-    console.log('submitting path', previewFileFolderPath)
+  const handleSubmit = () => {
+    if (!fileUID) return
+    const targetFile = filesByUid.get(fileUID)
+    if (!targetFile) return
+
+    const updates = {}
     if (previewFileFolderPath !== '') {
-      context.files.find(
-        (targetFile) => targetFile.uid === fileUID
-      ).folderPath = previewFileFolderPath
+      updates.folderPath = previewFileFolderPath
       setPreviewFileFolderPath('')
     }
     if (value !== '') {
-      context.files.find((targetFile) => targetFile.uid === fileUID).name =
-        value
-      context.fileList.find(
-        (targetFile) => targetFile.value === fileUID
-      ).label = value
+      updates.name = value
       setValue('')
     }
-    fetchFile(context.files.find((targetFile) => targetFile.uid === fileUID))
+
+    const updatedFile = Object.keys(updates).length > 0
+      ? { ...targetFile, ...updates }
+      : targetFile
+
+    if (Object.keys(updates).length > 0) {
+      setFiles((prevFiles) =>
+        prevFiles.map((file) =>
+          file.uid === fileUID ? { ...file, ...updates } : file
+        )
+      )
+
+      if (updates.name) {
+        setFileList((prevList) =>
+          prevList.map((entry) =>
+            entry.value === fileUID ? { ...entry, label: updates.name } : entry
+          )
+        )
+      }
+    }
+
+    fetchFile(updatedFile)
     setPreviewOpen(false)
   }
 
   const handleClearCache = async () => {
-    context.setFileList([])
-    context.setImageFileList([])
-    context.setLabelFileList([])
-    message.success('File list cleared successfully.')
+    try {
+      revokeAllObjectUrls()
+      await resetFileState()
+      message.success('File cache cleared successfully.')
+    } catch (error) {
+      console.error('Failed to clear file cache:', error)
+      message.error('Failed to clear file cache.')
+    }
   }
 
   const handleRevert = () => {
-    const oldName = context.files.find((targetFile) => targetFile.uid === fileUID)
-      .originFileObj.name
-    context.files.find((targetFile) => targetFile.uid === fileUID).name =
-      oldName
-    context.fileList.find((targetFile) => targetFile.value === fileUID).label =
-      oldName
+    if (!fileUID) {
+      setPreviewOpen(false)
+      return
+    }
+    const targetFile = filesByUid.get(fileUID)
+    const oldName = targetFile?.originFileObj?.name || targetFile?.originalName
+    if (!oldName) {
+      setPreviewOpen(false)
+      return
+    }
+    setFiles((prevFiles) =>
+      prevFiles.map((file) =>
+        file.uid === fileUID ? { ...file, name: oldName } : file
+      )
+    )
+    setFileList((prevList) =>
+      prevList.map((entry) =>
+        entry.value === fileUID ? { ...entry, label: oldName } : entry
+      )
+    )
     setPreviewOpen(false)
   }
 
@@ -169,35 +293,25 @@ export function Dragger () {
     setPreviewOpen(true)
     setPreviewImage(file.thumbUrl)
     setPreviewTitle(file.name || file.url.substring(file.url.lastIndexOf('/') + 1))
-    if (
-      context.files.find(targetFile => targetFile.uid === file.uid) &&
-      context.files.find(targetFile => targetFile.uid === file.uid).folderPath) {
-      setPreviewFileFolderPath(
-        context.files.find(targetFile => targetFile.uid === file.uid)
-          .folderPath
-      )
+    const targetFile = filesByUid.get(file.uid)
+    if (targetFile?.folderPath) {
+      setPreviewFileFolderPath(targetFile.folderPath)
     } else {
-      // Directory name with trailing slash
-      setPreviewFileFolderPath(path.dirname(file.originFileObj.path) + '/')
+      const originPath =
+        file?.originFileObj?.path ||
+        file?.path
+      setPreviewFileFolderPath(
+        originPath ? ensureTrailingSeparator(path.dirname(originPath)) : ''
+      )
     }
   }
 
-  // Solved the "clear the cache" button for image loading is not reachable when the image preview files are loaded.
   const listItemStyle = {
     display: 'inline-block',
     width: '185px',
     height: 'auto',
     verticalAlign: 'top'
   }
-  useEffect(() => {
-    // Get all elements with the class name "ant-upload-list-item-container"
-    const uploadListItemContainers = document.querySelectorAll('.ant-upload-list-item-container')
-
-    // Apply styles to each element
-    uploadListItemContainers.forEach((element) => {
-      Object.assign(element.style, listItemStyle)
-    })
-  })
 
   // when click or drag file to this area to upload, below function will be deployed.
   const handleBeforeUpload = (file) => {
@@ -213,9 +327,16 @@ export function Dragger () {
       })
     } else {
       file.thumbUrl = URL.createObjectURL(file)
+      objectUrlMapRef.current.set(file.uid, file.thumbUrl)
     }
     return true // Allow the upload
   }
+
+  useEffect(() => {
+    return () => {
+      revokeAllObjectUrls()
+    }
+  }, [revokeAllObjectUrls])
 
   return (
     <>

@@ -5,6 +5,7 @@
 *.png
 node_modules/
 pytc/
+pytorch_connectomics/
 logs/
 data/
 outputs/
