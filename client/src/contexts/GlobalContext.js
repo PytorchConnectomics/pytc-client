@@ -1,7 +1,69 @@
-import React, { createContext, useState, useEffect } from 'react'
+import React, { createContext, useState, useEffect, useCallback } from 'react'
 import localforage from 'localforage'
 
 export const AppContext = createContext(null)
+
+const FILE_STATE_DEFAULTS = {
+  files: [],
+  fileList: [],
+  imageFileList: [],
+  labelFileList: [],
+  currentImage: null,
+  currentLabel: null,
+  inputImage: null,
+  inputLabel: null
+}
+
+const FILE_CACHE_KEYS = Object.keys(FILE_STATE_DEFAULTS)
+const FILE_OBJECT_STATE_KEYS = FILE_CACHE_KEYS.filter((key) => key !== 'fileList')
+
+const sanitizeFileEntry = (file) => {
+  if (!file || typeof file !== 'object') return file
+  const {
+    uid,
+    name,
+    originalName,
+    path,
+    folderPath,
+    thumbUrl,
+    type,
+    status,
+    percent,
+    size,
+    response,
+    error,
+    lastModified,
+    lastModifiedDate,
+    url
+  } = file
+  return {
+    uid,
+    name,
+    originalName: originalName || name,
+    path,
+    folderPath,
+    thumbUrl,
+    type,
+    status,
+    percent,
+    size,
+    response,
+    error,
+    lastModified,
+    lastModifiedDate,
+    url
+  }
+}
+
+const sanitizePersistedState = (key, state) => {
+  if (!FILE_OBJECT_STATE_KEYS.includes(key)) {
+    return state
+  }
+  if (Array.isArray(state)) {
+    return state.map((entry) => sanitizeFileEntry(entry))
+  }
+  return sanitizeFileEntry(state)
+}
 
 // Solve delete button error issue
 function usePersistedState (key, defaultValue) {
@@ -24,7 +86,8 @@ function usePersistedState (key, defaultValue) {
   useEffect(() => {
     if (isLoaded) {
       // Save the state to localforage asynchronously whenever it changes
-      localforage.setItem(key, state).catch((err) => {
+      const valueToPersist = sanitizePersistedState(key, state)
+      localforage.setItem(key, valueToPersist).catch((err) => {
         console.error('Error setting value to localforage:', err)
       })
     }
@@ -60,6 +123,34 @@ export const ContextWrapper = (props) => {
   const [viewer, setViewer] = usePersistedState('viewer', null)
   const [tensorBoardURL, setTensorBoardURL] = usePersistedState('tensorBoardURL', null)
 
+  const resetFileState = useCallback(async () => {
+    try {
+      await Promise.all(
+        FILE_CACHE_KEYS.map((key) => localforage.removeItem(key))
+      )
+    } catch (error) {
+      console.error('Error clearing file cache from storage:', error)
+    } finally {
+      setFiles(FILE_STATE_DEFAULTS.files)
+      setFileList(FILE_STATE_DEFAULTS.fileList)
+      setImageFileList(FILE_STATE_DEFAULTS.imageFileList)
+      setLabelFileList(FILE_STATE_DEFAULTS.labelFileList)
+      setCurrentImage(FILE_STATE_DEFAULTS.currentImage)
+      setCurrentLabel(FILE_STATE_DEFAULTS.currentLabel)
+      setInputImage(FILE_STATE_DEFAULTS.inputImage)
+      setInputLabel(FILE_STATE_DEFAULTS.inputLabel)
+    }
+  }, [
+    setFiles,
+    setFileList,
+    setImageFileList,
+    setLabelFileList,
+    setCurrentImage,
+    setCurrentLabel,
+    setInputImage,
+    setInputLabel
+  ])
+
   return (
     <AppContext.Provider
       value={{
@@ -94,7 +185,8 @@ export const ContextWrapper = (props) => {
         checkpointPath,
         setCheckpointPath,
         tensorBoardURL,
-        setTensorBoardURL
+        setTensorBoardURL,
+        resetFileState
       }}
     >
       {props.children}
