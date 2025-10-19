@@ -1,50 +1,44 @@
-import { useEffect, useState } from 'react'
-import localforage from 'localforage'
+import { useContext, useEffect, useState } from 'react'
 import './App.css'
 import Views from './views/Views'
-import { ContextWrapper } from './contexts/GlobalContext'
+import { AppContext, ContextWrapper } from './contexts/GlobalContext'
 import { YamlContextWrapper } from './contexts/YamlContext'
 
-const FILE_CACHE_KEYS = [
-  'files',
-  'fileList',
-  'imageFileList',
-  'labelFileList',
-  'currentImage',
-  'currentLabel',
-  'inputImage',
-  'inputLabel'
-]
-
-function App () {
+function CacheBootstrapper ({ children }) {
+  const { resetFileState } = useContext(AppContext)
   const [isCacheCleared, setIsCacheCleared] = useState(false)
 
   useEffect(() => {
-    const clearFileCache = async () => {
-      try {
-        await Promise.all(
-          FILE_CACHE_KEYS.map((key) => localforage.removeItem(key))
-        )
-      } catch (error) {
-        console.error('Failed to clear file cache on startup:', error)
-      } finally {
+    let isMounted = true
+    const clearCache = async () => {
+      await resetFileState()
+      if (isMounted) {
         setIsCacheCleared(true)
       }
     }
 
-    clearFileCache()
-  }, [])
+    clearCache()
+    return () => {
+      isMounted = false
+    }
+  }, [resetFileState])
 
   if (!isCacheCleared) {
     return null
   }
 
+  return children
+}
+
+function App () {
   return (
     <ContextWrapper>
       <YamlContextWrapper>
-        <div className='App'>
-          <Views />
-        </div>
+        <CacheBootstrapper>
+          <div className='App'>
+            <Views />
+          </div>
+        </CacheBootstrapper>
       </YamlContextWrapper>
     </ContextWrapper>
   )
