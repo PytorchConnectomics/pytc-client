@@ -8,8 +8,38 @@ import UTIF from 'utif'
 
 const path = require('path')
 
+const ensureTrailingSeparator = (dirPath) => {
+  if (!dirPath) return ''
+  return dirPath.endsWith(path.sep) ? dirPath : dirPath + path.sep
+}
+
+const getFolderPath = (uploadFile, originPath) => {
+  if (uploadFile?.folderPath) {
+    return ensureTrailingSeparator(uploadFile.folderPath)
+  }
+  if (!originPath) return ''
+  return ensureTrailingSeparator(path.dirname(originPath))
+}
+
+const enrichFileMetadata = (uploadFile) => {
+  const originPath =
+    uploadFile?.originFileObj?.path ||
+    uploadFile?.path
+  const folderPath = getFolderPath(uploadFile, originPath)
+
+  const enhancedFile = { ...uploadFile }
+  if (originPath) {
+    enhancedFile.path = originPath
+  }
+  if (folderPath) {
+    enhancedFile.folderPath = folderPath
+  }
+  return enhancedFile
+}
+
 export function Dragger () {
   const context = useContext(AppContext)
+  const { setFiles, files } = context
 
   // const getBase64 = (file) =>
   //   new Promise((resolve, reject) => {
@@ -22,22 +52,21 @@ export function Dragger () {
   const onChange = (info) => {
     const { status } = info.file
     if (status === 'done') {
-      console.log('file found at:', info.file.originFileObj.path)
+      const originPath =
+        info.file?.originFileObj?.path ||
+        info.file?.path
+      console.log('file found at:', originPath)
 
       message.success(`${info.file.name} file uploaded successfully.`)
-      if (window.require) {
-        const modifiedFile = { ...info.file, path: info.file.originFileObj.path }
-        context.setFiles([...context.files, modifiedFile])
-      } else {
-        context.setFiles([...info.fileList])
-      }
+      const updatedFiles = info.fileList.map(enrichFileMetadata)
+      setFiles(updatedFiles)
       console.log('done')
     } else if (status === 'error') {
       console.log('error')
       message.error(`${info.file.name} file upload failed.`)
     } else if (status === 'removed') {
       console.log(info.fileList)
-      context.setFiles([...info.fileList])
+      setFiles(info.fileList.map(enrichFileMetadata))
     }
   }
 
@@ -57,6 +86,22 @@ export function Dragger () {
   const [fileUID, setFileUID] = useState(null)
   const [previewFileFolderPath, setPreviewFileFolderPath] = useState('')
   const [fileType, setFileType] = useState('Image')
+
+  useEffect(() => {
+    if (!files || files.length === 0) return
+    const needsFolderPath = files.some(
+      (file) =>
+        !file.folderPath &&
+        (file?.originFileObj?.path || file?.path)
+    )
+    if (needsFolderPath) {
+      setFiles(
+        files.map((file) =>
+          !file.folderPath ? enrichFileMetadata(file) : file
+        )
+      )
+    }
+  }, [files, setFiles])
 
   const handleText = (event) => {
     setValue(event.target.value)
@@ -177,8 +222,12 @@ export function Dragger () {
           .folderPath
       )
     } else {
-      // Directory name with trailing slash
-      setPreviewFileFolderPath(path.dirname(file.originFileObj.path) + '/')
+      const originPath =
+        file?.originFileObj?.path ||
+        file?.path
+      setPreviewFileFolderPath(
+        originPath ? ensureTrailingSeparator(path.dirname(originPath)) : ''
+      )
     }
   }
 
