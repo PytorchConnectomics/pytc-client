@@ -1,50 +1,34 @@
-#centOS
-FROM nvidia/cuda:11.1.1-devel-ubi8
+FROM python:3.11-slim
 
-# Enable AppStream and install Python 3.9 and git
-RUN yum -y module enable python39 && \
-    yum install -y python39-3.9.2 && \
-    yum install -y python39-devel-3.9.2 && \
-    yum install -y git && \
-    yum clean all && \ 
-    (python3.9 --version || echo "Python installation failed" && exit 1)
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    UV_PROJECT_ENV=/app/.venv
 
-# Create a symbolic link to bind python to python3.9
-RUN ln -s /usr/bin/python3.9 /usr/bin/python
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    build-essential \
+    curl \
+    git \
+    && rm -rf /var/lib/apt/lists/*
 
-# Install pip (if not already included)
-SHELL ["/bin/bash", "-o", "pipefail", "-c"]
-RUN curl -sS https://bootstrap.pypa.io/get-pip.py | python
-
-# Set working directory 
-WORKDIR /app
-
-# Install dependencies
-RUN pip3 install --no-cache-dir torch==1.9.0 torchvision==0.10.0 cuda-python==11.1.1
-
-# Download pytorch_connectomics at specific commit (version 1.0)
-RUN git clone https://github.com/zudi-lin/pytorch_connectomics.git /app/pytorch_connectomics && \
-    cd /app/pytorch_connectomics && \
-    git checkout 20ccfde
-
-COPY ./samples_pytc /app/samples_pytc
-COPY ./server_pytc /app/server_pytc
-COPY ./server_api /app/server_api
-
-WORKDIR /app/pytorch_connectomics
-RUN yum install -y libglvnd-glx-1.3.2 && \
-    yum clean all && \
-    pip3 install --no-cache-dir --editable .
-
-WORKDIR /app/server_api
-RUN pip3 install --no-cache-dir -r requirements.txt
+RUN curl -LsSf https://astral.sh/uv/install.sh | sh -s -- --install-dir /usr/local/bin
 
 WORKDIR /app
-# Copies the startup scripts, and runs it at CMD
-COPY ./start.sh /app/
-COPY ./setup_pytorch_connectomics.sh /app/
-RUN chmod +x start.sh setup_pytorch_connectomics.sh
 
-# Expose ports
+COPY pyproject.toml uv.lock ./
+RUN uv sync --frozen --no-dev --python 3.11
+
+COPY setup_pytorch_connectomics.sh ./setup_pytorch_connectomics.sh
+RUN chmod +x setup_pytorch_connectomics.sh && \
+    ./setup_pytorch_connectomics.sh --force && \
+    uv pip install --directory /app --editable /app/pytorch_connectomics && \
+    rm -rf /app/pytorch_connectomics/.git
+
+COPY server_api ./server_api
+COPY server_pytc ./server_pytc
+COPY scripts/docker-entrypoint.sh ./scripts/docker-entrypoint.sh
+
+RUN chmod +x scripts/docker-entrypoint.sh
+
 EXPOSE 4242 4243 4244 6006
-CMD [ "./start.sh"]
+
+CMD ["./scripts/docker-entrypoint.sh"]
