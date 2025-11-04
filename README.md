@@ -25,6 +25,30 @@ start.bat                               # Windows CMD
 
 This starts both FastAPI services under uv, runs the Electron client, and cleans up the servers when you close the UI. Re-run the bootstrap script any time you need to refresh dependencies.
 
+## Containerized Backend (Docker)
+
+Prefer to keep everything in a container? The provided image uses uv inside the container so the backend is ready in one build step. This target runs the FastAPI API (`:4242`), the PyTC worker service (`:4243`), the Neuroglancer bridge (`:4244`), and TensorBoard (`:6006`). Electron is not included—use your local client or Electron build to talk to the containerised backend.
+
+**Prerequisites**
+- Docker with Compose V2 (`docker compose`)
+
+**Build the image**
+```bash
+docker compose build backend
+```
+
+**Run the backend services**
+```bash
+docker compose up backend
+```
+
+When you are done:
+```bash
+docker compose down
+```
+
+You can now point the desktop client at `http://localhost:4242`.
+
 ## Legacy Manual Setup (without uv)
 
 If you prefer to manage Python environments yourself, follow the steps below. Expect a slower install and more moving pieces.
