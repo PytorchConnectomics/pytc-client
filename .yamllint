@@ -1,0 +1,8 @@
+---
+extends: default
+
+ignore: |
+  .venv/
+  node_modules/
+  outputs/
+  pytorch_connectomics/
