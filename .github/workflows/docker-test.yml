@@ -1,7 +1,7 @@
 ---
 name: Docker Build and Smoke Test
 
-on:
+'on':
   push:
     branches:
       - main
@@ -38,11 +38,17 @@ jobs:
 
       - name: Build backend image
         working-directory: pytc-client
-        run: docker build -t pytc-backend .
+        run: |
+          docker build -t pytc-backend .
 
       - name: Run backend container
         working-directory: pytc-client
-        run: docker run -d --name pytc-backend -p 4242:4242 -p 4243:4243 pytc-backend
+        run: |
+          docker run -d \
+            --name pytc-backend \
+            -p 4242:4242 \
+            -p 4243:4243 \
+            pytc-backend
 
       - name: Wait for API health
         run: |
@@ -59,7 +65,10 @@ jobs:
 
       - name: Check PyTC service
         run: |
-          curl -fsS http://localhost:4243/hello || (docker logs pytc-backend && exit 1)
+          if ! curl -fsS http://localhost:4243/hello; then
+            docker logs pytc-backend || true
+            exit 1
+          fi
 
       - name: Cleanup container
         if: always()
