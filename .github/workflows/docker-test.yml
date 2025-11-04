@@ -1,27 +1,68 @@
 ---
-name: Docker Build and Run Test
+name: Docker Build and Smoke Test
 
 on:
   push:
     branches:
       - main
+    paths:
+      - "pytc-client/Dockerfile"
+      - "pytc-client/docker-compose.yaml"
+      - "pytc-client/scripts/docker-entrypoint.sh"
+      - "pytc-client/setup_pytorch_connectomics.sh"
+      - "pytc-client/pyproject.toml"
+      - "pytc-client/uv.lock"
+      - "pytc-client/server_api/**"
+      - "pytc-client/server_pytc/**"
+  pull_request:
+    paths:
+      - "pytc-client/Dockerfile"
+      - "pytc-client/docker-compose.yaml"
+      - "pytc-client/scripts/docker-entrypoint.sh"
+      - "pytc-client/setup_pytorch_connectomics.sh"
+      - "pytc-client/pyproject.toml"
+      - "pytc-client/uv.lock"
+      - "pytc-client/server_api/**"
+      - "pytc-client/server_pytc/**"
 
 jobs:
   build-and-run:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Check out the repo
-        uses: actions/checkout@v2
+      - name: Check out repository
+        uses: actions/checkout@v4
 
       - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v1
+        uses: docker/setup-buildx-action@v3
 
-      - name: Initialize Git Submodules
-        run: git submodule update --init --recursive
+      - name: Build backend image
+        working-directory: pytc-client
+        run: docker build -t pytc-backend .
 
-      - name: Build Docker Image
-        run: docker build -t pytc .
+      - name: Run backend container
+        working-directory: pytc-client
+        run: docker run -d --name pytc-backend -p 4242:4242 -p 4243:4243 pytc-backend
 
-      - name: Run Docker Container
-        run: docker run --name mycontainer -d pytc
+      - name: Wait for API health
+        run: |
+          for attempt in {1..30}; do
+            if curl -fsS http://localhost:4242/hello >/tmp/hello.json; then
+              cat /tmp/hello.json
+              exit 0
+            fi
+            sleep 5
+          done
+          echo "API did not become ready in time"
+          docker logs pytc-backend || true
+          exit 1
+
+      - name: Check PyTC service
+        run: |
+          curl -fsS http://localhost:4243/hello || (docker logs pytc-backend && exit 1)
+
+      - name: Cleanup container
+        if: always()
+        run: |
+          docker logs pytc-backend || true
+          docker rm -f pytc-backend || true
