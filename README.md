@@ -1,96 +1,32 @@
 # pytc-client
 
-## Docker installation instructions
+## Quickstart (uv workflow)
+
+**Prerequisites**
+- [git](https://git-scm.com/)
+- [uv](https://docs.astral.sh/uv/) (bundles Python and virtualenv management)
+- [Node.js](https://nodejs.org/) 18+ (includes npm)
+
+Clone the repository and run the bootstrap script once to install everything (Python 3.11 environment, pytorch_connectomics checkout, npm packages):
 
 ```bash
-# Pull the image (tag 0.0.1 -- subject to change in future versions)
-docker pull xbalbinus/pytc-client:0.0.1
-# Expose ports to run the backend servers on Docker
-docker run -it -p 4242:4242 -p 4243:4243 -p 4244:4244 -p 6006:6006 --shm-size=8g xbalbinus/pytc-client:0.0.1
+./scripts/bootstrap.sh          # macOS / Linux
+scripts\bootstrap.ps1           # Windows (PowerShell)
 ```
 
-## Installation
-0. Create a Virtual Environment via. Conda
+Launch the full stack (both FastAPI services + Electron client) with a single command:
 
 ```bash
-conda create -n pytc python=3.9
-conda activate pytc
-conda install pytorch torchvision cudatoolkit=11.3 -c pytorch
+./start.sh                      # macOS / Linux
+start.bat                       # Windows (CMD)
 ```
 
-Alternatively, dependencies can be installed with native Python via. the following:
+The launcher keeps the API services running while Electron is open and cleans them up when you exit.
 
-```bash
-# Create a venv
-python -m venv .venv
-# if running in windows, replace the line above with '.\.venv\Scripts\activate.bat'
-source .venv/bin/activate
+## Alternate Setups
 
-# Install dependencies
-pip install torch torchvision cuda-python
-```
+- **Docker**: `docker pull xbalbinus/pytc-client:0.0.1` followed by `docker run -it -p 4242:4242 -p 4243:4243 -p 4244:4244 -p 6006:6006 --shm-size=8g xbalbinus/pytc-client:0.0.1`
+- **Manual Python environment**: still supported—create/activate your own virtualenv, run `pip install -r server_api/requirements.txt`, execute `setup_pytorch_connectomics.sh`, and install the package with `pip install -e pytorch_connectomics`.
 
-In the rare event that your device does not support CUDA, you may run the following respectively:
-
-```bash
-# If using a conda environment
-conda create -n pytc python=3.9
-conda activate pytc
-conda install pytorch torchvision
-
-# If installing via native python
-python -m venv .venv
-source .venv/bin/activate 
-# if running in windows, replace the line above with '.\.venv\Scripts\activate.bat'
-pip install torch torchvision
-```
-
-1. Client
-```bash
-cd client
-npm install
-npm run build
-```
-
-2. API Server:
-```bash
-cd server_api
-pip install -r requirements.txt
-```
-
-3. Pytc-connectomics:
-
-In root folder,
-```bash
-# The setup script will automatically download pytorch_connectomics at commit 20ccfde (version 1.0)
-./setup_pytorch_connectomics.sh
-cd pytorch_connectomics
-pip install --editable .
-```
-
-Alternatively, you can run this manually:
-```bash
-git clone https://github.com/zudi-lin/pytorch_connectomics.git
-cd pytorch_connectomics
-git checkout 20ccfde
-pip install --editable .
-```
-
-## Run Project
-### To run
-```bash
-# if running on mac or linux:
-./start.sh
-
-# if running on windows:
-./start.bat
-
-```
-In a separate terminal
-```bash
-cd client
-npm run electron
-```
-
-Below is a link to a video demo: showing how to set up and run the app:
-[video demo](https://www.loom.com/share/45c09b36bf37408fb3e5a9172e427deb?sid=2777bf8f-a705-4d47-b17a-adf882994168)
+## Video Demo
+[Video walkthrough](https://www.loom.com/share/45c09b36bf37408fb3e5a9172e427deb?sid=2777bf8f-a705-4d47-b17a-adf882994168)
