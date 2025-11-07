@@ -4,7 +4,9 @@ import Visualization from '../views/Visualization'
 import ModelTraining from '../views/ModelTraining'
 import ModelInference from '../views/ModelInference'
 import Monitoring from '../views/Monitoring'
-import { Layout, Menu } from 'antd'
+import Chatbot from '../components/Chatbot'
+import { Layout, Menu, Button } from 'antd'
+import { MessageOutlined } from '@ant-design/icons'
 import { getNeuroglancerViewer } from '../utils/api'
 
 const { Content, Sider } = Layout
@@ -14,6 +16,7 @@ function Views () {
   const [viewers, setViewers] = useState([])
   const [isLoading, setIsLoading] = useState(false)
   const [isInferring, setIsInferring] = useState(false)
+  const [isChatOpen, setIsChatOpen] = useState(false)
   console.log(viewers)
 
   const onClick = (e) => {
@@ -122,6 +125,24 @@ function Views () {
                 {renderMenu()}
               </Content>
             </Layout>
+            {isChatOpen ? (
+              <Sider
+                width={400}
+                theme='light'
+              >
+                <Chatbot onClose={() => setIsChatOpen(false)} />
+              </Sider>
+            ) : (
+              <Button
+                type="primary"
+                shape="circle"
+                icon={<MessageOutlined />}
+                onClick={() => setIsChatOpen(true)}
+                style={{
+                  margin: '8px 8px'
+                }}
+              />
+            )}
           </>
           )}
     </Layout>

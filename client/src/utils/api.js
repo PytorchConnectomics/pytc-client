@@ -170,3 +170,25 @@ export async function stopModelInference () {
     handleError(error)
   }
 }
+
+export async function queryChatBot (query) {
+  try {
+    const res = await axios.post(
+      `${process.env.REACT_APP_API_PROTOCOL}://${process.env.REACT_APP_API_URL}/chat/query`,
+      { query }
+    )
+    return res.data?.response
+  } catch (error) {
+    handleError(error)
+  }
+}
+
+export async function clearChat () {
+  try {
+    await axios.post(
+      `${process.env.REACT_APP_API_PROTOCOL}://${process.env.REACT_APP_API_URL}/chat/clear`
+    )
+  } catch (error) {
+    handleError(error)
+  }
+}

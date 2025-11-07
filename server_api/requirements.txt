@@ -6,3 +6,7 @@ imageio==2.37.0
 tensorboard==2.20.0
 tensorboard-data-server==0.7.2
 psutil>=5.9.0
+langchain-classic==1.0.0
+langchain-community==0.4.1
+langchain-ollama==1.0.0
+faiss-cpu==1.12.0
