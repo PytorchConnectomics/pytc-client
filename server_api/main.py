@@ -9,6 +9,8 @@ import uvicorn
 from fastapi import FastAPI, HTTPException, Request, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from utils.io import readVol
+from utils.utils import process_path
+from chatbot.chatbot import chain, memory
 
 REACT_APP_SERVER_PROTOCOL = "http"
 REACT_APP_SERVER_URL = "localhost:4243"
@@ -22,15 +24,6 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
-
-
-def process_path(path):
-    if not path:
-        return None
-    candidate = pathlib.Path(path).expanduser()
-    if candidate.is_absolute():
-        return candidate
-    return candidate.resolve(strict=False)
 
 
 def save_upload_to_tempfile(upload: UploadFile) -> pathlib.Path:
@@ -264,6 +257,20 @@ async def check_files(req: Request):
         return {"label": label}
     except Exception as e:
         return {"error": str(e)}
+
+
+# Chatbot endpoints
+@app.post("/chat/query")
+async def chat_query(req: Request):
+    body = await req.json()
+    query = body.get('query')
+    response = chain.invoke({'question': query})['answer']
+    return {"response": response}
+
+
+@app.post("/chat/clear")
+async def clear_chat():
+    memory.clear()
 
 
 def run():
