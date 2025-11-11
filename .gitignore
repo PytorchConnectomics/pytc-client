@@ -1,18 +1,37 @@
+# OS / IDE clutter
 .idea/
 .DS_Store
 *.pyc
 *.pclprof
 *.png
+
+# Node / frontend artifacts
 node_modules/
-pytc/
-pytorch_connectomics/
+client/build/
+client/dist/
+client/.parcel-cache/
+
+# Python environments / caches
+.venv
+.venv/
+__pycache__/
+.pytest_cache/
+
+# Data / generated artifacts
 logs/
 data/
 outputs/
 build/
-.venv
-__pycache__
-.pytest_cache
 mnt/
 samples_pytc/*
+pytc/
+pytorch_connectomics/
+
+# Misc tooling / temporary files
+.coverage
+coverage.xml
+dist/
+.env
+.env.*
+*.log
 .github/workflows/docker-test.yml
