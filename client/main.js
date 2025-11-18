@@ -17,11 +17,15 @@ function createWindow () {
     }
   })
 
-  mainWindow.loadURL(url.format({
-    pathname: path.join(__dirname, './build/index.html'),
-    protocol: 'file:',
-    slashes: true
-  }))
+  if (process.env.ENVIRONMENT === 'development') {
+    mainWindow.loadURL('http://localhost:3000')
+  } else {
+    mainWindow.loadURL(url.format({
+      pathname: path.join(__dirname, './build/index.html'),
+      protocol: 'file:',
+      slashes: true
+    }))
+  }
 
   // comment out to stop dev tools from opening
   // mainWindow.webContents.openDevTools();
