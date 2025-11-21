@@ -1,43 +1,49 @@
-import React, { createContext, useState, useEffect } from 'react'
-import localforage from 'localforage'
+import React, { createContext, useState, useCallback } from 'react';
+import localforage from 'localforage';
 
-export const UserContext = createContext(null)
+export const UserContext = createContext();
 
-const USERS_KEY = 'pytc_users'
-const CURRENT_USER_KEY = 'pytc_current_user'
+function hashPassword(password) {
+  // Simple SHA-256 hash (prototype)
+  return window.crypto.subtle.digest('SHA-256', new TextEncoder().encode(password)).then(buf =>
+    Array.from(new Uint8Array(buf)).map(b => b.toString(16).padStart(2, '0')).join('')
+  );
+// ...existing code...
 
-async function hashString (str) {
-  if (!str) return ''
-  const enc = new TextEncoder()
-  const data = enc.encode(str)
-  const hash = await crypto.subtle.digest('SHA-256', data)
-  const hashArray = Array.from(new Uint8Array(hash))
-  return hashArray.map(b => b.toString(16).padStart(2, '0')).join('')
+export const UserProvider = ({ children }) => {
+  const [currentUser, setCurrentUser] = useState(null);
+
+  const autoSignOut = useCallback(() => {
+    setCurrentUser(null);
+  }, []);
+
+  const signIn = async (name, password) => {
+    const users = (await localforage.getItem('users')) || [];
+    const hash = await hashPassword(password);
+    const user = users.find(u => u.name === name && u.passwordHash === hash);
+    if (user) {
+      setCurrentUser(user);
+      return true;
+    }
+    return false;
+  };
+
+  const signUp = async (name, password) => {
+    const users = (await localforage.getItem('users')) || [];
+    if (users.find(u => u.name === name)) return false;
+    const hash = await hashPassword(password);
+    const newUser = { id: Date.now(), name, passwordHash: hash, files: {}, createdAt: Date.now() };
+    await localforage.setItem('users', [...users, newUser]);
+    setCurrentUser(newUser);
+    return true;
+  };
+
+  return (
+    <UserContext.Provider value={{ currentUser, setCurrentUser, signIn, signUp, autoSignOut }}>
+      {children}
+    </UserContext.Provider>
+  );
 }
-
-export const UserContextWrapper = ({ children }) => {
-  const [users, setUsers] = useState([])
-  const [currentUserId, setCurrentUserId] = useState(null)
-  const [isLoaded, setIsLoaded] = useState(false)
-
-  useEffect(() => {
-    let mounted = true
-    const load = async () => {
-      await localforage.removeItem(CURRENT_USER_KEY) // Always sign out on app start
-      const stored = await localforage.getItem(USERS_KEY)
-      setUsers(stored || [])
-      setCurrentUserId(null)
-      setIsLoaded(true)
-    }
-    load()
-    return () => { mounted = false }
-  }, [])
-
-  useEffect(() => {
-    if (isLoaded) {
-      localforage.setItem(USERS_KEY, users).catch(() => {})
-    }
-  }, [users, isLoaded])
 
   useEffect(() => {
     if (isLoaded) {
