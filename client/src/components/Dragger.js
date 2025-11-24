@@ -6,6 +6,7 @@ import { AppContext } from '../contexts/GlobalContext'
 import { DEFAULT_IMAGE } from '../utils/utils'
 import UTIF from 'utif'
 
+import { getNeuroglancerViewer } from '../utils/api'
 const path = require('path')
 
 const ensureTrailingSeparator = (dirPath) => {
@@ -100,6 +101,7 @@ export function Dragger() {
       message.success(`${info.file.name} file uploaded successfully.`)
       const updatedFiles = info.fileList.map(enrichFileMetadata)
       setFiles(updatedFiles)
+
       console.log('done')
     } else if (status === 'error') {
       console.log('error')
