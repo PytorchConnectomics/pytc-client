@@ -2,7 +2,7 @@ import { Form, Input, Select } from 'antd'
 import React, { useContext } from 'react'
 import { AppContext } from '../contexts/GlobalContext'
 
-function InputSelector (props) {
+function InputSelector(props) {
   const context = useContext(AppContext)
   const { fileList, type } = props
   console.log(fileList, context.files)
@@ -74,14 +74,26 @@ function InputSelector (props) {
                 style={{
                   width: '100%'
                 }}
-                placeholder='Please type output path'
+                placeholder='Directory for outputs (e.g., /path/to/outputs/)'
                 value={context.outputPath ? context.outputPath : undefined}
                 onChange={handleOutputPathChange}
                 size='middle'
               />
             </Form.Item>
-            )
-          : null}
+          )
+          : (
+            <Form.Item label='Output Path' help='Directory where inference results will be saved'>
+              <Input
+                style={{
+                  width: '100%'
+                }}
+                placeholder='Directory for results (e.g., /path/to/inference_output/)'
+                value={context.outputPath ? context.outputPath : undefined}
+                onChange={handleOutputPathChange}
+                size='middle'
+              />
+            </Form.Item>
+          )}
         {type === 'training'
           ? (
             <Form.Item label='Log Path'>
@@ -95,20 +107,20 @@ function InputSelector (props) {
                 size='middle'
               />
             </Form.Item>
-            )
+          )
           : (
-            <Form.Item label='Checkpoint Path'>
+            <Form.Item label='Checkpoint Path' help='Path to trained model file (.pth.tar)'>
               <Input
                 style={{
                   width: '100%'
                 }}
-                placeholder='Please type checkpoint path'
-                value={context.outputPath ? context.outputPath : undefined}
+                placeholder='Model checkpoint file (e.g., /path/to/checkpoint_00010.pth.tar)'
+                value={context.checkpointPath ? context.checkpointPath : undefined}
                 onChange={handleCheckpointPathChange}
                 size='middle'
               />
             </Form.Item>
-            )}
+          )}
       </Form>
     </div>
   )

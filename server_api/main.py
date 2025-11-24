@@ -88,8 +88,11 @@ async def neuroglancer(req: Request):
         res = neuroglancer.CoordinateSpace(
             names=["z", "y", "x"], units=["nm", "nm", "nm"], scales=scales
         )
-        im = readVol(image, image_type="im")
-        gt = readVol(label, image_type="im") if label else None
+        try:
+            im = readVol(image, image_type="im")
+            gt = readVol(label, image_type="im") if label else None
+        except Exception as e:
+            raise HTTPException(status_code=400, detail=f"Failed to read image volume: {str(e)}")
 
         def ngLayer(data, res, oo=[0, 0, 0], tt="segmentation"):
             return neuroglancer.LocalVolume(
@@ -115,27 +118,48 @@ async def neuroglancer(req: Request):
 
 @app.post("/start_model_training")
 async def start_model_training(req: Request):
+    print("\n========== SERVER_API: START_MODEL_TRAINING ENDPOINT CALLED ==========")
     req = await req.json()
+    print(f"[SERVER_API] Received request payload keys: {list(req.keys())}")
+    print(f"[SERVER_API] Arguments: {req.get('arguments', {})}")
+    print(f"[SERVER_API] Log path: {req.get('logPath', 'NOT PROVIDED')}")
+    print(f"[SERVER_API] Output path: {req.get('outputPath', 'NOT PROVIDED')}")
+    print(f"[SERVER_API] Training config length: {len(req.get('trainingConfig', '')) if req.get('trainingConfig') else 0} chars")
+    print(f"[SERVER_API] NOTE: TensorBoard will monitor outputPath where PyTorch Connectomics writes logs")
+    
     try:
+        target_url = REACT_APP_SERVER_PROTOCOL + "://" + REACT_APP_SERVER_URL + "/start_model_training"
+        print(f"[SERVER_API] Proxying to PyTC server at: {target_url}")
+        
         response = requests.post(
-            REACT_APP_SERVER_PROTOCOL
-            + "://"
-            + REACT_APP_SERVER_URL
-            + "/start_model_training",
+            target_url,
             json=req,
             timeout=30  # TODO: Add timeout to prevent hanging
         )
+        
+        print(f"[SERVER_API] PyTC server response status: {response.status_code}")
+        print(f"[SERVER_API] PyTC server response: {response.text[:500]}")  # First 500 chars
 
         if response.status_code == 200:
+            print("[SERVER_API] ✓ Training request proxied successfully")
             return {"message": "Model training started successfully", "data": response.json()}
         else:
+            print(f"[SERVER_API] ✗ PyTC server returned error status: {response.status_code}")
             return {"message": f"Failed to start model training: {response.status_code}", "error": response.text}
-    except requests.exceptions.ConnectionError:
+    except requests.exceptions.ConnectionError as e:
+        print(f"[SERVER_API] ✗ CONNECTION ERROR: Cannot reach PyTC server at {REACT_APP_SERVER_URL}")
+        print(f"[SERVER_API] Error details: {e}")
         return {"message": "Failed to connect to PyTC server. Is server_pytc running?", "error": "ConnectionError"}
     except requests.exceptions.Timeout:
+        print("[SERVER_API] ✗ TIMEOUT: PyTC server did not respond within 30 seconds")
         return {"message": "Request timed out. PyTC server may be overloaded.", "error": "Timeout"}
     except Exception as e:
+        print(f"[SERVER_API] ✗ UNEXPECTED ERROR: {type(e).__name__}: {str(e)}")
+        import traceback
+        print(traceback.format_exc())
         return {"message": f"Failed to start model training: {str(e)}", "error": str(e)}
+    finally:
+        print("========== SERVER_API: END OF START_MODEL_TRAINING ==========\n")
 
 
 @app.post("/stop_model_training")
@@ -159,6 +183,24 @@ async def stop_model_training():
         return {"message": "Request timed out.", "error": "Timeout"}
     except Exception as e:
         return {"message": f"Failed to stop model training: {str(e)}", "error": str(e)}
+
+
+@app.get("/training_status")
+async def get_training_status():
+    """Proxy training status check to PyTC server"""
+    try:
+        response = requests.get(
+            REACT_APP_SERVER_PROTOCOL
+            + "://"
+            + REACT_APP_SERVER_URL
+            + "/training_status",
+            timeout=5
+        )
+        return response.json()
+    except requests.exceptions.ConnectionError:
+        return {"isRunning": False, "error": "Cannot connect to PyTC server"}
+    except Exception as e:
+        return {"isRunning": False, "error": str(e)}
 
 
 @app.post("/start_model_inference")
@@ -236,24 +278,51 @@ async def get_tensorboard_url():
 @app.post("/check_files")
 async def check_files(req: Request):
     import numpy as np
-    from PIL import Image
+    import os
 
     try:
         im = await req.json()
-        print(im["folderPath"], im["name"])
-        image = Image.open(im["folderPath"] + im["name"])
-        image_array = np.array(image)
+        print(f"Received check_files payload: {im}")
+        print(im.get("folderPath"), im.get("name"))
+        
+        # Use os.path.join for safe path construction
+        if "filePath" in im and im["filePath"]:
+            image_path = im["filePath"]
+        else:
+            image_path = os.path.join(im["folderPath"], im["name"])
+            
+        print(f"Checking file at: {image_path}")
+        
+        try:
+            # Use readVol to support all project-standard formats (TIFF, H5, etc.)
+            image_array = readVol(image_path, image_type="im")
+        except Exception as e:
+             print(f"Failed to read file: {e}")
+             return {"error": f"Failed to open image: {str(e)}"}
+
+        # Heuristic for label detection:
+        # 1. Must be integer type
+        # 2. Low number of unique values (e.g. < 50) relative to size
+        # 3. Or explicit binary (0, 255) or (0, 1)
+        
         unique_values = np.unique(image_array)
-        is_label = np.array_equal(unique_values, np.array([0, 255]))
+        num_unique = len(unique_values)
+        is_integer = np.issubdtype(image_array.dtype, np.integer)
+        
+        is_label = False
+        if is_integer:
+            if num_unique < 50:
+                is_label = True
+            elif np.array_equal(unique_values, np.array([0, 255])) or np.array_equal(unique_values, np.array([0, 1])):
+                is_label = True
 
         if is_label:
-            print("The image is a label")
+            print(f"The image {im['name']} is likely a label (unique values: {num_unique})")
             label = True
         else:
-            print("The image is not a label")
+            print(f"The image {im['name']} is likely not a label (unique values: {num_unique})")
             label = False
 
-        image.close()
         return {"label": label}
     except Exception as e:
         return {"error": str(e)}
