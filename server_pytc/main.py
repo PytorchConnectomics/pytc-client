@@ -10,6 +10,12 @@ from services.model import (
     stop_training,
 )
 
+print("\n" + "="*80)
+print("SERVER_PYTC STARTING UP")
+print(f"Python executable: {__import__('sys').executable}")
+print(f"Working directory: {__import__('os').getcwd()}")
+print("="*80 + "\n")
+
 app = FastAPI()
 
 app.add_middleware(
@@ -28,16 +34,49 @@ def hello():
 
 @app.post("/start_model_training")
 async def start_model_training(req: Request):
+    print("\n========== SERVER_PYTC: START_MODEL_TRAINING ENDPOINT CALLED ==========")
     req = await req.json()
-    print("start_model")
-    # log_dir = req["log_dir"]
-    start_training(req)
+    print(f"[SERVER_PYTC] Received request payload keys: {list(req.keys())}")
+    print(f"[SERVER_PYTC] Arguments: {req.get('arguments', {})}")
+    print(f"[SERVER_PYTC] Log path: {req.get('logPath', 'NOT PROVIDED')}")
+    print(f"[SERVER_PYTC] Training config preview: {req.get('trainingConfig', '')[:200]}...")
+    
+    try:
+        print("[SERVER_PYTC] Calling start_training()...")
+        result = start_training(req)
+        print(f"[SERVER_PYTC] start_training() returned: {result}")
+        print("========== SERVER_PYTC: END OF START_MODEL_TRAINING ==========\n")
+        return result or {"status": "started"}
+    except Exception as e:
+        print(f"[SERVER_PYTC] ✗ ERROR in start_training: {type(e).__name__}: {str(e)}")
+        import traceback
+        print(traceback.format_exc())
+        print("========== SERVER_PYTC: END OF START_MODEL_TRAINING (WITH ERROR) ==========\n")
+        raise
 
 
 @app.post("/stop_model_training")
 async def stop_model_training():
     print("Stop model training")
     return stop_training()
+
+
+@app.get("/training_status")
+async def get_training_status():
+    """Check if training process is still running"""
+    from services.model import _training_process
+    
+    if _training_process is None:
+        return {"isRunning": False, "message": "No training process"}
+    
+    poll_result = _training_process.poll()
+    is_running = poll_result is None
+    
+    return {
+        "isRunning": is_running,
+        "pid": _training_process.pid if is_running else None,
+        "exitCode": poll_result if not is_running else None
+    }
 
 
 @app.get("/start_tensorboard")
@@ -65,6 +104,9 @@ async def stop_model_inference():
 
 
 def run():
+    print("\n" + "="*80)
+    print("SERVER_PYTC: Starting Uvicorn server on port 4243...")
+    print("="*80 + "\n")
     uvicorn.run(
         "main:app",
         host="0.0.0.0",
