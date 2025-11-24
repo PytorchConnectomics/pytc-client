@@ -1,15 +1,14 @@
 import React, { useState } from 'react'
 import { Button, Tabs, Timeline } from 'antd'
 import {
-  ArrowRightOutlined,
-  DownOutlined,
   EyeOutlined,
   InboxOutlined,
-  ReloadOutlined
+  ReloadOutlined,
+  ScissorOutlined
 } from '@ant-design/icons'
 
 function Visualization (props) {
-  const { viewers, setViewers } = props
+  const { viewers, setViewers, setCurrent } = props
   const [activeKey, setActiveKey] = useState(
     viewers.length > 0 ? viewers[0].key : null
   ) // Store the active tab key
@@ -70,14 +69,24 @@ function Visualization (props) {
             onChange={handleChange}
             items={viewers.map((viewer) => ({
               label: (
-                <span>
-                  {viewer.title}
-                  <Button
-                    type='link'
-                    icon={<ReloadOutlined />}
-                    onClick={() => refreshViewer(viewer.key)}
-                  />
-
+                <span style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '16px'}}>
+                  <div>
+                    <Button
+                      type='link'
+                      icon={<ReloadOutlined />}
+                      onClick={() => refreshViewer(viewer.key)}
+                    />
+                    {viewer.title}
+                  </div>
+                  <div style={{ fontColor: 'red' }}>
+                    <Button
+                      type='link'
+                      icon={<ScissorOutlined />}
+                      onClick={() => setCurrent('inference')}
+                    >
+                      Segment it
+                    </Button>
+                  </div>
                 </span>
               ),
               key: viewer.key,
@@ -85,7 +94,7 @@ function Visualization (props) {
                 <iframe
                   title='Viewer Display'
                   width='100%'
-                  height='800'
+                  height='700'
                   frameBorder='0'
                   scrolling='no'
                   src={viewer.viewer}
@@ -101,26 +110,12 @@ function Visualization (props) {
               {
                 children: (
                   <>
-                    <InboxOutlined /> Upload your files
+                    <InboxOutlined /> Upload your files to the left
                   </>
                 )
               },
               {
-                children: (
-                  <>
-                    Input folder path of file in <EyeOutlined /> preview
-                  </>
-                )
-              },
-              {
-                children: (
-                  <>
-                    <DownOutlined /> Select your image and label in dropdown menus
-                  </>
-                )
-              },
-              {
-                children: 'Input scales of image in z,y,x order'
+                children: 'Input image scales in z, y, x order (optional)'
               },
               {
                 children: (
@@ -129,11 +124,11 @@ function Visualization (props) {
                     <Button
                       type='primary'
                       size='small'
-                      icon={<ArrowRightOutlined />}
+                      icon={<EyeOutlined />}
                     >
                       Visualize
                     </Button>{' '}
-                    button to render image and label in Neuroglancer
+                      to render the image and label with Neuroglancer
                   </>
                 )
               }

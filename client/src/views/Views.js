@@ -17,7 +17,6 @@ function Views () {
   const [isLoading, setIsLoading] = useState(false)
   const [isInferring, setIsInferring] = useState(false)
   const [isChatOpen, setIsChatOpen] = useState(false)
-  console.log(viewers)
 
   const onClick = (e) => {
     setCurrent(e.key)
@@ -25,14 +24,12 @@ function Views () {
 
   const items = [
     { label: 'Visualization', key: 'visualization' },
-    { label: 'Model Training', key: 'training' },
-    { label: 'Model Inference', key: 'inference' },
-    { label: 'Tensorboard', key: 'monitoring' }
+    { label: 'Model Inference', key: 'inference' }
   ]
 
   const renderMenu = () => {
     if (current === 'visualization') {
-      return <Visualization viewers={viewers} setViewers={setViewers} />
+      return <Visualization viewers={viewers} setViewers={setViewers} setCurrent={setCurrent} />
     } else if (current === 'training') {
       return <ModelTraining />
     } else if (current === 'monitoring') {
@@ -54,10 +51,8 @@ function Views () {
       const viewerId = currentImage.uid + currentLabel.uid + JSON.stringify(scales)
       let updatedViewers = viewers
       const exists = viewers.find(
-        // (viewer) => viewer.key === currentImage.uid + currentLabel.uid
         (viewer) => viewer.key === viewerId
       )
-      // console.log(exists, viewers)
       if (exists) {
         updatedViewers = viewers.filter((viewer) => viewer.key !== viewerId)
       }
@@ -67,7 +62,6 @@ function Views () {
         scales
       )
       const newUrl = res.replace(/\/\/[^:/]+/, '//localhost')
-      console.log('Current Viewer at ', newUrl)
 
       setViewers([
         ...updatedViewers,

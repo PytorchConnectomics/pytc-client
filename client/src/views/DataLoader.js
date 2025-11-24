@@ -1,7 +1,6 @@
 import React, { useContext, useEffect, useState } from 'react'
-import { Dragger } from '../components/Dragger'
-import { Button, Input, Select, Space, Typography } from 'antd'
-import { ArrowRightOutlined } from '@ant-design/icons'
+import { Button, Input, Space, Typography, Upload } from 'antd'
+import { InboxOutlined, EyeOutlined } from '@ant-design/icons'
 import { AppContext } from '../contexts/GlobalContext'
 import './DataLoader.css'
 
@@ -9,29 +8,33 @@ const { Title } = Typography
 
 function DataLoader (props) {
   const context = useContext(AppContext)
-  const [currentImage, setCurrentImage] = useState(null)
-  const [currentLabel, setCurrentLabel] = useState(null)
   const [scales, setScales] = useState('30,6,6')
   const { fetchNeuroglancerViewer } = props
 
   const handleVisualizeButtonClick = async (event) => {
     event.preventDefault()
-    context.setCurrentImage(currentImage)
-    context.setCurrentLabel(currentLabel)
     fetchNeuroglancerViewer(
-      currentImage,
-      currentLabel,
+      context.currentImage,
+      context.currentLabel,
       scales.split(',').map(Number)
     )
   }
-  const handleImageChange = (value) => {
-    console.log(`selected ${value}`)
-    setCurrentImage(context.files.find((image) => image.uid === value))
-  }
-  const handleLabelChange = (value) => {
-    console.log(`selected ${value}`)
-    setCurrentLabel(context.files.find((file) => file.uid === value))
-  }
+
+  const handleImageChange = (info) => {
+    const { file } = info
+    if (file) {
+      context.setInputImage(file)
+      context.setCurrentImage(file)
+    }
+  };
+
+  const handleLabelChange = (info) => {
+    const { file } = info
+    if (file) {
+      context.setInputLabel(file)
+      context.setCurrentLabel(file)
+    }
+  };
 
   const handleInputScales = (event) => {
     setScales(event.target.value)
@@ -56,36 +59,39 @@ function DataLoader (props) {
       align='start'
       style={{ margin: '7px', display: 'flex' }}
     >
-      <Dragger />
       <Title level={5} style={{ marginBottom: '-5px' }}>
         Image
       </Title>
-      <Select
+      <Upload.Dragger
+        accept="image/*"
+        multiple={false}
+        maxCount={1}
         onChange={handleImageChange}
-        options={context.imageFileList.map((file) => ({
-          label: file.name,
-          value: file.uid
-        }))}
-        style={{ width: '185px' }}
-        placeholder='Select image'
-        size='middle'
-        allowClear
-      />
+      >
+        <p className='ant-upload-drag-icon'>
+          <InboxOutlined />
+        </p>
+        <p className='ant-upload-text'>
+          Drag image here, or click to upload
+        </p>
+      </Upload.Dragger>
 
       <Title level={5} style={{ marginTop: '0px', marginBottom: '-5px' }}>
         Label
       </Title>
-      <Select
+      <Upload.Dragger
+        accept="image/*"
+        multiple={false}
+        maxCount={1}
         onChange={handleLabelChange}
-        options={context.labelFileList.map((file) => ({
-          label: file.name,
-          value: file.uid
-        }))}
-        style={{ width: '185px' }}
-        placeholder='Select label'
-        size='middle'
-        allowClear
-      />
+      >
+        <p className='ant-upload-drag-icon'>
+          <InboxOutlined />
+        </p>
+        <p className='ant-upload-text'>
+          Drag label here, or click to upload
+        </p>
+      </Upload.Dragger>
 
       <Title level={5} style={{ marginTop: '0px', marginBottom: '-5px' }}>
         Scales
@@ -99,7 +105,7 @@ function DataLoader (props) {
       <Button
         type='primary'
         onClick={handleVisualizeButtonClick}
-        icon={<ArrowRightOutlined />}
+        icon={<EyeOutlined />}
         style={{ width: '185px' }}
       >
         Visualize

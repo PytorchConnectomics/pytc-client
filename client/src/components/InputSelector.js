@@ -41,9 +41,8 @@ function InputSelector(props) {
       >
         <Form.Item label='Input Image'>
           <Select
-            allowClear
             style={{ width: '100%' }}
-            placeholder='Please select'
+            placeholder='Please upload to the left'
             onChange={handleImageChange}
             value={context.inputImage ? context.inputImage.uid : undefined}
             options={context.imageFileList.map((file) => ({
@@ -55,9 +54,8 @@ function InputSelector(props) {
         </Form.Item>
         <Form.Item label='Input Label'>
           <Select
-            allowClear
             style={{ width: '100%' }}
-            placeholder='Please select'
+            placeholder='Please upload to the left'
             onChange={handleLabelChange}
             value={context.inputLabel ? context.inputLabel.uid : undefined}
             options={context.labelFileList.map((file) => ({
