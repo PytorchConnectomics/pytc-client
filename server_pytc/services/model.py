@@ -4,6 +4,8 @@ import subprocess
 import tempfile
 import psutil
 import atexit
+import sys
+import pathlib
 
 # TODO: Global process tracking for proper cleanup
 _training_process = None
@@ -11,54 +13,141 @@ _inference_process = None
 _temp_files = []
 
 
+import sys
+import pathlib
+
+# ... (imports)
+
 def start_training(dict: dict):
+    print("\n========== MODEL.PY: START_TRAINING FUNCTION CALLED ==========")
     global _training_process
+    
+    print(f"[MODEL.PY] Input dict keys: {list(dict.keys())}")
+    print(f"[MODEL.PY] Arguments: {dict.get('arguments', {})}")
+    print(f"[MODEL.PY] *** Log path from request: {dict.get('logPath', 'NOT PROVIDED')}")
+    print(f"[MODEL.PY] Training config length: {len(dict.get('trainingConfig', ''))} chars")
+    
+    # Parse YAML to show what OUTPUT_PATH is being used
+    try:
+        import yaml
+        config_obj = yaml.safe_load(dict.get('trainingConfig', ''))
+        dataset_output_path = config_obj.get('DATASET', {}).get('OUTPUT_PATH', 'NOT SET')
+        print(f"[MODEL.PY] *** YAML DATASET.OUTPUT_PATH: {dataset_output_path}")
+        print(f"[MODEL.PY] NOTE: PyTorch Connectomics will write checkpoints to OUTPUT_PATH")
+        print(f"[MODEL.PY] NOTE: TensorBoard logs should go to logPath")
+    except Exception as e:
+        print(f"[MODEL.PY] Could not parse YAML to check OUTPUT_PATH: {e}")
     
     # TODO: Stop existing training process if running
     if _training_process and _training_process.poll() is None:
-        print("Stopping existing training process...")
+        print("[MODEL.PY] Existing training process detected, stopping it first...")
         stop_training()
     
-    path = "pytorch_connectomics/scripts/main.py"
-    command = ["python", path]
+    # Use absolute path relative to this file
+    # server_pytc/services/model.py -> server_pytc/ -> pytc-client/ -> pytorch_connectomics/scripts/main.py
+    print("[MODEL.PY] Resolving script path...")
+    current_dir = pathlib.Path(__file__).parent.parent.parent
+    print(f"[MODEL.PY] Current dir (project root): {current_dir}")
+    script_path = current_dir / "pytorch_connectomics" / "scripts" / "main.py"
+    print(f"[MODEL.PY] Script path: {script_path}")
+    
+    if not script_path.exists():
+        print(f"[MODEL.PY] ✗ ERROR: Training script not found at {script_path}")
+        raise FileNotFoundError(f"Training script not found at {script_path}")
+    else:
+        print(f"[MODEL.PY] ✓ Training script found")
 
+    print(f"[MODEL.PY] Python executable: {sys.executable}")
+    command = [sys.executable, str(script_path)]
+
+    print(f"[MODEL.PY] Processing command-line arguments...")
     for key, value in dict["arguments"].items():
         if value is not None:
+            print(f"[MODEL.PY]   Adding --{key} {value}")
             command.extend([f"--{key}", str(value)])
 
     # TODO: Write the value to a temporary file and track it for cleanup
+    print("[MODEL.PY] Creating temporary YAML config file...")
     temp_file = tempfile.NamedTemporaryFile(
         delete=False, mode="w", suffix=".yaml"
     )
-    temp_file.write(dict["trainingConfig"])
+    config_content = dict["trainingConfig"]
+    print(f"[MODEL.PY] Writing config ({len(config_content)} chars) to temp file...")
+    temp_file.write(config_content)
     temp_filepath = temp_file.name
     temp_file.close()
     _temp_files.append(temp_filepath)
+    print(f"[MODEL.PY] ✓ Temp config file created at: {temp_filepath}")
+    
+    # Show first few lines of the temp file for debugging
+    with open(temp_filepath, 'r') as f:
+        first_lines = ''.join(f.readlines()[:20])
+        print(f"[MODEL.PY] Temp file preview (first 20 lines):\n{first_lines}\n")
     
     command.extend(["--config-file", str(temp_filepath)])
 
     # TODO: Execute the command using subprocess.Popen for proper async handling
-    print("Starting training with command:", command)
+    print(f"[MODEL.PY] Final command: {' '.join(command)}")
+    print("[MODEL.PY] Starting subprocess...")
     try:
         _training_process = subprocess.Popen(
             command,
             stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            text=True
+            stderr=subprocess.STDOUT,  # Merge stderr into stdout
+            text=True,
+            bufsize=1,  # Line buffered
+            cwd=str(current_dir)  # Set working directory
         )
-        print(f"Training process started with PID: {_training_process.pid}")
+        print(f"[MODEL.PY] ✓ Training process started with PID: {_training_process.pid}")
         
-        # Initialize tensorboard asynchronously
-        initialize_tensorboard(dict["logPath"])
-        print("TensorBoard initialized")
+        # Start a thread to read and log subprocess output
+        import threading
+        def log_subprocess_output():
+            print(f"[MODEL.PY] === Training subprocess output (PID {_training_process.pid}) ===")
+            try:
+                for line in _training_process.stdout:
+                    print(f"[TRAINING:{_training_process.pid}] {line.rstrip()}")
+                
+                # Get exit code
+                _training_process.wait()
+                print(f"[MODEL.PY] === Training subprocess finished with exit code: {_training_process.returncode} ===")
+            except Exception as e:
+                print(f"[MODEL.PY] Error reading subprocess output: {e}")
         
-        return {"status": "started", "pid": _training_process.pid}
+        output_thread = threading.Thread(target=log_subprocess_output, daemon=True)
+        output_thread.start()
+        
+        # Initialize TensorBoard to monitor the OUTPUT_PATH where PyTorch Connectomics writes logs
+        # PyTorch Connectomics writes logs to {OUTPUT_PATH}/log{timestamp}/
+        output_path = dict.get("outputPath")
+        log_path = dict.get("logPath")
+        
+        print(f"[MODEL.PY] *** Output path from request: {output_path}")
+        print(f"[MODEL.PY] *** Log path from request: {log_path} (for compatibility only)")
+        
+        if output_path:
+            print(f"[MODEL.PY] *** Initializing TensorBoard to monitor: {output_path}")
+            print(f"[MODEL.PY] NOTE: PyTorch Connectomics writes logs to {{OUTPUT_PATH}}/log{{timestamp}}/")
+            print(f"[MODEL.PY] NOTE: TensorBoard will automatically find event files in subdirectories")
+            initialize_tensorboard(output_path)
+            print(f"[MODEL.PY] ✓ TensorBoard initialized for directory: {output_path}")
+        else:
+            print(f"[MODEL.PY] ⚠ WARNING: No outputPath provided, TensorBoard not initialized")
+        
+        result = {"status": "started", "pid": _training_process.pid}
+        print(f"[MODEL.PY] Returning: {result}")
+        print("========== MODEL.PY: END OF START_TRAINING ==========\n")
+        return result
     except Exception as e:
-        print(f"Error starting training: {e}")
+        print(f"[MODEL.PY] ✗ ERROR starting training process: {type(e).__name__}: {str(e)}")
+        import traceback
+        print(traceback.format_exc())
         # Cleanup temp file if process failed to start
         if os.path.exists(temp_filepath):
+            print(f"[MODEL.PY] Cleaning up temp file: {temp_filepath}")
             os.unlink(temp_filepath)
             _temp_files.remove(temp_filepath)
+        print("========== MODEL.PY: END OF START_TRAINING (WITH ERROR) ==========\n")
         raise
 
 
@@ -119,17 +208,19 @@ tensorboard_url = None
 
 
 def initialize_tensorboard(logPath):
+    print(f"[MODEL.PY] initialize_tensorboard called with logPath: {logPath}")
     from tensorboard import program
 
     tb = program.TensorBoard()
     # tb.configure(argv=[None, "--logdir", "./logs"])
     try:
+        print(f"[MODEL.PY] Configuring TensorBoard with logdir: {logPath}")
         tb.configure(argv=[None, "--logdir", logPath, "--host", "0.0.0.0"])
         tensorboard_url = tb.launch()
-        print(f"TensorBoard is running at {tensorboard_url}")
+        print(f"[MODEL.PY] ✓ TensorBoard is running at {tensorboard_url}")
     except Exception as e:
         tensorboard_url = "http://localhost:6006/"
-        print(f"TensorBoard is running at {tensorboard_url} due to {e}")
+        print(f"[MODEL.PY] ⚠ TensorBoard fallback to {tensorboard_url} due to error: {e}")
         # return str(url)
 
 
@@ -142,9 +233,15 @@ def stop_tensorboard():
 
 
 def start_inference(dict: dict):
-    path = "pytorch_connectomics/scripts/main.py"
+    # Use absolute path relative to this file
+    current_dir = pathlib.Path(__file__).parent.parent.parent
+    script_path = current_dir / "pytorch_connectomics" / "scripts" / "main.py"
+    
+    if not script_path.exists():
+        print(f"Error: Inference script not found at {script_path}")
+        raise FileNotFoundError(f"Inference script not found at {script_path}")
 
-    command = ["python", path, "--inference"]
+    command = [sys.executable, str(script_path), "--inference"]
 
     # Write the value to a temporary file
     with tempfile.NamedTemporaryFile(
