@@ -1,7 +1,7 @@
 //  global FileReader
 import React, { useContext, useState, useEffect, useRef, useCallback, useMemo } from 'react'
 import { Button, Input, message, Modal, Space, Upload } from 'antd'
-import { InboxOutlined } from '@ant-design/icons'
+import { InboxOutlined, DeleteOutlined, EyeOutlined } from '@ant-design/icons'
 import { AppContext } from '../contexts/GlobalContext'
 import { DEFAULT_IMAGE } from '../utils/utils'
 import UTIF from 'utif'
@@ -46,7 +46,7 @@ const enrichFileMetadata = (uploadFile) => {
   return enhancedFile
 }
 
-export function Dragger () {
+export function Dragger() {
   const context = useContext(AppContext)
   const {
     setFiles,
@@ -338,6 +338,12 @@ export function Dragger () {
     }
   }, [revokeAllObjectUrls])
 
+  const handleRemove = (file) => {
+    const newFiles = files.filter((f) => f.uid !== file.uid)
+    setFiles(newFiles)
+    revokeObjectUrl(file.uid)
+  }
+
   return (
     <>
       <Upload.Dragger
@@ -345,12 +351,8 @@ export function Dragger () {
         onChange={onChange}
         customRequest={uploadImage}
         beforeUpload={handleBeforeUpload}
-        onPreview={handlePreview}
-        listType='picture-card'
-        style={{ maxHeight: '20vh', maxWidth: '10vw%' }}
-        itemRender={(originNode, file) => (
-          <div style={listItemStyle}>{originNode}</div>
-        )}
+        showUploadList={false}
+        style={{ padding: '20px 0' }}
       >
         <p className='ant-upload-drag-icon'>
           <InboxOutlined />
@@ -359,7 +361,88 @@ export function Dragger () {
           Click or drag file to this area to upload
         </p>
       </Upload.Dragger>
-      <Button type='default' style={{ width: '185px' }} onClick={handleClearCache}>
+
+      <div style={{
+        marginTop: '16px',
+        maxHeight: '30vh',
+        overflowY: 'auto',
+        overflowX: 'hidden',
+        display: 'flex',
+        flexDirection: 'column',
+        gap: '4px'
+      }}>
+        {files && files.map((file) => (
+          <div
+            key={file.uid}
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              border: '1px solid #d9d9d9',
+              borderRadius: '4px',
+              padding: '4px',
+              backgroundColor: '#fafafa',
+              width: '100%',
+              boxSizing: 'border-box'
+            }}
+          >
+            <div style={{
+              width: '32px',
+              height: '32px',
+              marginRight: '8px',
+              flexShrink: 0,
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              overflow: 'hidden',
+              border: '1px solid #f0f0f0',
+              borderRadius: '2px',
+              backgroundColor: '#fff'
+            }}>
+              {file.thumbUrl ? (
+                <img
+                  src={file.thumbUrl}
+                  alt={file.name}
+                  style={{ width: '100%', height: '100%', objectFit: 'cover' }}
+                />
+              ) : (
+                <InboxOutlined style={{ fontSize: '16px', color: '#ccc' }} />
+              )}
+            </div>
+
+            <div style={{ flex: 1, minWidth: 0, marginRight: '4px' }}>
+              <div style={{
+                whiteSpace: 'nowrap',
+                overflow: 'hidden',
+                textOverflow: 'ellipsis',
+                fontWeight: 500,
+                fontSize: '12px'
+              }}>
+                {file.name}
+              </div>
+            </div>
+
+            <Space size={0}>
+              <Button
+                type="text"
+                icon={<EyeOutlined />}
+                onClick={() => handlePreview(file)}
+                size="small"
+                style={{ padding: '0 4px' }}
+              />
+              <Button
+                type="text"
+                danger
+                icon={<DeleteOutlined />}
+                onClick={() => handleRemove(file)}
+                size="small"
+                style={{ padding: '0 4px' }}
+              />
+            </Space>
+          </div>
+        ))}
+      </div>
+
+      <Button type='default' style={{ width: '100%', marginTop: '16px' }} onClick={handleClearCache}>
         Clear File Cache
       </Button>
       <Modal
@@ -368,10 +451,10 @@ export function Dragger () {
         footer={null}
         onCancel={handleCancel}
       >
-        <Space direction='vertical'>
+        <Space direction='vertical' style={{ width: '100%' }}>
           <Space.Compact block>
 
-            <select onChange={handleDropdownChange}>
+            <select onChange={handleDropdownChange} style={{ flex: 1 }}>
               <option value='' disabled selected>Please select input filetype</option>
               <option value='Image'>Image</option>
               <option value='Label'>Label</option>
