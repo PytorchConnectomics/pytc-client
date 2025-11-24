@@ -203,28 +203,116 @@ export async function getTensorboardURL() {
 }
 
 export async function startModelInference(
-  // configurationYamlFile,
   inferenceConfig,
   outputPath,
   checkpointPath
 ) {
+  console.log('\n========== API.JS: START_MODEL_INFERENCE CALLED ==========')
+  console.log('[API] Function arguments:')
+  console.log('[API]   - inferenceConfig type:', typeof inferenceConfig)
+  console.log('[API]   - inferenceConfig length:', inferenceConfig?.length || 'N/A')
+  console.log('[API]   - outputPath:', outputPath)
+  console.log('[API]   - outputPath type:', typeof outputPath)
+  console.log('[API]   - checkpointPath:', checkpointPath)
+  console.log('[API]   - checkpointPath type:', typeof checkpointPath)
+
   try {
-    const data = JSON.stringify({
+    console.log('[API] ===== Starting Inference Configuration =====')
+
+    // Parse the YAML config and inject the outputPath
+    let configToSend = inferenceConfig
+
+    if (outputPath) {
+      console.log('[API] outputPath provided, will inject into YAML')
+      try {
+        // Parse YAML to object
+        const yaml = require('js-yaml')
+        console.log('[API] Parsing YAML config...')
+        const configObj = yaml.load(inferenceConfig)
+        console.log('[API] ✓ YAML parsed successfully')
+
+        console.log('[API] Original config structure:')
+        console.log('[API]   - Has INFERENCE section?', !!configObj.INFERENCE)
+        console.log('[API]   - Original INFERENCE.OUTPUT_PATH:', configObj.INFERENCE?.OUTPUT_PATH)
+
+        // Inject the output path from UI
+        if (!configObj.INFERENCE) {
+          console.log('[API] INFERENCE section missing, creating it')
+          configObj.INFERENCE = {}
+        }
+        configObj.INFERENCE.OUTPUT_PATH = outputPath;
+        // Ensure SYSTEM section exists and set NUM_GPUS to 1 for CPU inference
+        if (!configObj.SYSTEM) {
+          console.log('[API] SYSTEM section missing, creating it');
+          configObj.SYSTEM = {};
+        }
+        configObj.SYSTEM.NUM_GPUS = 1;
+        console.log('[API] ✓ Set SYSTEM.NUM_GPUS = 1');
+        console.log('[API] ✓ Injected INFERENCE.OUTPUT_PATH:', outputPath)
+
+        // Convert back to YAML
+        console.log('[API] Converting back to YAML...')
+        configToSend = yaml.dump(configObj)
+        console.log('[API] ✓ YAML conversion successful')
+        console.log('[API] Modified config preview (first 500 chars):', configToSend.substring(0, 500))
+      } catch (e) {
+        console.error('[API] ✗ YAML processing error:', e)
+        console.error('[API] Error type:', e.constructor.name)
+        console.error('[API] Error message:', e.message)
+        console.warn('[API] Falling back to original config')
+        configToSend = inferenceConfig
+      }
+    } else {
+      console.warn('[API] ⚠ No outputPath provided, config will use its original OUTPUT_PATH')
+    }
+
+    console.log('[API] Building request payload...')
+    const payload = {
       arguments: {
-        // inference: " ",
         checkpoint: checkpointPath
       },
       outputPath,
-      inferenceConfig
-    })
+      inferenceConfig: configToSend
+    }
 
-    const res = await axios.post(
-      `${API_PROTOCOL}://${API_URL}/start_model_inference`,
-      data
+    console.log('[API] Payload structure:')
+    console.log('[API]   - arguments.checkpoint:', payload.arguments.checkpoint)
+    console.log('[API]   - outputPath:', payload.outputPath)
+    console.log('[API]   - inferenceConfig length:', payload.inferenceConfig?.length)
+
+    const data = JSON.stringify(payload)
+    console.log('[API] Request payload size:', data.length, 'bytes')
+    console.log('[API] JSON payload preview (first 300 chars):', data.substring(0, 300))
+
+    console.log('[API] Calling makeApiRequest...')
+    console.log('[API] Target endpoint: start_model_inference')
+    console.log('[API] Method: POST')
+    console.log('[API] =========================================')
+
+    const result = await makeApiRequest('start_model_inference', 'post', data)
+    console.log('[API] ✓ makeApiRequest returned:', result)
+    console.log('========== API.JS: END START_MODEL_INFERENCE ==========\n')
+    return result
+  } catch (error) {
+    console.error('========== API.JS: ERROR IN START_MODEL_INFERENCE ==========')
+    console.error('[API] Error caught:', error)
+    console.error('[API] Error type:', error.constructor.name)
+    console.error('[API] Error message:', error.message)
+    console.error('[API] Error stack:', error.stack)
+    console.error('========== API.JS: END ERROR ==========\n')
+    handleError(error)
+  }
+}
+
+export async function getInferenceStatus() {
+  try {
+    const res = await axios.get(
+      `${API_PROTOCOL}://${API_URL}/inference_status`
     )
     return res.data
   } catch (error) {
-    handleError(error)
+    console.error('Failed to get inference status:', error)
+    return { isRunning: false, error: true }
   }
 }
 
