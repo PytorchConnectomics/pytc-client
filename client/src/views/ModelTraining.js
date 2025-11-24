@@ -1,14 +1,60 @@
 //  global localStorage
-import React, { useContext, useState } from 'react'
+import React, { useContext, useState, useEffect, useRef } from 'react'
 import { Button, Space } from 'antd'
-import { startModelTraining, stopModelTraining } from '../utils/api'
+import { startModelTraining, stopModelTraining, getTrainingStatus } from '../utils/api'
 import Configurator from '../components/Configurator'
 import { AppContext } from '../contexts/GlobalContext'
 
-function ModelTraining () {
+function ModelTraining() {
   const context = useContext(AppContext)
   const [isTraining, setIsTraining] = useState(false)
   const [trainingStatus, setTrainingStatus] = useState('')
+  const pollingIntervalRef = useRef(null)
+
+  // Poll training status when training is active
+  useEffect(() => {
+    if (isTraining) {
+      console.log('Starting training status polling...')
+      pollingIntervalRef.current = setInterval(async () => {
+        try {
+          const status = await getTrainingStatus()
+          console.log('Training status:', status)
+
+          if (!status.isRunning) {
+            // Training has finished
+            console.log('Training completed!')
+            setIsTraining(false)
+
+            if (status.exitCode === 0) {
+              setTrainingStatus('Training completed successfully! ✓')
+            } else if (status.exitCode !== null) {
+              setTrainingStatus(`Training finished with exit code: ${status.exitCode}`)
+            } else {
+              setTrainingStatus('Training stopped.')
+            }
+
+            // Clear the polling interval
+            if (pollingIntervalRef.current) {
+              clearInterval(pollingIntervalRef.current)
+              pollingIntervalRef.current = null
+            }
+          }
+        } catch (error) {
+          console.error('Error polling training status:', error)
+        }
+      }, 2000) // Poll every 2 seconds
+    }
+
+    // Cleanup on unmount or when training stops
+    return () => {
+      if (pollingIntervalRef.current) {
+        console.log('Clearing polling interval')
+        clearInterval(pollingIntervalRef.current)
+        pollingIntervalRef.current = null
+      }
+    }
+  }, [isTraining])
+
   // const [tensorboardURL, setTensorboardURL] = useState(null);
   const handleStartButton = async () => {
     try {
@@ -17,27 +63,33 @@ function ModelTraining () {
         setTrainingStatus('Error: Please upload a YAML configuration file first.')
         return
       }
-      
+
+      if (!context.outputPath) {
+        setTrainingStatus('Error: Please set output path first in Step 1.')
+        return
+      }
+
       if (!context.logPath) {
-        setTrainingStatus('Error: Please set output/log path first.')
+        setTrainingStatus('Error: Please set log path first in Step 1.')
         return
       }
 
       console.log(context.uploadedYamlFile)
       const trainingConfig = localStorage.getItem('trainingConfig') || context.trainingConfig
       console.log(trainingConfig)
-      
+
       setIsTraining(true)
       setTrainingStatus('Starting training... Please wait, this may take a while.')
-      
+
       // TODO: The API call should be non-blocking and return immediately
       // Real training status should be polled separately
       const res = await startModelTraining(
         trainingConfig,
-        context.logPath
+        context.logPath,
+        context.outputPath
       )
       console.log(res)
-      
+
       // TODO: Don't set training complete here - implement proper status polling
       setTrainingStatus('Training started successfully. Monitoring progress...')
     } catch (e) {
