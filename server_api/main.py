@@ -123,7 +123,9 @@ async def start_model_training(req: Request):
     print(f"[SERVER_API] Received request payload keys: {list(req.keys())}")
     print(f"[SERVER_API] Arguments: {req.get('arguments', {})}")
     print(f"[SERVER_API] Log path: {req.get('logPath', 'NOT PROVIDED')}")
+    print(f"[SERVER_API] Output path: {req.get('outputPath', 'NOT PROVIDED')}")
     print(f"[SERVER_API] Training config length: {len(req.get('trainingConfig', '')) if req.get('trainingConfig') else 0} chars")
+    print(f"[SERVER_API] NOTE: TensorBoard will monitor outputPath where PyTorch Connectomics writes logs")
     
     try:
         target_url = REACT_APP_SERVER_PROTOCOL + "://" + REACT_APP_SERVER_URL + "/start_model_training"

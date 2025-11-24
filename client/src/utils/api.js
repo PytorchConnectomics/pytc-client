@@ -107,6 +107,10 @@ export async function startModelTraining(
   outputPath
 ) {
   try {
+    console.log('[API] ===== Starting Training Configuration =====')
+    console.log('[API] logPath:', logPath)
+    console.log('[API] outputPath:', outputPath)
+
     // Parse the YAML config and inject the outputPath
     let configToSend = trainingConfig
 
@@ -116,6 +120,8 @@ export async function startModelTraining(
         const yaml = require('js-yaml')
         const configObj = yaml.load(trainingConfig)
 
+        console.log('[API] Original DATASET.OUTPUT_PATH:', configObj.DATASET?.OUTPUT_PATH)
+
         // Inject the output path from UI
         if (!configObj.DATASET) {
           configObj.DATASET = {}
@@ -124,10 +130,13 @@ export async function startModelTraining(
 
         // Convert back to YAML
         configToSend = yaml.dump(configObj)
-        console.log('[API] Injected OUTPUT_PATH into config:', outputPath)
+        console.log('[API] Injected DATASET.OUTPUT_PATH:', outputPath)
+        console.log('[API] Modified config preview:', configToSend.substring(0, 500))
       } catch (e) {
         console.warn('[API] Failed to parse/modify YAML, using original config:', e)
       }
+    } else {
+      console.warn('[API] No outputPath provided, config will use its original OUTPUT_PATH')
     }
 
     const data = JSON.stringify({
@@ -136,9 +145,14 @@ export async function startModelTraining(
         // master_port: 2345,
         // distributed: "",
       },
-      logPath,
+      logPath,  // Keep for backwards compatibility, but won't be used for TensorBoard
+      outputPath,  // TensorBoard will use this instead
       trainingConfig: configToSend
     })
+
+    console.log('[API] Request payload size:', data.length, 'bytes')
+    console.log('[API] Note: TensorBoard will monitor outputPath, not logPath')
+    console.log('[API] =========================================')
 
     return makeApiRequest('start_model_training', 'post', data)
   } catch (error) {

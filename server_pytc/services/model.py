@@ -24,7 +24,19 @@ def start_training(dict: dict):
     
     print(f"[MODEL.PY] Input dict keys: {list(dict.keys())}")
     print(f"[MODEL.PY] Arguments: {dict.get('arguments', {})}")
-    print(f"[MODEL.PY] Log path: {dict.get('logPath', 'NOT PROVIDED')}")
+    print(f"[MODEL.PY] *** Log path from request: {dict.get('logPath', 'NOT PROVIDED')}")
+    print(f"[MODEL.PY] Training config length: {len(dict.get('trainingConfig', ''))} chars")
+    
+    # Parse YAML to show what OUTPUT_PATH is being used
+    try:
+        import yaml
+        config_obj = yaml.safe_load(dict.get('trainingConfig', ''))
+        dataset_output_path = config_obj.get('DATASET', {}).get('OUTPUT_PATH', 'NOT SET')
+        print(f"[MODEL.PY] *** YAML DATASET.OUTPUT_PATH: {dataset_output_path}")
+        print(f"[MODEL.PY] NOTE: PyTorch Connectomics will write checkpoints to OUTPUT_PATH")
+        print(f"[MODEL.PY] NOTE: TensorBoard logs should go to logPath")
+    except Exception as e:
+        print(f"[MODEL.PY] Could not parse YAML to check OUTPUT_PATH: {e}")
     
     # TODO: Stop existing training process if running
     if _training_process and _training_process.poll() is None:
@@ -67,6 +79,11 @@ def start_training(dict: dict):
     _temp_files.append(temp_filepath)
     print(f"[MODEL.PY] ✓ Temp config file created at: {temp_filepath}")
     
+    # Show first few lines of the temp file for debugging
+    with open(temp_filepath, 'r') as f:
+        first_lines = ''.join(f.readlines()[:20])
+        print(f"[MODEL.PY] Temp file preview (first 20 lines):\n{first_lines}\n")
+    
     command.extend(["--config-file", str(temp_filepath)])
 
     # TODO: Execute the command using subprocess.Popen for proper async handling
@@ -100,10 +117,22 @@ def start_training(dict: dict):
         output_thread = threading.Thread(target=log_subprocess_output, daemon=True)
         output_thread.start()
         
-        # Initialize tensorboard asynchronously
-        print(f"[MODEL.PY] Initializing TensorBoard with log path: {dict['logPath']}")
-        initialize_tensorboard(dict["logPath"])
-        print("[MODEL.PY] ✓ TensorBoard initialized")
+        # Initialize TensorBoard to monitor the OUTPUT_PATH where PyTorch Connectomics writes logs
+        # PyTorch Connectomics writes logs to {OUTPUT_PATH}/log{timestamp}/
+        output_path = dict.get("outputPath")
+        log_path = dict.get("logPath")
+        
+        print(f"[MODEL.PY] *** Output path from request: {output_path}")
+        print(f"[MODEL.PY] *** Log path from request: {log_path} (for compatibility only)")
+        
+        if output_path:
+            print(f"[MODEL.PY] *** Initializing TensorBoard to monitor: {output_path}")
+            print(f"[MODEL.PY] NOTE: PyTorch Connectomics writes logs to {{OUTPUT_PATH}}/log{{timestamp}}/")
+            print(f"[MODEL.PY] NOTE: TensorBoard will automatically find event files in subdirectories")
+            initialize_tensorboard(output_path)
+            print(f"[MODEL.PY] ✓ TensorBoard initialized for directory: {output_path}")
+        else:
+            print(f"[MODEL.PY] ⚠ WARNING: No outputPath provided, TensorBoard not initialized")
         
         result = {"status": "started", "pid": _training_process.pid}
         print(f"[MODEL.PY] Returning: {result}")
