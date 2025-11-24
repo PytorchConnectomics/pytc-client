@@ -22,8 +22,7 @@ echo "Preparing pytorch_connectomics dependency..."
 "${ROOT_DIR}/setup_pytorch_connectomics.sh"
 
 if [ -d "${ROOT_DIR}/pytorch_connectomics" ]; then
-    echo "Installing pytorch_connectomics into the uv environment..."
-    uv pip install --directory "${ROOT_DIR}" --editable "${ROOT_DIR}/pytorch_connectomics"
+    echo "pytorch_connectomics directory found."
 fi
 
 echo "Installing frontend dependencies..."
