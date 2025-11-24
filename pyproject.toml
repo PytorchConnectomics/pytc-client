@@ -20,6 +20,8 @@ dependencies = [
     "scipy>=1.11",
     "tensorboard==2.20.0",
     "tensorboard-data-server==0.7.2",
+    "torch>=2.0.0",
+    "torchvision>=0.15.0",
     "uvicorn==0.38.0",
     "zarr>=2.18",
     "connectomics",
