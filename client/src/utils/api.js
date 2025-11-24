@@ -18,7 +18,7 @@ const buildFilePath = (file) => {
 const hasBrowserFile = (file) =>
   file && file.originFileObj instanceof File
 
-export async function getNeuroglancerViewer (image, label, scales) {
+export async function getNeuroglancerViewer(image, label, scales) {
   try {
     const url = `${API_PROTOCOL}://${API_URL}/neuroglancer`
     if (hasBrowserFile(image)) {
@@ -53,7 +53,24 @@ export async function getNeuroglancerViewer (image, label, scales) {
     )
   }
 }
-function handleError (error) {
+
+
+export async function checkFile(file) {
+  try {
+    const url = `${API_PROTOCOL}://${API_URL}/check_files`
+    const data = JSON.stringify({
+      folderPath: file.folderPath || '',
+      name: file.name,
+      filePath: file.path || file.originFileObj?.path
+    })
+    const res = await axios.post(url, data)
+    return res.data
+  } catch (error) {
+    handleError(error)
+  }
+}
+
+function handleError(error) {
   if (error.response) {
     throw new Error(
       `${error.response.status}: ${error.response.data?.detail?.data || error.response.statusText}`
@@ -62,7 +79,7 @@ function handleError (error) {
   throw error
 }
 
-export async function makeApiRequest (url, method, data = null) {
+export async function makeApiRequest(url, method, data = null) {
   try {
     const fullUrl = `${API_PROTOCOL}://${API_URL}/${url}`
     const config = {
@@ -72,11 +89,11 @@ export async function makeApiRequest (url, method, data = null) {
         'Content-Type': 'application/json'
       }
     }
-    
+
     if (data) {
       config.data = data
     }
-    
+
     const res = await axios(config)
     return res.data
   } catch (error) {
@@ -84,11 +101,35 @@ export async function makeApiRequest (url, method, data = null) {
   }
 }
 
-export async function startModelTraining (
+export async function startModelTraining(
   trainingConfig,
-  logPath
+  logPath,
+  outputPath
 ) {
   try {
+    // Parse the YAML config and inject the outputPath
+    let configToSend = trainingConfig
+
+    if (outputPath) {
+      try {
+        // Parse YAML to object
+        const yaml = require('js-yaml')
+        const configObj = yaml.load(trainingConfig)
+
+        // Inject the output path from UI
+        if (!configObj.DATASET) {
+          configObj.DATASET = {}
+        }
+        configObj.DATASET.OUTPUT_PATH = outputPath
+
+        // Convert back to YAML
+        configToSend = yaml.dump(configObj)
+        console.log('[API] Injected OUTPUT_PATH into config:', outputPath)
+      } catch (e) {
+        console.warn('[API] Failed to parse/modify YAML, using original config:', e)
+      }
+    }
+
     const data = JSON.stringify({
       arguments: {
         // nproc_per_node: 4,
@@ -96,7 +137,7 @@ export async function startModelTraining (
         // distributed: "",
       },
       logPath,
-      trainingConfig
+      trainingConfig: configToSend
     })
 
     return makeApiRequest('start_model_training', 'post', data)
@@ -105,13 +146,25 @@ export async function startModelTraining (
   }
 }
 
-export async function stopModelTraining () {
+export async function stopModelTraining() {
   try {
     await axios.post(
       `${API_PROTOCOL}://${API_URL}/stop_model_training`
     )
   } catch (error) {
     handleError(error)
+  }
+}
+
+export async function getTrainingStatus() {
+  try {
+    const res = await axios.get(
+      `${API_PROTOCOL}://${API_URL}/training_status`
+    )
+    return res.data
+  } catch (error) {
+    console.error('Failed to get training status:', error)
+    return { isRunning: false, error: true }
   }
 }
 
@@ -131,11 +184,11 @@ export async function stopModelTraining () {
 //   }
 // }
 
-export async function getTensorboardURL () {
+export async function getTensorboardURL() {
   return makeApiRequest('get_tensorboard_url', 'get')
 }
 
-export async function startModelInference (
+export async function startModelInference(
   // configurationYamlFile,
   inferenceConfig,
   outputPath,
@@ -161,7 +214,7 @@ export async function startModelInference (
   }
 }
 
-export async function stopModelInference () {
+export async function stopModelInference() {
   try {
     await axios.post(
       `${API_PROTOCOL}://${API_URL}/stop_model_inference`
@@ -171,7 +224,7 @@ export async function stopModelInference () {
   }
 }
 
-export async function queryChatBot (query) {
+export async function queryChatBot(query) {
   try {
     const res = await axios.post(
       `${process.env.REACT_APP_API_PROTOCOL}://${process.env.REACT_APP_API_URL}/chat/query`,
@@ -183,7 +236,7 @@ export async function queryChatBot (query) {
   }
 }
 
-export async function clearChat () {
+export async function clearChat() {
   try {
     await axios.post(
       `${process.env.REACT_APP_API_PROTOCOL}://${process.env.REACT_APP_API_URL}/chat/clear`
