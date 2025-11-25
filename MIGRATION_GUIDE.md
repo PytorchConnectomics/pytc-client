@@ -1,30 +1,30 @@
 # Development Environment Migration Guide (Linux Edition)
 
-This guide details the steps to set up the `pytc-client` development environment on a fresh **Linux** machine, targeting the `mito-mvp` branch.
+This guide details the steps to set up the `pytc-client` development environment on a fresh **Linux** machine, targeting the `mito-mvp` branch. This branch contains the latest Hydra-based inference integration and critical fixes for legacy checkpoint compatibility.
 
-## 1. Project Vision: Mitochondria MVP
+## 1. Session Context & Status
 
-### 1.1 The Goal
-We are building a **state-of-the-art, automated mitochondria segmentation tool** for Electron Microscopy (EM) data. The "Mitochondria MVP" aims to provide researchers with a seamless, local-first application that bridges powerful deep learning models with an intuitive user interface.
+### 1.1 Objective
+The primary goal of the recent development session was to enable **Hydra-based inference** using the `monai_unet` architecture on the `v2.0` branch of `pytorch_connectomics`, while maintaining compatibility with a **legacy model checkpoint**.
 
-### 1.2 Core Capabilities
-*   **Robust Inference**: Utilizing the `monai_unet` architecture via `pytorch_connectomics` (v2.0) for high-accuracy 3D segmentation.
-*   **Streamlined Workflow**: A "Load → Segment → Visualize" pipeline that abstracts away the complexity of configuration files and CLI commands.
-*   **Interactive Visualization**: Integrated **Neuroglancer** support for immediate, high-performance 3D inspection of segmentation results against raw EM data.
-*   **Legacy Compatibility**: Ability to utilize existing, pre-trained model checkpoints while adopting modern configuration systems (Hydra).
+### 1.2 Work Completed
+We have successfully:
+1.  **Codebase Migration**: Switched the `pytorch_connectomics` submodule to the `v2.0` branch to support Hydra configuration.
+2.  **Config Schema Fixes**: Updated `client/src/contexts/GlobalContext.js` to match the new Hydra schema:
+    *   Removed invalid keys: `upsample`, `preset`, `affine`, `rotate.spatial_axes`.
+    *   Fixed `postprocessing` keys: `intensity_scale` -> `output_scale`.
+3.  **API Logic Update**: Refactored `client/src/utils/api.js` to correctly inject the `output_path` into `inference.data.output_path` (instead of the root `inference` object).
+4.  **Legacy Checkpoint Support**:
+    *   **Dummy Classes**: Injected dummy configuration classes (`DataTransformConfig`, `EdgeModeConfig`, `AffineConfig`, `StripeConfig`) into `connectomics/config/hydra_config.py` to resolve `AttributeError`s during unpickling.
+    *   **PyTorch Compatibility**: Monkeypatched `torch.load` in `scripts/main.py` to force `weights_only=False`, resolving security restrictions in newer PyTorch versions.
+5.  **Data Handling**: Excluded large data files (`lucchi_test`, `test_output`) from the repository to maintain a lightweight history. **Manual transfer is required.**
 
-### 1.3 Technical Architecture
-*   **Frontend**: Electron + React (Single-page application for data loading and control).
-*   **Backend**: FastAPI (Orchestration) + PyTorch Connectomics (Inference Engine).
-*   **Configuration**: Hydra-based system for type-safe, composable experiment configs.
-
-### 1.4 Current Status (Migration Context)
-We have successfully established the foundational pipeline:
-1.  **Engine Upgrade**: Migrated the core inference engine to `pytorch_connectomics` v2.0 (Hydra/Lightning/MONAI).
-2.  **Checkpoint Bridge**: Implemented compatibility layers to run legacy checkpoints on the new engine.
-3.  **End-to-End Flow**: Verified the path from UI input -> Hydra Config Injection -> Inference -> Output Generation.
-
-The next phase of development on the new machine will focus on refining the model performance, expanding the UI for training workflows, and optimizing the Neuroglancer integration.
+### 1.3 Next Steps
+On the new machine, the immediate goal is to:
+1.  Clone this repository (`mito-mvp` branch).
+2.  Install dependencies.
+3.  Run the inference workflow to verify reproducibility.
+4.  Continue development on the `monai_unet` integration.
 
 ---
 
