@@ -63,7 +63,6 @@ function DataLoader (props) {
         Image
       </Title>
       <Upload.Dragger
-        accept="image/*"
         multiple={false}
         maxCount={1}
         onChange={handleImageChange}
@@ -80,7 +79,6 @@ function DataLoader (props) {
         Label
       </Title>
       <Upload.Dragger
-        accept="image/*"
         multiple={false}
         maxCount={1}
         onChange={handleLabelChange}
