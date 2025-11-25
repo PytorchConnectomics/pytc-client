@@ -14,5 +14,9 @@ requests>=2.31
 scipy>=1.11
 tensorboard==2.20.0
 tensorboard-data-server==0.7.2
+python-jose[cryptography]
+passlib[argon2]
+argon2-cffi
+sqlalchemy
 uvicorn==0.38.0
 zarr>=2.18
