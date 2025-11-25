@@ -44,44 +44,64 @@ def hello():
 async def neuroglancer(req: Request):
     import neuroglancer
 
+    print("\n========== SERVER_API: NEUROGLANCER ENDPOINT CALLED ==========")
     cleanup_paths: List[pathlib.Path] = []
     try:
         content_type = req.headers.get("content-type", "")
+        print(f"[SERVER_API] Request content-type: {content_type}")
+        
         if "multipart/form-data" in content_type:
+            print("[SERVER_API] Processing multipart/form-data request")
             form = await req.form()
             image_upload = form.get("image")
             if not image_upload or not getattr(image_upload, "filename", None):
+                print("[SERVER_API] Error: Image file missing in form data")
                 raise HTTPException(status_code=400, detail="Image file is required.")
+            
             scales_raw = form.get("scales")
+            print(f"[SERVER_API] Raw scales: {scales_raw}")
             if scales_raw is None:
+                print("[SERVER_API] Error: Scales missing in form data")
                 raise HTTPException(status_code=400, detail="Scales are required.")
             try:
                 scales = json.loads(scales_raw)
             except json.JSONDecodeError:
+                print("[SERVER_API] Error: Invalid JSON for scales")
                 raise HTTPException(status_code=400, detail="Scales payload is invalid.")
 
+            print(f"[SERVER_API] Saving uploaded image: {image_upload.filename}")
             image = save_upload_to_tempfile(image_upload)
             cleanup_paths.append(image)
+            print(f"[SERVER_API] Image saved to temp file: {image}")
 
             label_upload = form.get("label")
             label: Optional[pathlib.Path] = None
             if label_upload and getattr(label_upload, "filename", None):
+                print(f"[SERVER_API] Saving uploaded label: {label_upload.filename}")
                 label = save_upload_to_tempfile(label_upload)
                 cleanup_paths.append(label)
+                print(f"[SERVER_API] Label saved to temp file: {label}")
+            else:
+                print("[SERVER_API] No label file provided")
         else:
+            print("[SERVER_API] Processing JSON request")
             payload = await req.json()
+            print(f"[SERVER_API] Payload keys: {list(payload.keys())}")
             image = process_path(payload["image"])
             label = process_path(payload.get("label"))
             scales = payload["scales"]
 
-        print(image, label, scales)
+        print(f"[SERVER_API] Final paths - Image: {image}, Label: {label}")
+        print(f"[SERVER_API] Scales: {scales}")
 
         if image is None:
+            print("[SERVER_API] Error: Image path is None")
             raise HTTPException(status_code=400, detail="Image path or file is required.")
 
         # neuroglancer setting -- bind to this to make accessible outside of container
         ip = "0.0.0.0"
         port = 4244
+        print(f"[SERVER_API] Setting up Neuroglancer on {ip}:{port}")
         neuroglancer.set_server_bind_address(ip, port)
         viewer = neuroglancer.Viewer()
         # SNEMI (# 3d vol dim: z,y,x)
@@ -89,9 +109,19 @@ async def neuroglancer(req: Request):
             names=["z", "y", "x"], units=["nm", "nm", "nm"], scales=scales
         )
         try:
+            print(f"[SERVER_API] Reading image volume from {image}...")
             im = readVol(image, image_type="im")
-            gt = readVol(label, image_type="im") if label else None
+            print(f"[SERVER_API] Image volume read successfully. Shape: {im.shape}, Dtype: {im.dtype}")
+            
+            gt = None
+            if label:
+                print(f"[SERVER_API] Reading label volume from {label}...")
+                gt = readVol(label, image_type="im")
+                print(f"[SERVER_API] Label volume read successfully. Shape: {gt.shape}, Dtype: {gt.dtype}")
         except Exception as e:
+            print(f"[SERVER_API] Error reading volumes: {e}")
+            import traceback
+            print(traceback.format_exc())
             raise HTTPException(status_code=400, detail=f"Failed to read image volume: {str(e)}")
 
         def ngLayer(data, res, oo=[0, 0, 0], tt="segmentation"):
@@ -99,12 +129,13 @@ async def neuroglancer(req: Request):
                 data, dimensions=res, volume_type=tt, voxel_offset=oo
             )
 
+        print("[SERVER_API] Adding layers to viewer...")
         with viewer.txn() as s:
             s.layers.append(name="im", layer=ngLayer(im, res, tt="image"))
             if gt is not None:
                 s.layers.append(name="gt", layer=ngLayer(gt, res, tt="segmentation"))
 
-        print(viewer)
+        print(f"[SERVER_API] Viewer created: {viewer}")
         return str(viewer)
     finally:
         for path in cleanup_paths:
@@ -205,27 +236,44 @@ async def get_training_status():
 
 @app.post("/start_model_inference")
 async def start_model_inference(req: Request):
+    print("\n========== SERVER_API: START_MODEL_INFERENCE ENDPOINT CALLED ==========")
     req = await req.json()
+    print(f"[SERVER_API] Received request payload keys: {list(req.keys())}")
+    print(f"[SERVER_API] Arguments: {req.get('arguments', {})}")
+    print(f"[SERVER_API] Output path: {req.get('outputPath', 'NOT PROVIDED')}")
+    
     try:
+        target_url = REACT_APP_SERVER_PROTOCOL + "://" + REACT_APP_SERVER_URL + "/start_model_inference"
+        print(f"[SERVER_API] Proxying to PyTC server at: {target_url}")
+        
         response = requests.post(
-            REACT_APP_SERVER_PROTOCOL
-            + "://"
-            + REACT_APP_SERVER_URL
-            + "/start_model_inference",
+            target_url,
             json=req,
-            timeout=30
+            timeout=30 
         )
+        
+        print(f"[SERVER_API] PyTC server response status: {response.status_code}")
+        print(f"[SERVER_API] PyTC server response: {response.text[:500]}")
 
         if response.status_code == 200:
+            print("[SERVER_API] ✓ Inference request proxied successfully")
             return {"message": "Model inference started successfully", "data": response.json()}
         else:
+            print(f"[SERVER_API] ✗ PyTC server returned error status: {response.status_code}")
             return {"message": f"Failed to start model inference: {response.status_code}", "error": response.text}
-    except requests.exceptions.ConnectionError:
+    except requests.exceptions.ConnectionError as e:
+        print(f"[SERVER_API] ✗ CONNECTION ERROR: Cannot reach PyTC server at {REACT_APP_SERVER_URL}")
         return {"message": "Failed to connect to PyTC server. Is server_pytc running?", "error": "ConnectionError"}
     except requests.exceptions.Timeout:
-        return {"message": "Request timed out. PyTC server may be overloaded.", "error": "Timeout"}
+        print("[SERVER_API] ✗ TIMEOUT: PyTC server did not respond within 30 seconds")
+        return {"message": "Request timed out. PyTC server may be overloaded or blocking.", "error": "Timeout"}
     except Exception as e:
+        print(f"[SERVER_API] ✗ UNEXPECTED ERROR: {type(e).__name__}: {str(e)}")
+        import traceback
+        print(traceback.format_exc())
         return {"message": f"Failed to start model inference: {str(e)}", "error": str(e)}
+    finally:
+        print("========== SERVER_API: END OF START_MODEL_INFERENCE ==========\n")
 
 
 @app.post("/stop_model_inference")

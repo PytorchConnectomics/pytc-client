@@ -1,46 +1,19 @@
 import React, { useState, useEffect } from 'react'
 import DataLoader from './DataLoader'
 import Visualization from '../views/Visualization'
-import ModelTraining from '../views/ModelTraining'
-import ModelInference from '../views/ModelInference'
-import Monitoring from '../views/Monitoring'
 import Chatbot from '../components/Chatbot'
-import { Layout, Menu, Button } from 'antd'
+import { Layout, Button } from 'antd'
 import { MessageOutlined } from '@ant-design/icons'
 import { getNeuroglancerViewer } from '../utils/api'
 
 const { Content, Sider } = Layout
 
-function Views () {
-  const [current, setCurrent] = useState('visualization')
+function Views() {
   const [viewers, setViewers] = useState([])
   const [isLoading, setIsLoading] = useState(false)
   const [isInferring, setIsInferring] = useState(false)
   const [isChatOpen, setIsChatOpen] = useState(false)
   console.log(viewers)
-
-  const onClick = (e) => {
-    setCurrent(e.key)
-  }
-
-  const items = [
-    { label: 'Visualization', key: 'visualization' },
-    { label: 'Model Training', key: 'training' },
-    { label: 'Model Inference', key: 'inference' },
-    { label: 'Tensorboard', key: 'monitoring' }
-  ]
-
-  const renderMenu = () => {
-    if (current === 'visualization') {
-      return <Visualization viewers={viewers} setViewers={setViewers} />
-    } else if (current === 'training') {
-      return <ModelTraining />
-    } else if (current === 'monitoring') {
-      return <Monitoring />
-    } else if (current === 'inference') {
-      return <ModelInference isInferring={isInferring} setIsInferring={setIsInferring} />
-    }
-  }
 
   const [collapsed, setCollapsed] = useState(false)
 
@@ -84,12 +57,6 @@ function Views () {
     }
   }
 
-  useEffect(() => { // This function makes sure that the inferring will continue when current tab changes
-    if (current === 'inference' && isInferring) {
-      console.log('Inference process is continuing...')
-    }
-  }, [current, isInferring])
-
   return (
     <Layout
       style={{
@@ -102,13 +69,17 @@ function Views () {
         : (
           <>
             <Sider
-            // collapsible
+              // collapsible
               collapsed={collapsed}
               onCollapse={(value) => setCollapsed(value)}
               theme='light'
               collapsedWidth='0'
             >
-              <DataLoader fetchNeuroglancerViewer={fetchNeuroglancerViewer} />
+              <DataLoader
+                fetchNeuroglancerViewer={fetchNeuroglancerViewer}
+                isInferring={isInferring}
+                setIsInferring={setIsInferring}
+              />
             </Sider>
             <Layout className='site-layout'>
               <Content
@@ -116,13 +87,7 @@ function Views () {
                   margin: '0 16px'
                 }}
               >
-                <Menu
-                  onClick={onClick}
-                  selectedKeys={[current]}
-                  mode='horizontal'
-                  items={items}
-                />
-                {renderMenu()}
+                <Visualization viewers={viewers} setViewers={setViewers} />
               </Content>
             </Layout>
             {isChatOpen ? (
@@ -144,7 +109,7 @@ function Views () {
               />
             )}
           </>
-          )}
+        )}
     </Layout>
   )
 }

@@ -233,35 +233,91 @@ def stop_tensorboard():
 
 
 def start_inference(dict: dict):
+    print("\n========== MODEL.PY: START_INFERENCE FUNCTION CALLED ==========")
+    global _inference_process
+    
+    print(f"[MODEL.PY] Input dict keys: {list(dict.keys())}")
+    print(f"[MODEL.PY] Arguments: {dict.get('arguments', {})}")
+    print(f"[MODEL.PY] Output path: {dict.get('outputPath', 'NOT PROVIDED')}")
+    
     # Use absolute path relative to this file
     current_dir = pathlib.Path(__file__).parent.parent.parent
     script_path = current_dir / "pytorch_connectomics" / "scripts" / "main.py"
+    print(f"[MODEL.PY] Script path: {script_path}")
     
     if not script_path.exists():
-        print(f"Error: Inference script not found at {script_path}")
+        print(f"[MODEL.PY] ✗ ERROR: Inference script not found at {script_path}")
         raise FileNotFoundError(f"Inference script not found at {script_path}")
 
-    command = [sys.executable, str(script_path), "--inference"]
+    print(f"[MODEL.PY] Python executable: {sys.executable}")
+    command = [sys.executable, str(script_path)]
 
     # Write the value to a temporary file
-    with tempfile.NamedTemporaryFile(
+    print("[MODEL.PY] Creating temporary YAML config file...")
+    temp_file = tempfile.NamedTemporaryFile(
         delete=False, mode="w", suffix=".yaml"
-    ) as temp_file:
-        temp_file.write(dict["inferenceConfig"])
-        temp_filepath = temp_file.name
-        command.extend(["--config-file", str(temp_filepath)])
+    )
+    config_content = dict["inferenceConfig"]
+    print(f"[MODEL.PY] Writing config ({len(config_content)} chars) to temp file...")
+    temp_file.write(config_content)
+    temp_filepath = temp_file.name
+    temp_file.close()
+    _temp_files.append(temp_filepath)
+    print(f"[MODEL.PY] ✓ Temp config file created at: {temp_filepath}")
+    
+    command.extend(["--config", str(temp_filepath)])
+    command.extend(["--mode", "test"])
 
-    for key, value in dict["arguments"].items():
-        if value is not None:
-            command.extend([f"--{key}", str(value)])
-    # Execute the command using subprocess.call
-    print(command)
+    # Handle checkpoint specifically
+    if "checkpoint" in dict["arguments"] and dict["arguments"]["checkpoint"]:
+        print(f"[MODEL.PY]   Adding --checkpoint {dict['arguments']['checkpoint']}")
+        command.extend(["--checkpoint", str(dict["arguments"]["checkpoint"])])
+    
+    # Add any other specific arguments if needed, but avoid generic loop for now
+    # to prevent passing unsupported flags to the new script.
+    # The new script accepts overrides as positional args, but we are injecting them
+    # into the YAML via api.js, so we don't need to pass them here.
+            
+    print(f"[MODEL.PY] Final command: {' '.join(command)}")
+    print("[MODEL.PY] Starting subprocess...")
+    
     try:
-        subprocess.call(command)
-    except subprocess.CalledProcessError as e:
-        print(f"Error occurred: {e}")
-
-    print("start_inference")
+        _inference_process = subprocess.Popen(
+            command,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True,
+            bufsize=1,
+            cwd=str(current_dir)
+        )
+        print(f"[MODEL.PY] ✓ Inference process started with PID: {_inference_process.pid}")
+        
+        # Start a thread to read and log subprocess output
+        import threading
+        def log_subprocess_output():
+            print(f"[MODEL.PY] === Inference subprocess output (PID {_inference_process.pid}) ===")
+            try:
+                for line in _inference_process.stdout:
+                    print(f"[INFERENCE:{_inference_process.pid}] {line.rstrip()}")
+                
+                _inference_process.wait()
+                print(f"[MODEL.PY] === Inference subprocess finished with exit code: {_inference_process.returncode} ===")
+            except Exception as e:
+                print(f"[MODEL.PY] Error reading subprocess output: {e}")
+        
+        output_thread = threading.Thread(target=log_subprocess_output, daemon=True)
+        output_thread.start()
+        
+        result = {"status": "started", "pid": _inference_process.pid}
+        print(f"[MODEL.PY] Returning: {result}")
+        print("========== MODEL.PY: END OF START_INFERENCE ==========\n")
+        return result
+        
+    except Exception as e:
+        print(f"[MODEL.PY] ✗ ERROR starting inference process: {e}")
+        if os.path.exists(temp_filepath):
+            os.unlink(temp_filepath)
+        raise
 
 
 def stop_inference():

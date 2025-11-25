@@ -7,8 +7,8 @@ const API_URL = process.env.REACT_APP_API_URL || 'localhost:4242'
 
 const buildFilePath = (file) => {
   if (!file) return ''
-  if (file.folderPath) return file.folderPath + file.name
   if (file.path) return file.path
+  if (file.folderPath) return file.folderPath + '/' + file.name
   if (file.originFileObj && file.originFileObj.path) {
     return file.originFileObj.path
   }
@@ -205,7 +205,8 @@ export async function getTensorboardURL() {
 export async function startModelInference(
   inferenceConfig,
   outputPath,
-  checkpointPath
+  checkpointPath,
+  imagePath
 ) {
   console.log('\n========== API.JS: START_MODEL_INFERENCE CALLED ==========')
   console.log('[API] Function arguments:')
@@ -215,6 +216,7 @@ export async function startModelInference(
   console.log('[API]   - outputPath type:', typeof outputPath)
   console.log('[API]   - checkpointPath:', checkpointPath)
   console.log('[API]   - checkpointPath type:', typeof checkpointPath)
+  console.log('[API]   - imagePath:', imagePath)
 
   try {
     console.log('[API] ===== Starting Inference Configuration =====')
@@ -222,8 +224,8 @@ export async function startModelInference(
     // Parse the YAML config and inject the outputPath
     let configToSend = inferenceConfig
 
-    if (outputPath) {
-      console.log('[API] outputPath provided, will inject into YAML')
+    if (outputPath || imagePath) {
+      console.log('[API] outputPath or imagePath provided, will inject into YAML')
       try {
         // Parse YAML to object
         const yaml = require('js-yaml')
@@ -236,19 +238,49 @@ export async function startModelInference(
         console.log('[API]   - Original INFERENCE.OUTPUT_PATH:', configObj.INFERENCE?.OUTPUT_PATH)
 
         // Inject the output path from UI
-        if (!configObj.INFERENCE) {
-          console.log('[API] INFERENCE section missing, creating it')
-          configObj.INFERENCE = {}
+        // Check for Hydra style (lowercase) or YACS style (uppercase)
+        if (configObj.inference) {
+          // Hydra style
+          if (outputPath) {
+            if (!configObj.inference.data) configObj.inference.data = {};
+            configObj.inference.data.output_path = outputPath;
+            console.log('[API] ✓ Injected inference.data.output_path:', outputPath);
+          }
+
+          if (imagePath) {
+            if (!configObj.inference.data) configObj.inference.data = {};
+            configObj.inference.data.test_image = imagePath;
+            console.log('[API] ✓ Injected inference.data.test_image:', imagePath);
+          }
+
+          // Ensure system.inference.num_gpus is set to 1 for CPU inference if needed
+          if (!configObj.system) configObj.system = {};
+          if (!configObj.system.inference) configObj.system.inference = {};
+          configObj.system.inference.num_gpus = 1;
+          console.log('[API] ✓ Set system.inference.num_gpus = 1');
+        } else {
+          // YACS style (Legacy)
+          if (!configObj.INFERENCE) {
+            console.log('[API] INFERENCE section missing, creating it')
+            configObj.INFERENCE = {}
+          }
+          if (outputPath) {
+            configObj.INFERENCE.OUTPUT_PATH = outputPath;
+            console.log('[API] ✓ Injected INFERENCE.OUTPUT_PATH:', outputPath)
+          }
+
+          if (imagePath) {
+            configObj.INFERENCE.IMAGE_NAME = imagePath; // Legacy usually took just name, but let's pass path
+            console.log('[API] ✓ Injected INFERENCE.IMAGE_NAME:', imagePath);
+          }
+
+          if (!configObj.SYSTEM) {
+            console.log('[API] SYSTEM section missing, creating it');
+            configObj.SYSTEM = {};
+          }
+          configObj.SYSTEM.NUM_GPUS = 1;
+          console.log('[API] ✓ Set SYSTEM.NUM_GPUS = 1');
         }
-        configObj.INFERENCE.OUTPUT_PATH = outputPath;
-        // Ensure SYSTEM section exists and set NUM_GPUS to 1 for CPU inference
-        if (!configObj.SYSTEM) {
-          console.log('[API] SYSTEM section missing, creating it');
-          configObj.SYSTEM = {};
-        }
-        configObj.SYSTEM.NUM_GPUS = 1;
-        console.log('[API] ✓ Set SYSTEM.NUM_GPUS = 1');
-        console.log('[API] ✓ Injected INFERENCE.OUTPUT_PATH:', outputPath)
 
         // Convert back to YAML
         console.log('[API] Converting back to YAML...')

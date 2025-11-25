@@ -91,10 +91,18 @@ async def get_tensorboard_url():
 
 @app.post("/start_model_inference")
 async def start_model_inference(req: Request):
+    print("\n========== SERVER_PYTC: START_MODEL_INFERENCE ENDPOINT CALLED ==========")
     req = await req.json()
-    print("start model inference")
+    print(f"[SERVER_PYTC] Received request payload keys: {list(req.keys())}")
     # log_dir = req["log_dir"]
-    start_inference(req)
+    try:
+        result = start_inference(req)
+        print(f"[SERVER_PYTC] start_inference() returned: {result}")
+        print("========== SERVER_PYTC: END OF START_MODEL_INFERENCE ==========\n")
+        return result
+    except Exception as e:
+        print(f"[SERVER_PYTC] ✗ ERROR in start_inference: {e}")
+        raise
 
 
 @app.post("/stop_model_inference")

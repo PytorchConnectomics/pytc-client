@@ -27,6 +27,14 @@ samples_pytc/*
 pytc/
 pytorch_connectomics/
 
+# Large Data Files (Excluded from Repo)
+lucchi_test/
+test_output/
+lightning_logs/
+*.h5
+*.tif
+*.ckpt
+
 # Misc tooling / temporary files
 .coverage
 coverage.xml
