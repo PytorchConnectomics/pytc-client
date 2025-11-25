@@ -58,6 +58,10 @@ class FileBase(BaseModel):
 class FileCreate(FileBase):
     pass
 
+class FileUpdate(BaseModel):
+    name: Optional[str] = None
+    path: Optional[str] = None
+
 class FileResponse(FileBase):
     id: int
     user_id: int

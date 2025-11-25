@@ -293,16 +293,36 @@ function FilesManager() {
 
   const handleDrop = async (e, targetFolderKey) => {
     e.preventDefault();
+
+    // Check if dropping files from OS (external files)
+    if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
+      await handleExternalFileDrop(e.dataTransfer.files, targetFolderKey);
+      return;
+    }
+
+    // Handle internal drag-and-drop
     const dataStr = e.dataTransfer.getData('text/plain');
     if (!dataStr) return;
     const { keys } = JSON.parse(dataStr);
     if (!keys || keys.length === 0) return;
     if (keys.includes(targetFolderKey)) return;
+
     let moved = 0;
     for (const key of keys) {
       const isFolder = folders.some((f) => f.key === key);
+      const item = isFolder
+        ? folders.find((f) => f.key === key)
+        : Object.values(files).flat().find((f) => f.key === key);
+
+      if (!item) continue;
+
       try {
-        await axios.put(`${API_BASE}/files/${key}`, { path: targetFolderKey });
+        // Send name along with path to fix 422 error
+        await axios.put(`${API_BASE}/files/${key}`, {
+          name: item.title || item.name,
+          path: targetFolderKey
+        }, { withCredentials: true });
+
         if (isFolder) {
           setFolders((prev) => prev.map((f) => (f.key === key ? { ...f, parent: targetFolderKey } : f)));
         } else {
@@ -318,6 +338,7 @@ function FilesManager() {
         moved++;
       } catch (err) {
         console.error('Move error', err);
+        message.error(`Failed to move ${item.title || item.name}`);
       }
     }
     if (moved) {
@@ -325,6 +346,44 @@ function FilesManager() {
       setSelectedItems([]);
     }
   };
+
+  // Handle external file drops from OS
+  const handleExternalFileDrop = async (fileList, targetFolder) => {
+    const filesArray = Array.from(fileList);
+    let uploaded = 0;
+
+    for (const file of filesArray) {
+      const form = new FormData();
+      form.append('file', file);
+      form.append('path', targetFolder);
+
+      try {
+        const res = await axios.post(`${API_BASE}/files/upload`, form, {
+          headers: { 'Content-Type': 'multipart/form-data' },
+          withCredentials: true,
+        });
+        const newFile = res.data;
+        setFiles((prev) => ({
+          ...prev,
+          [targetFolder]: [...(prev[targetFolder] || []), {
+            key: String(newFile.id),
+            name: newFile.name,
+            size: newFile.size,
+            type: newFile.type
+          }],
+        }));
+        uploaded++;
+      } catch (err) {
+        console.error('Upload error', err);
+        message.error(`Failed to upload ${file.name}`);
+      }
+    }
+
+    if (uploaded > 0) {
+      message.success(`Uploaded ${uploaded} file${uploaded > 1 ? 's' : ''}`);
+    }
+  };
+
 
   // Selection box handling
   const handleMouseDown = (e) => {
@@ -616,6 +675,8 @@ function FilesManager() {
         onMouseMove={handleMouseMove}
         onMouseUp={handleMouseUp}
         onMouseLeave={handleMouseUp}
+        onDragOver={handleDragOver}
+        onDrop={(e) => handleDrop(e, currentFolder)}
       >
         {currentFolders.length === 0 && currentFiles.length === 0 && !newItemType && (
           <div style={{ width: '100%', marginTop: 64, pointerEvents: 'none' }}>
