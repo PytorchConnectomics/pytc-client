@@ -1,8 +1,9 @@
 import React, { useState, useContext, useEffect } from 'react';
-import { Modal, Button, Input, Card, Typography, message } from 'antd';
+import { Card, Button, Input, Modal, Typography, message, Space } from 'antd';
+import { UserOutlined, LockOutlined, RocketOutlined } from '@ant-design/icons';
 import { UserContext } from '../contexts/UserContext';
 
-const { Title, Paragraph } = Typography;
+const { Title, Text } = Typography;
 
 function Welcome() {
   const { signIn, signUp, autoSignOut } = useContext(UserContext);
@@ -22,6 +23,7 @@ function Welcome() {
     if (!ok) message.error('Invalid credentials');
     setShowSignIn(false);
   };
+
   const handleSignUp = async () => {
     const ok = await signUp(signUpName, signUpPassword);
     if (!ok) message.error('Sign up failed');
@@ -29,79 +31,147 @@ function Welcome() {
   };
 
   return (
-    <div style={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'linear-gradient(135deg, #e0e7ff 0%, #f5f7fa 100%)' }}>
-      <Card style={{ maxWidth: 420, width: '100%', textAlign: 'center', boxShadow: '0 8px 32px #0001' }}>
-        <Title level={2} style={{ marginBottom: 8 }}>Pytc Client</Title>
-        <Paragraph style={{ fontSize: 18, marginBottom: 24 }}>
-          Welcome to Pytc Client!<br />A modern interface for connectomics workflows.<br />Sign in or sign up to get started.
-        </Paragraph>
-        <Button type='primary' size='large' style={{ margin: 8 }} onClick={() => setShowSignIn(true)}>Sign In</Button>
-        <Button size='large' style={{ margin: 8 }} onClick={() => setShowSignUp(true)}>Sign Up</Button>
+    <div style={{
+      minHeight: '100vh',
+      display: 'flex',
+      alignItems: 'center',
+      justifyContent: 'center',
+      background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
+      padding: 20
+    }}>
+      <Card
+        style={{
+          maxWidth: 480,
+          width: '100%',
+          textAlign: 'center',
+          borderRadius: 16,
+          boxShadow: '0 10px 25px rgba(0,0,0,0.2)',
+          border: 'none',
+          overflow: 'hidden'
+        }}
+        bodyStyle={{ padding: '40px 32px' }}
+      >
+        <div style={{ marginBottom: 24 }}>
+          <div style={{
+            width: 80,
+            height: 80,
+            background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
+            borderRadius: '50%',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            margin: '0 auto 16px',
+            color: 'white',
+            fontSize: 32,
+            boxShadow: '0 4px 10px rgba(118, 75, 162, 0.3)'
+          }}>
+            <RocketOutlined />
+          </div>
+          <Title level={2} style={{ marginBottom: 8, color: '#333' }}>PyTC Client</Title>
+          <Text type="secondary" style={{ fontSize: 16 }}>
+            Advanced Connectomics Workflow Interface
+          </Text>
+        </div>
+
+        <Space direction="vertical" size="middle" style={{ width: '100%' }}>
+          <Button
+            type='primary'
+            size='large'
+            block
+            style={{
+              height: 48,
+              fontSize: 16,
+              borderRadius: 8,
+              background: 'linear-gradient(90deg, #667eea 0%, #764ba2 100%)',
+              border: 'none'
+            }}
+            onClick={() => setShowSignIn(true)}
+          >
+            Sign In
+          </Button>
+          <Button
+            size='large'
+            block
+            style={{
+              height: 48,
+              fontSize: 16,
+              borderRadius: 8,
+              borderColor: '#d9d9d9'
+            }}
+            onClick={() => setShowSignUp(true)}
+          >
+            Create Account
+          </Button>
+        </Space>
+
+        <div style={{ marginTop: 32, borderTop: '1px solid #f0f0f0', paddingTop: 16 }}>
+          <Text type="secondary" style={{ fontSize: 12 }}>
+            &copy; {new Date().getFullYear()} PyTC Client. All rights reserved.
+          </Text>
+        </div>
       </Card>
-      <Modal title='Sign In' open={showSignIn} onCancel={() => setShowSignIn(false)} onOk={handleSignIn} okText='Sign In'>
-        <Input placeholder='Username' value={signInName} onChange={e => setSignInName(e.target.value)} style={{ marginBottom: 12 }} />
-        <Input.Password placeholder='Password' value={signInPassword} onChange={e => setSignInPassword(e.target.value)} />
+
+      {/* Sign In Modal */}
+      <Modal
+        title={<div style={{ textAlign: 'center', marginBottom: 20 }}>Sign In</div>}
+        open={showSignIn}
+        onCancel={() => setShowSignIn(false)}
+        onOk={handleSignIn}
+        okText='Sign In'
+        centered
+        width={360}
+        okButtonProps={{ style: { background: '#764ba2', borderColor: '#764ba2' } }}
+      >
+        <Space direction="vertical" size="large" style={{ width: '100%' }}>
+          <Input
+            size="large"
+            placeholder='Username'
+            prefix={<UserOutlined style={{ color: '#bfbfbf' }} />}
+            value={signInName}
+            onChange={e => setSignInName(e.target.value)}
+          />
+          <Input.Password
+            size="large"
+            placeholder='Password'
+            prefix={<LockOutlined style={{ color: '#bfbfbf' }} />}
+            value={signInPassword}
+            onChange={e => setSignInPassword(e.target.value)}
+            onPressEnter={handleSignIn}
+          />
+        </Space>
       </Modal>
-      <Modal title='Sign Up' open={showSignUp} onCancel={() => setShowSignUp(false)} onOk={handleSignUp} okText='Sign Up'>
-        <Input placeholder='Username' value={signUpName} onChange={e => setSignUpName(e.target.value)} style={{ marginBottom: 12 }} />
-        <Input.Password placeholder='Password' value={signUpPassword} onChange={e => setSignUpPassword(e.target.value)} />
+
+      {/* Sign Up Modal */}
+      <Modal
+        title={<div style={{ textAlign: 'center', marginBottom: 20 }}>Create Account</div>}
+        open={showSignUp}
+        onCancel={() => setShowSignUp(false)}
+        onOk={handleSignUp}
+        okText='Sign Up'
+        centered
+        width={360}
+        okButtonProps={{ style: { background: '#764ba2', borderColor: '#764ba2' } }}
+      >
+        <Space direction="vertical" size="large" style={{ width: '100%' }}>
+          <Input
+            size="large"
+            placeholder='Choose Username'
+            prefix={<UserOutlined style={{ color: '#bfbfbf' }} />}
+            value={signUpName}
+            onChange={e => setSignUpName(e.target.value)}
+          />
+          <Input.Password
+            size="large"
+            placeholder='Choose Password'
+            prefix={<LockOutlined style={{ color: '#bfbfbf' }} />}
+            value={signUpPassword}
+            onChange={e => setSignUpPassword(e.target.value)}
+            onPressEnter={handleSignUp}
+          />
+        </Space>
       </Modal>
     </div>
   );
 }
 
 export default Welcome;
-        <Paragraph style={{ fontSize: 16, marginBottom: 24 }}>
-          A desktop client for connectomics workflows — visualize data, run inference, and manage experiments.
-        </Paragraph>
-        <Paragraph style={{ color: '#555', marginBottom: 28 }}>
-          Welcome — get started by signing in or creating a new account.
-        </Paragraph>
-        <Space size='large'>
-          <Button type='primary' size='large' onClick={() => { console.log('Sign in clicked'); setSignInOpen(true); }}>Sign in</Button>
-          <Button size='large' onClick={() => { console.log('Sign up clicked'); setSignUpOpen(true); }}>Sign up</Button>
-        </Space>
-
-        <Modal
-          title='Sign in'
-          open={isSignInOpen}
-          onCancel={() => setSignInOpen(false)}
-          footer={null}
-        >
-          <Form layout='vertical' onFinish={onSignIn}>
-            <Form.Item name='name' label='Name' rules={[{ required: true }]}>
-              <Input />
-            </Form.Item>
-            <Form.Item name='password' label='Password' rules={[{ required: true }]}>
-              <Input.Password />
-            </Form.Item>
-            <Form.Item>
-              <Button type='primary' htmlType='submit' block>Sign in</Button>
-            </Form.Item>
-          </Form>
-        </Modal>
-
-        <Modal
-          title='Create account'
-          open={isSignUpOpen}
-          onCancel={() => setSignUpOpen(false)}
-          footer={null}
-        >
-          <Form layout='vertical' onFinish={onSignUp}>
-            <Form.Item name='name' label='Name' rules={[{ required: true }]}>
-              <Input />
-            </Form.Item>
-            <Form.Item name='password' label='Password' rules={[{ required: true, min: 6 }]}>
-              <Input.Password />
-            </Form.Item>
-            <Form.Item>
-              <Button type='primary' htmlType='submit' block>Create account</Button>
-            </Form.Item>
-          </Form>
-        </Modal>
-      </div>
-    </div>
-  )
-}
-
-export default Welcome
