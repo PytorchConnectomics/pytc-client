@@ -129,7 +129,7 @@ def create_folder(
 @router.put("/files/{file_id}", response_model=models.FileResponse)
 def update_file(
     file_id: int,
-    file_update: models.FileCreate,
+    file_update: models.FileUpdate,
     current_user: models.User = Depends(get_current_user),
     db: Session = Depends(database.get_db)
 ):
@@ -137,8 +137,12 @@ def update_file(
     if not file:
         raise HTTPException(status_code=404, detail="File not found")
     
-    file.name = file_update.name
-    file.path = file_update.path
+    # Only update provided fields
+    if file_update.name is not None:
+        file.name = file_update.name
+    if file_update.path is not None:
+        file.path = file_update.path
+    
     db.commit()
     db.refresh(file)
     return file
