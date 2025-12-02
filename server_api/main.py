@@ -12,6 +12,7 @@ from utils.io import readVol
 from utils.utils import process_path
 from chatbot.chatbot import chain, memory
 from auth import models, database, router as auth_router
+from synanno import router as synanno_router
 
 from fastapi.staticfiles import StaticFiles
 import os
@@ -28,6 +29,7 @@ os.makedirs("uploads", exist_ok=True)
 app.mount("/uploads", StaticFiles(directory="uploads"), name="uploads")
 
 app.include_router(auth_router.router)
+app.include_router(synanno_router.router, tags=["synanno"])
 
 app.add_middleware(
     CORSMiddleware,
