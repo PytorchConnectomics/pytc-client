@@ -13,7 +13,9 @@ function createWindow() {
     height: 600,
     webPreferences: {
       nodeIntegration: true,
-      contextIsolation: false
+      contextIsolation: false,
+      webSecurity: false,  // Allow loading iframes from localhost
+      allowRunningInsecureContent: true
     }
   })
 
