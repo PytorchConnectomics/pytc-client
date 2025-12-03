@@ -126,6 +126,44 @@ def create_folder(
     db.refresh(new_folder)
     return new_folder
 
+@router.post("/files/copy", response_model=models.FileResponse)
+def copy_file(
+    file_copy: models.FileCopy,
+    current_user: models.User = Depends(get_current_user),
+    db: Session = Depends(database.get_db)
+):
+    # Find source file
+    source_file = db.query(models.File).filter(models.File.id == file_copy.source_id, models.File.user_id == current_user.id).first()
+    if not source_file:
+        raise HTTPException(status_code=404, detail="Source file not found")
+
+    # If it's a folder, we don't support recursive copy yet (or implement it if needed)
+    # For now, let's assume file copy only or simple folder entry copy
+    
+    new_physical_path = None
+    if not source_file.is_folder and source_file.physical_path and os.path.exists(source_file.physical_path):
+        # Generate new filename
+        file_ext = os.path.splitext(source_file.physical_path)[1]
+        unique_filename = f"{uuid.uuid4()}{file_ext}"
+        # Use same upload dir
+        upload_dir = os.path.dirname(source_file.physical_path)
+        new_physical_path = f"{upload_dir}/{unique_filename}"
+        shutil.copy2(source_file.physical_path, new_physical_path)
+
+    new_file = models.File(
+        user_id=current_user.id,
+        name=f"Copy of {source_file.name}",
+        path=file_copy.destination_path,
+        is_folder=source_file.is_folder,
+        size=source_file.size,
+        type=source_file.type,
+        physical_path=new_physical_path
+    )
+    db.add(new_file)
+    db.commit()
+    db.refresh(new_file)
+    return new_file
+
 @router.put("/files/{file_id}", response_model=models.FileResponse)
 def update_file(
     file_id: int,

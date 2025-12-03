@@ -1,7 +1,8 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { Button, Input, Modal, message, Menu, Breadcrumb, Empty, Image } from 'antd';
-import { FolderFilled, FileOutlined, FileTextOutlined, HomeOutlined, ArrowUpOutlined, AppstoreOutlined, BarsOutlined, UploadOutlined, EyeOutlined } from '@ant-design/icons';
+import { FolderFilled, FileOutlined, FileTextOutlined, HomeOutlined, ArrowUpOutlined, AppstoreOutlined, BarsOutlined, UploadOutlined, EyeOutlined, LayoutOutlined } from '@ant-design/icons';
 import axios from 'axios';
+import FileTreeSidebar from '../components/FileTreeSidebar';
 
 // API base URL (adjust via env vars if needed)
 const API_BASE = `${process.env.REACT_APP_SERVER_PROTOCOL || 'http'}://${process.env.REACT_APP_SERVER_URL || 'localhost:4243'}`;
@@ -52,6 +53,35 @@ function FilesManager() {
   const containerRef = useRef(null);
   const itemRefs = useRef({});
   const isDragSelecting = useRef(false);
+
+  // Sidebar Resize Logic
+  const [sidebarWidth, setSidebarWidth] = useState(250);
+  const [isResizing, setIsResizing] = useState(false);
+  const [isSidebarVisible, setIsSidebarVisible] = useState(true);
+
+  const startResizing = React.useCallback(() => setIsResizing(true), []);
+  const stopResizing = React.useCallback(() => setIsResizing(false), []);
+  const resize = React.useCallback(
+    (mouseMoveEvent) => {
+      if (isResizing) {
+        // Simple resize logic assuming sidebar is on the left
+        const newWidth = mouseMoveEvent.clientX;
+        if (newWidth > 100 && newWidth < 600) {
+          setSidebarWidth(newWidth);
+        }
+      }
+    },
+    [isResizing]
+  );
+
+  useEffect(() => {
+    window.addEventListener("mousemove", resize);
+    window.addEventListener("mouseup", stopResizing);
+    return () => {
+      window.removeEventListener("mousemove", resize);
+      window.removeEventListener("mouseup", stopResizing);
+    };
+  }, [resize, stopResizing]);
 
   // Focus input when editing starts
   useEffect(() => {
@@ -116,6 +146,13 @@ function FilesManager() {
       setNewItemType(null);
       return;
     }
+    // Check for duplicate name
+    const existing = folders.some(f => f.parent === currentFolder && f.title === tempName) ||
+      (files[currentFolder] || []).some(f => f.name === tempName);
+    if (existing) {
+      message.error('A file or folder with this name already exists.');
+      return;
+    }
     try {
       const payload = { name: tempName, path: currentFolder };
       const res = await axios.post(`${API_BASE}/files/folder`, payload, { withCredentials: true });
@@ -144,6 +181,23 @@ function FilesManager() {
     }
     const key = editingItem;
     const isFolder = folders.some((f) => f.key === key);
+    const targetPath = isFolder ? folders.find(f => f.key === key).parent : currentFolder;
+
+    // Check for duplicate name
+    const existing = folders.some(f => f.parent === targetPath && f.title === tempName && f.key !== key) ||
+      (files[targetPath] || []).some(f => f.name === tempName && f.key !== key);
+
+    if (existing) {
+      message.error('A file or folder with this name already exists.');
+      // Restore original name
+      const originalItem = isFolder
+        ? folders.find(f => f.key === key)
+        : (files[targetPath] || []).find(f => f.key === key);
+      if (originalItem) {
+        setTempName(originalItem.title || originalItem.name);
+      }
+      return;
+    }
     try {
       await axios.put(`${API_BASE}/files/${key}`, { name: tempName, path: isFolder ? undefined : currentFolder }, { withCredentials: true });
       if (isFolder) {
@@ -192,24 +246,83 @@ function FilesManager() {
     message.info('Copied to clipboard');
   };
 
+  const handleCut = (keys = selectedItems) => {
+    if (keys.length === 0) return;
+    setClipboard({ items: keys, action: 'move' });
+    message.info('Cut to clipboard');
+  };
+
   const handlePaste = async () => {
     if (!clipboard.items.length) return;
+
     if (clipboard.action === 'copy') {
       const newEntries = [];
       for (const id of clipboard.items) {
+        // Find original item to get name (for UI update if needed, though backend handles naming)
         const orig = Object.values(files).flat().find((f) => f.key === id);
         if (!orig) continue;
-        const payload = { name: `Copy of ${orig.name}`, path: currentFolder };
+
         try {
-          const res = await axios.post(`${API_BASE}/files/folder`, payload, { withCredentials: true });
-          newEntries.push({ key: String(res.data.id), name: payload.name, size: orig.size, type: orig.type });
+          const res = await axios.post(`${API_BASE}/files/copy`, {
+            source_id: parseInt(id),
+            destination_path: currentFolder
+          }, { withCredentials: true });
+
+          const newFile = res.data;
+          newEntries.push({
+            key: String(newFile.id),
+            name: newFile.name,
+            size: newFile.size,
+            type: newFile.type
+          });
         } catch (err) {
           console.error('Paste error', err);
+          message.error(`Failed to copy item ${id}`);
         }
       }
       if (newEntries.length) {
         setFiles((prev) => ({ ...prev, [currentFolder]: [...(prev[currentFolder] || []), ...newEntries] }));
         message.success('Pasted items');
+      }
+    } else if (clipboard.action === 'move') {
+      let moved = 0;
+      for (const id of clipboard.items) {
+        // Find item (could be folder or file)
+        const isFolder = folders.some(f => f.key === id);
+        const item = isFolder
+          ? folders.find(f => f.key === id)
+          : Object.values(files).flat().find(f => f.key === id);
+
+        if (!item) continue;
+        // Skip if already in current folder
+        if ((isFolder && item.parent === currentFolder) || (!isFolder && files[currentFolder]?.some(f => f.key === id))) continue;
+
+        try {
+          await axios.put(`${API_BASE}/files/${id}`, {
+            name: item.title || item.name,
+            path: currentFolder
+          }, { withCredentials: true });
+
+          if (isFolder) {
+            setFolders((prev) => prev.map((f) => (f.key === id ? { ...f, parent: currentFolder } : f)));
+          } else {
+            setFiles((prev) => {
+              const sourceFolder = Object.keys(prev).find((fk) => prev[fk].some((f) => f.key === id));
+              if (!sourceFolder) return prev;
+              const fileObj = prev[sourceFolder].find((f) => f.key === id);
+              const newSource = prev[sourceFolder].filter((f) => f.key !== id);
+              const newTarget = [...(prev[currentFolder] || []), fileObj];
+              return { ...prev, [sourceFolder]: newSource, [currentFolder]: newTarget };
+            });
+          }
+          moved++;
+        } catch (err) {
+          console.error('Paste move error', err);
+        }
+      }
+      if (moved) {
+        message.success(`Moved ${moved} items`);
+        setClipboard({ items: [], action: null }); // Clear clipboard after move
       }
     }
   };
@@ -451,6 +564,7 @@ function FilesManager() {
       if (e.target.tagName === 'INPUT') return;
       if (e.key === 'Delete') handleDelete();
       if (e.ctrlKey && e.key === 'c') handleCopy();
+      if (e.ctrlKey && e.key === 'x') handleCut();
       if (e.ctrlKey && e.key === 'v') handlePaste();
       if (e.ctrlKey && e.key === 'a') {
         e.preventDefault();
@@ -536,7 +650,14 @@ function FilesManager() {
             onChange={(e) => setTempName(e.target.value)}
             onBlur={() => (newItemType ? finishCreateFolder() : finishRename())}
             onClick={(e) => e.stopPropagation()}
-            onKeyDown={(e) => e.stopPropagation()}
+            onKeyDown={(e) => {
+              e.stopPropagation();
+              if (e.key === 'Enter') newItemType ? finishCreateFolder() : finishRename();
+              if (e.key === 'Escape') {
+                setEditingItem(null);
+                setNewItemType(null);
+              }
+            }}
             style={{ width: viewMode === 'grid' ? '100%' : 300 }}
           />
         ) : (
@@ -571,7 +692,14 @@ function FilesManager() {
           onChange={(e) => setTempName(e.target.value)}
           onBlur={finishCreateFolder}
           onClick={(e) => e.stopPropagation()}
-          onKeyDown={(e) => e.stopPropagation()}
+          onKeyDown={(e) => {
+            e.stopPropagation();
+            if (e.key === 'Enter') finishCreateFolder();
+            if (e.key === 'Escape') {
+              setEditingItem(null);
+              setNewItemType(null);
+            }
+          }}
           style={{ width: viewMode === 'grid' ? '100%' : 300 }}
         />
       </div>
@@ -637,196 +765,281 @@ function FilesManager() {
   };
 
   return (
-    <div
-      style={{ height: '100%', display: 'flex', flexDirection: 'column' }}
-      onClick={(e) => {
-        if (isDragSelecting.current) {
-          isDragSelecting.current = false;
-          return;
-        }
-        setSelectedItems([]);
-        setContextMenu(null);
-      }}
-      onContextMenu={(e) => handleContextMenu(e, 'container')}
-    >
-      {/* Toolbar & Breadcrumbs */}
-      <div style={{ padding: '12px 0', borderBottom: '1px solid #f0f0f0', display: 'flex', gap: 16, alignItems: 'center' }}>
-        <Button icon={<ArrowUpOutlined />} onClick={handleUp} disabled={currentFolder === 'root'} size="small" />
-        <Breadcrumb style={{ flex: 1 }}>
-          {getBreadcrumbs().map((f) => (
-            <Breadcrumb.Item key={f.key} onClick={() => handleNavigate(f.key)} style={{ cursor: 'pointer' }}>
-              {f.key === 'root' ? <HomeOutlined /> : f.title}
-            </Breadcrumb.Item>
-          ))}
-        </Breadcrumb>
-        <Button
-          icon={viewMode === 'grid' ? <BarsOutlined /> : <AppstoreOutlined />}
-          onClick={() => setViewMode(viewMode === 'grid' ? 'list' : 'grid')}
-          title={viewMode === 'grid' ? 'Switch to List View' : 'Switch to Grid View'}
-        />
-      </div>
+    <div style={{ height: '100%', display: 'flex', flexDirection: 'row' }}>
+      {isSidebarVisible && (
+        <>
+          <FileTreeSidebar
+            folders={folders}
+            files={files}
+            currentFolder={currentFolder}
+            onSelect={handleNavigate}
+            onDrop={(info) => {
+              const dropKey = info.node.key;
+              const dragKey = info.dragNode.key;
+              // Handle folder-to-folder drop (sidebar internal) or file-to-folder drop
+              // Note: Ant Design Tree drag/drop is complex. 
+              // For simplicity, we assume dropping ONTO a folder (dropPosition === 0)
+              if (!info.dropToGap && dropKey.startsWith('folder-')) {
+                const targetFolderId = dropKey.replace('folder-', '');
+                const sourceId = dragKey.replace(/^(folder-|file-)/, '');
+                // Reuse existing drop logic if possible, or call API directly
+                // We need to know if source is file or folder
+                const isSourceFolder = dragKey.startsWith('folder-');
 
-      {/* Content Area */}
-      <div
-        ref={containerRef}
-        className="file-manager-content"
-        style={{ flex: 1, overflow: 'auto', display: 'flex', flexWrap: 'wrap', alignContent: 'flex-start', position: 'relative', flexDirection: viewMode === 'list' ? 'column' : 'row' }}
-        onMouseDown={handleMouseDown}
-        onMouseMove={handleMouseMove}
-        onMouseUp={handleMouseUp}
-        onMouseLeave={handleMouseUp}
-        onDragOver={handleDragOver}
-        onDrop={(e) => handleDrop(e, currentFolder)}
-      >
-        {currentFolders.length === 0 && currentFiles.length === 0 && !newItemType && (
-          <div style={{ width: '100%', marginTop: 64, pointerEvents: 'none' }}>
-            <Empty description="Empty Folder" />
-          </div>
-        )}
-        {currentFolders.map((f) => renderItem(f, 'folder'))}
-        {renderNewFolderPlaceholder()}
-        {currentFiles.map((f) => renderItem(f, 'file'))}
-        {selectionBox && (
-          <div
-            style={{
-              position: 'absolute',
-              left: Math.min(selectionBox.startX, selectionBox.currentX),
-              top: Math.min(selectionBox.startY, selectionBox.currentY),
-              width: Math.abs(selectionBox.currentX - selectionBox.startX),
-              height: Math.abs(selectionBox.currentY - selectionBox.startY),
-              backgroundColor: 'rgba(24, 144, 255, 0.2)',
-              border: '1px solid #1890ff',
-              pointerEvents: 'none',
-              zIndex: 100,
-            }}
-          />
-        )}
-      </div>
+                // Call existing drop handler logic
+                // We need to mock the event object or refactor handleDrop to accept keys
+                // Refactoring handleDrop is better but for now let's just call the API
+                const moveItem = async () => {
+                  try {
+                    const item = isSourceFolder
+                      ? folders.find(f => f.key === sourceId)
+                      : Object.values(files).flat().find(f => f.key === sourceId);
 
-      {/* Context Menu */}
-      {contextMenu && (
-        <div
-          style={{
-            position: 'fixed',
-            top: contextMenu.y,
-            left: contextMenu.x,
-            zIndex: 1000,
-            background: '#fff',
-            boxShadow: '0 2px 8px rgba(0,0,0,0.15)',
-            borderRadius: 4,
-            border: '1px solid #f0f0f0',
-          }}
-        >
-          <Menu
-            selectable={false}
-            onClick={({ key }) => {
-              setContextMenu(null);
-              if (key === 'new_folder') startCreateFolder();
-              if (key === 'upload') handleUploadClick();
-              if (key === 'rename') {
-                const item = folders.find((f) => f.key === contextMenu.key) || (files[currentFolder] || []).find((f) => f.key === contextMenu.key);
-                startRename(contextMenu.key, item.title || item.name);
+                    if (!item) return;
+
+                    await axios.put(`${API_BASE}/files/${sourceId}`, {
+                      name: item.title || item.name,
+                      path: targetFolderId
+                    }, { withCredentials: true });
+
+                    if (isSourceFolder) {
+                      setFolders((prev) => prev.map((f) => (f.key === sourceId ? { ...f, parent: targetFolderId } : f)));
+                    } else {
+                      setFiles((prev) => {
+                        const sourceFolder = Object.keys(prev).find((fk) => prev[fk].some((f) => f.key === sourceId));
+                        if (!sourceFolder) return prev;
+                        const fileObj = prev[sourceFolder].find((f) => f.key === sourceId);
+                        const newSource = prev[sourceFolder].filter((f) => f.key !== sourceId);
+                        const newTarget = [...(prev[targetFolderId] || []), fileObj];
+                        return { ...prev, [sourceFolder]: newSource, [targetFolderId]: newTarget };
+                      });
+                    }
+                    message.success(`Moved to ${folders.find(f => f.key === targetFolderId)?.title}`);
+                  } catch (err) {
+                    console.error('Sidebar drop error', err);
+                    message.error('Failed to move item');
+                  }
+                };
+                moveItem();
               }
-              if (key === 'copy') handleCopy(selectedItems.length > 0 ? selectedItems : [contextMenu.key]);
-              if (key === 'delete') handleDelete(selectedItems.length > 0 ? selectedItems : [contextMenu.key]);
-              if (key === 'preview') handlePreview(contextMenu.key);
-              if (key === 'properties') handleProperties(selectedItems.length > 0 ? selectedItems : [contextMenu.key]);
             }}
-            items={getContextMenuItems()}
+            onContextMenu={(e, node) => {
+              e.preventDefault();
+              // Determine if it's a folder or file
+              const key = node.key;
+              const id = key.replace(/^(folder-|file-)/, '');
+              const type = key.startsWith('folder-') ? 'folder' : 'file';
+
+              // Select the item
+              setSelectedItems([id]);
+
+              // Show context menu
+              setContextMenu({ x: e.clientX, y: e.clientY, type: 'item', key: id });
+            }}
+            width={sidebarWidth}
+          />
+          <div
+            onMouseDown={startResizing}
+            style={{ width: 4, cursor: 'col-resize', backgroundColor: '#f0f0f0', height: '100%', flexShrink: 0 }}
+          />
+        </>
+      )}
+      <div
+        style={{ flex: 1, display: 'flex', flexDirection: 'column', height: '100%', overflow: 'hidden' }}
+        onClick={(e) => {
+          if (isDragSelecting.current) {
+            isDragSelecting.current = false;
+            return;
+          }
+          setSelectedItems([]);
+          setContextMenu(null);
+        }}
+        onContextMenu={(e) => handleContextMenu(e, 'container')}
+      >
+        {/* Toolbar & Breadcrumbs */}
+        <div style={{ padding: '12px 0', borderBottom: '1px solid #f0f0f0', display: 'flex', gap: 16, alignItems: 'center' }}>
+          <Button
+            icon={<LayoutOutlined />}
+            onClick={() => setIsSidebarVisible(!isSidebarVisible)}
+            title={isSidebarVisible ? 'Hide Sidebar' : 'Show Sidebar'}
+          />
+          <Button icon={<ArrowUpOutlined />} onClick={handleUp} disabled={currentFolder === 'root'} size="small" />
+          <Breadcrumb style={{ flex: 1 }}>
+            {getBreadcrumbs().map((f) => (
+              <Breadcrumb.Item key={f.key} onClick={() => handleNavigate(f.key)} style={{ cursor: 'pointer' }}>
+                {f.key === 'root' ? <HomeOutlined /> : f.title}
+              </Breadcrumb.Item>
+            ))}
+          </Breadcrumb>
+          <Button
+            icon={viewMode === 'grid' ? <BarsOutlined /> : <AppstoreOutlined />}
+            onClick={() => setViewMode(viewMode === 'grid' ? 'list' : 'grid')}
+            title={viewMode === 'grid' ? 'Switch to List View' : 'Switch to Grid View'}
           />
         </div>
-      )}
 
-      {/* Preview Modal */}
-      <Modal
-        title={previewFile?.name}
-        open={!!previewFile}
-        onCancel={() => setPreviewFile(null)}
-        footer={null}
-        width={800}
-      >
-        {previewFile && (
-          <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', minHeight: 300 }}>
-            {previewFile.type?.startsWith('image') ? (
-              <Image src="https://via.placeholder.com/600x400?text=Image+Preview+Placeholder" alt={previewFile.name} style={{ maxWidth: '100%', maxHeight: 600 }} />
-            ) : (
-              <div style={{ padding: 20, background: '#f5f5f5', width: '100%', borderRadius: 8 }}>
-                <pre style={{ whiteSpace: 'pre-wrap' }}>{previewFile.name === 'readme.txt' ? "This is a dummy text file content.\n\nIn a real app, this would fetch the file content from the server." : "Preview not available for this file type."}</pre>
-              </div>
-            )}
+        {/* Content Area */}
+        <div
+          ref={containerRef}
+          className="file-manager-content"
+          style={{ flex: 1, overflow: 'auto', display: 'flex', flexWrap: 'wrap', alignContent: 'flex-start', position: 'relative', flexDirection: viewMode === 'list' ? 'column' : 'row' }}
+          onMouseDown={handleMouseDown}
+          onMouseMove={handleMouseMove}
+          onMouseUp={handleMouseUp}
+          onMouseLeave={handleMouseUp}
+          onDragOver={handleDragOver}
+          onDrop={(e) => handleDrop(e, currentFolder)}
+        >
+          {currentFolders.length === 0 && currentFiles.length === 0 && !newItemType && (
+            <div style={{ width: '100%', marginTop: 64, pointerEvents: 'none' }}>
+              <Empty description="Empty Folder" />
+            </div>
+          )}
+          {currentFolders.map((f) => renderItem(f, 'folder'))}
+          {renderNewFolderPlaceholder()}
+          {currentFiles.map((f) => renderItem(f, 'file'))}
+          {selectionBox && (
+            <div
+              style={{
+                position: 'absolute',
+                left: Math.min(selectionBox.startX, selectionBox.currentX),
+                top: Math.min(selectionBox.startY, selectionBox.currentY),
+                width: Math.abs(selectionBox.currentX - selectionBox.startX),
+                height: Math.abs(selectionBox.currentY - selectionBox.startY),
+                backgroundColor: 'rgba(24, 144, 255, 0.2)',
+                border: '1px solid #1890ff',
+                pointerEvents: 'none',
+                zIndex: 100,
+              }}
+            />
+          )}
+        </div>
+
+        {/* Context Menu */}
+        {contextMenu && (
+          <div
+            style={{
+              position: 'fixed',
+              top: contextMenu.y,
+              left: contextMenu.x,
+              zIndex: 1000,
+              background: '#fff',
+              boxShadow: '0 2px 8px rgba(0,0,0,0.15)',
+              borderRadius: 4,
+              border: '1px solid #f0f0f0',
+            }}
+          >
+            <Menu
+              selectable={false}
+              onClick={({ key }) => {
+                setContextMenu(null);
+                if (key === 'new_folder') startCreateFolder();
+                if (key === 'upload') handleUploadClick();
+                if (key === 'rename') {
+                  const item = folders.find((f) => f.key === contextMenu.key) || (files[currentFolder] || []).find((f) => f.key === contextMenu.key);
+                  startRename(contextMenu.key, item.title || item.name);
+                }
+                if (key === 'copy') handleCopy(selectedItems.length > 0 ? selectedItems : [contextMenu.key]);
+                if (key === 'delete') handleDelete(selectedItems.length > 0 ? selectedItems : [contextMenu.key]);
+                if (key === 'preview') handlePreview(contextMenu.key);
+                if (key === 'properties') handleProperties(selectedItems.length > 0 ? selectedItems : [contextMenu.key]);
+              }}
+              items={getContextMenuItems()}
+            />
           </div>
         )}
-      </Modal>
 
-      {/* Properties Modal */}
-      <Modal
-        title="Properties"
-        open={!!propertiesData}
-        onCancel={() => setPropertiesData(null)}
-        footer={[
-          <Button key="close" type="primary" onClick={() => setPropertiesData(null)}>
-            Close
-          </Button>,
-        ]}
-        width={500}
-      >
-        {propertiesData && propertiesData.type === 'single' && (
-          <div style={{ padding: '16px 0' }}>
-            <div style={{ marginBottom: 16, display: 'flex', alignItems: 'center', gap: 12 }}>
-              {propertiesData.isFolder ? (
-                <FolderFilled style={{ fontSize: 48, color: '#1890ff' }} />
+        {/* Preview Modal */}
+        <Modal
+          title={previewFile?.name}
+          open={!!previewFile}
+          onCancel={() => setPreviewFile(null)}
+          footer={null}
+          width={800}
+        >
+          {previewFile && (
+            <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', minHeight: 300 }}>
+              {previewFile.type?.startsWith('image') ? (
+                <Image src="https://via.placeholder.com/600x400?text=Image+Preview+Placeholder" alt={previewFile.name} style={{ maxWidth: '100%', maxHeight: 600 }} />
               ) : (
-                <FileOutlined style={{ fontSize: 48, color: '#555' }} />
+                <div style={{ padding: 20, background: '#f5f5f5', width: '100%', borderRadius: 8 }}>
+                  <pre style={{ whiteSpace: 'pre-wrap' }}>{previewFile.name === 'readme.txt' ? "This is a dummy text file content.\n\nIn a real app, this would fetch the file content from the server." : "Preview not available for this file type."}</pre>
+                </div>
               )}
-              <div>
-                <div style={{ fontSize: 18, fontWeight: 'bold', marginBottom: 4 }}>{propertiesData.name}</div>
-                <div style={{ color: '#888', fontSize: 12 }}>{propertiesData.isFolder ? 'Folder' : 'File'}</div>
+            </div>
+          )}
+        </Modal>
+
+        {/* Properties Modal */}
+        <Modal
+          title="Properties"
+          open={!!propertiesData}
+          onCancel={() => setPropertiesData(null)}
+          footer={[
+            <Button key="close" type="primary" onClick={() => setPropertiesData(null)}>
+              Close
+            </Button>,
+          ]}
+          width={500}
+        >
+          {propertiesData && propertiesData.type === 'single' && (
+            <div style={{ padding: '16px 0' }}>
+              <div style={{ marginBottom: 16, display: 'flex', alignItems: 'center', gap: 12 }}>
+                {propertiesData.isFolder ? (
+                  <FolderFilled style={{ fontSize: 48, color: '#1890ff' }} />
+                ) : (
+                  <FileOutlined style={{ fontSize: 48, color: '#555' }} />
+                )}
+                <div>
+                  <div style={{ fontSize: 18, fontWeight: 'bold', marginBottom: 4 }}>{propertiesData.name}</div>
+                  <div style={{ color: '#888', fontSize: 12 }}>{propertiesData.isFolder ? 'Folder' : 'File'}</div>
+                </div>
+              </div>
+              <div style={{ borderTop: '1px solid #f0f0f0', paddingTop: 16 }}>
+                <div style={{ marginBottom: 12, display: 'flex', justifyContent: 'space-between' }}>
+                  <span style={{ fontWeight: 500 }}>Type:</span>
+                  <span>{propertiesData.fileType}</span>
+                </div>
+                <div style={{ marginBottom: 12, display: 'flex', justifyContent: 'space-between' }}>
+                  <span style={{ fontWeight: 500 }}>Size:</span>
+                  <span>{propertiesData.size}</span>
+                </div>
+                <div style={{ marginBottom: 12, display: 'flex', justifyContent: 'space-between' }}>
+                  <span style={{ fontWeight: 500 }}>Created:</span>
+                  <span>{propertiesData.created}</span>
+                </div>
+                <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                  <span style={{ fontWeight: 500 }}>Modified:</span>
+                  <span>{propertiesData.modified}</span>
+                </div>
               </div>
             </div>
-            <div style={{ borderTop: '1px solid #f0f0f0', paddingTop: 16 }}>
-              <div style={{ marginBottom: 12, display: 'flex', justifyContent: 'space-between' }}>
-                <span style={{ fontWeight: 500 }}>Type:</span>
-                <span>{propertiesData.fileType}</span>
-              </div>
-              <div style={{ marginBottom: 12, display: 'flex', justifyContent: 'space-between' }}>
-                <span style={{ fontWeight: 500 }}>Size:</span>
-                <span>{propertiesData.size}</span>
-              </div>
-              <div style={{ marginBottom: 12, display: 'flex', justifyContent: 'space-between' }}>
-                <span style={{ fontWeight: 500 }}>Created:</span>
-                <span>{propertiesData.created}</span>
-              </div>
-              <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                <span style={{ fontWeight: 500 }}>Modified:</span>
-                <span>{propertiesData.modified}</span>
-              </div>
-            </div>
-          </div>
-        )}
-        {propertiesData && propertiesData.type === 'multiple' && (
-          <div style={{ padding: '16px 0' }}>
-            <div style={{ fontSize: 16, fontWeight: 'bold', marginBottom: 16 }}>Selection Summary</div>
-            <div style={{ borderTop: '1px solid #f0f0f0', paddingTop: 16 }}>
-              <div style={{ marginBottom: 12, display: 'flex', justifyContent: 'space-between' }}>
-                <span style={{ fontWeight: 500 }}>Total Items:</span>
-                <span>{propertiesData.totalCount}</span>
-              </div>
-              <div style={{ marginBottom: 12, display: 'flex', justifyContent: 'space-between' }}>
-                <span style={{ fontWeight: 500 }}>Folders:</span>
-                <span>{propertiesData.folderCount}</span>
-              </div>
-              <div style={{ marginBottom: 12, display: 'flex', justifyContent: 'space-between' }}>
-                <span style={{ fontWeight: 500 }}>Files:</span>
-                <span>{propertiesData.fileCount}</span>
-              </div>
-              <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                <span style={{ fontWeight: 500 }}>Total Size:</span>
-                <span>{propertiesData.totalSize}</span>
+          )}
+          {propertiesData && propertiesData.type === 'multiple' && (
+            <div style={{ padding: '16px 0' }}>
+              <div style={{ fontSize: 16, fontWeight: 'bold', marginBottom: 16 }}>Selection Summary</div>
+              <div style={{ borderTop: '1px solid #f0f0f0', paddingTop: 16 }}>
+                <div style={{ marginBottom: 12, display: 'flex', justifyContent: 'space-between' }}>
+                  <span style={{ fontWeight: 500 }}>Total Items:</span>
+                  <span>{propertiesData.totalCount}</span>
+                </div>
+                <div style={{ marginBottom: 12, display: 'flex', justifyContent: 'space-between' }}>
+                  <span style={{ fontWeight: 500 }}>Folders:</span>
+                  <span>{propertiesData.folderCount}</span>
+                </div>
+                <div style={{ marginBottom: 12, display: 'flex', justifyContent: 'space-between' }}>
+                  <span style={{ fontWeight: 500 }}>Files:</span>
+                  <span>{propertiesData.fileCount}</span>
+                </div>
+                <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                  <span style={{ fontWeight: 500 }}>Total Size:</span>
+                  <span>{propertiesData.totalSize}</span>
+                </div>
               </div>
             </div>
-          </div>
-        )}
-      </Modal>
+          )}
+        </Modal>
+      </div>
     </div>
   );
 }
