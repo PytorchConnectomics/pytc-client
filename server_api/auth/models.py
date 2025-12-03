@@ -62,6 +62,10 @@ class FileUpdate(BaseModel):
     name: Optional[str] = None
     path: Optional[str] = None
 
+class FileCopy(BaseModel):
+    source_id: int
+    destination_path: str
+
 class FileResponse(FileBase):
     id: int
     user_id: int
