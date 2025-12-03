@@ -7,7 +7,7 @@ require('electron-reload')(__dirname, {
 
 let mainWindow
 
-function createWindow () {
+function createWindow() {
   mainWindow = new BrowserWindow({
     width: 800,
     height: 600,
@@ -21,7 +21,7 @@ function createWindow () {
     mainWindow.loadURL('http://localhost:3000')
   } else {
     mainWindow.loadURL(url.format({
-      pathname: path.join(__dirname, './build/index.html'),
+      pathname: path.join(__dirname, 'build', 'index.html'),
       protocol: 'file:',
       slashes: true
     }))

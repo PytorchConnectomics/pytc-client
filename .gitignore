@@ -31,7 +31,6 @@ pytorch_connectomics/
 .coverage
 coverage.xml
 dist/
-.env
-.env.*
+
 *.log
 .github/workflows/docker-test.yml

@@ -1,150 +1,49 @@
-import React, { useState, useEffect } from 'react'
-import DataLoader from './DataLoader'
-import Visualization from '../views/Visualization'
-import ModelTraining from '../views/ModelTraining'
-import ModelInference from '../views/ModelInference'
-import Monitoring from '../views/Monitoring'
-import Chatbot from '../components/Chatbot'
-import { Layout, Menu, Button } from 'antd'
-import { MessageOutlined } from '@ant-design/icons'
-import { getNeuroglancerViewer } from '../utils/api'
+import React, { useState, useContext } from 'react'
+import { Layout, Menu, Avatar, Typography, Space, Button, Tooltip } from 'antd'
+import { FolderOpenOutlined, DesktopOutlined, UserOutlined, LogoutOutlined } from '@ant-design/icons'
+import FilesManager from './FilesManager'
+import Workspace from './Workspace'
+import { UserContext } from '../contexts/UserContext'
 
-const { Content, Sider } = Layout
+const { Content } = Layout
+const { Text } = Typography
 
-function Views () {
-  const [current, setCurrent] = useState('visualization')
-  const [viewers, setViewers] = useState([])
-  const [isLoading, setIsLoading] = useState(false)
-  const [isInferring, setIsInferring] = useState(false)
-  const [isChatOpen, setIsChatOpen] = useState(false)
-  console.log(viewers)
+function Views() {
+  const [current, setCurrent] = useState('files')
+  const { currentUser, autoSignOut } = useContext(UserContext)
+
+  const items = [
+    { label: 'File Management', key: 'files', icon: <FolderOpenOutlined /> },
+    { label: 'Work Space', key: 'workspace', icon: <DesktopOutlined /> }
+  ]
 
   const onClick = (e) => {
     setCurrent(e.key)
   }
 
-  const items = [
-    { label: 'Visualization', key: 'visualization' },
-    { label: 'Model Training', key: 'training' },
-    { label: 'Model Inference', key: 'inference' },
-    { label: 'Tensorboard', key: 'monitoring' }
-  ]
-
-  const renderMenu = () => {
-    if (current === 'visualization') {
-      return <Visualization viewers={viewers} setViewers={setViewers} />
-    } else if (current === 'training') {
-      return <ModelTraining />
-    } else if (current === 'monitoring') {
-      return <Monitoring />
-    } else if (current === 'inference') {
-      return <ModelInference isInferring={isInferring} setIsInferring={setIsInferring} />
-    }
-  }
-
-  const [collapsed, setCollapsed] = useState(false)
-
-  const fetchNeuroglancerViewer = async (
-    currentImage,
-    currentLabel,
-    scales
-  ) => {
-    setIsLoading(true)
-    try {
-      const viewerId = currentImage.uid + currentLabel.uid + JSON.stringify(scales)
-      let updatedViewers = viewers
-      const exists = viewers.find(
-        // (viewer) => viewer.key === currentImage.uid + currentLabel.uid
-        (viewer) => viewer.key === viewerId
-      )
-      // console.log(exists, viewers)
-      if (exists) {
-        updatedViewers = viewers.filter((viewer) => viewer.key !== viewerId)
-      }
-      const res = await getNeuroglancerViewer(
-        currentImage,
-        currentLabel,
-        scales
-      )
-      const newUrl = res.replace(/\/\/[^:/]+/, '//localhost')
-      console.log('Current Viewer at ', newUrl)
-
-      setViewers([
-        ...updatedViewers,
-        {
-          key: viewerId,
-          title: currentImage.name + ' & ' + currentLabel.name,
-          viewer: newUrl
-        }
-      ])
-      setIsLoading(false)
-    } catch (e) {
-      console.log(e)
-      setIsLoading(false)
-    }
-  }
-
-  useEffect(() => { // This function makes sure that the inferring will continue when current tab changes
-    if (current === 'inference' && isInferring) {
-      console.log('Inference process is continuing...')
-    }
-  }, [current, isInferring])
-
   return (
-    <Layout
-      style={{
-        minHeight: '99vh',
-        minWidth: '90vw'
-      }}
-    >
-      {isLoading
-        ? (<div>Loading the viewer ...</div>)
-        : (
-          <>
-            <Sider
-            // collapsible
-              collapsed={collapsed}
-              onCollapse={(value) => setCollapsed(value)}
-              theme='light'
-              collapsedWidth='0'
-            >
-              <DataLoader fetchNeuroglancerViewer={fetchNeuroglancerViewer} />
-            </Sider>
-            <Layout className='site-layout'>
-              <Content
-                style={{
-                  margin: '0 16px'
-                }}
-              >
-                <Menu
-                  onClick={onClick}
-                  selectedKeys={[current]}
-                  mode='horizontal'
-                  items={items}
-                />
-                {renderMenu()}
-              </Content>
-            </Layout>
-            {isChatOpen ? (
-              <Sider
-                width={400}
-                theme='light'
-              >
-                <Chatbot onClose={() => setIsChatOpen(false)} />
-              </Sider>
-            ) : (
-              <Button
-                type="primary"
-                shape="circle"
-                icon={<MessageOutlined />}
-                onClick={() => setIsChatOpen(true)}
-                style={{
-                  margin: '8px 8px'
-                }}
-              />
-            )}
-          </>
-          )}
+    <Layout style={{ minHeight: '100vh' }}>
+      <div style={{ display: 'flex', alignItems: 'center', background: '#fff', paddingRight: 24 }}>
+        <Menu
+          onClick={onClick}
+          selectedKeys={[current]}
+          mode='horizontal'
+          items={items}
+          style={{ lineHeight: '64px', paddingLeft: '16px', flex: 1, borderBottom: 'none' }}
+        />
+        <Space size="large">
+          <Space>
+            <Avatar icon={<UserOutlined />} style={{ backgroundColor: '#87d068' }} />
+            <Text strong>{currentUser ? currentUser.name : 'Guest'}</Text>
+          </Space>
+          <Tooltip title="Sign Out">
+            <Button icon={<LogoutOutlined />} onClick={autoSignOut} type="text" danger />
+          </Tooltip>
+        </Space>
+      </div>
+      <Content style={{ padding: '24px', height: 'calc(100vh - 64px)', overflow: 'auto' }}>
+        {current === 'files' ? <FilesManager /> : <Workspace />}
+      </Content>
     </Layout>
   )
 }

@@ -11,11 +11,23 @@ from fastapi.middleware.cors import CORSMiddleware
 from utils.io import readVol
 from utils.utils import process_path
 from chatbot.chatbot import chain, memory
+from auth import models, database, router as auth_router
+
+from fastapi.staticfiles import StaticFiles
+import os
 
 REACT_APP_SERVER_PROTOCOL = "http"
 REACT_APP_SERVER_URL = "localhost:4243"
 
+models.Base.metadata.create_all(bind=database.engine)
+
 app = FastAPI()
+
+# Ensure uploads directory exists
+os.makedirs("uploads", exist_ok=True)
+app.mount("/uploads", StaticFiles(directory="uploads"), name="uploads")
+
+app.include_router(auth_router.router)
 
 app.add_middleware(
     CORSMiddleware,
