@@ -4,6 +4,8 @@ version = "0.1.0"
 description = "PyTC Client backend services"
 requires-python = ">=3.10,<3.12"
 dependencies = [
+    "argon2-cffi>=25.1.0",
+    "bcrypt>=5.0.0",
     "faiss-cpu==1.12.0",
     "fastapi==0.119.0",
     "h5py>=3.11",
@@ -13,8 +15,10 @@ dependencies = [
     "langchain-ollama==1.0.0",
     "neuroglancer==2.38",
     "numpy>=1.24,<2.0",
+    "passlib>=1.7.4",
     "pillow>=10.0",
     "psutil>=5.9.0",
+    "python-jose>=3.5.0",
     "python-multipart==0.0.20",
     "requests>=2.31",
     "scipy>=1.11",

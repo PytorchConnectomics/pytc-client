@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, String, DateTime, ForeignKey, Boolean
+from sqlalchemy import Column, Integer, String, DateTime, ForeignKey, Boolean, Float
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
 from .database import Base
@@ -32,6 +32,33 @@ class File(Base):
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
     owner = relationship("User", back_populates="files")
+
+class Project(Base):
+    __tablename__ = "projects"
+    
+    id = Column(Integer, primary_key=True, index=True)
+    name = Column(String, nullable=False)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=True)
+    neuroglancer_url = Column(String, nullable=True)
+    image_path = Column(String, nullable=True)
+    label_path = Column(String, nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+class Synapse(Base):
+    __tablename__ = "synapses"
+    
+    id = Column(Integer, primary_key=True, index=True)
+    project_id = Column(Integer, ForeignKey("projects.id"))
+    pre_neuron_id = Column(Integer, nullable=True)
+    post_neuron_id = Column(Integer, nullable=True)
+    x = Column(Float, nullable=False)
+    y = Column(Float, nullable=False)
+    z = Column(Float, nullable=False)
+    status = Column(String, default="error")  # error, correct, incorrect, unsure
+    confidence = Column(Float, nullable=True)
+    reviewed_by = Column(Integer, ForeignKey("users.id"), nullable=True)
+    reviewed_at = Column(DateTime(timezone=True), nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
 
 # Pydantic Schemas
 class UserBase(BaseModel):
@@ -76,3 +103,31 @@ class Token(BaseModel):
 
 class TokenData(BaseModel):
     username: Optional[str] = None
+
+# Synapse Proofreading Schemas
+class SynapseResponse(BaseModel):
+    id: int
+    project_id: int
+    pre_neuron_id: Optional[int]
+    post_neuron_id: Optional[int]
+    x: float
+    y: float
+    z: float
+    status: str
+    confidence: Optional[float]
+    
+    class Config:
+        from_attributes = True
+
+class SynapseUpdate(BaseModel):
+    status: Optional[str] = None
+    pre_neuron_id: Optional[int] = None
+    post_neuron_id: Optional[int] = None
+
+class ProjectResponse(BaseModel):
+    id: int
+    name: str
+    neuroglancer_url: Optional[str]
+    
+    class Config:
+        from_attributes = True

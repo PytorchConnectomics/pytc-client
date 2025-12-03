@@ -4,6 +4,7 @@ import Visualization from '../views/Visualization'
 import ModelTraining from '../views/ModelTraining'
 import ModelInference from '../views/ModelInference'
 import Monitoring from '../views/Monitoring'
+import ProofReading from '../views/ProofReading'
 import Chatbot from '../components/Chatbot'
 import { Layout, Menu, Button } from 'antd'
 import { MessageOutlined } from '@ant-design/icons'
@@ -27,7 +28,8 @@ function Workspace() {
     { label: 'Visualization', key: 'visualization' },
     { label: 'Model Training', key: 'training' },
     { label: 'Model Inference', key: 'inference' },
-    { label: 'Tensorboard', key: 'monitoring' }
+    { label: 'Tensorboard', key: 'monitoring' },
+    { label: 'Proof Reading', key: 'proofreading' }
   ]
 
   const renderMenu = () => {
@@ -39,6 +41,8 @@ function Workspace() {
       return <Monitoring />
     } else if (current === 'inference') {
       return <ModelInference isInferring={isInferring} setIsInferring={setIsInferring} />
+    } else if (current === 'proofreading') {
+      return <ProofReading />
     }
   }
 

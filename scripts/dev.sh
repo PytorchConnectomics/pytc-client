@@ -26,11 +26,18 @@ cleanup() {
     if [[ -n "${REACT_PID:-}" ]] && ps -p "${REACT_PID}" >/dev/null 2>&1; then
         kill "${REACT_PID}" >/dev/null 2>&1 || true
     fi
+    if [[ -n "${DATA_SERVER_PID:-}" ]] && ps -p "${DATA_SERVER_PID}" >/dev/null 2>&1; then
+        kill "${DATA_SERVER_PID}" >/dev/null 2>&1 || true
+    fi
     wait || true
     exit "${exit_code}"
 }
 
 trap cleanup EXIT INT TERM
+
+echo "Starting Data Server (port 8000)..."
+uv run --directory "${ROOT_DIR}" python server_api/scripts/serve_data.py &
+DATA_SERVER_PID=$!
 
 echo "Starting API server..."
 uv run --directory "${ROOT_DIR}" python server_api/main.py &
