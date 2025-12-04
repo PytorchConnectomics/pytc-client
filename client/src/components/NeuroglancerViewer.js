@@ -1,10 +1,9 @@
 import React, { useState, useEffect } from 'react';
 import { Button, Spin, Alert, Typography } from 'antd';
 import { ReloadOutlined } from '@ant-design/icons';
-import axios from 'axios';
+import apiClient from '../services/apiClient';
 
 const { Text, Title } = Typography;
-const API_BASE = `${process.env.REACT_APP_SERVER_PROTOCOL || 'http'}://${process.env.REACT_APP_SERVER_URL || 'localhost:4243'}`;
 
 /**
  * NeuroglancerViewer Component
@@ -30,9 +29,8 @@ function NeuroglancerViewer({ projectId = 1, currentSynapse }) {
     setError(null);
 
     try {
-      const response = await axios.get(
-        `${API_BASE}/api/synanno/ng-url/${projectId}`,
-        { withCredentials: true }
+      const response = await apiClient.get(
+        `/api/synanno/ng-url/${projectId}`
       );
 
       if (response.data.url) {

@@ -1,12 +1,11 @@
 import React, { useState, useEffect } from 'react';
 import { Layout, message, Spin, Empty } from 'antd';
-import axios from 'axios';
+import apiClient from '../services/apiClient';
 import NeuroglancerViewer from '../components/NeuroglancerViewer';
 import SynapseList from '../components/SynapseList';
 import ProofreadingControls from '../components/ProofreadingControls';
 
 const { Sider, Content } = Layout;
-const API_BASE = `${process.env.REACT_APP_SERVER_PROTOCOL || 'http'}://${process.env.REACT_APP_SERVER_URL || 'localhost:4243'}`;
 
 /**
  * ProofReading Component
@@ -69,9 +68,7 @@ function ProofReading() {
   const fetchSynapses = async () => {
     try {
       setLoading(true);
-      const res = await axios.get(`${API_BASE}/api/projects/${projectId}/synapses`, {
-        withCredentials: true
-      });
+      const res = await apiClient.get(`/api/projects/${projectId}/synapses`);
       setSynapses(res.data);
 
       // Count reviewed synapses (not in error state)
@@ -91,9 +88,7 @@ function ProofReading() {
    */
   const fetchNeuroglancerUrl = async () => {
     try {
-      const res = await axios.get(`${API_BASE}/api/synanno/ng-url/${projectId}`, {
-        withCredentials: true
-      });
+      const res = await apiClient.get(`/api/synanno/ng-url/${projectId}`);
       setNeuroglancerUrl(res.data.url);
     } catch (err) {
       console.error('Failed to fetch Neuroglancer URL', err);
@@ -119,14 +114,13 @@ function ProofReading() {
     if (!synapses[currentIndex]) return;
 
     try {
-      await axios.put(
-        `${API_BASE}/api/synapses/${synapses[currentIndex].id}`,
+      await apiClient.put(
+        `/api/synapses/${synapses[currentIndex].id}`,
         {
           status: synapses[currentIndex].status,
           pre_neuron_id: synapses[currentIndex].pre_neuron_id,
           post_neuron_id: synapses[currentIndex].post_neuron_id
-        },
-        { withCredentials: true }
+        }
       );
       message.success('Synapse updated');
 
@@ -146,10 +140,9 @@ function ProofReading() {
     if (!synapses[currentIndex]) return;
 
     try {
-      await axios.put(
-        `${API_BASE}/api/synapses/${synapses[currentIndex].id}`,
-        updates,
-        { withCredentials: true }
+      await apiClient.put(
+        `/api/synapses/${synapses[currentIndex].id}`,
+        updates
       );
 
       // Update local state

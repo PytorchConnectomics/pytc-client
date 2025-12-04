@@ -1,20 +1,8 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { Button, Input, Modal, message, Menu, Breadcrumb, Empty, Image } from 'antd';
 import { FolderFilled, FileOutlined, FileTextOutlined, HomeOutlined, ArrowUpOutlined, AppstoreOutlined, BarsOutlined, UploadOutlined, EyeOutlined, LayoutOutlined } from '@ant-design/icons';
-import axios from 'axios';
+import apiClient from '../services/apiClient';
 import FileTreeSidebar from '../components/FileTreeSidebar';
-
-// API base URL (adjust via env vars if needed)
-const API_BASE = `${process.env.REACT_APP_SERVER_PROTOCOL || 'http'}://${process.env.REACT_APP_SERVER_URL || 'localhost:4243'}`;
-
-// Configure axios to include JWT token
-axios.interceptors.request.use((config) => {
-  const token = localStorage.getItem('token');
-  if (token) {
-    config.headers.Authorization = `Bearer ${token}`;
-  }
-  return config;
-});
 
 // Transform backend file list into UI state
 const transformFiles = (fileList) => {
@@ -91,22 +79,37 @@ function FilesManager() {
     }
   }, [editingItem]);
 
-  // Load initial data
-  // eslint-disable-next-line react-hooks/exhaustive-deps
+  // Load initial data with proper cleanup and 401 handling
   useEffect(() => {
+    let isMounted = true; // Prevent state updates after unmount
+
     const fetchFiles = async () => {
       try {
-        const res = await axios.get(`${API_BASE}/files`, { withCredentials: true });
-        const { folders: flds, files: fls } = transformFiles(res.data);
-        setFolders(flds);
-        setFiles(fls);
+        const res = await apiClient.get('/files');
+
+        // Only update state if component is still mounted
+        if (isMounted) {
+          const { folders: flds, files: fls } = transformFiles(res.data);
+          setFolders(flds);
+          setFiles(fls);
+        }
       } catch (err) {
-        console.error('Failed to load files', err);
-        message.error('Could not load files');
+        // Only show error if component is mounted and it's not an auth error
+        // (auth errors are already handled by the interceptor)
+        if (isMounted && !err.isAuthError) {
+          console.error('Failed to load files', err);
+          message.error('Could not load files');
+        }
       }
     };
+
     fetchFiles();
-  }, []);
+
+    // Cleanup function to prevent state updates after unmount
+    return () => {
+      isMounted = false;
+    };
+  }, []); // Empty dependency array - only run once on mount
 
   const getCurrentFolderObj = () => folders.find((f) => f.key === currentFolder);
   // eslint-disable-next-line no-loop-func
@@ -155,7 +158,7 @@ function FilesManager() {
     }
     try {
       const payload = { name: tempName, path: currentFolder };
-      const res = await axios.post(`${API_BASE}/files/folder`, payload, { withCredentials: true });
+      const res = await apiClient.post(`/files/folder`, payload, { withCredentials: true });
       const newFolder = res.data;
       setFolders([...folders, { key: String(newFolder.id), title: newFolder.name, parent: newFolder.path }]);
       setFiles({ ...files, [String(newFolder.id)]: [] });
@@ -199,7 +202,7 @@ function FilesManager() {
       return;
     }
     try {
-      await axios.put(`${API_BASE}/files/${key}`, { name: tempName, path: isFolder ? undefined : currentFolder }, { withCredentials: true });
+      await apiClient.put(`/files/${key}`, { name: tempName, path: isFolder ? undefined : currentFolder }, { withCredentials: true });
       if (isFolder) {
         setFolders(folders.map((f) => (f.key === key ? { ...f, title: tempName } : f)));
       } else {
@@ -220,7 +223,7 @@ function FilesManager() {
   const handleDelete = async (keys = selectedItems) => {
     if (keys.length === 0) return;
     try {
-      await Promise.all(keys.map((id) => axios.delete(`${API_BASE}/files/${id}`, { withCredentials: true })));
+      await Promise.all(keys.map((id) => apiClient.delete(`/files/${id}`, { withCredentials: true })));
       const folderIds = keys.filter((k) => folders.some((f) => f.key === k));
       const fileIds = keys.filter((k) => !folderIds.includes(k));
       setFolders(folders.filter((f) => !folderIds.includes(f.key)));
@@ -263,7 +266,7 @@ function FilesManager() {
         if (!orig) continue;
 
         try {
-          const res = await axios.post(`${API_BASE}/files/copy`, {
+          const res = await apiClient.post(`/files/copy`, {
             source_id: parseInt(id),
             destination_path: currentFolder
           }, { withCredentials: true });
@@ -298,7 +301,7 @@ function FilesManager() {
         if ((isFolder && item.parent === currentFolder) || (!isFolder && files[currentFolder]?.some(f => f.key === id))) continue;
 
         try {
-          await axios.put(`${API_BASE}/files/${id}`, {
+          await apiClient.put(`/files/${id}`, {
             name: item.title || item.name,
             path: currentFolder
           }, { withCredentials: true });
@@ -431,7 +434,7 @@ function FilesManager() {
 
       try {
         // Send name along with path to fix 422 error
-        await axios.put(`${API_BASE}/files/${key}`, {
+        await apiClient.put(`/files/${key}`, {
           name: item.title || item.name,
           path: targetFolderKey
         }, { withCredentials: true });
@@ -471,7 +474,7 @@ function FilesManager() {
       form.append('path', targetFolder);
 
       try {
-        const res = await axios.post(`${API_BASE}/files/upload`, form, {
+        const res = await apiClient.post(`/files/upload`, form, {
           headers: { 'Content-Type': 'multipart/form-data' },
           withCredentials: true,
         });
@@ -746,7 +749,7 @@ function FilesManager() {
         form.append('file', file);
         form.append('path', currentFolder);
         try {
-          const res = await axios.post(`${API_BASE}/files/upload`, form, {
+          const res = await apiClient.post(`/files/upload`, form, {
             headers: { 'Content-Type': 'multipart/form-data' },
           });
           const newFile = res.data;
@@ -797,7 +800,7 @@ function FilesManager() {
 
                     if (!item) return;
 
-                    await axios.put(`${API_BASE}/files/${sourceId}`, {
+                    await apiClient.put(`/files/${sourceId}`, {
                       name: item.title || item.name,
                       path: targetFolderId
                     }, { withCredentials: true });
