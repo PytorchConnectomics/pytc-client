@@ -11,7 +11,7 @@
     "antd": "^5.18.1",
     "axios": "^1.7.2",
     "buffer": "^6.0.3",
-    "electron": "^38.3.0",
+    "electron": "^33.0.0",
     "js-yaml": "^4.1.0",
     "localforage": "^1.10.0",
     "nth-check": "^2.1.1",

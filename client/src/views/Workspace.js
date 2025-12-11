@@ -5,6 +5,8 @@ import ModelTraining from '../views/ModelTraining'
 import ModelInference from '../views/ModelInference'
 import Monitoring from '../views/Monitoring'
 import ProofReading from '../views/ProofReading'
+import EHTool from '../views/EHTool'
+import ProofreadingTab from '../views/ProofreadingTab'
 import Chatbot from '../components/Chatbot'
 import { Layout, Menu, Button } from 'antd'
 import { MessageOutlined } from '@ant-design/icons'
@@ -19,6 +21,8 @@ function Workspace() {
   const [isInferring, setIsInferring] = useState(false)
   const [isChatOpen, setIsChatOpen] = useState(false)
   const [collapsed, setCollapsed] = useState(false)
+  const [ehToolSession, setEhToolSession] = useState(null)
+  const [refreshTrigger, setRefreshTrigger] = useState(0)
 
   const onClick = (e) => {
     setCurrent(e.key)
@@ -29,21 +33,47 @@ function Workspace() {
     { label: 'Model Training', key: 'training' },
     { label: 'Model Inference', key: 'inference' },
     { label: 'Tensorboard', key: 'monitoring' },
-    { label: 'Proof Reading', key: 'proofreading' }
+    { label: 'SynAnno', key: 'synanno' },
+    { label: 'Error Handling', key: 'ehtool' },
+    { label: 'Proof Reading', key: 'proofreading-ehtool' }
   ]
 
-  const renderMenu = () => {
-    if (current === 'visualization') {
-      return <Visualization viewers={viewers} setViewers={setViewers} />
-    } else if (current === 'training') {
-      return <ModelTraining />
-    } else if (current === 'monitoring') {
-      return <Monitoring />
-    } else if (current === 'inference') {
-      return <ModelInference isInferring={isInferring} setIsInferring={setIsInferring} />
-    } else if (current === 'proofreading') {
-      return <ProofReading />
-    }
+  const renderContent = () => {
+    return (
+      <>
+        <div style={{ display: current === 'visualization' ? 'block' : 'none', height: '100%' }}>
+          <Visualization viewers={viewers} setViewers={setViewers} />
+        </div>
+        <div style={{ display: current === 'training' ? 'block' : 'none', height: '100%' }}>
+          <ModelTraining />
+        </div>
+        <div style={{ display: current === 'monitoring' ? 'block' : 'none', height: '100%' }}>
+          <Monitoring />
+        </div>
+        <div style={{ display: current === 'inference' ? 'block' : 'none', height: '100%' }}>
+          <ModelInference isInferring={isInferring} setIsInferring={setIsInferring} />
+        </div>
+        <div style={{ display: current === 'synanno' ? 'block' : 'none', height: '100%' }}>
+          <ProofReading />
+        </div>
+        <div style={{ display: current === 'ehtool' ? 'block' : 'none', height: '100%' }}>
+          <EHTool
+            onStartProofreading={() => {
+              setCurrent('proofreading-ehtool')
+              setRefreshTrigger(prev => prev + 1)
+            }}
+            onSessionChange={setEhToolSession}
+          />
+        </div>
+        <div style={{ display: current === 'proofreading-ehtool' ? 'block' : 'none', height: '100%' }}>
+          <ProofreadingTab
+            sessionId={ehToolSession}
+            refreshTrigger={refreshTrigger}
+            onComplete={() => setCurrent('ehtool')}
+          />
+        </div>
+      </>
+    )
   }
 
   const fetchNeuroglancerViewer = async (
@@ -112,7 +142,7 @@ function Workspace() {
                   mode='horizontal'
                   items={items}
                 />
-                {renderMenu()}
+                {renderContent()}
               </Content>
             </Layout>
             {isChatOpen ? (

@@ -40,7 +40,7 @@ uv run --directory "${ROOT_DIR}" python server_api/scripts/serve_data.py &
 DATA_SERVER_PID=$!
 
 echo "Starting API server (port 4242)..."
-uv run --directory "${ROOT_DIR}" python server_api/main.py &
+PYTHONDONTWRITEBYTECODE=1 uv run --directory "${ROOT_DIR}" python server_api/main.py &
 API_PID=$!
 
 echo "Starting PyTC server (port 4243)..."
@@ -49,12 +49,12 @@ PYTC_PID=$!
 
 echo "Starting React dev server (port 3000)..."
 pushd "${CLIENT_DIR}" >/dev/null
-PORT=3000 BROWSER=none npm start >/dev/null 2>&1 &
+PORT=3000 BROWSER=none npm start > react.log 2>&1 &
 REACT_PID=$!
 
 # Robust readiness check with progress feedback
 wait_for_react() {
-    local max_attempts=20
+    local max_attempts=60
     local attempt=1
     while [[ ${attempt} -le ${max_attempts} ]]; do
         if curl -sf http://localhost:3000 >/dev/null 2>&1; then
@@ -66,6 +66,7 @@ wait_for_react() {
         sleep 1
     done
     echo "ERROR: React dev server failed to start within ${max_attempts} seconds" >&2
+    echo "Check client/react.log for details." >&2
     return 1
 }
 

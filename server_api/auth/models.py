@@ -96,6 +96,7 @@ class FileCopy(BaseModel):
 class FileResponse(FileBase):
     id: int
     user_id: int
+    physical_path: Optional[str] = None
     created_at: datetime
 
     class Config:

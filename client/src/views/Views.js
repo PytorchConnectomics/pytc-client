@@ -42,7 +42,12 @@ function Views() {
         </Space>
       </div>
       <Content style={{ padding: '24px', height: 'calc(100vh - 64px)', overflow: 'auto' }}>
-        {current === 'files' ? <FilesManager /> : <Workspace />}
+        <div style={{ display: current === 'files' ? 'block' : 'none', height: '100%' }}>
+          <FilesManager />
+        </div>
+        <div style={{ display: current === 'workspace' ? 'block' : 'none', height: '100%' }}>
+          <Workspace />
+        </div>
       </Content>
     </Layout>
   )

@@ -1,9 +1,10 @@
 const path = require('path')
 const url = require('url')
-const { app, BrowserWindow } = require('electron')
-require('electron-reload')(__dirname, {
-  electron: require(path.join(__dirname, 'node_modules', 'electron'))
-})
+const { app, BrowserWindow, ipcMain, dialog } = require('electron')
+
+// require('electron-reload')(__dirname, {
+//   electron: require(path.join(__dirname, 'node_modules', 'electron'))
+// })
 
 let mainWindow
 
@@ -36,6 +37,19 @@ function createWindow() {
     mainWindow = null
   })
 }
+
+ipcMain.handle('dialog:openFile', async (event, options) => {
+  const { canceled, filePaths } = await dialog.showOpenDialog(mainWindow, {
+    properties: ['openFile', 'openDirectory']
+  })
+  if (canceled) {
+    return null
+  } else {
+    return filePaths[0]
+  }
+})
+
+
 
 app.on('ready', createWindow)
 
