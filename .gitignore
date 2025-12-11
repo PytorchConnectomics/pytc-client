@@ -34,3 +34,5 @@ dist/
 
 *.log
 .github/workflows/docker-test.yml
+
+uploads/
