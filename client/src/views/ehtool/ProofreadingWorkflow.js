@@ -28,33 +28,18 @@ function ProofreadingWorkflow({ sessionId, refreshTrigger, onComplete }) {
   const loadIncorrectLayers = async () => {
     try {
       setLoading(true);
-
-      console.log('Loading incorrect layers for session:', sessionId);
-
-      // Get all layers for this session
       const response = await apiClient.get('/eh/detection/layers', {
         params: {
           session_id: sessionId,
           page: 1,
-          page_size: 1000, // Get all layers
-          include_images: false // Don't need images yet
+          page_size: 1000,
+          include_images: false
         }
       });
 
-      console.log('All layers response:', response.data);
-      console.log('Total layers:', response.data.layers.length);
-
-      // Log each layer's classification
-      response.data.layers.forEach((layer, idx) => {
-        console.log(`Layer ${idx}: id=${layer.id}, index=${layer.layer_index}, classification="${layer.classification}"`);
-      });
-
-      // Filter for incorrect layers
       const incorrect = response.data.layers.filter(
         layer => layer.classification === 'incorrect'
       );
-
-      console.log('Incorrect layers found:', incorrect.length, incorrect);
 
       if (incorrect.length === 0) {
         message.info('No incorrect layers to proofread');
@@ -75,8 +60,6 @@ function ProofreadingWorkflow({ sessionId, refreshTrigger, onComplete }) {
   const loadLayerData = async (layer) => {
     try {
       setLoading(true);
-
-      // Load full layer data with images
       const response = await apiClient.get('/eh/detection/layers', {
         params: {
           session_id: sessionId,
@@ -86,14 +69,11 @@ function ProofreadingWorkflow({ sessionId, refreshTrigger, onComplete }) {
         }
       });
 
-      // Find the specific layer
       const layerData = response.data.layers.find(
         l => l.layer_index === layer.layer_index
       );
 
-      if (!layerData) {
-        throw new Error('Layer data not found');
-      }
+      if (!layerData) throw new Error('Layer data not found');
 
       setCurrentLayerData(layerData);
     } catch (error) {
@@ -107,19 +87,23 @@ function ProofreadingWorkflow({ sessionId, refreshTrigger, onComplete }) {
   const handleSave = async (maskBase64) => {
     try {
       setSaving(true);
+      const layer = incorrectLayers[currentIndex];
 
-      // TODO: Implement mask save endpoint
-      // For now, just show success message
+      await apiClient.post('/eh/detection/mask', {
+        session_id: sessionId,
+        layer_index: layer.layer_index,
+        mask_base64: maskBase64
+      });
+
       message.success('Mask saved successfully');
 
-      // Note: In a full implementation, you would:
-      // 1. Send the updated mask to the backend
-      // 2. Backend would update the mask file on disk
-      // 3. Optionally update the DataManager's cached mask data
+      if (currentLayerData) {
+        setCurrentLayerData(prev => ({ ...prev, mask_base64: maskBase64 }));
+      }
 
     } catch (error) {
       console.error('Failed to save mask:', error);
-      message.error('Failed to save mask');
+      message.error('Failed to save mask: ' + (error.response?.data?.detail || error.message));
     } finally {
       setSaving(false);
     }
@@ -128,17 +112,13 @@ function ProofreadingWorkflow({ sessionId, refreshTrigger, onComplete }) {
   const handleMarkCorrected = async () => {
     try {
       const layer = incorrectLayers[currentIndex];
-
-      // Mark layer as corrected
       await apiClient.post('/eh/detection/classify', {
         session_id: sessionId,
         layer_ids: [layer.id],
         classification: 'correct'
       });
-
       message.success('Layer marked as corrected');
 
-      // Move to next incorrect layer or complete
       if (currentIndex < incorrectLayers.length - 1) {
         setCurrentIndex(currentIndex + 1);
       } else {
@@ -204,7 +184,6 @@ function ProofreadingWorkflow({ sessionId, refreshTrigger, onComplete }) {
 
   return (
     <div style={{ height: '100%', display: 'flex', flexDirection: 'column', gap: '16px' }}>
-      {/* Header */}
       <Card size="small">
         <Space style={{ width: '100%', justifyContent: 'space-between' }}>
           <div>
@@ -216,28 +195,15 @@ function ProofreadingWorkflow({ sessionId, refreshTrigger, onComplete }) {
             </p>
           </div>
           <Space>
-            <Button
-              icon={<CloseOutlined />}
-              onClick={handleSkip}
-            >
-              Skip
-            </Button>
-            <Button
-              type="primary"
-              icon={<CheckOutlined />}
-              onClick={handleMarkCorrected}
-              loading={saving}
-            >
+            <Button icon={<CloseOutlined />} onClick={handleSkip}>Skip</Button>
+            <Button type="primary" icon={<CheckOutlined />} onClick={handleMarkCorrected} loading={saving}>
               Mark as Corrected
             </Button>
-            <Button onClick={onComplete}>
-              Exit Proofreading
-            </Button>
+            <Button onClick={onComplete}>Exit Proofreading</Button>
           </Space>
         </Space>
       </Card>
 
-      {/* Editor */}
       <div style={{ flex: 1, minHeight: 0 }}>
         <ProofreadingEditor
           imageBase64={currentLayerData.image_base64}

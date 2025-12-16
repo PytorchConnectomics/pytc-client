@@ -50,6 +50,7 @@ function ProofreadingEditor({
   const [offset, setOffset] = useState({ x: 0, y: 0 });
   const [isPanning, setIsPanning] = useState(false);
   const [panStart, setPanStart] = useState({ x: 0, y: 0 });
+  const [canvasDimensions, setCanvasDimensions] = useState({ width: 0, height: 0 });
 
   // Load images when props change
   useEffect(() => {
@@ -100,6 +101,7 @@ function ProofreadingEditor({
           // Set canvas size to image size
           canvas.width = img.width;
           canvas.height = img.height;
+          setCanvasDimensions({ width: img.width, height: img.height });
 
           // Draw image to get pixel data
           ctx.drawImage(img, 0, 0);
@@ -654,8 +656,8 @@ function ProofreadingEditor({
               <div
                 style={{
                   position: 'absolute',
-                  left: cursorPos.x * zoom,
-                  top: cursorPos.y * zoom,
+                  left: ((canvasDimensions.width * (1 - zoom)) / 2) + offset.x + (cursorPos.x * zoom) + (zoom / 2),
+                  top: ((canvasDimensions.height * (1 - zoom)) / 2) + offset.y + (cursorPos.y * zoom) + (zoom / 2),
                   width: brushSize * zoom,
                   height: brushSize * zoom,
                   border: `2px solid ${tool === 'paint' ? '#1890ff' : '#ff4d4f'}`,

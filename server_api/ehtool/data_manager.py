@@ -1,7 +1,6 @@
 """
 Data Manager for EHTool
 Handles loading and processing image datasets for error detection workflow
-Adapted from original EHTool for FastAPI integration
 """
 import os
 import glob
@@ -30,21 +29,13 @@ class DataManager:
     def __init__(self):
         self.image_volume: Optional[np.ndarray] = None
         self.mask_volume: Optional[np.ndarray] = None
+        self.mask_path: Optional[str] = None
         self.is_3d: bool = False
         self.total_layers: int = 0
         self.image_shape: Optional[Tuple[int, ...]] = None
     
     def load_dataset(self, dataset_path: str, mask_path: Optional[str] = None) -> Dict[str, Any]:
-        """
-        Load image dataset and optional mask dataset
-        
-        Args:
-            dataset_path: Path to image file or directory
-            mask_path: Optional path to mask file or directory
-        
-        Returns:
-            Dictionary with dataset info
-        """
+        """Load image dataset and optional mask dataset"""
         # Discover and load images
         image_data = self._load_volume(dataset_path)
         
@@ -72,6 +63,7 @@ class DataManager:
         # Store volume data
         self.image_volume = image_data['volume']
         self.mask_volume = mask_data['volume'] if mask_data else None
+        self.mask_path = mask_path
         self.is_3d = image_data['is_3d']
         self.total_layers = image_data['num_slices']
         self.image_shape = image_data['shape']
@@ -82,27 +74,84 @@ class DataManager:
             "image_shape": self.image_shape,
             "has_masks": mask_data is not None
         }
-    
+
+    def save_mask(self, layer_index: int, mask_base64: str) -> None:
+        """Update mask for a specific layer and save to disk"""
+        import base64
+        from io import BytesIO
+        
+        if self.mask_volume is None:
+            raise ValueError("No mask volume loaded")
+            
+        if layer_index < 0 or layer_index >= self.total_layers:
+            raise IndexError(f"Layer index {layer_index} out of range")
+            
+        # Decode base64 to numpy array
+        if ',' in mask_base64:
+            mask_base64 = mask_base64.split(',')[1]
+            
+        img_data = base64.b64decode(mask_base64)
+        img = Image.open(BytesIO(img_data))
+        
+        # Convert to numpy array (grayscale)
+        new_mask = np.array(img.convert('L'))
+        
+        # Ensure it matches expected dimensions
+        expected_shape = self.image_shape[-2:] if len(self.image_shape) >= 2 else self.image_shape
+        if new_mask.shape != expected_shape:
+             # Resize if needed (nearest neighbor to preserve classes)
+             img = img.resize(expected_shape[::-1], Image.NEAREST)
+             new_mask = np.array(img.convert('L'))
+        
+        # Update in-memory volume
+        if self.mask_volume.ndim == 3:
+            self.mask_volume[layer_index] = new_mask
+        else:
+            self.mask_volume = new_mask
+            
+        # Save to disk
+        if self.mask_path:
+            self._save_volume(self.mask_path, self.mask_volume, layer_index)
+
+    def _save_volume(self, path: str, volume: np.ndarray, layer_index: int = -1):
+        """Save volume to disk"""
+        path_obj = Path(path)
+        
+        if path_obj.is_file():
+            # It's a single file (likely TIFF)
+             if path.lower().endswith(('.tif', '.tiff')):
+                 # Rewrite entire TIFF
+                 tifffile.imwrite(path, volume, compression='zlib')
+             else:
+                 # Single 2D image file
+                 if volume.ndim == 2:
+                     Image.fromarray(volume).save(path)
+        
+        elif path_obj.is_dir():
+            # Directory of images
+            for ext in ['*.tif', '*.tiff', '*.png', '*.jpg', '*.jpeg']:
+                files = sorted(glob.glob(os.path.join(path, ext)) + glob.glob(os.path.join(path, ext.upper())))
+                if files:
+                    if layer_index >= 0 and layer_index < len(files):
+                         target_file = files[layer_index]
+                         if volume.ndim == 3:
+                             slice_data = volume[layer_index]
+                         else:
+                             slice_data = volume
+                         Image.fromarray(slice_data).save(target_file)
+                         return
+                    else:
+                        raise IndexError(f"Layer index {layer_index} out of range for file list")
+
     def get_layer(self, layer_index: int, enhance: bool = True) -> Tuple[np.ndarray, Optional[np.ndarray]]:
-        """
-        Get image and mask for a specific layer
-        
-        Args:
-            layer_index: 0-based layer index
-            enhance: Whether to apply contrast enhancement
-        
-        Returns:
-            Tuple of (image_array, mask_array or None)
-        """
+        """Get image and mask for a specific layer"""
         if layer_index < 0 or layer_index >= self.total_layers:
             raise IndexError(f"Layer index {layer_index} out of range [0, {self.total_layers})")
         
         # Get image slice
         if self.image_volume.ndim == 3:
-            # 3D volume - get specific slice
             image = self.image_volume[layer_index]
         else:
-            # 2D image
             image = self.image_volume
         
         image = ensure_grayscale_2d(image)
@@ -126,16 +175,7 @@ class DataManager:
         return image, mask
     
     def get_layer_base64(self, layer_index: int, enhance: bool = True) -> Tuple[str, Optional[str]]:
-        """
-        Get image and mask as base64-encoded strings
-        
-        Args:
-            layer_index: 0-based layer index
-            enhance: Whether to apply contrast enhancement
-        
-        Returns:
-            Tuple of (image_base64, mask_base64 or None)
-        """
+        """Get image and mask as base64-encoded strings"""
         image, mask = self.get_layer(layer_index, enhance=enhance)
         
         image_base64 = array_to_base64(image, format='PNG')
@@ -154,85 +194,45 @@ class DataManager:
             return "Image"
     
     def _load_volume(self, path: str) -> Dict[str, Any]:
-        """
-        Load volume data from a path (file, directory, or glob pattern)
-        
-        Args:
-            path: Path to file, directory, or glob pattern
-        
-        Returns:
-            Dictionary with volume, shape, num_slices, is_3d
-        """
+        """Load volume data from a path"""
         path_obj = Path(path)
         
         # Single file
         if path_obj.is_file():
             if path.lower().endswith(('.tif', '.tiff')):
-                # Load TIFF (may be multi-page)
                 volume = tifffile.imread(path)
-                
                 if volume.ndim == 2:
-                    # Single 2D image
-                    return {
-                        'volume': volume,
-                        'shape': volume.shape,
-                        'num_slices': 1,
-                        'is_3d': False
-                    }
+                    return {'volume': volume, 'shape': volume.shape, 'num_slices': 1, 'is_3d': False}
                 elif volume.ndim == 3:
-                    # 3D stack
-                    return {
-                        'volume': volume,
-                        'shape': volume.shape,
-                        'num_slices': volume.shape[0],
-                        'is_3d': True
-                    }
+                    return {'volume': volume, 'shape': volume.shape, 'num_slices': volume.shape[0], 'is_3d': True}
                 else:
                     raise ValueError(f"Unsupported TIFF dimensions: {volume.ndim}")
             else:
-                # Load single 2D image (PNG, JPG, etc.)
                 image = load_image_file(path)
-                return {
-                    'volume': image,
-                    'shape': image.shape,
-                    'num_slices': 1,
-                    'is_3d': False
-                }
+                return {'volume': image, 'shape': image.shape, 'num_slices': 1, 'is_3d': False}
         
-        # Directory or glob pattern - load multiple 2D files
+        # Directory or glob pattern
         elif path_obj.is_dir() or '*' in path or '?' in path:
             files = []
-            
             if path_obj.is_dir():
-                # Directory - find all image files
                 for ext in ['*.tif', '*.tiff', '*.png', '*.jpg', '*.jpeg']:
                     files.extend(glob.glob(os.path.join(path, ext)))
                     files.extend(glob.glob(os.path.join(path, ext.upper())))
             else:
-                # Glob pattern
                 files = glob.glob(path)
             
             if not files:
                 raise ValueError(f"No image files found at: {path}")
             
             files = sorted(files)
-            
-            # Load all files into a 3D volume
             slices = []
             for file_path in files:
                 img = load_image_file(file_path)
                 img = ensure_grayscale_2d(img)
                 slices.append(img)
             
-            # Stack into 3D volume
             volume = np.stack(slices, axis=0)
-            
-            return {
-                'volume': volume,
-                'shape': volume.shape,
-                'num_slices': volume.shape[0],
-                'is_3d': True
-            }
+            return {'volume': volume, 'shape': volume.shape, 'num_slices': volume.shape[0], 'is_3d': True}
         
         else:
             raise ValueError(f"Invalid path: {path}")

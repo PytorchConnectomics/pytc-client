@@ -1,32 +1,38 @@
-import { Form, Input, Select } from 'antd'
+import { Form } from 'antd'
 import React, { useContext } from 'react'
 import { AppContext } from '../contexts/GlobalContext'
+import UnifiedFileInput from './UnifiedFileInput'
 
 function InputSelector(props) {
   const context = useContext(AppContext)
-  const { fileList, type } = props
-  console.log(fileList, context.files)
+  const { type } = props
 
-  const handleLogPathChange = (e) => {
-    context.setLogPath(e.target.value)
+  const handleLogPathChange = (value) => {
+    context.setLogPath(value)
   }
 
-  const handleOutputPathChange = (e) => {
-    context.setOutputPath(e.target.value)
+  const handleOutputPathChange = (value) => {
+    context.setOutputPath(value)
   }
 
-  const handleCheckpointPathChange = (e) => {
-    context.setCheckpointPath(e.target.value)
+  const handleCheckpointPathChange = (value) => {
+    context.setCheckpointPath(value)
   }
 
   const handleImageChange = (value) => {
-    console.log(`selected ${value}`)
-    context.setInputImage(context.files.find((file) => file.uid === value))
+    console.log(`selected image:`, value)
+    context.setInputImage(value)
   }
 
   const handleLabelChange = (value) => {
-    console.log(`selected ${value}`)
-    context.setInputLabel(context.files.find((file) => file.uid === value))
+    console.log(`selected label:`, value)
+    context.setInputLabel(value)
+  }
+
+  // Helper to get value for UnifiedFileInput (can be object or string)
+  const getValue = (val) => {
+    if (!val) return '';
+    return val;
   }
 
   return (
@@ -40,84 +46,58 @@ function InputSelector(props) {
         }}
       >
         <Form.Item label='Input Image'>
-          <Select
-            allowClear
-            style={{ width: '100%' }}
-            placeholder='Please select'
+          <UnifiedFileInput
+            placeholder='Please select or input image path'
             onChange={handleImageChange}
-            value={context.inputImage ? context.inputImage.uid : undefined}
-            options={context.imageFileList.map((file) => ({
-              label: file.name,
-              value: file.uid
-            }))}
-            size='middle'
+            value={getValue(context.inputImage)}
           />
         </Form.Item>
         <Form.Item label='Input Label'>
-          <Select
-            allowClear
-            style={{ width: '100%' }}
-            placeholder='Please select'
+          <UnifiedFileInput
+            placeholder='Please select or input label path'
             onChange={handleLabelChange}
-            value={context.inputLabel ? context.inputLabel.uid : undefined}
-            options={context.labelFileList.map((file) => ({
-              label: file.name,
-              value: file.uid
-            }))}
-            size='middle'
+            value={getValue(context.inputLabel)}
           />
         </Form.Item>
         {type === 'training'
           ? (
             <Form.Item label='Output Path'>
-              <Input
-                style={{
-                  width: '100%'
-                }}
+              <UnifiedFileInput
                 placeholder='Directory for outputs (e.g., /path/to/outputs/)'
-                value={context.outputPath ? context.outputPath : undefined}
+                value={context.outputPath || ''}
                 onChange={handleOutputPathChange}
-                size='middle'
+                selectionType="directory"
               />
             </Form.Item>
           )
           : (
             <Form.Item label='Output Path' help='Directory where inference results will be saved'>
-              <Input
-                style={{
-                  width: '100%'
-                }}
+              <UnifiedFileInput
                 placeholder='Directory for results (e.g., /path/to/inference_output/)'
-                value={context.outputPath ? context.outputPath : undefined}
+                value={context.outputPath || ''}
                 onChange={handleOutputPathChange}
-                size='middle'
+                selectionType="directory"
               />
             </Form.Item>
           )}
         {type === 'training'
           ? (
             <Form.Item label='Log Path'>
-              <Input
-                style={{
-                  width: '100%'
-                }}
+              <UnifiedFileInput
                 placeholder='Please type training log path'
-                value={context.logPath ? context.logPath : undefined}
+                value={context.logPath || ''}
                 onChange={handleLogPathChange}
-                size='middle'
+                selectionType="directory"
               />
             </Form.Item>
           )
           : (
             <Form.Item label='Checkpoint Path' help='Path to trained model file (.pth.tar)'>
-              <Input
-                style={{
-                  width: '100%'
-                }}
+              <UnifiedFileInput
                 placeholder='Model checkpoint file (e.g., /path/to/checkpoint_00010.pth.tar)'
-                value={context.checkpointPath ? context.checkpointPath : undefined}
+                value={context.checkpointPath || ''}
                 onChange={handleCheckpointPathChange}
-                size='middle'
+                selectionType="directory"
               />
             </Form.Item>
           )}

@@ -3,7 +3,7 @@ import { Modal, List, Breadcrumb, Button, Spin, message } from 'antd';
 import { FolderFilled, FileOutlined, HomeOutlined, ArrowUpOutlined } from '@ant-design/icons';
 import apiClient from '../services/apiClient';
 
-const FilePickerModal = ({ visible, onCancel, onSelect, title = "Select File" }) => {
+const FilePickerModal = ({ visible, onCancel, onSelect, title = "Select File", selectionType = 'file' }) => {
   const [currentPath, setCurrentPath] = useState('root');
   const [items, setItems] = useState([]);
   const [loading, setLoading] = useState(false);
@@ -36,10 +36,6 @@ const FilePickerModal = ({ visible, onCancel, onSelect, title = "Select File" })
       });
 
       setItems(currentItems);
-
-      // Update folders list for breadcrumbs if needed (simplified here)
-      // In a real app, we might need a better way to build breadcrumbs from flat list
-      // For now, we'll just rely on the path string or build it up
     } catch (error) {
       console.error('Failed to load files:', error);
       message.error('Failed to load files');
@@ -52,30 +48,16 @@ const FilePickerModal = ({ visible, onCancel, onSelect, title = "Select File" })
     if (item.is_folder) {
       setCurrentPath(String(item.id));
     } else {
-      // It's a file, select it? Or just highlight?
-      // For now, let's just select it immediately or maybe we want a "Select" button
-      // The user might want to select a folder too.
-      // Let's assume we select on double click or have a select button.
-      // For this implementation: Single click selects (highlights), Double click enters folder or chooses file.
+      // It's a file
+      if (selectionType === 'file') {
+        onSelect(item);
+      }
     }
   };
 
   const handleNavigateUp = () => {
-    // This is tricky with flat structure + ID based paths.
-    // We need to find the parent of the current folder.
-    // Since we don't have the full tree easily, we might need to fetch all folders or store parent info.
-    // The backend 'files' endpoint returns everything.
-    // Let's find the current folder object to get its parent.
     if (currentPath === 'root') return;
-
-    // We need to find the folder object that corresponds to currentPath
-    // But we only have the items IN the current path.
-    // We should probably fetch ALL files once or change the API.
-    // Assuming we fetch ALL files in fetchFiles (which we do):
-
-    // Optimisation: Fetch all once and filter locally?
-    // The current fetchFiles fetches ALL files every time (based on FilesManager logic).
-    // Let's optimize: Fetch all once on mount/visible, then filter locally.
+    // ... navigation logic ...
   };
 
   // Refactored fetch to get all files once
@@ -141,12 +123,56 @@ const FilePickerModal = ({ visible, onCancel, onSelect, title = "Select File" })
     return parts;
   };
 
+  const constructFullPath = (item) => {
+    if (!item) return '';
+    if (item.path === 'root' || !item.path) return item.name;
+
+    const parts = [item.name];
+    let currParentId = item.path;
+
+    // Safety break to prevent infinite loops
+    let attempts = 0;
+    while (currParentId && currParentId !== 'root' && attempts < 100) {
+      const parent = allData.find(f => String(f.id) === currParentId);
+      if (parent) {
+        parts.unshift(parent.name);
+        currParentId = parent.path;
+      } else {
+        break;
+      }
+      attempts++;
+    }
+    return parts.join('/');
+  };
+
+  const handleSelectCurrentDirectory = () => {
+    // Construct path for current directory
+    if (currentPath === 'root') {
+      onSelect({ name: '', path: 'root', is_folder: true, logical_path: '' }); // Root
+      return;
+    }
+    const currentFolder = allData.find(f => String(f.id) === currentPath);
+    if (currentFolder) {
+      const fullPath = constructFullPath(currentFolder);
+      onSelect({ ...currentFolder, logical_path: fullPath });
+    }
+  };
+
   return (
     <Modal
       title={title}
       open={visible}
       onCancel={onCancel}
-      footer={null}
+      footer={
+        selectionType === 'directory' ? (
+          <div style={{ display: 'flex', justifyContent: 'flex-end', padding: '10px 16px' }}>
+            <Button onClick={onCancel} style={{ marginRight: 8 }}>Cancel</Button>
+            <Button type="primary" onClick={handleSelectCurrentDirectory}>
+              Select Current Directory
+            </Button>
+          </div>
+        ) : null
+      }
       width={600}
       bodyStyle={{ padding: 0 }}
     >
@@ -182,28 +208,27 @@ const FilePickerModal = ({ visible, onCancel, onSelect, title = "Select File" })
                   if (item.is_folder) {
                     setCurrentPath(String(item.id));
                   } else {
-                    // Select file
-                    // We need to construct the full path or just return the ID/Name?
-                    // The backend likely needs the full path on the server disk.
-                    // But wait, the 'files' API returns metadata. Does it have the absolute path?
-                    // Looking at FilesManager, it seems to use IDs for operations.
-                    // But DatasetLoader expects a string path.
-                    // If the backend 'files' are virtual or in a specific root, we might need the real path.
-                    // Let's assume for now we return the item and let the parent handle it, 
-                    // OR we assume the 'name' is relative to the storage root.
-                    // Actually, for the Python backend to load it, it needs an absolute path or relative to CWD.
-                    // The 'files' endpoint usually serves files from a specific directory.
-                    // If the user selects a file from the "Server", it implies a file in the managed storage.
-                    // We might need to ask the backend for the full path or construct it.
-                    // For now, let's return the item object.
-                    onSelect(item);
+                    if (selectionType === 'file') {
+                      const fullPath = constructFullPath(item);
+                      onSelect({ ...item, logical_path: fullPath });
+                    }
                   }
                 }}
                 actions={[
-                  !item.is_folder && <Button type="link" size="small" onClick={(e) => {
-                    e.stopPropagation();
-                    onSelect(item);
-                  }}>Select</Button>
+                  selectionType === 'file' && !item.is_folder && (
+                    <Button type="link" size="small" onClick={(e) => {
+                      e.stopPropagation();
+                      const fullPath = constructFullPath(item);
+                      onSelect({ ...item, logical_path: fullPath });
+                    }}>Select</Button>
+                  ),
+                  selectionType === 'directory' && item.is_folder && (
+                    <Button type="link" size="small" onClick={(e) => {
+                      e.stopPropagation();
+                      const fullPath = constructFullPath(item);
+                      onSelect({ ...item, logical_path: fullPath });
+                    }}>Select</Button>
+                  )
                 ]}
               >
                 <List.Item.Meta

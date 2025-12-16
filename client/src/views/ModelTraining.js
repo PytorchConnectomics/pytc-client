@@ -81,12 +81,18 @@ function ModelTraining() {
       setIsTraining(true)
       setTrainingStatus('Starting training... Please wait, this may take a while.')
 
+      const getPath = (val) => {
+        if (!val) return '';
+        if (typeof val === 'string') return val;
+        return val.path || '';
+      }
+
       // TODO: The API call should be non-blocking and return immediately
       // Real training status should be polled separately
       const res = await startModelTraining(
         trainingConfig,
-        context.logPath,
-        context.outputPath
+        getPath(context.logPath),
+        getPath(context.outputPath)
       )
       console.log(res)
 

@@ -12,7 +12,7 @@ const { Sider, Content } = Layout;
  * Detection Workflow Component
  * Main interface for error detection workflow
  */
-function DetectionWorkflow({ sessionId, setSessionId, onStartProofreading }) {
+function DetectionWorkflow({ sessionId, setSessionId, onStartProofreading, refreshTrigger }) {
   const [projectName, setProjectName] = useState('');
   const [totalLayers, setTotalLayers] = useState(0);
   const [currentPage, setCurrentPage] = useState(1);
@@ -29,7 +29,7 @@ function DetectionWorkflow({ sessionId, setSessionId, onStartProofreading }) {
       loadLayers();
       loadStats();
     }
-  }, [sessionId, currentPage]);
+  }, [sessionId, currentPage, refreshTrigger]);
 
   // Keyboard shortcuts
   useEffect(() => {

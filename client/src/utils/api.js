@@ -7,6 +7,7 @@ const API_URL = process.env.REACT_APP_API_URL || 'localhost:4242'
 
 const buildFilePath = (file) => {
   if (!file) return ''
+  if (typeof file === 'string') return file
   if (file.folderPath) return file.folderPath + file.name
   if (file.path) return file.path
   if (file.originFileObj && file.originFileObj.path) {

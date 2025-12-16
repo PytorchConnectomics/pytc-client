@@ -5,19 +5,25 @@ import { startModelInference, stopModelInference } from '../utils/api'
 import Configurator from '../components/Configurator'
 import { AppContext } from '../contexts/GlobalContext'
 
-function ModelInference ({ isInferring, setIsInferring }) {
+function ModelInference({ isInferring, setIsInferring }) {
   const context = useContext(AppContext)
   // const [isInference, setIsInference] = useState(false)
   const handleStartButton = async () => {
     try {
       const inferenceConfig = localStorage.getItem('inferenceConfig')
 
+      const getPath = (val) => {
+        if (!val) return '';
+        if (typeof val === 'string') return val;
+        return val.path || '';
+      }
+
       // const res = startModelInference(
       const res = await startModelInference(
         context.uploadedYamlFile.name,
         inferenceConfig,
-        context.outputPath,
-        context.checkpointPath
+        getPath(context.outputPath),
+        getPath(context.checkpointPath)
       ) // inputs, configurationYaml
       console.log(res)
     } catch (e) {

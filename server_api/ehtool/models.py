@@ -45,6 +45,13 @@ class LayerClassifyRequest(BaseModel):
     classification: str  # 'correct', 'incorrect', 'unsure', 'error'
 
 
+class MaskSaveRequest(BaseModel):
+    """Request to save an updated mask for a layer"""
+    session_id: int
+    layer_index: int
+    mask_base64: str
+
+
 # Response Models
 class DetectionLoadResponse(BaseModel):
     """Response after loading detection dataset"""

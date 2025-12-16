@@ -1,5 +1,5 @@
-import React, { useState, useEffect, useMemo } from 'react';
-import { Layout, Tabs, message } from 'antd';
+import React, { useState, useEffect } from 'react';
+import { Layout } from 'antd';
 import { BugOutlined } from '@ant-design/icons';
 import DetectionWorkflow from './ehtool/DetectionWorkflow';
 
@@ -9,36 +9,23 @@ const { Content } = Layout;
  * EHTool Main Component
  * Error Handling Tool for detecting and classifying errors in image stacks
  */
-function EHTool({ onStartProofreading, onSessionChange }) {
-  const [activeTab, setActiveTab] = useState('detection');
-  const [sessionId, setSessionId] = useState(null);
+function EHTool({ onStartProofreading, onSessionChange, refreshTrigger, savedSessionId }) {
+  // Initialize with saved session if available
+  const [sessionId, setSessionId] = useState(savedSessionId || null);
 
-  // Notify parent when session changes
+  // Sync prop changes if they occur (e.g. from parent state update)
+  useEffect(() => {
+    if (savedSessionId && savedSessionId !== sessionId) {
+      setSessionId(savedSessionId);
+    }
+  }, [savedSessionId]);
+
+  // Notify parent when session changes internally
   useEffect(() => {
     if (onSessionChange) {
       onSessionChange(sessionId);
     }
   }, [sessionId, onSessionChange]);
-
-  // Use useMemo to prevent tabs from being recreated on every render
-  const tabs = useMemo(() => [
-    {
-      key: 'detection',
-      label: (
-        <span>
-          <BugOutlined />
-          Error Detection
-        </span>
-      ),
-      children: (
-        <DetectionWorkflow
-          sessionId={sessionId}
-          setSessionId={setSessionId}
-          onStartProofreading={onStartProofreading}
-        />
-      )
-    }
-  ], [sessionId, onStartProofreading]);
 
   return (
     <Layout style={{ height: '100%', background: '#fff' }}>
@@ -53,12 +40,11 @@ function EHTool({ onStartProofreading, onSessionChange }) {
           </p>
         </div>
 
-        <Tabs
-          activeKey={activeTab}
-          onChange={setActiveTab}
-          items={tabs}
-          size="large"
-          destroyInactiveTabPane={false}
+        <DetectionWorkflow
+          sessionId={sessionId}
+          setSessionId={setSessionId}
+          onStartProofreading={onStartProofreading}
+          refreshTrigger={refreshTrigger}
         />
       </Content>
     </Layout>

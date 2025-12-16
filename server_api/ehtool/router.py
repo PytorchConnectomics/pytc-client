@@ -21,7 +21,8 @@ from .models import (
     ClassifyResponse,
     LayersPageResponse,
     LayerInfo,
-    DetectionStatsResponse
+    DetectionStatsResponse,
+    MaskSaveRequest
 )
 from .db_models import EHToolSession, EHToolLayer
 from .data_manager import DataManager
@@ -34,7 +35,6 @@ print("EHTOOL ROUTER MODULE LOADED - VERSION: DEBUG v2")
 print("=" * 80)
 
 # In-memory cache for DataManagers (session_id -> DataManager)
-# In production, consider using Redis or similar
 _data_managers = {}
 
 
@@ -73,11 +73,6 @@ async def load_detection_dataset(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
-    """
-    Load a dataset for error detection workflow
-    
-    Creates a new session and initializes layers
-    """
     try:
         # Create DataManager and load dataset
         data_manager = DataManager()
@@ -122,20 +117,11 @@ async def load_detection_dataset(
         )
         
     except FileNotFoundError as e:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=str(e)
-        )
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
     except ValueError as e:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=str(e)
-        )
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
     except Exception as e:
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to load dataset: {str(e)}"
-        )
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Failed to load dataset: {str(e)}")
 
 
 @router.get("/detection/layers", response_model=LayersPageResponse)
@@ -147,15 +133,6 @@ async def get_detection_layers(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
-    """
-    Get paginated layers for detection workflow
-    
-    Args:
-        session_id: Session ID
-        page: Page number (1-indexed)
-        page_size: Number of layers per page (default 12)
-        include_images: Whether to include base64-encoded images
-    """
     # Verify session belongs to user
     db_session = db.query(EHToolSession).filter(
         EHToolSession.id == session_id,
@@ -163,15 +140,10 @@ async def get_detection_layers(
     ).first()
     
     if not db_session:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Session not found"
-        )
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Session not found")
     
-    # Get DataManager
     data_manager = get_data_manager(session_id, db)
     
-    # Calculate pagination
     total_layers = db_session.total_layers
     total_pages = math.ceil(total_layers / page_size)
     
@@ -181,27 +153,19 @@ async def get_detection_layers(
             detail=f"Invalid page number. Must be between 1 and {total_pages}"
         )
     
-    # Get layers for this page
     start_idx = (page - 1) * page_size
     end_idx = min(start_idx + page_size, total_layers)
     
-    # Force refresh of session to ensure we see latest updates
     db.expire_all()
     
-    # Query database for layer info
     db_layers = db.query(EHToolLayer).filter(
         EHToolLayer.session_id == session_id,
         EHToolLayer.layer_index >= start_idx,
         EHToolLayer.layer_index < end_idx
     ).order_by(EHToolLayer.layer_index).all()
     
-    # Build response
     layers = []
     for db_layer in db_layers:
-        # DIAGNOSTIC: Log incorrect layers to verify what we see
-        if db_layer.classification == 'incorrect':
-            print(f"[GET_LAYERS] Found incorrect layer: id={db_layer.id}, index={db_layer.layer_index}")
-            
         layer_info = LayerInfo(
             id=db_layer.id,
             layer_index=db_layer.layer_index,
@@ -209,7 +173,6 @@ async def get_detection_layers(
             classification=db_layer.classification
         )
         
-        # Include images if requested
         if include_images:
             try:
                 image_base64, mask_base64 = data_manager.get_layer_base64(
@@ -218,10 +181,6 @@ async def get_detection_layers(
                 )
                 layer_info.image_base64 = image_base64
                 layer_info.mask_base64 = mask_base64
-                if image_base64:
-                    print(f"[GET_LAYERS] Loaded image for layer {db_layer.layer_index}, size: {len(image_base64)}")
-                else:
-                    print(f"[GET_LAYERS] Image is None for layer {db_layer.layer_index}")
             except Exception as e:
                 print(f"[GET_LAYERS] Warning: Failed to load image for layer {db_layer.layer_index}: {e}")
         
@@ -242,25 +201,14 @@ async def classify_layers(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
-    """
-    Classify one or more layers
-    
-    Args:
-        request: Classification request with layer IDs and classification
-    """
-    # Verify session belongs to user
     db_session = db.query(EHToolSession).filter(
         EHToolSession.id == request.session_id,
         EHToolSession.user_id == current_user.id
     ).first()
     
     if not db_session:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Session not found"
-        )
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Session not found")
     
-    # Validate classification
     valid_classifications = ['correct', 'incorrect', 'unsure', 'error']
     if request.classification not in valid_classifications:
         raise HTTPException(
@@ -268,9 +216,6 @@ async def classify_layers(
             detail=f"Invalid classification. Must be one of: {', '.join(valid_classifications)}"
         )
     
-    print(f"[CLASSIFY] Session: {request.session_id}, Layer IDs: {request.layer_ids}, Classification: {request.classification}")
-    
-    # Update layers
     updated_count = 0
     for layer_id in request.layer_ids:
         db_layer = db.query(EHToolLayer).filter(
@@ -279,29 +224,14 @@ async def classify_layers(
         ).first()
         
         if db_layer:
-            print(f"[CLASSIFY] Updating layer {layer_id}: {db_layer.classification} -> {request.classification}")
             db_layer.classification = request.classification
             updated_count += 1
-        else:
-            print(f"[CLASSIFY] Layer {layer_id} not found in session {request.session_id}")
     
-    # Flush changes to database
-    db.flush()
-    print(f"[CLASSIFY] Flushed {updated_count} layer updates to database")
-    
-    # Commit the transaction
     db.commit()
-    print(f"[CLASSIFY] Committed {updated_count} layers to database")
-    
-    # Verify the changes were persisted
-    for layer_id in request.layer_ids:
-        verify_layer = db.query(EHToolLayer).filter(EHToolLayer.id == layer_id).first()
-        if verify_layer:
-            print(f"[CLASSIFY] VERIFY: Layer {layer_id} classification is now: {verify_layer.classification}")
     
     return ClassifyResponse(
         updated_count=updated_count,
-        message=f"[DEBUG v2] Successfully classified {updated_count} layer(s) as '{request.classification}'"
+        message=f"Successfully classified {updated_count} layer(s) as '{request.classification}'"
     )
 
 
@@ -311,27 +241,15 @@ async def get_detection_stats(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
-    """
-    Get statistics for detection workflow
-    
-    Returns counts for each classification type
-    """
-    # Verify session belongs to user
     db_session = db.query(EHToolSession).filter(
         EHToolSession.id == session_id,
         EHToolSession.user_id == current_user.id
     ).first()
     
     if not db_session:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Session not found"
-        )
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Session not found")
     
-    # Count classifications
-    layers = db.query(EHToolLayer).filter(
-        EHToolLayer.session_id == session_id
-    ).all()
+    layers = db.query(EHToolLayer).filter(EHToolLayer.session_id == session_id).all()
     
     correct = sum(1 for l in layers if l.classification == 'correct')
     incorrect = sum(1 for l in layers if l.classification == 'incorrect')
@@ -358,27 +276,46 @@ async def delete_detection_session(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
-    """
-    Delete a detection session and all its layers
-    """
-    # Verify session belongs to user
     db_session = db.query(EHToolSession).filter(
         EHToolSession.id == session_id,
         EHToolSession.user_id == current_user.id
     ).first()
     
     if not db_session:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Session not found"
-        )
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Session not found")
     
-    # Remove from cache
     if session_id in _data_managers:
         del _data_managers[session_id]
     
-    # Delete from database (cascade will delete layers)
     db.delete(db_session)
     db.commit()
     
     return {"message": f"Session {session_id} deleted successfully"}
+
+
+@router.post("/detection/mask")
+async def save_mask(
+    request: MaskSaveRequest,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """Save updated mask for a layer"""
+    db_session = db.query(EHToolSession).filter(
+        EHToolSession.id == request.session_id,
+        EHToolSession.user_id == current_user.id
+    ).first()
+    
+    if not db_session:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Session not found")
+        
+    try:
+        data_manager = get_data_manager(request.session_id, db)
+        data_manager.save_mask(request.layer_index, request.mask_base64)
+        return {"message": "Mask saved successfully"}
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to save mask: {str(e)}"
+        )
