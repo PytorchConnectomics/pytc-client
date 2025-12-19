@@ -4,6 +4,7 @@ import DatasetLoader from './DatasetLoader';
 import LayerGrid from './LayerGrid';
 import ClassificationPanel from './ClassificationPanel';
 import ProgressTracker from './ProgressTracker';
+import UnifiedImageEditor from './UnifiedImageEditor';
 import apiClient from '../../services/apiClient';
 
 const { Sider, Content } = Layout;
@@ -12,7 +13,7 @@ const { Sider, Content } = Layout;
  * Detection Workflow Component
  * Main interface for error detection workflow
  */
-function DetectionWorkflow({ sessionId, setSessionId, onStartProofreading, refreshTrigger }) {
+function DetectionWorkflow({ sessionId, setSessionId, refreshTrigger }) {
   const [projectName, setProjectName] = useState('');
   const [totalLayers, setTotalLayers] = useState(0);
   const [currentPage, setCurrentPage] = useState(1);
@@ -20,6 +21,7 @@ function DetectionWorkflow({ sessionId, setSessionId, onStartProofreading, refre
   const [selectedLayers, setSelectedLayers] = useState([]);
   const [stats, setStats] = useState(null);
   const [loading, setLoading] = useState(false);
+  const [editingLayer, setEditingLayer] = useState(null);
 
   const pageSize = 12; // 12 layers per page (3x4 grid)
 
@@ -31,22 +33,22 @@ function DetectionWorkflow({ sessionId, setSessionId, onStartProofreading, refre
     }
   }, [sessionId, currentPage, refreshTrigger]);
 
-  // Keyboard shortcuts
+  // Keyboard shortcuts for main grid
   useEffect(() => {
     const handleKeyPress = (e) => {
-      // Don't trigger shortcuts when typing in input fields
-      if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
-      if (!sessionId || selectedLayers.length === 0) return;
+      // Don't trigger shortcuts when typing in input fields or when modal is open
+      if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA' || editingLayer) return;
+      if (!sessionId) return;
 
       switch (e.key.toLowerCase()) {
         case 'c':
-          handleClassify('correct');
+          if (selectedLayers.length > 0) handleClassify('correct');
           break;
         case 'x':
-          handleClassify('incorrect');
+          if (selectedLayers.length > 0) handleClassify('incorrect');
           break;
         case 'u':
-          handleClassify('unsure');
+          if (selectedLayers.length > 0) handleClassify('unsure');
           break;
         case 'a':
           if (e.ctrlKey) {
@@ -61,7 +63,7 @@ function DetectionWorkflow({ sessionId, setSessionId, onStartProofreading, refre
 
     window.addEventListener('keydown', handleKeyPress);
     return () => window.removeEventListener('keydown', handleKeyPress);
-  }, [sessionId, selectedLayers, layers]);
+  }, [sessionId, selectedLayers, layers, editingLayer]);
 
   const handleDatasetLoad = async (datasetPath, maskPath, projectName) => {
     setLoading(true);
@@ -149,12 +151,19 @@ function DetectionWorkflow({ sessionId, setSessionId, onStartProofreading, refre
     }
   };
 
-  const handleLayerSelect = (layerId) => {
-    setSelectedLayers(prev =>
-      prev.includes(layerId)
-        ? prev.filter(id => id !== layerId)
-        : [...prev, layerId]
-    );
+  const handleLayerSelect = (layerId, e) => {
+    // If Ctrl or Shift is pressed, or if clicking the card normally (selection mode)
+    // We'll treat clicking the thumbnail as "Inspection" and clicking the card body as "Selection"
+    // OR we just use a specific area for selection.
+    // For simplicity, let's say normal click opens the editor, and we use the Badge/Checkbox for selection?
+    // Actually, the user said "On clicking any, open a high-resolution...".
+    // So click = Inspection.
+
+    // We'll pass both to LayerGrid and let it decide.
+  };
+
+  const handleOpenEditor = (layer) => {
+    setEditingLayer(layer);
   };
 
   const selectAllLayers = () => {
@@ -202,12 +211,12 @@ function DetectionWorkflow({ sessionId, setSessionId, onStartProofreading, refre
             setSelectedLayers([]);
           }}
           onStartProofreading={() => {
-            if (stats && stats.incorrect > 0) {
-              if (onStartProofreading) {
-                onStartProofreading();
-              }
+            // Find first incorrect layer and open it
+            const firstIncorrect = layers.find(l => l.classification === 'incorrect');
+            if (firstIncorrect) {
+              setEditingLayer(firstIncorrect);
             } else {
-              message.info('No incorrect layers to proofread');
+              message.info('No incorrect layers visible on this page. Try scrolling or filtering.');
             }
           }}
         />
@@ -228,7 +237,14 @@ function DetectionWorkflow({ sessionId, setSessionId, onStartProofreading, refre
           <LayerGrid
             layers={layers}
             selectedLayers={selectedLayers}
-            onLayerSelect={handleLayerSelect}
+            onLayerSelect={(layerId) => {
+              setSelectedLayers(prev =>
+                prev.includes(layerId)
+                  ? prev.filter(id => id !== layerId)
+                  : [...prev, layerId]
+              );
+            }}
+            onLayerClick={(layer) => setEditingLayer(layer)}
             currentPage={currentPage}
             totalPages={Math.ceil(totalLayers / pageSize)}
             onPageChange={handlePageChange}
@@ -253,6 +269,18 @@ function DetectionWorkflow({ sessionId, setSessionId, onStartProofreading, refre
           onClearSelection={clearSelection}
         />
       </Sider>
+
+      {/* Integrated Image Editor Modal */}
+      <UnifiedImageEditor
+        visible={!!editingLayer}
+        layer={editingLayer}
+        sessionId={sessionId}
+        onClose={() => setEditingLayer(null)}
+        onSaveSuccess={() => {
+          loadLayers();
+          loadStats();
+        }}
+      />
     </Layout>
   );
 }

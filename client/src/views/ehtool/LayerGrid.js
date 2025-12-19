@@ -1,12 +1,12 @@
 import React from 'react';
-import { Row, Col, Card, Pagination, Empty, Badge } from 'antd';
+import { Row, Col, Card, Pagination, Empty, Badge, Checkbox } from 'antd';
 import { CheckCircleOutlined, CloseCircleOutlined, QuestionCircleOutlined, ExclamationCircleOutlined } from '@ant-design/icons';
 
 /**
  * Layer Grid Component
  * Displays layers in a grid with thumbnails and classification status
  */
-function LayerGrid({ layers, selectedLayers, onLayerSelect, currentPage, totalPages, onPageChange }) {
+function LayerGrid({ layers, selectedLayers, onLayerSelect, onLayerClick, currentPage, totalPages, onPageChange }) {
   const getClassificationIcon = (classification) => {
     switch (classification) {
       case 'correct':
@@ -76,61 +76,83 @@ function LayerGrid({ layers, selectedLayers, onLayerSelect, currentPage, totalPa
               >
                 <Card
                   hoverable
-                  onClick={() => onLayerSelect(layer.id)}
                   style={{
                     border: isSelected ? '2px solid #1890ff' : '1px solid #d9d9d9',
                     boxShadow: isSelected ? '0 0 10px rgba(24, 144, 255, 0.3)' : 'none',
-                    cursor: 'pointer'
+                    cursor: 'pointer',
+                    position: 'relative'
                   }}
                   bodyStyle={{ padding: '8px' }}
+                  onClick={() => onLayerClick && onLayerClick(layer)}
                   cover={
-                    layer.image_base64 ? (
-                      <div style={{
-                        position: 'relative',
-                        paddingTop: '100%', // 1:1 aspect ratio
-                        background: '#000',
-                        overflow: 'hidden'
-                      }}>
-                        <img
-                          src={layer.image_base64}
-                          alt={layer.layer_name}
-                          style={{
-                            position: 'absolute',
-                            top: 0,
-                            left: 0,
-                            width: '100%',
-                            height: '100%',
-                            objectFit: 'contain'
-                          }}
+                    <div style={{ position: 'relative' }}>
+                      {/* Selection Checkbox Overlay */}
+                      <div
+                        style={{
+                          position: 'absolute',
+                          top: '8px',
+                          left: '8px',
+                          zIndex: 10,
+                          backgroundColor: 'rgba(255,255,255,0.8)',
+                          borderRadius: '4px',
+                          padding: '2px 4px'
+                        }}
+                        onClick={(e) => e.stopPropagation()}
+                      >
+                        <Checkbox
+                          checked={isSelected}
+                          onChange={(e) => onLayerSelect && onLayerSelect(layer.id)}
                         />
-                        {layer.mask_base64 && (
+                      </div>
+
+                      {layer.image_base64 ? (
+                        <div style={{
+                          position: 'relative',
+                          paddingTop: '100%', // 1:1 aspect ratio
+                          background: '#000',
+                          overflow: 'hidden'
+                        }}>
                           <img
-                            src={layer.mask_base64}
-                            alt="mask"
+                            src={layer.image_base64}
+                            alt={layer.layer_name}
                             style={{
                               position: 'absolute',
                               top: 0,
                               left: 0,
                               width: '100%',
                               height: '100%',
-                              objectFit: 'contain',
-                              opacity: 0.5,
-                              mixBlendMode: 'screen'
+                              objectFit: 'contain'
                             }}
                           />
-                        )}
-                      </div>
-                    ) : (
-                      <div style={{
-                        paddingTop: '100%',
-                        background: '#f0f0f0',
-                        display: 'flex',
-                        alignItems: 'center',
-                        justifyContent: 'center'
-                      }}>
-                        Loading...
-                      </div>
-                    )
+                          {layer.mask_base64 && (
+                            <img
+                              src={layer.mask_base64}
+                              alt="mask"
+                              style={{
+                                position: 'absolute',
+                                top: 0,
+                                left: 0,
+                                width: '100%',
+                                height: '100%',
+                                objectFit: 'contain',
+                                opacity: 0.5,
+                                mixBlendMode: 'screen'
+                              }}
+                            />
+                          )}
+                        </div>
+                      ) : (
+                        <div style={{
+                          paddingTop: '100%',
+                          background: '#f0f0f0',
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'center'
+                        }}>
+                          Loading...
+                        </div>
+                      )}
+                    </div>
                   }
                 >
                   <div style={{
