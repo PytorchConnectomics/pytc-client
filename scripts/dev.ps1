@@ -16,10 +16,10 @@ RequireCommand 'uv' 'uv is required. Run scripts\bootstrap.ps1 first.'
 RequireCommand 'npm' 'npm is required to launch the Electron client.'
 
 Write-Host 'Starting API server...'
-$apiProcess = Start-Process uv -ArgumentList @('run','--directory', $rootDir, 'python', 'server_api/main.py') -NoNewWindow -PassThru
+$apiProcess = Start-Process uv -ArgumentList @('run','--directory', $rootDir, 'python', '-m', 'server_api.main') -NoNewWindow -PassThru
 
 Write-Host 'Starting PyTC server...'
-$pyProcess = Start-Process uv -ArgumentList @('run','--directory', $rootDir, 'python', 'server_pytc/main.py') -NoNewWindow -PassThru
+$pyProcess = Start-Process uv -ArgumentList @('run','--directory', $rootDir, 'python', '-m', 'server_pytc.main') -NoNewWindow -PassThru
 
 Push-Location $clientDir
 try {

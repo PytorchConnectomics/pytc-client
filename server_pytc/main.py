@@ -1,7 +1,7 @@
 import uvicorn
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
-from services.model import (
+from server_pytc.services.model import (
     get_tensorboard,
     initialize_tensorboard,
     start_inference,
@@ -64,7 +64,7 @@ async def stop_model_training():
 @app.get("/training_status")
 async def get_training_status():
     """Check if training process is still running"""
-    from services.model import _training_process
+    from server_pytc.services.model import _training_process
     
     if _training_process is None:
         return {"isRunning": False, "message": "No training process"}
@@ -108,12 +108,11 @@ def run():
     print("SERVER_PYTC: Starting Uvicorn server on port 4243...")
     print("="*80 + "\n")
     uvicorn.run(
-        "main:app",
+        app,
         host="0.0.0.0",
         port=4243,
-        reload=True,
+        reload=False,
         log_level="info",
-        app_dir="/",
     )
 
 

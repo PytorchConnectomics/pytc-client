@@ -30,6 +30,20 @@ This starts both FastAPI services under uv, runs the Electron client, and cleans
 up the servers when you close the UI. Re-run the bootstrap script any time you
 need to refresh dependencies.
 
+### Authentication
+
+The app now runs as a shared guest user—no sign-up or credentials required. The
+header will show “Guest” and all features remain available.
+
+## Running Tests
+
+Install the dev dependencies and execute the backend tests with uv:
+
+```bash
+uv sync --python 3.11 --group dev
+uv run --group dev pytest
+```
+
 ## Containerized Backend (Docker)
 
 Prefer to keep everything in a container? The provided image uses uv inside the
@@ -104,8 +118,8 @@ Expect a slower install and more moving pieces.
 5. **Run the app (three terminals or background processes)**
 
    ```bash
-   python server_api/main.py
-   python server_pytc/main.py
+   python -m server_api.main
+   python -m server_pytc.main
    cd client && npm run electron
    ```
 

@@ -1,150 +1,268 @@
 import React, { useState, useEffect } from 'react'
-import DataLoader from './DataLoader'
-import Visualization from '../views/Visualization'
-import ModelTraining from '../views/ModelTraining'
-import ModelInference from '../views/ModelInference'
-import Monitoring from '../views/Monitoring'
-import Chatbot from '../components/Chatbot'
-import { Layout, Menu, Button } from 'antd'
-import { MessageOutlined } from '@ant-design/icons'
-import { getNeuroglancerViewer } from '../utils/api'
+import { Layout, Menu, message } from 'antd'
+import {
+  FolderOpenOutlined,
+  DesktopOutlined,
+  EyeOutlined,
+  ExperimentOutlined,
+  ThunderboltOutlined,
+  DashboardOutlined,
+  BugOutlined,
+  ReadOutlined,
+  ApartmentOutlined
+} from '@ant-design/icons'
+import FilesManager from './FilesManager'
+import Visualization from './Visualization'
+import ModelTraining from './ModelTraining'
+import ModelInference from './ModelInference'
+import Monitoring from './Monitoring'
+import ProofReading from './ProofReading'
+import WormErrorHandling from './WormErrorHandling'
+import WorkflowSelector from '../components/WorkflowSelector'
+import apiClient from '../services/apiClient'
 
-const { Content, Sider } = Layout
+const { Content } = Layout
 
-function Views () {
-  const [current, setCurrent] = useState('visualization')
+const PREF_FILE_NAME = 'workflow_preference.json'
+
+function Views() {
+  // State
+  const [current, setCurrent] = useState('files')
+  const [visibleTabs, setVisibleTabs] = useState(new Set(['files']))
+  const [visitedTabs, setVisitedTabs] = useState(new Set(['files']))
+  const [workflowModalVisible, setWorkflowModalVisible] = useState(false)
+  const [isManualChange, setIsManualChange] = useState(false) // Flag for "Change Startup Mode"
+
+  // Lifted state from Workspace
   const [viewers, setViewers] = useState([])
-  const [isLoading, setIsLoading] = useState(false)
   const [isInferring, setIsInferring] = useState(false)
-  const [isChatOpen, setIsChatOpen] = useState(false)
-  console.log(viewers)
+
+  const allItems = [
+    { label: 'File Management', key: 'files', icon: <FolderOpenOutlined /> },
+    { label: 'Visualization', key: 'visualization', icon: <EyeOutlined /> },
+    { label: 'Model Training', key: 'training', icon: <ExperimentOutlined /> },
+    { label: 'Model Inference', key: 'inference', icon: <ThunderboltOutlined /> },
+    { label: 'Tensorboard', key: 'monitoring', icon: <DashboardOutlined /> },
+    { label: 'SynAnno', key: 'synanno', icon: <ApartmentOutlined /> },
+    { label: 'Worm Error Handling', key: 'worm-error-handling', icon: <BugOutlined /> }
+  ]
+
+  const items = allItems.filter(item => visibleTabs.has(item.key))
 
   const onClick = (e) => {
     setCurrent(e.key)
+    setVisitedTabs(prev => new Set(prev).add(e.key))
   }
 
-  const items = [
-    { label: 'Visualization', key: 'visualization' },
-    { label: 'Model Training', key: 'training' },
-    { label: 'Model Inference', key: 'inference' },
-    { label: 'Tensorboard', key: 'monitoring' }
-  ]
+  // Helper to activate tabs and set valid current
+  const applyModes = (modes) => {
+    const modeList = Array.isArray(modes) ? modes : [modes]
+    if (modeList.length === 0) return
 
-  const renderMenu = () => {
-    if (current === 'visualization') {
-      return <Visualization viewers={viewers} setViewers={setViewers} />
-    } else if (current === 'training') {
-      return <ModelTraining />
-    } else if (current === 'monitoring') {
-      return <Monitoring />
-    } else if (current === 'inference') {
-      return <ModelInference isInferring={isInferring} setIsInferring={setIsInferring} />
+    setVisitedTabs(prev => {
+      const next = new Set(prev)
+      modeList.forEach(m => next.add(m))
+      return next
+    })
+    setVisibleTabs(prev => {
+      const next = new Set(prev)
+      modeList.forEach(m => next.add(m))
+      return next
+    })
+
+    // Switch to first selected tab, or 'files' if included, or keep current if valid
+    if (modeList.includes('files')) {
+      setCurrent('files')
+    } else {
+      setCurrent(modeList[0])
     }
   }
 
-  const [collapsed, setCollapsed] = useState(false)
+  // Load Preference on Mount
+  useEffect(() => {
+    let isMounted = true
 
-  const fetchNeuroglancerViewer = async (
-    currentImage,
-    currentLabel,
-    scales
-  ) => {
-    setIsLoading(true)
-    try {
-      const viewerId = currentImage.uid + currentLabel.uid + JSON.stringify(scales)
-      let updatedViewers = viewers
-      const exists = viewers.find(
-        // (viewer) => viewer.key === currentImage.uid + currentLabel.uid
-        (viewer) => viewer.key === viewerId
-      )
-      // console.log(exists, viewers)
-      if (exists) {
-        updatedViewers = viewers.filter((viewer) => viewer.key !== viewerId)
-      }
-      const res = await getNeuroglancerViewer(
-        currentImage,
-        currentLabel,
-        scales
-      )
-      const newUrl = res.replace(/\/\/[^:/]+/, '//localhost')
-      console.log('Current Viewer at ', newUrl)
+    const checkPreference = async () => {
+      try {
+        const res = await apiClient.get('/files')
+        const fileList = res.data || []
 
-      setViewers([
-        ...updatedViewers,
-        {
-          key: viewerId,
-          title: currentImage.name + ' & ' + currentLabel.name,
-          viewer: newUrl
+        // Find saved preference file
+        const prefFile = fileList.find(f => f.name === PREF_FILE_NAME && !f.is_folder)
+
+        if (prefFile && prefFile.physical_path) {
+          try {
+            let pathForUrl = prefFile.physical_path.replace(/\\/g, '/')
+            if (pathForUrl.includes('uploads/')) {
+              const parts = pathForUrl.split('uploads/')
+              if (parts.length > 1) {
+                pathForUrl = 'uploads/' + parts[parts.length - 1]
+              }
+            }
+            const fileUrl = `${apiClient.defaults.baseURL || 'http://localhost:4242'}/${pathForUrl}`
+
+            const contentRes = await fetch(fileUrl)
+            if (contentRes.ok) {
+              const data = await contentRes.json()
+              if (data) {
+                const modes = data.modes || data.mode
+                if (modes) {
+                  applyModes(modes)
+                  return
+                }
+              }
+            }
+          } catch (err) {
+            console.error('Error reading pref file content', err)
+          }
         }
-      ])
-      setIsLoading(false)
-    } catch (e) {
-      console.log(e)
-      setIsLoading(false)
+
+        // If no file found or error reading it, show selector (Initial Launch)
+        if (isMounted) {
+          setWorkflowModalVisible(true)
+          setIsManualChange(false)
+        }
+
+      } catch (err) {
+        if (isMounted) {
+          setWorkflowModalVisible(true)
+          setIsManualChange(false)
+        }
+      }
     }
+
+    checkPreference()
+
+    return () => { isMounted = false }
+  }, [])
+
+  const handleWorkflowSelect = async (modes, remember) => {
+    setWorkflowModalVisible(false)
+
+    // Render logic: Only if NOT manual change
+    if (!isManualChange) {
+      applyModes(modes)
+    }
+
+    // Persistence Logic
+    try {
+      // 1. Always delete existing to avoid staleness or duplicates
+      const res = await apiClient.get('/files')
+      const existing = (res.data || []).filter(f => f.name === PREF_FILE_NAME)
+      for (const f of existing) {
+        await apiClient.delete(`/files/${f.id}`)
+      }
+
+      // 2. If Remember is checked, Save new
+      if (remember) {
+        const jsonContent = JSON.stringify({ modes })
+        const blob = new Blob([jsonContent], { type: 'application/json' })
+        const file = new File([blob], PREF_FILE_NAME, { type: 'application/json' })
+
+        const formData = new FormData()
+        formData.append('file', file)
+        formData.append('path', 'root')
+
+        await apiClient.post('/files/upload', formData, {
+          headers: { 'Content-Type': 'multipart/form-data' }
+        })
+        if (isManualChange) {
+          message.success('Preferences saved for next launch')
+        }
+      } else {
+        // Remember is UNCHECKED
+        if (isManualChange) {
+          message.info('Startup preference cleared')
+        }
+      }
+    } catch (err) {
+      console.error('Failed to update preference', err)
+      message.error('Failed to update preference')
+    }
+
+    // Reset manual flag
+    setIsManualChange(false)
   }
 
-  useEffect(() => { // This function makes sure that the inferring will continue when current tab changes
-    if (current === 'inference' && isInferring) {
-      console.log('Inference process is continuing...')
+  // IPC Listener
+  useEffect(() => {
+    let ipcRenderer
+    try {
+      ipcRenderer = window.require('electron').ipcRenderer
+    } catch (e) { return }
+
+    const handleToggleTab = (event, key, checked) => {
+      setVisibleTabs(prev => {
+        const newSet = new Set(prev)
+        if (checked) {
+          newSet.add(key)
+        } else {
+          newSet.delete(key)
+          if (current === key) setCurrent('files')
+        }
+        return newSet
+      })
     }
-  }, [current, isInferring])
+
+    const handleResetPreference = () => {
+      // User clicked "Change Startup Mode"
+      // We set isManualChange = true, so selecting doesn't render immediately
+      setIsManualChange(true)
+      setWorkflowModalVisible(true)
+    }
+
+    ipcRenderer.on('toggle-tab', handleToggleTab)
+    ipcRenderer.on('reset-preference', handleResetPreference)
+
+    return () => {
+      ipcRenderer.removeListener('toggle-tab', handleToggleTab)
+      ipcRenderer.removeListener('reset-preference', handleResetPreference)
+    }
+  }, [current])
+
+  const renderTabContent = (key, component) => {
+    if (!visitedTabs.has(key)) return null
+    return (
+      <div style={{ display: current === key ? 'block' : 'none', height: '100%' }}>
+        {component}
+      </div>
+    )
+  }
 
   return (
-    <Layout
-      style={{
-        minHeight: '99vh',
-        minWidth: '90vw'
-      }}
-    >
-      {isLoading
-        ? (<div>Loading the viewer ...</div>)
-        : (
-          <>
-            <Sider
-            // collapsible
-              collapsed={collapsed}
-              onCollapse={(value) => setCollapsed(value)}
-              theme='light'
-              collapsedWidth='0'
-            >
-              <DataLoader fetchNeuroglancerViewer={fetchNeuroglancerViewer} />
-            </Sider>
-            <Layout className='site-layout'>
-              <Content
-                style={{
-                  margin: '0 16px'
-                }}
-              >
-                <Menu
-                  onClick={onClick}
-                  selectedKeys={[current]}
-                  mode='horizontal'
-                  items={items}
-                />
-                {renderMenu()}
-              </Content>
-            </Layout>
-            {isChatOpen ? (
-              <Sider
-                width={400}
-                theme='light'
-              >
-                <Chatbot onClose={() => setIsChatOpen(false)} />
-              </Sider>
-            ) : (
-              <Button
-                type="primary"
-                shape="circle"
-                icon={<MessageOutlined />}
-                onClick={() => setIsChatOpen(true)}
-                style={{
-                  margin: '8px 8px'
-                }}
-              />
-            )}
-          </>
-          )}
+    <Layout style={{ minHeight: '100vh' }}>
+      <WorkflowSelector
+        visible={workflowModalVisible}
+        onSelect={handleWorkflowSelect}
+        onCancel={() => {
+          setWorkflowModalVisible(false)
+          setIsManualChange(false)
+          // If initial launch and cancelled, maybe just files?
+          if (!isManualChange && visitedTabs.size <= 1) { // simple heuristic
+            // already files by default
+          }
+        }}
+        isManual={isManualChange}
+      />
+
+      <div style={{ display: 'flex', alignItems: 'center', background: '#fff', paddingRight: 24, borderBottom: '1px solid #f0f0f0' }}>
+        <Menu
+          onClick={onClick}
+          selectedKeys={[current]}
+          mode='horizontal'
+          items={items}
+          style={{ lineHeight: '64px', paddingLeft: '16px', flex: 1, borderBottom: 'none' }}
+        />
+      </div>
+      <Content style={{ padding: '24px', height: 'calc(100vh - 64px)', overflow: 'auto' }}>
+        {renderTabContent('files', <FilesManager />)}
+        {renderTabContent('visualization', <Visualization viewers={viewers} setViewers={setViewers} />)}
+        {renderTabContent('training', <ModelTraining />)}
+        {renderTabContent('monitoring', <Monitoring />)}
+        {renderTabContent('inference', <ModelInference isInferring={isInferring} setIsInferring={setIsInferring} />)}
+        {renderTabContent('synanno', <ProofReading />)}
+        {renderTabContent('worm-error-handling', <WormErrorHandling />)}
+      </Content>
     </Layout>
   )
 }

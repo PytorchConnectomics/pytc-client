@@ -23,6 +23,9 @@ cleanup() {
     if [[ -n "${PYTC_PID:-}" ]] && ps -p "${PYTC_PID}" >/dev/null 2>&1; then
         kill "${PYTC_PID}" >/dev/null 2>&1 || true
     fi
+    if [[ -n "${DATA_SERVER_PID:-}" ]] && ps -p "${DATA_SERVER_PID}" >/dev/null 2>&1; then
+        kill "${DATA_SERVER_PID}" >/dev/null 2>&1 || true
+    fi
     if [[ -n "${REACT_PID:-}" ]] && ps -p "${REACT_PID}" >/dev/null 2>&1; then
         kill "${REACT_PID}" >/dev/null 2>&1 || true
     fi
@@ -32,34 +35,47 @@ cleanup() {
 
 trap cleanup EXIT INT TERM
 
-echo "Starting API server..."
-uv run --directory "${ROOT_DIR}" python server_api/main.py &
+echo "Starting Data Server (port 8000)..."
+uv run --directory "${ROOT_DIR}" python server_api/scripts/serve_data.py &
+DATA_SERVER_PID=$!
+
+echo "Starting API server (port 4242)..."
+PYTHONDONTWRITEBYTECODE=1 uv run --directory "${ROOT_DIR}" python -m server_api.main &
 API_PID=$!
 
-echo "Starting PyTC server..."
-uv run --directory "${ROOT_DIR}" python server_pytc/main.py &
+echo "Starting PyTC server (port 4243)..."
+uv run --directory "${ROOT_DIR}" python -m server_pytc.main &
 PYTC_PID=$!
 
-echo "Starting React server..."
+echo "Starting React dev server (port 3000)..."
 pushd "${CLIENT_DIR}" >/dev/null
-BROWSER=none npm start >/dev/null 2>&1 &
+PORT=3000 BROWSER=none npm start > react.log 2>&1 &
 REACT_PID=$!
+
+# Robust readiness check with progress feedback
 wait_for_react() {
-    local max_attempts=30
+    local max_attempts=60
     local attempt=1
-    until curl -sf http://localhost:3000 >/dev/null 2>&1; do
-        if [[ ${attempt} -ge ${max_attempts} ]]; then
-            return 1
+    while [[ ${attempt} -le ${max_attempts} ]]; do
+        if curl -sf http://localhost:3000 >/dev/null 2>&1; then
+            echo "React dev server is ready!"
+            return 0
         fi
+        echo "Waiting for React (attempt ${attempt}/${max_attempts})..."
         attempt=$((attempt + 1))
         sleep 1
     done
-    return 0
+    echo "ERROR: React dev server failed to start within ${max_attempts} seconds" >&2
+    echo "Check client/react.log for details." >&2
+    return 1
 }
+
 if wait_for_react; then
-    echo "Starting Electron client..."
+    echo "Launching Electron client..."
     ENVIRONMENT=development npm run electron
 else
-    echo "Failed to start React server"
+    echo "Failed to start React dev server" >&2
+    exit 1
 fi
+
 popd >/dev/null

@@ -3,7 +3,7 @@ from langchain_community.vectorstores import FAISS
 from langchain_classic.chains import ConversationalRetrievalChain
 from langchain_classic.memory import ConversationBufferMemory
 from langchain_classic.prompts import ChatPromptTemplate
-from utils.utils import process_path
+from server_api.utils.utils import process_path
 
 embeddings = OllamaEmbeddings(model='mistral:latest', base_url='http://cscigpu08.bc.edu:11434')
 faiss_path = process_path('server_api/chatbot/faiss_index')
