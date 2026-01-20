@@ -10,6 +10,8 @@ node_modules/
 client/build/
 client/dist/
 client/.parcel-cache/
+package-lock.json
+client/package-lock.json
 
 # Python environments / caches
 .venv
@@ -36,3 +38,4 @@ dist/
 .github/workflows/docker-test.yml
 
 uploads/
+sql_app.db
