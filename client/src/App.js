@@ -1,9 +1,8 @@
 import { useContext, useEffect, useState } from 'react'
 import './App.css'
 import Views from './views/Views'
-import Welcome from './views/Welcome'
 import { AppContext, ContextWrapper } from './contexts/GlobalContext'
-import UserContextWrapper, { UserContext } from './contexts/UserContext'
+import UserContextWrapper from './contexts/UserContext'
 import { YamlContextWrapper } from './contexts/YamlContext'
 
 function CacheBootstrapper ({ children }) {
@@ -33,8 +32,7 @@ function CacheBootstrapper ({ children }) {
 }
 
 function MainContent () {
-  const { currentUser } = useContext(UserContext)
-  return currentUser ? <Views /> : <Welcome />
+  return <Views />
 }
 
 function App () {

@@ -1,10 +1,8 @@
-import React, { useState, useContext, useEffect } from 'react'
-import { Layout, Menu, Avatar, Typography, Space, Button, Tooltip, message } from 'antd'
+import React, { useState, useEffect } from 'react'
+import { Layout, Menu, message } from 'antd'
 import {
   FolderOpenOutlined,
   DesktopOutlined,
-  UserOutlined,
-  LogoutOutlined,
   EyeOutlined,
   ExperimentOutlined,
   ThunderboltOutlined,
@@ -20,18 +18,14 @@ import ModelInference from './ModelInference'
 import Monitoring from './Monitoring'
 import ProofReading from './ProofReading'
 import WormErrorHandling from './WormErrorHandling'
-import { UserContext } from '../contexts/UserContext'
 import WorkflowSelector from '../components/WorkflowSelector'
 import apiClient from '../services/apiClient'
 
 const { Content } = Layout
-const { Text } = Typography
 
 const PREF_FILE_NAME = 'workflow_preference.json'
 
 function Views() {
-  const { currentUser, autoSignOut } = useContext(UserContext)
-
   // State
   const [current, setCurrent] = useState('files')
   const [visibleTabs, setVisibleTabs] = useState(new Set(['files']))
@@ -259,15 +253,6 @@ function Views() {
           items={items}
           style={{ lineHeight: '64px', paddingLeft: '16px', flex: 1, borderBottom: 'none' }}
         />
-        <Space size="large">
-          <Space>
-            <Avatar icon={<UserOutlined />} style={{ backgroundColor: '#87d068' }} />
-            <Text strong>{currentUser ? currentUser.name : 'Guest'}</Text>
-          </Space>
-          <Tooltip title="Sign Out">
-            <Button icon={<LogoutOutlined />} onClick={autoSignOut} type="text" danger />
-          </Tooltip>
-        </Space>
       </div>
       <Content style={{ padding: '24px', height: 'calc(100vh - 64px)', overflow: 'auto' }}>
         {renderTabContent('files', <FilesManager />)}
