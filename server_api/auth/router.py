@@ -10,25 +10,42 @@ import uuid
 
 router = APIRouter()
 
-oauth2_scheme = OAuth2PasswordBearer(tokenUrl="token")
+oauth2_scheme = OAuth2PasswordBearer(tokenUrl="token", auto_error=False)
+
+
+def _get_or_create_guest_user(db: Session) -> models.User:
+    """Return the shared guest user, creating it if needed."""
+    guest = db.query(models.User).filter(models.User.username == "guest").first()
+    if guest:
+        return guest
+    guest = models.User(
+        username="guest",
+        email=None,
+        hashed_password=utils.get_password_hash("guest"),
+    )
+    db.add(guest)
+    db.commit()
+    db.refresh(guest)
+    return guest
+
 
 def get_current_user(token: str = Depends(oauth2_scheme), db: Session = Depends(database.get_db)):
-    credentials_exception = HTTPException(
-        status_code=status.HTTP_401_UNAUTHORIZED,
-        detail="Could not validate credentials",
-        headers={"WWW-Authenticate": "Bearer"},
-    )
+    # If no token is provided, fall back to the shared guest account.
+    if not token:
+        return _get_or_create_guest_user(db)
+
     try:
         payload = jwt.decode(token, utils.SECRET_KEY, algorithms=[utils.ALGORITHM])
         username: str = payload.get("sub")
         if username is None:
-            raise credentials_exception
+            return _get_or_create_guest_user(db)
         token_data = models.TokenData(username=username)
     except JWTError:
-        raise credentials_exception
+        return _get_or_create_guest_user(db)
+
     user = db.query(models.User).filter(models.User.username == token_data.username).first()
     if user is None:
-        raise credentials_exception
+        return _get_or_create_guest_user(db)
     return user
 
 @router.post("/register", response_model=models.UserResponse)

@@ -2,11 +2,11 @@ import io
 import json
 import sys
 
-import httpx
 import pytest
+import pytest_asyncio
 import numpy as np
 from fastapi import FastAPI
-from httpx import AsyncClient
+from httpx import ASGITransport, AsyncClient
 from server_api.main import app as fastapi_app
 from types import SimpleNamespace
 
@@ -65,14 +65,15 @@ def stub_neuroglancer(monkeypatch):
     yield
 
 
-@pytest.fixture
+@pytest_asyncio.fixture
 async def app() -> FastAPI:
     return fastapi_app
 
 
-@pytest.fixture
+@pytest_asyncio.fixture
 async def client(app: FastAPI) -> AsyncClient:
-    async with httpx.AsyncClient(app=app, base_url="http://test") as ac:
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as ac:
         yield ac
 
 
@@ -80,7 +81,7 @@ async def client(app: FastAPI) -> AsyncClient:
 async def test_hello(client: AsyncClient) -> None:
     response = await client.get("/hello")
     assert response.status_code == 200
-    assert response.json() == {"hello"}
+    assert response.json() == {"message": "hello"}
 
 
 @pytest.mark.asyncio

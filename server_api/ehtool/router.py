@@ -10,9 +10,9 @@ import logging
 
 logger = logging.getLogger(__name__)
 
-from auth.database import get_db
-from auth.router import get_current_user
-from auth.models import User
+from server_api.auth.database import get_db
+from server_api.auth.router import get_current_user
+from server_api.auth.models import User
 
 from .models import (
     DetectionLoadRequest,

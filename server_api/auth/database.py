@@ -23,6 +23,6 @@ def init_db():
     """Initialize database and create tables"""
     # Import models to register them with SQLAlchemy
     from . import models
-    from ehtool import db_models  # Import EHTool models
+    from server_api.ehtool import db_models  # Import EHTool models
     
     Base.metadata.create_all(bind=engine)

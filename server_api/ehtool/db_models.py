@@ -5,7 +5,7 @@ SQLAlchemy models for sessions and layers
 from sqlalchemy import Column, Integer, String, DateTime, ForeignKey
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
-from auth.database import Base
+from server_api.auth.database import Base
 
 
 class EHToolSession(Base):
