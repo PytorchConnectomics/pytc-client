@@ -104,8 +104,8 @@ Expect a slower install and more moving pieces.
 5. **Run the app (three terminals or background processes)**
 
    ```bash
-   python server_api/main.py
-   python server_pytc/main.py
+   python -m server_api.main
+   python -m server_pytc.main
    cd client && npm run electron
    ```
 

@@ -8,16 +8,23 @@ import requests
 import uvicorn
 from fastapi import FastAPI, HTTPException, Request, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
-from utils.io import readVol
-from utils.utils import process_path
-# Temporarily disabled due to langchain import error
-# from chatbot.chatbot import chain, memory
-from auth import models, database, router as auth_router
-from synanno import router as synanno_router
-from ehtool import router as ehtool_router
+from server_api.utils.io import readVol
+from server_api.utils.utils import process_path
+from server_api.auth import models, database, router as auth_router
+from server_api.synanno import router as synanno_router
+from server_api.ehtool import router as ehtool_router
 
 from fastapi.staticfiles import StaticFiles
 import os
+
+# Chatbot is optional; keep the server running if dependencies or model endpoints
+# are unavailable.
+try:
+    from chatbot.chatbot import chain, memory
+except Exception as exc:  # pragma: no cover - exercised indirectly via endpoints
+    chain = None
+    memory = None
+    _chatbot_error = exc
 
 REACT_APP_SERVER_PROTOCOL = "http"
 REACT_APP_SERVER_URL = "localhost:4243"
@@ -54,7 +61,7 @@ def save_upload_to_tempfile(upload: UploadFile) -> pathlib.Path:
 
 @app.get("/hello")
 def hello():
-    return {"hello"}
+    return {"message": "hello"}
 
 
 @app.post("/neuroglancer")
@@ -348,6 +355,11 @@ async def check_files(req: Request):
 # Chatbot endpoints
 @app.post("/chat/query")
 async def chat_query(req: Request):
+    if chain is None:
+        detail = "Chatbot is not configured"
+        if "_chatbot_error" in globals():
+            detail = f"{detail}: {_chatbot_error}"
+        raise HTTPException(status_code=503, detail=detail)
     body = await req.json()
     query = body.get('query')
     response = chain.invoke({'question': query})['answer']
@@ -356,18 +368,22 @@ async def chat_query(req: Request):
 
 @app.post("/chat/clear")
 async def clear_chat():
-    # memory.clear()  # Temporarily disabled due to langchain import error
+    if memory is None:
+        detail = "Chatbot is not configured"
+        if "_chatbot_error" in globals():
+            detail = f"{detail}: {_chatbot_error}"
+        raise HTTPException(status_code=503, detail=detail)
+    memory.clear()
     return {"message": "Chat history cleared"}
 
 
 def run():
     uvicorn.run(
-        "main:app",
+        app,
         host="0.0.0.0",
         port=4242,
         reload=False,  # Temporarily disabled to force fresh load
         log_level="info",
-        app_dir="/",
     )
 
 

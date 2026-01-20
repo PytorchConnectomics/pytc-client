@@ -40,11 +40,11 @@ uv run --directory "${ROOT_DIR}" python server_api/scripts/serve_data.py &
 DATA_SERVER_PID=$!
 
 echo "Starting API server (port 4242)..."
-PYTHONDONTWRITEBYTECODE=1 uv run --directory "${ROOT_DIR}" python server_api/main.py &
+PYTHONDONTWRITEBYTECODE=1 uv run --directory "${ROOT_DIR}" python -m server_api.main &
 API_PID=$!
 
 echo "Starting PyTC server (port 4243)..."
-uv run --directory "${ROOT_DIR}" python server_pytc/main.py &
+uv run --directory "${ROOT_DIR}" python -m server_pytc.main &
 PYTC_PID=$!
 
 echo "Starting React dev server (port 3000)..."
