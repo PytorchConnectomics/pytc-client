@@ -80,10 +80,11 @@ const FileTreeSidebar = ({ folders, files, currentFolder, onSelect, onDrop, onCo
         height: '100%',
         overflow: 'auto',
         backgroundColor: '#fafafa',
+        paddingBottom: 8,
         display: width === 0 ? 'none' : 'block', // Hide if collapsed
       }}
     >
-      <div style={{ padding: '10px 16px', fontWeight: 'bold', borderBottom: '1px solid #f0f0f0' }}>
+      <div style={{ padding: '12px 16px', fontWeight: 'bold', borderBottom: '1px solid #f0f0f0' }}>
         Explorer
       </div>
       <DirectoryTree
@@ -93,7 +94,7 @@ const FileTreeSidebar = ({ folders, files, currentFolder, onSelect, onDrop, onCo
         onSelect={onSelectHandler}
         treeData={treeData}
         expandAction="click"
-        style={{ backgroundColor: 'transparent' }}
+        style={{ backgroundColor: 'transparent', padding: '8px 12px' }}
         draggable
         blockNode
         onDrop={handleDrop}
