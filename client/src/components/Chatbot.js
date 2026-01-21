@@ -71,9 +71,11 @@ function Chatbot({ onClose }) {
   return (
     <div
       style={{
-        height: '100vh',
+        height: '100%',
+        minHeight: 0,
         display: 'flex',
-        flexDirection: 'column'
+        flexDirection: 'column',
+        overflow: 'hidden'
       }}
     >
       <div
@@ -109,6 +111,7 @@ function Chatbot({ onClose }) {
       <div
         style={{
           flex: 1,
+          minHeight: 0,
           overflow: 'auto',
           padding: '16px',
         }}
