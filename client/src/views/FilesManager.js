@@ -14,7 +14,14 @@ const transformFiles = (fileList) => {
     } else {
       const parentKey = f.path || 'root';
       if (!files[parentKey]) files[parentKey] = [];
-      files[parentKey].push({ key: String(f.id), name: f.name, size: f.size, type: f.type, is_folder: false });
+      files[parentKey].push({
+        key: String(f.id),
+        name: f.name,
+        size: f.size,
+        type: f.type,
+        physical_path: f.physical_path,
+        is_folder: false
+      });
     }
   });
   if (!folders.find((f) => f.key === 'root')) {
@@ -755,7 +762,16 @@ function FilesManager() {
           const newFile = res.data;
           setFiles((prev) => ({
             ...prev,
-            [currentFolder]: [...(prev[currentFolder] || []), { key: String(newFile.id), name: newFile.name, size: newFile.size, type: newFile.type }],
+            [currentFolder]: [
+              ...(prev[currentFolder] || []),
+              {
+                key: String(newFile.id),
+                name: newFile.name,
+                size: newFile.size,
+                type: newFile.type,
+                physical_path: newFile.physical_path,
+              }
+            ],
           }));
           message.success(`${file.name} uploaded`);
         } catch (err) {
@@ -765,6 +781,31 @@ function FilesManager() {
       }
     };
     input.click();
+  };
+
+  const getFilePreviewUrl = (file) => {
+    if (!file?.physical_path) return null;
+    const baseUrl = apiClient.defaults.baseURL || 'http://localhost:4242';
+    let pathForUrl = file.physical_path.replace(/\\/g, '/');
+    if (pathForUrl.includes('uploads/')) {
+      pathForUrl = pathForUrl.slice(pathForUrl.indexOf('uploads/'));
+    }
+    return `${baseUrl}/${pathForUrl}`;
+  };
+
+  const getContextMenuPosition = (menuItems) => {
+    if (!contextMenu || typeof window === 'undefined') {
+      return { left: 0, top: 0 };
+    }
+    const menuWidth = 220;
+    const estimatedHeight = Math.min(320, 12 + menuItems.length * 36);
+    const padding = 8;
+    const maxLeft = Math.max(padding, window.innerWidth - menuWidth - padding);
+    const maxTop = Math.max(padding, window.innerHeight - estimatedHeight - padding);
+    return {
+      left: Math.min(contextMenu.x, maxLeft),
+      top: Math.min(contextMenu.y, maxTop),
+    };
   };
 
   return (
@@ -920,11 +961,15 @@ function FilesManager() {
 
         {/* Context Menu */}
         {contextMenu && (
+          (() => {
+            const menuItems = getContextMenuItems();
+            const menuPosition = getContextMenuPosition(menuItems);
+            return (
           <div
             style={{
               position: 'fixed',
-              top: contextMenu.y,
-              left: contextMenu.x,
+              top: menuPosition.top,
+              left: menuPosition.left,
               zIndex: 1000,
               background: '#fff',
               boxShadow: '0 2px 8px rgba(0,0,0,0.15)',
@@ -947,9 +992,11 @@ function FilesManager() {
                 if (key === 'preview') handlePreview(contextMenu.key);
                 if (key === 'properties') handleProperties(selectedItems.length > 0 ? selectedItems : [contextMenu.key]);
               }}
-              items={getContextMenuItems()}
+              items={menuItems}
             />
           </div>
+            );
+          })()
         )}
 
         {/* Preview Modal */}
@@ -962,11 +1009,21 @@ function FilesManager() {
         >
           {previewFile && (
             <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', minHeight: 300 }}>
-              {previewFile.type?.startsWith('image') ? (
-                <Image src="https://via.placeholder.com/600x400?text=Image+Preview+Placeholder" alt={previewFile.name} style={{ maxWidth: '100%', maxHeight: 600 }} />
+              {previewFile.type?.startsWith('image') && getFilePreviewUrl(previewFile) ? (
+                <Image
+                  src={getFilePreviewUrl(previewFile)}
+                  alt={previewFile.name}
+                  style={{ maxWidth: '100%', maxHeight: 600 }}
+                />
               ) : (
-                <div style={{ padding: 20, background: '#f5f5f5', width: '100%', borderRadius: 8 }}>
-                  <pre style={{ whiteSpace: 'pre-wrap' }}>{previewFile.name === 'readme.txt' ? "This is a dummy text file content.\n\nIn a real app, this would fetch the file content from the server." : "Preview not available for this file type."}</pre>
+                <div style={{ padding: 20, background: '#fafafa', width: '100%', borderRadius: 8 }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 12 }}>
+                    <FileTextOutlined style={{ fontSize: 24, color: '#8c8c8c' }} />
+                    <div style={{ fontWeight: 600 }}>{previewFile.name}</div>
+                  </div>
+                  <div style={{ color: '#8c8c8c', marginBottom: 4 }}>Type: {previewFile.type || 'Unknown'}</div>
+                  <div style={{ color: '#8c8c8c' }}>Size: {previewFile.size || 'N/A'}</div>
+                  <div style={{ marginTop: 12, color: '#8c8c8c' }}>Preview unavailable for this file type.</div>
                 </div>
               )}
             </div>
