@@ -1,5 +1,5 @@
-import React, { useState } from 'react';
-import { Modal, Button, Checkbox, Space, Typography, Row, Col } from 'antd';
+import React, { useEffect, useState } from 'react';
+import { Modal, Button, Checkbox, Space, Typography, Row, Col, Card } from 'antd';
 import {
   FolderOpenOutlined,
   BugOutlined,
@@ -12,7 +12,7 @@ import {
 
 const { Title, Text } = Typography;
 
-const WorkflowSelector = ({ visible, onSelect, onCancel, isManual }) => {
+const WorkflowSelector = ({ visible, onSelect, onCancel, isManual, initialModes }) => {
   // Default to having Files selected
   const [selectedModes, setSelectedModes] = useState(['files']);
   const [remember, setRemember] = useState(false);
@@ -26,13 +26,22 @@ const WorkflowSelector = ({ visible, onSelect, onCancel, isManual }) => {
     { label: 'Visualization', value: 'visualization', icon: <EyeOutlined /> },
     { label: 'Model Training', value: 'training', icon: <ExperimentOutlined /> },
     { label: 'Model Inference', value: 'inference', icon: <ThunderboltOutlined /> },
-    { label: 'Tensorboard', value: 'monitoring', icon: <DashboardOutlined /> },
+    { label: 'TensorBoard', value: 'monitoring', icon: <DashboardOutlined /> },
     { label: 'SynAnno', value: 'synanno', icon: <ApartmentOutlined /> },
     { label: 'Worm Error Handling', value: 'worm-error-handling', icon: <BugOutlined /> }
   ];
 
-  const onChange = (checkedValues) => {
-    setSelectedModes(checkedValues);
+  useEffect(() => {
+    if (visible) {
+      setSelectedModes((initialModes && initialModes.length > 0) ? initialModes : ['files']);
+      setRemember(false);
+    }
+  }, [visible, initialModes]);
+
+  const toggleMode = (value) => {
+    setSelectedModes((prev) => (
+      prev.includes(value) ? prev.filter((v) => v !== value) : [...prev, value]
+    ));
   };
 
   return (
@@ -53,8 +62,8 @@ const WorkflowSelector = ({ visible, onSelect, onCancel, isManual }) => {
           {isManual ? 'Save Preference' : 'Launch Selected'}
         </Button>,
       ]}
-      closable={isManual} // Allow closing if manual
-      maskClosable={isManual}
+      closable
+      maskClosable
       centered
       width={600}
     >
@@ -66,37 +75,42 @@ const WorkflowSelector = ({ visible, onSelect, onCancel, isManual }) => {
         </Text>
       </div>
 
-      <Checkbox.Group
-        value={selectedModes}
-        onChange={onChange}
-        style={{ width: '100%' }}
-      >
-        <Row gutter={[16, 16]}>
-          {options.map(opt => (
+      <Row gutter={[16, 16]}>
+        {options.map((opt) => {
+          const isSelected = selectedModes.includes(opt.value);
+          return (
             <Col span={12} key={opt.value}>
-              <div style={{
-                border: '1px solid #d9d9d9',
-                borderRadius: '4px',
-                padding: '12px',
-                height: '100%',
-                display: 'flex',
-                alignItems: 'center',
-                backgroundColor: selectedModes.includes(opt.value) ? '#e6f7ff' : 'transparent',
-                borderColor: selectedModes.includes(opt.value) ? '#1890ff' : '#d9d9d9'
-              }}>
-                <Checkbox value={opt.value} style={{ width: '100%' }}>
-                  <Space>
-                    {opt.icon}
-                    <span style={{ fontSize: 16 }}>{opt.label}</span>
-                  </Space>
-                </Checkbox>
-              </div>
+              <Card
+                size="small"
+                hoverable
+                onClick={() => toggleMode(opt.value)}
+                bodyStyle={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 12,
+                  padding: 12,
+                }}
+                style={{
+                  borderColor: isSelected ? '#1677ff' : '#f0f0f0',
+                  backgroundColor: isSelected ? '#f0f7ff' : '#fff',
+                }}
+              >
+                <Checkbox
+                  checked={isSelected}
+                  onChange={() => toggleMode(opt.value)}
+                  onClick={(e) => e.stopPropagation()}
+                />
+                <Space>
+                  {opt.icon}
+                  <span style={{ fontSize: 16 }}>{opt.label}</span>
+                </Space>
+              </Card>
             </Col>
-          ))}
-        </Row>
-      </Checkbox.Group>
+          );
+        })}
+      </Row>
 
-      <div style={{ marginTop: 24, textAlign: 'center' }}>
+      <div style={{ marginTop: 16 }}>
         <Checkbox checked={remember} onChange={e => setRemember(e.target.checked)}>
           {isManual ? 'Enable auto-launch with these settings' : 'Remember my choice'}
         </Checkbox>

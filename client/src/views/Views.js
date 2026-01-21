@@ -42,7 +42,7 @@ function Views() {
     { label: 'Visualization', key: 'visualization', icon: <EyeOutlined /> },
     { label: 'Model Training', key: 'training', icon: <ExperimentOutlined /> },
     { label: 'Model Inference', key: 'inference', icon: <ThunderboltOutlined /> },
-    { label: 'Tensorboard', key: 'monitoring', icon: <DashboardOutlined /> },
+    { label: 'TensorBoard', key: 'monitoring', icon: <DashboardOutlined /> },
     { label: 'SynAnno', key: 'synanno', icon: <ApartmentOutlined /> },
     { label: 'Worm Error Handling', key: 'worm-error-handling', icon: <BugOutlined /> }
   ]
@@ -243,6 +243,7 @@ function Views() {
           }
         }}
         isManual={isManualChange}
+        initialModes={[...visibleTabs]}
       />
 
       <div style={{ display: 'flex', alignItems: 'center', background: '#fff', paddingRight: 24, borderBottom: '1px solid #f0f0f0' }}>
