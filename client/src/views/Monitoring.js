@@ -21,18 +21,19 @@ function Monitoring () {
   }, [tensorboardURL])
 
   return (
-    <>
+    <div style={{ height: '100%', minHeight: 0 }}>
       {tensorboardURL && (
         <iframe
-          title='Tensorboard Display'
+          title='TensorBoard Display'
           width='100%'
-          height='800'
+          height='100%'
           frameBorder='0'
           scrolling='no'
           src={tensorboardURL}
+          style={{ height: '100%', minHeight: 360, border: 0 }}
         />
       )}
-    </>
+    </div>
   )
 }
 export default Monitoring

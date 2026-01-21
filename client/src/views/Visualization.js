@@ -160,14 +160,14 @@ function Visualization(props) {
     <div style={{ height: '100%', display: 'flex', flexDirection: 'column' }}>
       {/* Input Section */}
       <div style={{ padding: '16px', background: '#f5f5f5', borderRadius: '8px', marginBottom: '16px' }}>
-        <Space wrap align="end">
+        <Space wrap align="end" size="large">
           <div>
             <Title level={5} style={{ margin: '0 0 8px 0' }}>Image</Title>
             <UnifiedFileInput
               placeholder='Please select or input image path'
               onChange={handleImageChange}
               value={currentImage}
-              style={{ width: '200px' }}
+              style={{ width: 240 }}
             />
           </div>
 
@@ -177,7 +177,7 @@ function Visualization(props) {
               placeholder='Please select or input label path'
               onChange={handleLabelChange}
               value={currentLabel}
-              style={{ width: '200px' }}
+              style={{ width: 240 }}
             />
           </div>
 
@@ -187,7 +187,7 @@ function Visualization(props) {
               placeholder='30,6,6'
               value={scales}
               onChange={handleInputScales}
-              style={{ width: '150px' }}
+              style={{ width: 180 }}
             />
           </div>
 
@@ -212,6 +212,7 @@ function Visualization(props) {
             onEdit={handleEdit}
             activeKey={activeKey}
             onChange={handleChange}
+            style={{ height: '100%' }}
             items={viewers.map((viewer) => ({
               label: (
                 <span>
@@ -228,15 +229,17 @@ function Visualization(props) {
               ),
               key: viewer.key,
               children: (
-                <iframe
-                  title='Viewer Display'
-                  width='100%'
-                  height='800'
-                  frameBorder='0'
-                  scrolling='no'
-                  src={viewer.viewer}
-                  style={{ height: 'calc(100vh - 250px)' }}
-                />
+                <div style={{ height: '100%' }}>
+                  <iframe
+                    title='Viewer Display'
+                    width='100%'
+                    height='100%'
+                    frameBorder='0'
+                    scrolling='no'
+                    src={viewer.viewer}
+                    style={{ height: '100%', minHeight: 360, border: 0 }}
+                  />
+                </div>
               )
             }))}
           />
