@@ -18,7 +18,7 @@ function Welcome() {
       display: 'flex',
       alignItems: 'center',
       justifyContent: 'center',
-      background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
+      background: 'linear-gradient(180deg, #f6f7f9 0%, #eef1f5 100%)',
       padding: 20
     }}>
       <Card
@@ -26,9 +26,9 @@ function Welcome() {
           maxWidth: 480,
           width: '100%',
           textAlign: 'center',
-          borderRadius: 16,
-          boxShadow: '0 10px 25px rgba(0,0,0,0.2)',
-          border: 'none',
+          borderRadius: 12,
+          boxShadow: '0 8px 24px rgba(0,0,0,0.08)',
+          border: '1px solid #f0f0f0',
           overflow: 'hidden'
         }}
         bodyStyle={{ padding: '40px 32px' }}
@@ -37,15 +37,15 @@ function Welcome() {
           <div style={{
             width: 80,
             height: 80,
-            background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
-            borderRadius: '50%',
+            background: '#e6f4ff',
+            borderRadius: 12,
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'center',
             margin: '0 auto 16px',
-            color: 'white',
+            color: '#1677ff',
             fontSize: 32,
-            boxShadow: '0 4px 10px rgba(118, 75, 162, 0.3)'
+            border: '1px solid #d6e4ff'
           }}>
             <RocketOutlined />
           </div>
@@ -63,9 +63,7 @@ function Welcome() {
             style={{
               height: 48,
               fontSize: 16,
-              borderRadius: 8,
-              background: 'linear-gradient(90deg, #667eea 0%, #764ba2 100%)',
-              border: 'none'
+              borderRadius: 8
             }}
             onClick={signIn}
           >
