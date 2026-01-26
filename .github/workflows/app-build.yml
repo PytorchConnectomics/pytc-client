@@ -41,6 +41,7 @@ jobs:
       - name: Build Client App
         env:
           ELECTRON_ENABLE_LOGGING: true
+          ELECTRON_DISABLE_SANDBOX: true
           DISPLAY: ':99.0'
         run: |
           cd client
