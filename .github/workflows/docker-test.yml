@@ -8,7 +8,7 @@ name: Docker Build and Smoke Test
     paths:
       - "pytc-client/Dockerfile"
       - "pytc-client/docker-compose.yaml"
-      - "pytc-client/scripts/docker-entrypoint.sh"
+      - "scripts/docker-entrypoint.sh"
       - "pytc-client/setup_pytorch_connectomics.sh"
       - "pytc-client/pyproject.toml"
       - "pytc-client/uv.lock"
