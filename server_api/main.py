@@ -59,11 +59,6 @@ def save_upload_to_tempfile(upload: UploadFile) -> pathlib.Path:
     return temp_path
 
 
-@app.get("/hello")
-def hello():
-    return {"message": "hello"}
-
-
 @app.post("/neuroglancer")
 async def neuroglancer(req: Request):
     import neuroglancer

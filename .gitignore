@@ -1,41 +1,15 @@
 # OS / IDE clutter
-.idea/
 .DS_Store
-*.pyc
-*.pclprof
-*.png
 
-# Node / frontend artifacts
-node_modules/
-client/build/
-client/dist/
-client/.parcel-cache/
-package-lock.json
-client/package-lock.json
+# Frontend
+node_modules
+client/build
 
 # Python environments / caches
 .venv
-.venv/
-__pycache__/
-.pytest_cache/
+__pycache__
 
-# Data / generated artifacts
-logs/
-data/
-outputs/
-build/
-mnt/
-samples_pytc/*
-pytc/
-pytorch_connectomics/
-
-# Misc tooling / temporary files
-.coverage
-coverage.xml
-dist/
-
-*.log
-.github/workflows/docker-test.yml
-
-uploads/
+# Other
 sql_app.db
+uploads
+pytorch_connectomics

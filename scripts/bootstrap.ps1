@@ -45,4 +45,4 @@ Push-Location $clientDir
 npm install
 Pop-Location
 
-Write-Host 'Bootstrap complete. Use scripts\dev.ps1 or start.bat to launch the app.'
+Write-Host 'Bootstrap complete. Use scripts\start.bat to launch the app.'
