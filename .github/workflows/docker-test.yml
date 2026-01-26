@@ -37,12 +37,12 @@ jobs:
         uses: docker/setup-buildx-action@v3
 
       - name: Build backend image
-        working-directory: pytc-client
+        working-directory: .
         run: |
           docker build -t pytc-backend .
 
       - name: Run backend container
-        working-directory: pytc-client
+        working-directory: .
         run: |
           docker run -d \
             --name pytc-backend \
