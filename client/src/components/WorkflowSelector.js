@@ -78,7 +78,6 @@ const WorkflowSelector = ({ visible, onSelect, onCancel, isManual }) => {
                 border: '1px solid #d9d9d9',
                 borderRadius: '4px',
                 padding: '12px',
-                height: '100%',
                 display: 'flex',
                 alignItems: 'center',
                 backgroundColor: selectedModes.includes(opt.value) ? '#e6f7ff' : 'transparent',
