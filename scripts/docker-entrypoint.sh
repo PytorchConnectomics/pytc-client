@@ -1,4 +1,4 @@
-#!/usr/bin/env bash
+# THIS IS A TEST
 
 set -euo pipefail
 
