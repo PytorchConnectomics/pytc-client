@@ -1,5 +1,3 @@
-param()
-
 $ErrorActionPreference = 'Stop'
 
 $scriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
@@ -13,8 +11,8 @@ function RequireCommand([string]$command, [string]$message) {
     }
 }
 
-RequireCommand 'uv' 'uv is required. Install it from https://docs.astral.sh/uv/'
-RequireCommand 'npm' 'npm is required to install the Electron client.'
+RequireCommand 'uv' 'uv is required. Install it from https://docs.astral.sh/uv/.'
+RequireCommand 'npm' 'npm is required to run the Electron client.'
 RequireCommand 'git' 'git is required to download pytorch_connectomics.'
 
 Write-Host 'Synchronizing Python environment with uv...'
@@ -37,12 +35,9 @@ if (Test-Path (Join-Path $pytcDir '.git')) {
     Pop-Location
 }
 
-Write-Host 'Installing pytorch_connectomics into the uv environment...'
-uv pip install --directory $rootDir --editable $pytcDir
-
 Write-Host 'Installing frontend dependencies...'
 Push-Location $clientDir
 npm install
 Pop-Location
 
-Write-Host 'Bootstrap complete. Use scripts\start.bat to launch the app.'
+Write-Host 'Bootstrap complete. Use scripts\start.ps1 to launch the app.'
