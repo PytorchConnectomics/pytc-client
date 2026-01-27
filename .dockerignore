@@ -1,13 +1,5 @@
 .git
-.gitmodules
-*.pyc
-*.pyo
-*.pyd
 __pycache__
 .DS_Store
 node_modules
-client/node_modules
-logs
-outputs
 .venv
-.env

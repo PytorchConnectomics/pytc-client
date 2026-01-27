@@ -2,10 +2,6 @@ const path = require('path')
 const url = require('url')
 const { app, BrowserWindow, ipcMain, dialog, Menu } = require('electron')
 
-// require('electron-reload')(__dirname, {
-//   electron: require(path.join(__dirname, 'node_modules', 'electron'))
-// })
-
 let mainWindow
 
 function createWindow() {
@@ -34,9 +30,6 @@ function createWindow() {
 
   mainWindow.loadURL(startUrl)
 
-  // comment out to stop dev tools from opening
-  // mainWindow.webContents.openDevTools();
-
   mainWindow.on('closed', () => {
     mainWindow = null
   })
@@ -45,7 +38,6 @@ function createWindow() {
 }
 
 function createMenu() {
-  const isMac = process.platform === 'darwin'
 
   const template = [
     {

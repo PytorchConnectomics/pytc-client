@@ -19,7 +19,7 @@ echo "Synchronizing Python environment with uv..."
 uv sync --python 3.11 --directory "${ROOT_DIR}"
 
 echo "Preparing pytorch_connectomics dependency..."
-"${ROOT_DIR}/setup_pytorch_connectomics.sh"
+"${ROOT_DIR}/scripts/setup_pytorch_connectomics.sh"
 
 if [ -d "${ROOT_DIR}/pytorch_connectomics" ]; then
     echo "pytorch_connectomics directory found."
@@ -30,4 +30,4 @@ pushd "${CLIENT_DIR}" >/dev/null
 npm install
 popd >/dev/null
 
-echo "Bootstrap complete. Use ./scripts/dev.sh or ./start.sh to launch the app."
+echo "Bootstrap complete. Use ./scripts/start.sh to launch the app."

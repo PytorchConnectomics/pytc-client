@@ -49,7 +49,7 @@ PYTC_PID=$!
 
 echo "Starting React dev server (port 3000)..."
 pushd "${CLIENT_DIR}" >/dev/null
-PORT=3000 BROWSER=none npm start > react.log 2>&1 &
+PORT=3000 BROWSER=none npm start >/dev/null 2>&1 &
 REACT_PID=$!
 
 # Robust readiness check with progress feedback
@@ -66,7 +66,6 @@ wait_for_react() {
         sleep 1
     done
     echo "ERROR: React dev server failed to start within ${max_attempts} seconds" >&2
-    echo "Check client/react.log for details." >&2
     return 1
 }
 

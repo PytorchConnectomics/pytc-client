@@ -8,7 +8,6 @@ Resolution: 5nm per voxel
 import sqlite3
 import random
 import os
-from datetime import datetime
 
 # Connect to database
 conn = sqlite3.connect('sql_app.db')

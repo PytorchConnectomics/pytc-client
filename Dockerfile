@@ -17,9 +17,9 @@ WORKDIR /app
 COPY pyproject.toml uv.lock ./
 RUN uv sync --frozen --no-dev --python 3.11
 
-COPY setup_pytorch_connectomics.sh ./setup_pytorch_connectomics.sh
-RUN chmod +x setup_pytorch_connectomics.sh && \
-    ./setup_pytorch_connectomics.sh --force && \
+COPY scripts/setup_pytorch_connectomics.sh ./scripts/setup_pytorch_connectomics.sh
+RUN chmod +x scripts/setup_pytorch_connectomics.sh && \
+    ./scripts/setup_pytorch_connectomics.sh --force && \
     uv pip install --directory /app --editable /app/pytorch_connectomics && \
     rm -rf /app/pytorch_connectomics/.git
 
