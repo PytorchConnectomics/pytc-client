@@ -7,6 +7,7 @@ import {
   SelectOutlined,
   ClearOutlined,
 } from "@ant-design/icons";
+import InlineHelpChat from "../../components/InlineHelpChat";
 
 /**
  * Classification Panel Component
@@ -18,10 +19,27 @@ function ClassificationPanel({
   onSelectAll,
   onClearSelection,
 }) {
+  const projectContext =
+    "Mitochondria segmentation on an electron microscopy volume.";
+  const taskContext =
+    "Segmentation proofreading workflow (error handling tool).";
+
   return (
     <div style={{ padding: "16px" }}>
       <Card
-        title="Classification"
+        title={
+          <Space align="center">
+            <span>Classification</span>
+            <InlineHelpChat
+              taskKey="worm-error-handling"
+              label="Classification"
+              yamlKey="EHTOOL.CLASSIFICATION"
+              value={selectedCount}
+              projectContext={projectContext}
+              taskContext={taskContext}
+            />
+          </Space>
+        }
         size="small"
         style={{ marginBottom: "16px" }}
       >
@@ -69,7 +87,22 @@ function ClassificationPanel({
         </Space>
       </Card>
 
-      <Card title="Selection" size="small">
+      <Card
+        title={
+          <Space align="center">
+            <span>Selection</span>
+            <InlineHelpChat
+              taskKey="worm-error-handling"
+              label="Selection"
+              yamlKey="EHTOOL.SELECTION"
+              value={selectedCount}
+              projectContext={projectContext}
+              taskContext={taskContext}
+            />
+          </Space>
+        }
+        size="small"
+      >
         <Space direction="vertical" style={{ width: "100%" }} size="small">
           <Button icon={<SelectOutlined />} onClick={onSelectAll} block>
             Select All (Ctrl+A)
@@ -96,7 +129,19 @@ function ClassificationPanel({
           fontSize: "12px",
         }}
       >
-        <h4 style={{ marginTop: 0, fontSize: "13px" }}>Keyboard Shortcuts:</h4>
+        <Space align="center" style={{ marginBottom: 4 }}>
+          <h4 style={{ marginTop: 0, fontSize: "13px" }}>
+            Keyboard Shortcuts:
+          </h4>
+          <InlineHelpChat
+            taskKey="worm-error-handling"
+            label="Keyboard shortcuts"
+            yamlKey="EHTOOL.SHORTCUTS"
+            value={null}
+            projectContext={projectContext}
+            taskContext={taskContext}
+          />
+        </Space>
         <ul style={{ marginBottom: 0, paddingLeft: "20px" }}>
           <li>
             <kbd>C</kbd> - Mark as Correct

@@ -1,11 +1,18 @@
-import { Form } from "antd";
+import { Form, Space } from "antd";
 import React, { useContext } from "react";
 import { AppContext } from "../contexts/GlobalContext";
 import UnifiedFileInput from "./UnifiedFileInput";
+import InlineHelpChat from "./InlineHelpChat";
 
 function InputSelector(props) {
   const context = useContext(AppContext);
   const { type } = props;
+  const projectContext =
+    "Mitochondria segmentation on an electron microscopy volume.";
+  const taskContext =
+    type === "training"
+      ? "Model training configuration in PyTorch Connectomics."
+      : "Model inference configuration in PyTorch Connectomics.";
 
   const handleLogPathChange = (value) => {
     context.setLogPath(value);
@@ -45,7 +52,21 @@ function InputSelector(props) {
           span: 14,
         }}
       >
-        <Form.Item label="Input Image">
+        <Form.Item
+          label={
+            <Space align="center">
+              <span>Input Image</span>
+              <InlineHelpChat
+                taskKey={type}
+                label="Input Image"
+                yamlKey="DATASET.INPUT_IMAGE"
+                value={context.inputImage}
+                projectContext={projectContext}
+                taskContext={taskContext}
+              />
+            </Space>
+          }
+        >
           <UnifiedFileInput
             placeholder="Please select or input image path"
             onChange={handleImageChange}
@@ -53,7 +74,21 @@ function InputSelector(props) {
             selectionType={type === 'training' || type === 'inference' ? 'fileOrDirectory' : 'file'}
           />
         </Form.Item>
-        <Form.Item label="Input Label">
+        <Form.Item
+          label={
+            <Space align="center">
+              <span>Input Label</span>
+              <InlineHelpChat
+                taskKey={type}
+                label="Input Label"
+                yamlKey="DATASET.INPUT_LABEL"
+                value={context.inputLabel}
+                projectContext={projectContext}
+                taskContext={taskContext}
+              />
+            </Space>
+          }
+        >
           <UnifiedFileInput
             placeholder="Please select or input label path"
             onChange={handleLabelChange}
@@ -62,7 +97,21 @@ function InputSelector(props) {
           />
         </Form.Item>
         {type === "training" ? (
-          <Form.Item label="Output Path">
+          <Form.Item
+            label={
+              <Space align="center">
+                <span>Output Path</span>
+                <InlineHelpChat
+                  taskKey={type}
+                  label="Output Path"
+                  yamlKey="DATASET.OUTPUT_PATH"
+                  value={context.outputPath}
+                  projectContext={projectContext}
+                  taskContext={taskContext}
+                />
+              </Space>
+            }
+          >
             <UnifiedFileInput
               placeholder="Directory for outputs (e.g., /path/to/outputs/)"
               value={context.outputPath || ""}
@@ -72,7 +121,19 @@ function InputSelector(props) {
           </Form.Item>
         ) : (
           <Form.Item
-            label="Output Path"
+            label={
+              <Space align="center">
+                <span>Output Path</span>
+                <InlineHelpChat
+                  taskKey={type}
+                  label="Output Path"
+                  yamlKey="INFERENCE.OUTPUT_PATH"
+                  value={context.outputPath}
+                  projectContext={projectContext}
+                  taskContext={taskContext}
+                />
+              </Space>
+            }
             help="Directory where inference results will be saved"
           >
             <UnifiedFileInput
@@ -84,7 +145,21 @@ function InputSelector(props) {
           </Form.Item>
         )}
         {type === "training" ? (
-          <Form.Item label="Log Path">
+          <Form.Item
+            label={
+              <Space align="center">
+                <span>Log Path</span>
+                <InlineHelpChat
+                  taskKey={type}
+                  label="Log Path"
+                  yamlKey="SOLVER.LOG_PATH"
+                  value={context.logPath}
+                  projectContext={projectContext}
+                  taskContext={taskContext}
+                />
+              </Space>
+            }
+          >
             <UnifiedFileInput
               placeholder="Please type training log path"
               value={context.logPath || ""}
@@ -94,7 +169,19 @@ function InputSelector(props) {
           </Form.Item>
         ) : (
           <Form.Item
-            label="Checkpoint Path"
+            label={
+              <Space align="center">
+                <span>Checkpoint Path</span>
+                <InlineHelpChat
+                  taskKey={type}
+                  label="Checkpoint Path"
+                  yamlKey="MODEL.PRE_MODEL"
+                  value={context.checkpointPath}
+                  projectContext={projectContext}
+                  taskContext={taskContext}
+                />
+              </Space>
+            }
             help="Path to trained model file (.pth.tar)"
           >
             <UnifiedFileInput

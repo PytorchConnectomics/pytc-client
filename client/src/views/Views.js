@@ -22,10 +22,23 @@ import WormErrorHandling from "./WormErrorHandling";
 import WorkflowSelector from "../components/WorkflowSelector";
 import Chatbot from "../components/Chatbot";
 import apiClient from "../services/apiClient";
+import { initTaskAgent } from "../utils/api";
 
 const { Content } = Layout;
 
 const PREF_FILE_NAME = "workflow_preference.json";
+const PROJECT_CONTEXT =
+  "Mitochondria segmentation on an electron microscopy volume.";
+
+const TASK_CONTEXTS = {
+  files: "File management for datasets and configuration files.",
+  visualization: "Visualization of EM volumes and labels in Neuroglancer.",
+  training: "Model training configuration and execution in PyTorch Connectomics.",
+  inference: "Model inference configuration and execution in PyTorch Connectomics.",
+  monitoring: "Tensorboard monitoring and training metrics.",
+  synanno: "Synapse proofreading workflow.",
+  "worm-error-handling": "Segmentation proofreading workflow.",
+};
 
 function Views() {
   // State
@@ -35,6 +48,7 @@ function Views() {
   const [workflowModalVisible, setWorkflowModalVisible] = useState(false);
   const [isManualChange, setIsManualChange] = useState(false); // Flag for "Change Startup Mode"
   const [isChatOpen, setIsChatOpen] = useState(false);
+  const [pendingChatPrompt, setPendingChatPrompt] = useState(null);
   const [apiReady, setApiReady] = useState(false);
   const [hasShownApiWarning, setHasShownApiWarning] = useState(false);
 
@@ -226,6 +240,22 @@ function Views() {
 
     // Reset manual flag
     setIsManualChange(false);
+
+    // Initialize task-scoped agents for selected modules
+    try {
+      const modeList = Array.isArray(modes) ? modes : [modes];
+      await Promise.all(
+        modeList.map((mode) =>
+          initTaskAgent(
+            mode,
+            PROJECT_CONTEXT,
+            TASK_CONTEXTS[mode] || "Module assistance.",
+          ),
+        ),
+      );
+    } catch (err) {
+      console.warn("Failed to initialize task agents:", err);
+    }
   };
 
   // IPC Listener
@@ -265,6 +295,19 @@ function Views() {
       ipcRenderer.removeListener("reset-preference", handleResetPreference);
     };
   }, [current]);
+
+  useEffect(() => {
+    const handleChatPrompt = (event) => {
+      const prompt = event.detail?.prompt;
+      if (!prompt) return;
+      setPendingChatPrompt(prompt);
+      setIsChatOpen(true);
+    };
+    window.addEventListener("chatbot:prompt", handleChatPrompt);
+    return () => {
+      window.removeEventListener("chatbot:prompt", handleChatPrompt);
+    };
+  }, []);
 
   const renderTabContent = (key, component) => {
     if (!visitedTabs.has(key)) return null;
@@ -356,7 +399,11 @@ function Views() {
         destroyOnClose
         styles={{ header: { display: 'none' }, body: { padding: 0 } }}
       >
-        <Chatbot onClose={() => setIsChatOpen(false)} />
+        <Chatbot
+          onClose={() => setIsChatOpen(false)}
+          pendingPrompt={pendingChatPrompt}
+          onPromptConsumed={() => setPendingChatPrompt(null)}
+        />
       </Drawer>
     </Layout>
   );

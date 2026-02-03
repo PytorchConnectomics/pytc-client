@@ -8,6 +8,7 @@ import {
 import { AppContext } from "../contexts/GlobalContext";
 import { getNeuroglancerViewer } from "../utils/api";
 import UnifiedFileInput from "../components/UnifiedFileInput";
+import InlineHelpChat from "../components/InlineHelpChat";
 
 const { Title } = Typography;
 
@@ -23,6 +24,10 @@ function Visualization(props) {
   const [currentLabel, setCurrentLabel] = useState(null);
   const [scales, setScales] = useState("30,6,6");
   const [isLoading, setIsLoading] = useState(false);
+  const projectContext =
+    "Mitochondria segmentation on an electron microscopy volume.";
+  const taskContext =
+    "Visualization of EM volumes and labels in Neuroglancer.";
 
   // Update file list options - No longer needed for UnifiedFileInput but keeping context access
   const { files } = context;
@@ -174,7 +179,17 @@ function Visualization(props) {
         <Space wrap align="end">
           <div>
             <Title level={5} style={{ margin: "0 0 8px 0" }}>
-              Image
+              <Space align="center">
+                <span>Image</span>
+                <InlineHelpChat
+                  taskKey="visualization"
+                  label="Image"
+                  yamlKey="VISUALIZATION.IMAGE"
+                  value={currentImage}
+                  projectContext={projectContext}
+                  taskContext={taskContext}
+                />
+              </Space>
             </Title>
             <UnifiedFileInput
               placeholder="Please select or input image path"
@@ -186,7 +201,17 @@ function Visualization(props) {
 
           <div>
             <Title level={5} style={{ margin: "0 0 8px 0" }}>
-              Label
+              <Space align="center">
+                <span>Label</span>
+                <InlineHelpChat
+                  taskKey="visualization"
+                  label="Label"
+                  yamlKey="VISUALIZATION.LABEL"
+                  value={currentLabel}
+                  projectContext={projectContext}
+                  taskContext={taskContext}
+                />
+              </Space>
             </Title>
             <UnifiedFileInput
               placeholder="Please select or input label path"
@@ -198,7 +223,17 @@ function Visualization(props) {
 
           <div>
             <Title level={5} style={{ margin: "0 0 8px 0" }}>
-              Scales (z,y,x)
+              <Space align="center">
+                <span>Scales (z,y,x)</span>
+                <InlineHelpChat
+                  taskKey="visualization"
+                  label="Scales (z,y,x)"
+                  yamlKey="VISUALIZATION.SCALES"
+                  value={scales}
+                  projectContext={projectContext}
+                  taskContext={taskContext}
+                />
+              </Space>
             </Title>
             <Input
               placeholder="30,6,6"
@@ -208,14 +243,24 @@ function Visualization(props) {
             />
           </div>
 
-          <Button
-            type="primary"
-            onClick={fetchNeuroglancerViewer}
-            icon={<ArrowRightOutlined />}
-            loading={isLoading}
-          >
-            Visualize
-          </Button>
+          <Space align="center">
+            <Button
+              type="primary"
+              onClick={fetchNeuroglancerViewer}
+              icon={<ArrowRightOutlined />}
+              loading={isLoading}
+            >
+              Visualize
+            </Button>
+            <InlineHelpChat
+              taskKey="visualization"
+              label="Visualize"
+              yamlKey="VISUALIZATION.ACTION"
+              value={null}
+              projectContext={projectContext}
+              taskContext={taskContext}
+            />
+          </Space>
         </Space>
       </div>
 

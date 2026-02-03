@@ -6,6 +6,7 @@ import {
   QuestionOutlined,
   ArrowRightOutlined,
 } from "@ant-design/icons";
+import InlineHelpChat from "./InlineHelpChat";
 
 const { Text } = Typography;
 
@@ -56,6 +57,10 @@ function ProofreadingControls({ currentSynapse, onSave, onNext }) {
     );
   }
 
+  const projectContext =
+    "Mitochondria segmentation on an electron microscopy volume.";
+  const taskContext = "Synapse proofreading workflow.";
+
   return (
     <div
       style={{
@@ -68,7 +73,17 @@ function ProofreadingControls({ currentSynapse, onSave, onNext }) {
       {/* Current Synapse Info */}
       <div>
         <Text strong style={{ fontSize: "14px" }}>
-          Synapse #{currentSynapse.id}
+          <Space align="center">
+            <span>Synapse #{currentSynapse.id}</span>
+            <InlineHelpChat
+              taskKey="synanno"
+              label="Synapse info"
+              yamlKey="SYNAPSE.INFO"
+              value={currentSynapse.id}
+              projectContext={projectContext}
+              taskContext={taskContext}
+            />
+          </Space>
         </Text>
         <div style={{ marginTop: "8px" }}>
           <Text type="secondary" style={{ fontSize: "12px", display: "block" }}>
@@ -90,9 +105,17 @@ function ProofreadingControls({ currentSynapse, onSave, onNext }) {
 
       {/* Status Classification */}
       <div>
-        <Text strong style={{ display: "block", marginBottom: "12px" }}>
-          Status Classification
-        </Text>
+        <Space align="center" style={{ marginBottom: "12px" }}>
+          <Text strong>Status Classification</Text>
+          <InlineHelpChat
+            taskKey="synanno"
+            label="Status classification"
+            yamlKey="SYNAPSE.STATUS"
+            value={status}
+            projectContext={projectContext}
+            taskContext={taskContext}
+          />
+        </Space>
         <Space direction="vertical" style={{ width: "100%" }} size="small">
           <Button
             block
@@ -135,9 +158,17 @@ function ProofreadingControls({ currentSynapse, onSave, onNext }) {
 
       {/* Neuron ID Inputs */}
       <div>
-        <Text strong style={{ display: "block", marginBottom: "8px" }}>
-          Pre-synaptic Neuron ID
-        </Text>
+        <Space align="center" style={{ marginBottom: "8px" }}>
+          <Text strong>Pre-synaptic Neuron ID</Text>
+          <InlineHelpChat
+            taskKey="synanno"
+            label="Pre-synaptic neuron ID"
+            yamlKey="SYNAPSE.PRE_NEURON_ID"
+            value={preNeuronId}
+            projectContext={projectContext}
+            taskContext={taskContext}
+          />
+        </Space>
         <Input
           value={preNeuronId}
           onChange={(e) => setPreNeuronId(e.target.value)}
@@ -147,9 +178,17 @@ function ProofreadingControls({ currentSynapse, onSave, onNext }) {
       </div>
 
       <div>
-        <Text strong style={{ display: "block", marginBottom: "8px" }}>
-          Post-synaptic Neuron ID
-        </Text>
+        <Space align="center" style={{ marginBottom: "8px" }}>
+          <Text strong>Post-synaptic Neuron ID</Text>
+          <InlineHelpChat
+            taskKey="synanno"
+            label="Post-synaptic neuron ID"
+            yamlKey="SYNAPSE.POST_NEURON_ID"
+            value={postNeuronId}
+            projectContext={projectContext}
+            taskContext={taskContext}
+          />
+        </Space>
         <Input
           value={postNeuronId}
           onChange={(e) => setPostNeuronId(e.target.value)}
@@ -162,9 +201,19 @@ function ProofreadingControls({ currentSynapse, onSave, onNext }) {
 
       {/* Action Buttons */}
       <Space direction="vertical" style={{ width: "100%" }} size="small">
-        <Button block onClick={handleSave}>
-          Save (S)
-        </Button>
+        <Space align="center" style={{ width: "100%", justifyContent: "space-between" }}>
+          <Button block onClick={handleSave}>
+            Save (S)
+          </Button>
+          <InlineHelpChat
+            taskKey="synanno"
+            label="Save synapse"
+            yamlKey="SYNAPSE.SAVE"
+            value={status}
+            projectContext={projectContext}
+            taskContext={taskContext}
+          />
+        </Space>
         <Button
           block
           type="primary"

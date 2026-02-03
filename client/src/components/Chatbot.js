@@ -14,7 +14,7 @@ const initialMessage = [
   },
 ];
 
-function Chatbot({ onClose }) {
+function Chatbot({ onClose, pendingPrompt, onPromptConsumed }) {
   const [messages, setMessages] = useState(() => {
     const saved = localStorage.getItem("chatMessages");
     return saved ? JSON.parse(saved) : initialMessage;
@@ -22,6 +22,7 @@ function Chatbot({ onClose }) {
   const [inputValue, setInputValue] = useState("");
   const [isSending, setIsSending] = useState(false);
   const lastMessageRef = useRef(null);
+  const lastPromptRef = useRef(null);
 
   const scrollToLastMessage = () => {
     setTimeout(() => {
@@ -42,9 +43,18 @@ function Chatbot({ onClose }) {
     scrollToLastMessage();
   }, [messages, isSending]);
 
-  const handleSendMessage = async () => {
-    if (!inputValue.trim() || isSending) return;
-    const query = inputValue;
+  useEffect(() => {
+    if (!pendingPrompt || isSending) return;
+    if (pendingPrompt === lastPromptRef.current) return;
+    lastPromptRef.current = pendingPrompt;
+    sendMessage(pendingPrompt);
+    if (onPromptConsumed) {
+      onPromptConsumed();
+    }
+  }, [pendingPrompt, isSending, onPromptConsumed]);
+
+  const sendMessage = async (query) => {
+    if (!query.trim() || isSending) return;
     setInputValue("");
     const userMessage = { id: messages.length + 1, text: query, isUser: true };
     setMessages((prev) => [...prev, userMessage]);
@@ -69,6 +79,11 @@ function Chatbot({ onClose }) {
     } finally {
       setIsSending(false);
     }
+  };
+
+  const handleSendMessage = async () => {
+    if (!inputValue.trim() || isSending) return;
+    await sendMessage(inputValue);
   };
 
   const handleKeyPress = (e) => {

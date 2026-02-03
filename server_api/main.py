@@ -27,6 +27,8 @@ except Exception as exc:  # pragma: no cover - exercised indirectly via endpoint
 
 chain = None
 memory = None
+task_chains = {}
+task_memories = {}
 
 
 def _ensure_chatbot():
@@ -42,6 +44,25 @@ def _ensure_chatbot():
     except Exception as exc:  # pragma: no cover - runtime config issue
         chain = None
         memory = None
+        _chatbot_error = exc
+        return False
+
+
+def _ensure_task_chatbot(task_key: str, project_context: str, task_context: str):
+    if build_chain is None:
+        return False
+    if task_key in task_chains and task_key in task_memories:
+        return True
+    try:
+        task_chain, task_memory = build_chain(
+            project_context=project_context,
+            task_context=task_context,
+        )
+        task_chains[task_key] = task_chain
+        task_memories[task_key] = task_memory
+        return True
+    except Exception as exc:  # pragma: no cover
+        global _chatbot_error
         _chatbot_error = exc
         return False
 
@@ -453,6 +474,66 @@ async def chat_query(req: Request):
     body = await req.json()
     query = body.get("query")
     response = chain.invoke({"question": query})["answer"]
+    return {"response": response}
+
+
+@app.post("/chat/task/init")
+async def chat_task_init(req: Request):
+    if build_chain is None:
+        detail = "Chatbot is not configured"
+        if "_chatbot_error" in globals():
+            detail = f"{detail}: {_chatbot_error}"
+        raise HTTPException(status_code=503, detail=detail)
+
+    body = await req.json()
+    task_key = body.get("taskKey")
+    project_context = body.get("projectContext", "")
+    task_context = body.get("taskContext", "")
+    reset = bool(body.get("reset", False))
+
+    if not task_key:
+        raise HTTPException(status_code=400, detail="taskKey is required")
+
+    if task_key in task_chains and reset:
+        task_memories[task_key].clear()
+        return {"message": "Task agent reset", "taskKey": task_key}
+
+    if not _ensure_task_chatbot(task_key, project_context, task_context):
+        detail = "Task chatbot is not configured"
+        if "_chatbot_error" in globals():
+            detail = f"{detail}: {_chatbot_error}"
+        raise HTTPException(status_code=503, detail=detail)
+
+    return {"message": "Task agent ready", "taskKey": task_key}
+
+
+@app.post("/chat/task/query")
+async def chat_task_query(req: Request):
+    if build_chain is None:
+        detail = "Chatbot is not configured"
+        if "_chatbot_error" in globals():
+            detail = f"{detail}: {_chatbot_error}"
+        raise HTTPException(status_code=503, detail=detail)
+
+    body = await req.json()
+    task_key = body.get("taskKey")
+    query = body.get("query")
+    project_context = body.get("projectContext", "")
+    task_context = body.get("taskContext", "")
+
+    if not task_key:
+        raise HTTPException(status_code=400, detail="taskKey is required")
+    if not query:
+        raise HTTPException(status_code=400, detail="query is required")
+
+    if not _ensure_task_chatbot(task_key, project_context, task_context):
+        detail = "Task chatbot is not configured"
+        if "_chatbot_error" in globals():
+            detail = f"{detail}: {_chatbot_error}"
+        raise HTTPException(status_code=503, detail=detail)
+
+    task_chain = task_chains[task_key]
+    response = task_chain.invoke({"question": query})["answer"]
     return {"response": response}
 
 

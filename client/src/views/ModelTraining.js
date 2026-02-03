@@ -8,6 +8,7 @@ import {
 } from "../utils/api";
 import Configurator from "../components/Configurator";
 import { AppContext } from "../contexts/GlobalContext";
+import InlineHelpChat from "../components/InlineHelpChat";
 
 function ModelTraining() {
   const context = useContext(AppContext);
@@ -154,12 +155,32 @@ function ModelTraining() {
         {/* {"ModelTraining"} */}
         <Configurator fileList={context.files} type="training" />
         <Space wrap style={{ marginTop: 12 }}>
-          <Button onClick={handleStartButton} disabled={isTraining}>
-            Start Training
-          </Button>
-          <Button onClick={handleStopButton} disabled={!isTraining}>
-            Stop Training
-          </Button>
+          <Space align="center">
+            <Button onClick={handleStartButton} disabled={isTraining}>
+              Start Training
+            </Button>
+            <InlineHelpChat
+              taskKey="training"
+              label="Start Training"
+              yamlKey="TRAINING.START"
+              value={null}
+              projectContext="Mitochondria segmentation on an electron microscopy volume."
+              taskContext="Model training configuration and execution in PyTorch Connectomics."
+            />
+          </Space>
+          <Space align="center">
+            <Button onClick={handleStopButton} disabled={!isTraining}>
+              Stop Training
+            </Button>
+            <InlineHelpChat
+              taskKey="training"
+              label="Stop Training"
+              yamlKey="TRAINING.STOP"
+              value={null}
+              projectContext="Mitochondria segmentation on an electron microscopy volume."
+              taskContext="Model training configuration and execution in PyTorch Connectomics."
+            />
+          </Space>
         </Space>
         {/* <Button onClick={handleTensorboardButton}>Tensorboard</Button> */}
         <p style={{ marginTop: 4 }}>{trainingStatus}</p>

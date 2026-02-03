@@ -1,5 +1,5 @@
 import React from "react";
-import { Card, Progress, Statistic, Row, Col, Button, Divider } from "antd";
+import { Card, Progress, Statistic, Row, Col, Button, Divider, Space } from "antd";
 import {
   CheckCircleOutlined,
   CloseCircleOutlined,
@@ -8,6 +8,7 @@ import {
   FolderOpenOutlined,
   EditOutlined,
 } from "@ant-design/icons";
+import InlineHelpChat from "../../components/InlineHelpChat";
 
 /**
  * Progress Tracker Component
@@ -20,6 +21,11 @@ function ProgressTracker({
   onNewSession,
   onStartProofreading,
 }) {
+  const projectContext =
+    "Mitochondria segmentation on an electron microscopy volume.";
+  const taskContext =
+    "Segmentation proofreading workflow (error handling tool).";
+
   if (!stats) {
     return (
       <div style={{ padding: "16px" }}>
@@ -36,7 +42,23 @@ function ProgressTracker({
 
   return (
     <div style={{ padding: "16px" }}>
-      <Card title="Project Info" size="small" style={{ marginBottom: "16px" }}>
+      <Card
+        title={
+          <Space align="center">
+            <span>Project Info</span>
+            <InlineHelpChat
+              taskKey="worm-error-handling"
+              label="Project info"
+              yamlKey="EHTOOL.PROJECT_INFO"
+              value={projectName}
+              projectContext={projectContext}
+              taskContext={taskContext}
+            />
+          </Space>
+        }
+        size="small"
+        style={{ marginBottom: "16px" }}
+      >
         <div style={{ marginBottom: "8px" }}>
           <strong>{projectName}</strong>
         </div>
@@ -45,7 +67,23 @@ function ProgressTracker({
         </div>
       </Card>
 
-      <Card title="Progress" size="small" style={{ marginBottom: "16px" }}>
+      <Card
+        title={
+          <Space align="center">
+            <span>Progress</span>
+            <InlineHelpChat
+              taskKey="worm-error-handling"
+              label="Progress"
+              yamlKey="EHTOOL.PROGRESS"
+              value={stats.reviewed}
+              projectContext={projectContext}
+              taskContext={taskContext}
+            />
+          </Space>
+        }
+        size="small"
+        style={{ marginBottom: "16px" }}
+      >
         <Progress
           percent={progressPercent}
           status={progressPercent === 100 ? "success" : "active"}
@@ -67,7 +105,19 @@ function ProgressTracker({
       </Card>
 
       <Card
-        title="Classification Summary"
+        title={
+          <Space align="center">
+            <span>Classification Summary</span>
+            <InlineHelpChat
+              taskKey="worm-error-handling"
+              label="Classification Summary"
+              yamlKey="EHTOOL.SUMMARY"
+              value={stats}
+              projectContext={projectContext}
+              taskContext={taskContext}
+            />
+          </Space>
+        }
         size="small"
         style={{ marginBottom: "16px" }}
       >
@@ -112,20 +162,39 @@ function ProgressTracker({
       <Divider />
 
       {stats && stats.incorrect > 0 && (
-        <Button
-          type="primary"
-          icon={<EditOutlined />}
-          onClick={onStartProofreading}
-          block
-          style={{ marginBottom: "12px" }}
-        >
-          Proofread Incorrect Layers ({stats.incorrect})
-        </Button>
+        <Space align="center" style={{ width: "100%", marginBottom: "12px" }}>
+          <Button
+            type="primary"
+            icon={<EditOutlined />}
+            onClick={onStartProofreading}
+            block
+          >
+            Proofread Incorrect Layers ({stats.incorrect})
+          </Button>
+          <InlineHelpChat
+            taskKey="worm-error-handling"
+            label="Proofread incorrect layers"
+            yamlKey="EHTOOL.PROOFREAD"
+            value={stats.incorrect}
+            projectContext={projectContext}
+            taskContext={taskContext}
+          />
+        </Space>
       )}
 
-      <Button icon={<FolderOpenOutlined />} onClick={onNewSession} block>
-        Load New Dataset
-      </Button>
+      <Space align="center" style={{ width: "100%" }}>
+        <Button icon={<FolderOpenOutlined />} onClick={onNewSession} block>
+          Load New Dataset
+        </Button>
+        <InlineHelpChat
+          taskKey="worm-error-handling"
+          label="Load new dataset"
+          yamlKey="EHTOOL.NEW_DATASET"
+          value={null}
+          projectContext={projectContext}
+          taskContext={taskContext}
+        />
+      </Space>
     </div>
   );
 }

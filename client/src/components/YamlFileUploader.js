@@ -1,16 +1,23 @@
 // global FileReader
 import React, { Fragment, useContext, useEffect, useState } from "react";
-import { Button, Col, message, Row, Slider, Upload } from "antd";
+import { Button, Col, message, Row, Slider, Space, Upload } from "antd";
 import { UploadOutlined } from "@ant-design/icons";
 import yaml from "js-yaml";
 import { AppContext } from "../contexts/GlobalContext";
 import { YamlContext } from "../contexts/YamlContext";
 import { findCommonPartOfString } from "../utils/utils";
+import InlineHelpChat from "./InlineHelpChat";
 
 const YamlFileUploader = (props) => {
   const context = useContext(AppContext);
   const YAMLContext = useContext(YamlContext);
   const { type } = props;
+  const projectContext =
+    "Mitochondria segmentation on an electron microscopy volume.";
+  const taskContext =
+    type === "training"
+      ? "Model training configuration in PyTorch Connectomics."
+      : "Model inference configuration in PyTorch Connectomics.";
 
   const [, setYamlContent] = useState("");
 
@@ -254,11 +261,21 @@ const YamlFileUploader = (props) => {
 
   return (
     <div style={{ margin: "10px" }}>
-      <Upload beforeUpload={handleFileUpload} showUploadList={false}>
-        <Button icon={<UploadOutlined />} size="small">
-          Upload YAML File
-        </Button>
-      </Upload>
+      <Space align="center">
+        <Upload beforeUpload={handleFileUpload} showUploadList={false}>
+          <Button icon={<UploadOutlined />} size="small">
+            Upload YAML File
+          </Button>
+        </Upload>
+        <InlineHelpChat
+          taskKey={type}
+          label="Upload YAML File"
+          yamlKey="CONFIG.UPLOAD"
+          value={context.uploadedYamlFile?.name}
+          projectContext={projectContext}
+          taskContext={taskContext}
+        />
+      </Space>
       {((type === "training" && context.trainingConfig !== null) ||
         (type === "inference" && context.inferenceConfig !== null)) && (
         <>
@@ -271,7 +288,17 @@ const YamlFileUploader = (props) => {
                 <Fragment key={index}>
                   <Col span={8} offset={2}>
                     <div>
-                      <h4>{param.label}</h4>
+                      <Space align="center">
+                        <h4 style={{ marginBottom: 0 }}>{param.label}</h4>
+                        <InlineHelpChat
+                          taskKey={type}
+                          label={param.label}
+                          yamlKey={`${param.location}.${param.property}`}
+                          value={param.value}
+                          projectContext={projectContext}
+                          taskContext={taskContext}
+                        />
+                      </Space>
                       <Slider
                         min={param.min}
                         max={param.max}

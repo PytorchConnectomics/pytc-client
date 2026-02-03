@@ -1,13 +1,19 @@
 import React, { useContext, useEffect, useState } from "react";
-import { Input, message } from "antd";
+import { Input, message, Space } from "antd";
 import yaml from "js-yaml";
 import { AppContext } from "../contexts/GlobalContext";
+import InlineHelpChat from "./InlineHelpChat";
 
 const YamlFileEditor = (props) => {
   const context = useContext(AppContext);
   const [yamlContent, setYamlContent] = useState("");
-
   const { type } = props;
+  const projectContext =
+    "Mitochondria segmentation on an electron microscopy volume.";
+  const taskContext =
+    type === "training"
+      ? "Model training configuration in PyTorch Connectomics."
+      : "Model inference configuration in PyTorch Connectomics.";
 
   const handleTextAreaChange = (event) => {
     const updatedYamlContent = event.target.value;
@@ -48,7 +54,17 @@ const YamlFileEditor = (props) => {
     <div>
       {yamlContent && (
         <div>
-          <h2>{context.uploadedYamlFile.name}</h2>
+          <Space align="center">
+            <h2 style={{ marginBottom: 0 }}>{context.uploadedYamlFile.name}</h2>
+            <InlineHelpChat
+              taskKey={type}
+              label="YAML editor"
+              yamlKey="CONFIG.YAML"
+              value={null}
+              projectContext={projectContext}
+              taskContext={taskContext}
+            />
+          </Space>
         </div>
       )}
       {yamlContent && (

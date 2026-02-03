@@ -372,3 +372,33 @@ export async function clearChat() {
     handleError(error);
   }
 }
+
+export async function initTaskAgent(
+  taskKey,
+  projectContext,
+  taskContext,
+  reset = false,
+) {
+  const data = JSON.stringify({
+    taskKey,
+    projectContext,
+    taskContext,
+    reset,
+  });
+  return makeApiRequest("chat/task/init", "post", data);
+}
+
+export async function queryTaskAgent(
+  taskKey,
+  query,
+  projectContext,
+  taskContext,
+) {
+  const data = JSON.stringify({
+    taskKey,
+    query,
+    projectContext,
+    taskContext,
+  });
+  return makeApiRequest("chat/task/query", "post", data);
+}
