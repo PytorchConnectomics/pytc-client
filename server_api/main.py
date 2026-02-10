@@ -517,6 +517,8 @@ async def chat_query(req: Request):
         raise HTTPException(status_code=503, detail=detail)
     body = await req.json()
     query = body.get("query")
+    if not isinstance(query, str) or not query.strip():
+        raise HTTPException(status_code=400, detail="Query must be a non-empty string.")
     if _reset_search is not None:
         _reset_search()
     result = chain.invoke({"messages": [{"role": "user", "content": query}]})
