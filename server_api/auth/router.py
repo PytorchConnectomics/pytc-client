@@ -62,40 +62,44 @@ def _validate_mount_size(source_dir: str) -> dict:
     """
     Pre-validate directory size and depth before mounting.
     Returns a dict with file_count, folder_count, max_depth, and whether it exceeds limits.
+    Note: Counts may be partial if limits are exceeded during scanning.
     """
     file_count = 0
     folder_count = 0
     max_depth = 0
+    counts_are_partial = False
     
-    source_depth = source_dir.rstrip(os.sep).count(os.sep)
+    source_depth = os.path.normpath(source_dir).count(os.sep)
     
     for current_dir, dirnames, filenames in os.walk(source_dir, topdown=True):
-        current_depth = current_dir.count(os.sep) - source_depth
+        current_depth = os.path.normpath(current_dir).count(os.sep) - source_depth
         max_depth = max(max_depth, current_depth)
         
-        # Check depth limit
-        if current_depth > MAX_MOUNT_DEPTH:
+        # Check depth limit (consistent with mounting logic)
+        if current_depth >= MAX_MOUNT_DEPTH:
             dirnames[:] = []  # Stop traversing deeper
             continue
         
         folder_count += len(dirnames)
-        file_count += len([f for f in filenames if os.path.isfile(os.path.join(current_dir, f))])
+        file_count += len(filenames)
         
         # Early termination if limits exceeded
         if file_count > MAX_MOUNT_FILES or folder_count > MAX_MOUNT_FOLDERS:
+            counts_are_partial = True
             break
     
     exceeds_limits = (
         file_count > MAX_MOUNT_FILES or 
         folder_count > MAX_MOUNT_FOLDERS or 
-        max_depth > MAX_MOUNT_DEPTH
+        max_depth >= MAX_MOUNT_DEPTH
     )
     
     return {
         "file_count": file_count,
         "folder_count": folder_count,
         "max_depth": max_depth,
-        "exceeds_limits": exceeds_limits
+        "exceeds_limits": exceeds_limits,
+        "counts_are_partial": counts_are_partial
     }
 
 
@@ -450,11 +454,12 @@ def mount_directory(
     # Pre-validate directory size to prevent self-DoS
     validation = _validate_mount_size(source_dir)
     if validation["exceeds_limits"]:
+        count_prefix = "at least " if validation["counts_are_partial"] else ""
         detail = (
             f"Directory exceeds mount limits: "
-            f"{validation['file_count']} files (max {MAX_MOUNT_FILES}), "
-            f"{validation['folder_count']} folders (max {MAX_MOUNT_FOLDERS}), "
-            f"depth {validation['max_depth']} (max {MAX_MOUNT_DEPTH}). "
+            f"{count_prefix}{validation['file_count']} files (max {MAX_MOUNT_FILES}), "
+            f"{count_prefix}{validation['folder_count']} folders (max {MAX_MOUNT_FOLDERS}), "
+            f"depth {validation['max_depth']} (max {MAX_MOUNT_DEPTH - 1}). "
             f"Consider mounting a smaller subdirectory."
         )
         raise HTTPException(status_code=400, detail=detail)
@@ -503,7 +508,7 @@ def mount_directory(
     dir_to_id = {source_dir: str(mounted_root.id)}
     mounted_folders = 1
     mounted_files = 0
-    source_depth = source_dir.rstrip(os.sep).count(os.sep)
+    source_depth = os.path.normpath(source_dir).count(os.sep)
 
     for current_dir, dirnames, filenames in os.walk(source_dir, topdown=True):
         parent_id = dir_to_id.get(current_dir)
@@ -511,7 +516,7 @@ def mount_directory(
             continue
         
         # Enforce depth limit during traversal
-        current_depth = current_dir.count(os.sep) - source_depth
+        current_depth = os.path.normpath(current_dir).count(os.sep) - source_depth
         if current_depth >= MAX_MOUNT_DEPTH:
             dirnames[:] = []  # Stop going deeper
             continue
@@ -520,7 +525,7 @@ def mount_directory(
         filenames.sort()
 
         for dirname in dirnames:
-            # Check folder limit during mounting
+            # Check folder limit before processing
             if mounted_folders >= MAX_MOUNT_FOLDERS:
                 dirnames[:] = []  # Stop processing more folders
                 break
@@ -542,7 +547,7 @@ def mount_directory(
             mounted_folders += 1
 
         for filename in filenames:
-            # Check file limit during mounting
+            # Check file limit before processing
             if mounted_files >= MAX_MOUNT_FILES:
                 break
             
