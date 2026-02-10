@@ -23,6 +23,11 @@ router = APIRouter()
 
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="token", auto_error=False)
 
+# Mount operation guardrails to prevent self-DoS
+MAX_MOUNT_FILES = 10000  # Maximum number of files to mount
+MAX_MOUNT_FOLDERS = 5000  # Maximum number of folders to mount
+MAX_MOUNT_DEPTH = 20  # Maximum directory depth to traverse
+
 
 def _format_size(size_bytes: int) -> str:
     if size_bytes < 1024:
@@ -51,6 +56,47 @@ def _ensure_unique_name(
         if candidate not in existing_names:
             return candidate
         index += 1
+
+
+def _validate_mount_size(source_dir: str) -> dict:
+    """
+    Pre-validate directory size and depth before mounting.
+    Returns a dict with file_count, folder_count, max_depth, and whether it exceeds limits.
+    """
+    file_count = 0
+    folder_count = 0
+    max_depth = 0
+    
+    source_depth = source_dir.rstrip(os.sep).count(os.sep)
+    
+    for current_dir, dirnames, filenames in os.walk(source_dir, topdown=True):
+        current_depth = current_dir.count(os.sep) - source_depth
+        max_depth = max(max_depth, current_depth)
+        
+        # Check depth limit
+        if current_depth > MAX_MOUNT_DEPTH:
+            dirnames[:] = []  # Stop traversing deeper
+            continue
+        
+        folder_count += len(dirnames)
+        file_count += len([f for f in filenames if os.path.isfile(os.path.join(current_dir, f))])
+        
+        # Early termination if limits exceeded
+        if file_count > MAX_MOUNT_FILES or folder_count > MAX_MOUNT_FOLDERS:
+            break
+    
+    exceeds_limits = (
+        file_count > MAX_MOUNT_FILES or 
+        folder_count > MAX_MOUNT_FOLDERS or 
+        max_depth > MAX_MOUNT_DEPTH
+    )
+    
+    return {
+        "file_count": file_count,
+        "folder_count": folder_count,
+        "max_depth": max_depth,
+        "exceeds_limits": exceeds_limits
+    }
 
 
 def _is_managed_upload_path(user_id: int, physical_path: Optional[str]) -> bool:
@@ -401,6 +447,18 @@ def mount_directory(
     if not os.path.isdir(source_dir):
         raise HTTPException(status_code=400, detail="Directory does not exist")
 
+    # Pre-validate directory size to prevent self-DoS
+    validation = _validate_mount_size(source_dir)
+    if validation["exceeds_limits"]:
+        detail = (
+            f"Directory exceeds mount limits: "
+            f"{validation['file_count']} files (max {MAX_MOUNT_FILES}), "
+            f"{validation['folder_count']} folders (max {MAX_MOUNT_FOLDERS}), "
+            f"depth {validation['max_depth']} (max {MAX_MOUNT_DEPTH}). "
+            f"Consider mounting a smaller subdirectory."
+        )
+        raise HTTPException(status_code=400, detail=detail)
+
     destination_path = mount_request.destination_path or "root"
     if destination_path != "root":
         try:
@@ -445,15 +503,28 @@ def mount_directory(
     dir_to_id = {source_dir: str(mounted_root.id)}
     mounted_folders = 1
     mounted_files = 0
+    source_depth = source_dir.rstrip(os.sep).count(os.sep)
 
     for current_dir, dirnames, filenames in os.walk(source_dir, topdown=True):
         parent_id = dir_to_id.get(current_dir)
         if parent_id is None:
             continue
+        
+        # Enforce depth limit during traversal
+        current_depth = current_dir.count(os.sep) - source_depth
+        if current_depth >= MAX_MOUNT_DEPTH:
+            dirnames[:] = []  # Stop going deeper
+            continue
+        
         dirnames.sort()
         filenames.sort()
 
         for dirname in dirnames:
+            # Check folder limit during mounting
+            if mounted_folders >= MAX_MOUNT_FOLDERS:
+                dirnames[:] = []  # Stop processing more folders
+                break
+            
             abs_subdir = os.path.join(current_dir, dirname)
             folder_name = _ensure_unique_name(db, current_user.id, parent_id, dirname)
             folder_record = models.File(
@@ -471,6 +542,10 @@ def mount_directory(
             mounted_folders += 1
 
         for filename in filenames:
+            # Check file limit during mounting
+            if mounted_files >= MAX_MOUNT_FILES:
+                break
+            
             abs_file = os.path.join(current_dir, filename)
             if not os.path.isfile(abs_file):
                 continue
@@ -491,11 +566,19 @@ def mount_directory(
             )
             db.add(file_record)
             mounted_files += 1
+        
+        # Stop early if limits reached
+        if mounted_files >= MAX_MOUNT_FILES:
+            break
 
     db.commit()
 
+    message = f"Mounted {mounted_files} files and {mounted_folders} folders from {source_dir}"
+    if mounted_files >= MAX_MOUNT_FILES or mounted_folders >= MAX_MOUNT_FOLDERS:
+        message += f" (limits reached: some files/folders may not be indexed)"
+
     return {
-        "message": f"Mounted {mounted_files} files from {source_dir}",
+        "message": message,
         "mounted_root_id": mounted_root.id,
         "mounted_folders": mounted_folders,
         "mounted_files": mounted_files,
