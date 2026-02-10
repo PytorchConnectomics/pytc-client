@@ -105,6 +105,12 @@ class FileCopy(BaseModel):
     destination_path: str
 
 
+class MountDirectoryRequest(BaseModel):
+    directory_path: str
+    destination_path: str = "root"
+    mount_name: Optional[str] = None
+
+
 class FileResponse(FileBase):
     id: int
     user_id: int

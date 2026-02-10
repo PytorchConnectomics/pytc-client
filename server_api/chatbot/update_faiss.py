@@ -1,25 +1,21 @@
-"""
-How to update faiss_index:
-    1. Delete the existing server_api/chatbot/file_summaries directory
-    2. Paste the following prompt into Cursor (or any AI IDE, in agent mode):
-
-        Create markdown files summarizing server_api/main.py and each file in client/src/*/** (including files in nested directories),
-        but don't create markdown files for index.js, utils.js, or any CSS files.
-        These markdown files will serve as the knowledge base for a RAG chatbot that helps end users navigate the frontend client.
-        Put these markdown files in a new server_api/chatbot/file_summaries directory.
-
-    3. Run this script:
-        python server_api/chatbot/update_faiss.py
-"""
+# How to update faiss_index:
+#     1. Edit the markdown files in server_api/chatbot/file_summaries/ as needed.
+#        These are end-user-focused guides (one per application page/feature) that
+#        serve as the knowledge base for the RAG chatbot.
+#     2. Run this script:
+#         python server_api/chatbot/update_faiss.py
 
 from pathlib import Path
 from langchain_core.documents import Document
+from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langchain_community.vectorstores import FAISS
 from langchain_ollama import OllamaEmbeddings
 
 script_directory = Path(__file__).parent.resolve()
 summaries_directory = script_directory / "file_summaries"
 faiss_directory = script_directory / "faiss_index"
+
+# Load full documents
 documents = []
 for md_file in summaries_directory.rglob("*.md"):
     summary = md_file.read_text(encoding="utf-8")
@@ -30,9 +26,22 @@ for md_file in summaries_directory.rglob("*.md"):
             metadata={"source": str(relative_path)},
         )
     )
-embeddings = OllamaEmbeddings(
-    model="mistral:latest", base_url="http://cscigpu08.bc.edu:11434"
+
+# Split into chunks for better embedding quality
+text_splitter = RecursiveCharacterTextSplitter(
+    chunk_size=1000,
+    chunk_overlap=200,
+    add_start_index=True,
 )
-vectorstore = FAISS.from_documents(documents, embeddings)
+chunks = text_splitter.split_documents(documents)
+print(f"Split {len(documents)} docs into {len(chunks)} chunks")
+for c in chunks:
+    print(f"  - {c.metadata['source']} (start={c.metadata.get('start_index', '?')}, {len(c.page_content)} chars)")
+
+embeddings = OllamaEmbeddings(
+    model="qwen3-embedding:8b", base_url="http://cscigpu08.bc.edu:11434"
+)
+vectorstore = FAISS.from_documents(chunks, embeddings)
 faiss_directory.mkdir(parents=True, exist_ok=True)
 vectorstore.save_local(str(faiss_directory))
+print(f"FAISS index saved with {vectorstore.index.ntotal} vectors")

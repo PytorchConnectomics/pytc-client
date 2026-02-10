@@ -1,10 +1,6 @@
 import React, { useState } from "react";
-import { Input, Modal, Button, message } from "antd";
-import {
-  FolderOpenOutlined,
-  LaptopOutlined,
-  CloudServerOutlined,
-} from "@ant-design/icons";
+import { Input, message } from "antd";
+import { FolderOpenOutlined } from "@ant-design/icons";
 import FilePickerModal from "./FilePickerModal";
 
 /**
@@ -12,7 +8,7 @@ import FilePickerModal from "./FilePickerModal";
  * Supports:
  * - Text input (path)
  * - Drag and drop (external files)
- * - File picker (Local Machine or Server Storage)
+ * - File picker (mounted storage)
  *
  * @param {string} selectionType - 'file', 'directory', or 'fileOrDirectory' (default: 'file')
  * @param {object|string} value - The current value. Can be a string (path) or object { path, display }
@@ -26,40 +22,10 @@ const UnifiedFileInput = ({
   selectionType = "file",
 }) => {
   const [filePickerVisible, setFilePickerVisible] = useState(false);
-  const [sourceSelectionVisible, setSourceSelectionVisible] = useState(false);
   const [isDragOver, setIsDragOver] = useState(false);
 
   const handleBrowse = () => {
     if (disabled) return;
-    setSourceSelectionVisible(true);
-  };
-
-  const handleLocalSelection = async () => {
-    setSourceSelectionVisible(false);
-    try {
-      const { ipcRenderer } = window.require("electron");
-      const properties =
-        selectionType === "directory"
-          ? ["openDirectory"]
-          : selectionType === "fileOrDirectory"
-            ? ["openFile", "openDirectory"]
-            : ["openFile"];
-
-      const filePath = await ipcRenderer.invoke("open-local-file", {
-        properties,
-      });
-      if (filePath) {
-        // For local files, path and display are the same
-        onChange({ path: filePath, display: filePath });
-      }
-    } catch (error) {
-      console.error("Failed to open file:", error);
-      message.error("Failed to open file");
-    }
-  };
-
-  const handleServerSelection = () => {
-    setSourceSelectionVisible(false);
     setFilePickerVisible(true);
   };
 
@@ -185,49 +151,6 @@ const UnifiedFileInput = ({
           </div>
         )}
       </div>
-
-      {/* Source Selection Modal */}
-      <Modal
-        title={
-          <span>
-            <FolderOpenOutlined style={{ marginRight: 8 }} />
-            Select Source
-          </span>
-        }
-        open={sourceSelectionVisible}
-        onCancel={() => setSourceSelectionVisible(false)}
-        footer={null}
-        width={400}
-      >
-        <div
-          style={{
-            display: "flex",
-            flexDirection: "column",
-            gap: "12px",
-            padding: "10px 0",
-          }}
-        >
-          <p style={{ marginBottom: "16px" }}>
-            Where would you like to select from?
-          </p>
-          <Button
-            size="large"
-            icon={<LaptopOutlined />}
-            onClick={handleLocalSelection}
-            block
-          >
-            Local Machine
-          </Button>
-          <Button
-            size="large"
-            icon={<CloudServerOutlined />}
-            onClick={handleServerSelection}
-            block
-          >
-            Server Storage
-          </Button>
-        </div>
-      </Modal>
 
       <FilePickerModal
         visible={filePickerVisible}

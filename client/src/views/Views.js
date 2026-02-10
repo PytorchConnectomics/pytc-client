@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef, useCallback } from "react";
-import { Layout, Menu, message, Button, Drawer } from "antd";
+import { Layout, Menu, Button, Drawer } from "antd";
 import {
   FolderOpenOutlined,
   EyeOutlined,
@@ -19,23 +19,18 @@ import ProofReading from "./ProofReading";
 import WormErrorHandling from "./WormErrorHandling";
 import WorkflowSelector from "../components/WorkflowSelector";
 import Chatbot from "../components/Chatbot";
-import { apiClient } from "../api";
 
 const { Content } = Layout;
-
-const PREF_FILE_NAME = "workflow_preference.json";
 
 function Views() {
   // State
   const [current, setCurrent] = useState("files");
   const [visibleTabs, setVisibleTabs] = useState(new Set(["files"]));
   const [visitedTabs, setVisitedTabs] = useState(new Set(["files"]));
-  const [workflowModalVisible, setWorkflowModalVisible] = useState(false);
+  const [workflowModalVisible, setWorkflowModalVisible] = useState(true);
   const [isChatOpen, setIsChatOpen] = useState(false);
   const [chatWidth, setChatWidth] = useState(380);
   const isResizing = useRef(false);
-  const [apiReady, setApiReady] = useState(false);
-  const [hasShownApiWarning, setHasShownApiWarning] = useState(false);
 
   // Lifted state from Workspace
   const [viewers, setViewers] = useState([]);
@@ -90,123 +85,9 @@ function Views() {
     }
   };
 
-  const checkPreference = async (isMounted) => {
-    try {
-      const res = await apiClient.get("/files");
-      const fileList = res.data || [];
-
-      // Find saved preference file
-      const prefFile = fileList.find(
-        (f) => f.name === PREF_FILE_NAME && !f.is_folder,
-      );
-
-      if (prefFile && prefFile.physical_path) {
-        try {
-          let pathForUrl = prefFile.physical_path.replace(/\\/g, "/");
-          if (pathForUrl.includes("uploads/")) {
-            const parts = pathForUrl.split("uploads/");
-            if (parts.length > 1) {
-              pathForUrl = "uploads/" + parts[parts.length - 1];
-            }
-          }
-          const fileUrl = `${apiClient.defaults.baseURL || "http://localhost:4242"}/${pathForUrl}`;
-
-          const contentRes = await fetch(fileUrl);
-          if (contentRes.ok) {
-            const data = await contentRes.json();
-            if (data) {
-              const modes = data.modes || data.mode;
-              if (modes) {
-                applyModes(modes);
-                return;
-              }
-            }
-          }
-        } catch (err) {
-          console.error("Error reading pref file content", err);
-        }
-      }
-
-      // If no file found or error reading it, show selector (Initial Launch)
-      if (isMounted) {
-        setWorkflowModalVisible(true);
-      }
-    } catch (err) {
-      if (isMounted) {
-        setWorkflowModalVisible(true);
-      }
-    }
-  };
-
-  // Wait for API readiness before loading preferences
-  useEffect(() => {
-    let isMounted = true;
-    let pollId;
-
-    const pollApi = async () => {
-      try {
-        await apiClient.get("/health");
-        if (!isMounted) return;
-        setApiReady(true);
-        checkPreference(isMounted);
-        if (pollId) clearInterval(pollId);
-      } catch (err) {
-        if (!isMounted) return;
-        setApiReady(false);
-        if (!hasShownApiWarning) {
-          setHasShownApiWarning(true);
-          message.warning("API server is not ready yet. Retrying...");
-        }
-      }
-    };
-
-    pollApi();
-    pollId = setInterval(pollApi, 2000);
-
-    return () => {
-      isMounted = false;
-      if (pollId) clearInterval(pollId);
-    };
-  }, [hasShownApiWarning]);
-
-  const handleWorkflowSelect = async (modes) => {
+  const handleWorkflowSelect = (modes) => {
     setWorkflowModalVisible(false);
     applyModes(modes);
-
-    // Persistence Logic
-    try {
-      if (!apiReady) {
-        message.warning("API server is not ready. Preference was not saved.");
-        return;
-      }
-      // 1. Always delete existing to avoid staleness or duplicates
-      const res = await apiClient.get("/files");
-      const existing = (res.data || []).filter(
-        (f) => f.name === PREF_FILE_NAME,
-      );
-      for (const f of existing) {
-        await apiClient.delete(`/files/${f.id}`);
-      }
-
-      // Save new preferences
-      const jsonContent = JSON.stringify({ modes });
-      const blob = new Blob([jsonContent], { type: "application/json" });
-      const file = new File([blob], PREF_FILE_NAME, {
-        type: "application/json",
-      });
-
-      const formData = new FormData();
-      formData.append("file", file);
-      formData.append("path", "root");
-
-      await apiClient.post("/files/upload", formData, {
-        headers: { "Content-Type": "multipart/form-data" },
-      });
-      message.success("Preferences saved");
-    } catch (err) {
-      console.error("Failed to update preferences", err);
-      message.error("Failed to update preferences");
-    }
   };
 
   // IPC Listener

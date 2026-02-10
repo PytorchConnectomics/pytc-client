@@ -8,13 +8,14 @@ import {
   Breadcrumb,
   Empty,
   Image,
+  Spin,
 } from "antd";
 import {
   FolderFilled,
+  FolderOpenOutlined,
   FileOutlined,
   FileTextOutlined,
-  HomeOutlined,
-  ArrowUpOutlined,
+  ArrowLeftOutlined,
   AppstoreOutlined,
   BarsOutlined,
   UploadOutlined,
@@ -24,17 +25,38 @@ import {
 import { apiClient } from "../api";
 import FileTreeSidebar from "../components/FileTreeSidebar";
 
+const HIDDEN_SYSTEM_FILES = new Set([
+  "workflow_preference.json",
+  ".ds_store",
+  "thumbs.db",
+]);
+const IMAGE_EXTENSIONS = new Set([
+  ".png",
+  ".jpg",
+  ".jpeg",
+  ".gif",
+  ".bmp",
+  ".tif",
+  ".tiff",
+  ".webp",
+]);
+
 // Transform backend file list into UI state
 const transformFiles = (fileList) => {
   const folders = [];
   const files = {};
   fileList.forEach((f) => {
+    const nameLower = String(f.name || "").toLowerCase();
+    if (!f.is_folder && HIDDEN_SYSTEM_FILES.has(nameLower)) {
+      return;
+    }
     if (f.is_folder) {
       folders.push({
         key: String(f.id),
         title: f.name,
-        parent: f.path === "root" ? "root" : String(f.path),
+        parent: f.path ? String(f.path) : "root",
         is_folder: true,
+        physical_path: f.physical_path || null,
       });
     } else {
       const parentKey = f.path || "root";
@@ -45,12 +67,10 @@ const transformFiles = (fileList) => {
         size: f.size,
         type: f.type,
         is_folder: false,
+        physical_path: f.physical_path || null,
       });
     }
   });
-  if (!folders.find((f) => f.key === "root")) {
-    folders.unshift({ key: "root", title: "My Drive", parent: null });
-  }
   return { folders, files };
 };
 
@@ -71,9 +91,12 @@ function FilesManager() {
   const [selectionBox, setSelectionBox] = useState(null);
   const [serverUnavailable, setServerUnavailable] = useState(false);
   const [hasShownServerWarning, setHasShownServerWarning] = useState(false);
+  const [previewStatus, setPreviewStatus] = useState({});
   const containerRef = useRef(null);
   const itemRefs = useRef({});
   const isDragSelecting = useRef(false);
+  const previewBaseUrl =
+    apiClient.defaults.baseURL || "http://localhost:4242";
 
   // Sidebar Resize Logic
   const [sidebarWidth, setSidebarWidth] = useState(250);
@@ -112,43 +135,48 @@ function FilesManager() {
     }
   }, [editingItem]);
 
-  // Load initial data with proper cleanup and 401 handling
-  useEffect(() => {
-    let isMounted = true; // Prevent state updates after unmount
-
-    const fetchFiles = async () => {
+  const fetchFiles = React.useCallback(
+    async (options = {}) => {
+      const { silentNetworkError = false } = options;
       try {
         const res = await apiClient.get("/files");
-
-        // Only update state if component is still mounted
-        if (isMounted) {
-          const { folders: flds, files: fls } = transformFiles(res.data);
-          setFolders(flds);
-          setFiles(fls);
-          setServerUnavailable(false);
-        }
+        const { folders: flds, files: fls } = transformFiles(res.data);
+        setFolders(flds);
+        setFiles(fls);
+        setServerUnavailable(false);
+        return { folders: flds, files: fls };
       } catch (err) {
         const isNetworkError = !err.response;
-        if (isMounted && isNetworkError) {
+        if (isNetworkError) {
           setServerUnavailable(true);
-          if (!hasShownServerWarning) {
+          if (!hasShownServerWarning && !silentNetworkError) {
             setHasShownServerWarning(true);
             message.warning("API server is not available yet. Retrying...");
           }
         }
-        // Only show error if component is mounted and it's not an auth error
-        // (auth errors are already handled by the interceptor)
-        if (isMounted && !err.isAuthError && !isNetworkError) {
+        if (!err.isAuthError && !isNetworkError) {
           console.error("Failed to load files", err);
           message.error("Could not load files");
         }
+        return null;
       }
+    },
+    [hasShownServerWarning],
+  );
+
+  // Load initial data with proper cleanup and 401 handling
+  useEffect(() => {
+    let isMounted = true; // Prevent state updates after unmount
+
+    const loadFiles = async () => {
+      if (!isMounted) return;
+      await fetchFiles();
     };
 
-    fetchFiles();
+    loadFiles();
     const retryId = setInterval(() => {
       if (isMounted && serverUnavailable) {
-        fetchFiles();
+        fetchFiles({ silentNetworkError: true });
       }
     }, 2000);
 
@@ -157,19 +185,24 @@ function FilesManager() {
       isMounted = false;
       clearInterval(retryId);
     };
-  }, [serverUnavailable, hasShownServerWarning]); // Retry when server unavailable
+  }, [fetchFiles, serverUnavailable]); // Retry when server unavailable
 
   const getCurrentFolderObj = () =>
     folders.find((f) => f.key === currentFolder);
   // eslint-disable-next-line no-loop-func
   const getBreadcrumbs = () => {
-    const path = [];
+    const path = [{ key: "root", title: "Projects", parent: null }];
+    if (currentFolder === "root") {
+      return path;
+    }
+    const chain = [];
     let curr = getCurrentFolderObj();
     while (curr) {
-      path.unshift(curr);
+      chain.unshift(curr);
+      if (!curr.parent || curr.parent === "root") break;
       curr = folders.find((f) => f.key === curr.parent);
     }
-    return path;
+    return path.concat(chain);
   };
 
   const handleNavigate = (key) => {
@@ -177,6 +210,24 @@ function FilesManager() {
     setSelectedItems([]);
     setEditingItem(null);
     setNewItemType(null);
+  };
+
+  const isImageFile = (file) => {
+    if (!file || file.is_folder) return false;
+    if (file.type && file.type.startsWith("image/")) return true;
+    const ext = `.${String(file.name || "").split(".").pop()}`.toLowerCase();
+    return IMAGE_EXTENSIONS.has(ext);
+  };
+
+  const getPreviewUrl = (fileKey) =>
+    `${previewBaseUrl}/files/preview/${fileKey}`;
+
+  const markPreviewLoaded = (id) => {
+    setPreviewStatus((prev) => ({ ...prev, [id]: "loaded" }));
+  };
+
+  const markPreviewError = (id) => {
+    setPreviewStatus((prev) => ({ ...prev, [id]: "error" }));
   };
 
   const handleUp = () => {
@@ -457,14 +508,54 @@ function FilesManager() {
       const item = folder || file;
 
       if (item) {
+        const isMountedFolder =
+          !!folder && folder.parent === "root" && folder.physical_path;
+        let descendantFileCount = 0;
+        let descendantFolderCount = 0;
+        let descendantSizeKb = 0;
+
+        if (isMountedFolder) {
+          const queue = [folder.key];
+          while (queue.length) {
+            const parentId = queue.shift();
+            const childFolders = folders.filter((f) => f.parent === parentId);
+            descendantFolderCount += childFolders.length;
+            childFolders.forEach((f) => queue.push(f.key));
+
+            const childFiles = files[parentId] || [];
+            descendantFileCount += childFiles.length;
+            childFiles.forEach((f) => {
+              const sizeStr = String(f.size || "");
+              const match = sizeStr.match(/([0-9.]+)\s*(KB|MB|GB|B)/i);
+              if (match) {
+                const value = parseFloat(match[1]);
+                const unit = match[2].toUpperCase();
+                if (unit === "B") descendantSizeKb += value / 1024;
+                if (unit === "KB") descendantSizeKb += value;
+                if (unit === "MB") descendantSizeKb += value * 1024;
+                if (unit === "GB") descendantSizeKb += value * 1024 * 1024;
+              }
+            });
+          }
+        }
+
+        const totalSizeStr = isMountedFolder
+          ? descendantSizeKb > 1024
+            ? `${(descendantSizeKb / 1024).toFixed(2)} MB`
+            : `${descendantSizeKb.toFixed(2)} KB`
+          : item.size || "N/A";
+
         setPropertiesData({
           type: "single",
           name: item.title || item.name,
           isFolder: !!folder,
-          size: item.size || "N/A",
+          size: totalSizeStr,
           fileType: item.type || "Folder",
           created: new Date().toLocaleString(), // Backend should provide this
           modified: new Date().toLocaleString(), // Backend should provide this
+          fileCount: isMountedFolder ? descendantFileCount : undefined,
+          folderCount: isMountedFolder ? descendantFolderCount : undefined,
+          isMountedFolder,
         });
       }
     } else {
@@ -759,12 +850,48 @@ function FilesManager() {
   const renderItem = (item, type) => {
     const isSelected = selectedItems.includes(item.key);
     const isEditing = editingItem === item.key;
-    const icon =
-      type === "folder" ? (
-        <FolderFilled style={{ fontSize: 48, color: "#1890ff" }} />
-      ) : (
-        <FileOutlined style={{ fontSize: 48, color: "#555" }} />
-      );
+    const isImagePreview = type !== "folder" && isImageFile(item);
+    const iconSize = viewMode === "grid" ? 48 : 24;
+    const icon = isImagePreview ? (
+      <div
+        style={{
+          width: iconSize,
+          height: iconSize,
+          borderRadius: 4,
+          border: "1px solid #f0f0f0",
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
+          overflow: "hidden",
+          position: "relative",
+          background: "#fafafa",
+        }}
+      >
+        {previewStatus[item.key] !== "loaded" && <Spin size="small" />}
+        {previewStatus[item.key] !== "error" && (
+          <img
+            src={getPreviewUrl(item.key)}
+            alt={item.name}
+            loading="lazy"
+            onLoad={() => markPreviewLoaded(item.key)}
+            onError={() => markPreviewError(item.key)}
+            style={{
+              position: "absolute",
+              inset: 0,
+              width: "100%",
+              height: "100%",
+              objectFit: "cover",
+              opacity: previewStatus[item.key] === "loaded" ? 1 : 0,
+              transition: "opacity 0.2s ease",
+            }}
+          />
+        )}
+      </div>
+    ) : type === "folder" ? (
+      <FolderFilled style={{ fontSize: iconSize, color: "#1890ff" }} />
+    ) : (
+      <FileOutlined style={{ fontSize: iconSize, color: "#555" }} />
+    );
     return (
       <div
         key={item.key}
@@ -811,14 +938,12 @@ function FilesManager() {
           style={{
             marginBottom: viewMode === "grid" ? 4 : 0,
             marginRight: viewMode === "list" ? 12 : 0,
+            display: viewMode === "grid" ? "flex" : "block",
+            justifyContent: viewMode === "grid" ? "center" : "flex-start",
+            width: viewMode === "grid" ? "100%" : "auto",
           }}
         >
-          {React.cloneElement(icon, {
-            style: {
-              fontSize: viewMode === "grid" ? 48 : 24,
-              color: type === "folder" ? "#1890ff" : "#555",
-            },
-          })}
+          {icon}
         </div>
         {isEditing ? (
           <Input
@@ -842,6 +967,24 @@ function FilesManager() {
         ) : (
           <div style={{ wordBreak: "break-word", fontSize: 12 }}>
             {item.title || item.name}
+            {type === "folder" &&
+              item.parent === "root" &&
+              item.physical_path && (
+                <span
+                  style={{
+                    display: "inline-block",
+                    marginLeft: 6,
+                    padding: "2px 6px",
+                    fontSize: 10,
+                    borderRadius: 10,
+                    background: "#f0f5ff",
+                    color: "#2f54eb",
+                    border: "1px solid #adc6ff",
+                  }}
+                >
+                  Mounted
+                </span>
+              )}
           </div>
         )}
       </div>
@@ -867,6 +1010,9 @@ function FilesManager() {
           style={{
             marginBottom: viewMode === "grid" ? 4 : 0,
             marginRight: viewMode === "list" ? 12 : 0,
+            display: viewMode === "grid" ? "flex" : "block",
+            justifyContent: viewMode === "grid" ? "center" : "flex-start",
+            width: viewMode === "grid" ? "100%" : "auto",
           }}
         >
           <FolderFilled
@@ -905,15 +1051,56 @@ function FilesManager() {
       return [
         { key: "new_folder", label: "Create Folder", icon: <FolderFilled /> },
         { key: "upload", label: "Upload File...", icon: <UploadOutlined /> },
+        {
+          key: "mount_project",
+          label: "Mount Project Directory...",
+          icon: <FolderOpenOutlined />,
+        },
       ];
     }
     const items = [];
+    const selectedKey = selectedItems.length === 1 ? selectedItems[0] : null;
+    const selectedFolder = selectedKey
+      ? folders.find((f) => f.key === selectedKey)
+      : null;
+    const isMountedProjectFolder = Boolean(
+      selectedFolder &&
+      selectedFolder.parent === "root" &&
+      selectedFolder.physical_path,
+    );
     // Only show preview for files, not folders
     if (selectedItems.length === 1) {
-      const selectedKey = selectedItems[0];
       const isFolder = folders.some((f) => f.key === selectedKey);
       if (!isFolder) {
         items.push({ key: "preview", label: "Preview", icon: <EyeOutlined /> });
+      }
+    }
+    if (isMountedProjectFolder) {
+      items.push({
+        key: "unmount_project",
+        label: "Unmount Project",
+        danger: true,
+        icon: <FolderOpenOutlined />,
+      });
+    }
+    if (selectedItems.length === 1) {
+      const selectedFile = Object.values(files)
+        .flat()
+        .find((f) => f.key === selectedKey);
+      const selectedFolder = folders.find((f) => f.key === selectedKey);
+      const hasPhysicalPath =
+        (selectedFile &&
+          selectedFile.physical_path &&
+          selectedFile.physical_path.startsWith("/")) ||
+        (selectedFolder &&
+          selectedFolder.physical_path &&
+          selectedFolder.physical_path.startsWith("/"));
+      if (hasPhysicalPath) {
+        items.push({
+          key: "reveal_in_finder",
+          label: "Open in Finder",
+          icon: <FolderOpenOutlined />,
+        });
       }
     }
     items.push(
@@ -975,6 +1162,83 @@ function FilesManager() {
       }
     };
     input.click();
+  };
+
+  const handleMountProjectDirectory = async () => {
+    try {
+      const { ipcRenderer } = window.require("electron");
+      const selectedDirectory = await ipcRenderer.invoke("open-local-file", {
+        properties: ["openDirectory"],
+      });
+      if (!selectedDirectory) return;
+
+      // Mount builds a stable project index now; later this same flow can point to
+      // cloud-backed project storage while keeping picker + workflow behavior unchanged.
+      const res = await apiClient.post(
+        "/files/mount",
+        {
+          directory_path: selectedDirectory,
+          destination_path: "root",
+        },
+        { withCredentials: true },
+      );
+
+      await fetchFiles();
+      if (res?.data?.mounted_root_id) {
+        handleNavigate(String(res.data.mounted_root_id));
+      }
+      message.success(res?.data?.message || "Project directory mounted.");
+    } catch (err) {
+      console.error("Mount directory error", err);
+      message.error("Failed to mount project directory");
+    }
+  };
+
+  const handleUnmountProject = async (folderKey) => {
+    const mountedFolder = folders.find((f) => f.key === folderKey);
+    if (!mountedFolder) return;
+    Modal.confirm({
+      title: "Unmount project?",
+      content:
+        "This removes the indexed project from the app only. Source files on disk are not deleted.",
+      okText: "Unmount",
+      okButtonProps: { danger: true },
+      cancelText: "Cancel",
+      onOk: async () => {
+        try {
+          await apiClient.delete(`/files/unmount/${folderKey}`, {
+            withCredentials: true,
+          });
+          await fetchFiles();
+          if (currentFolder === folderKey) {
+            handleNavigate("root");
+          }
+          message.success("Project unmounted.");
+        } catch (err) {
+          console.error("Unmount error", err);
+          message.error("Failed to unmount project");
+        }
+      },
+    });
+  };
+
+  const handleRevealInFinder = (key) => {
+    const item =
+      folders.find((f) => f.key === key) ||
+      Object.values(files)
+        .flat()
+        .find((f) => f.key === key);
+    if (!item || !item.physical_path || !item.physical_path.startsWith("/")) {
+      message.warning("This item is not linked to a local file.");
+      return;
+    }
+    try {
+      const { ipcRenderer } = window.require("electron");
+      ipcRenderer.invoke("reveal-in-finder", item.physical_path);
+    } catch (err) {
+      console.error("Reveal in Finder error", err);
+      message.error("Failed to open in Finder");
+    }
   };
 
   return (
@@ -1098,7 +1362,6 @@ function FilesManager() {
               // Determine if it's a folder or file
               const key = node.key;
               const id = key.replace(/^(folder-|file-)/, "");
-              const type = key.startsWith("folder-") ? "folder" : "file";
 
               // Select the item
               setSelectedItems([id]);
@@ -1121,6 +1384,7 @@ function FilesManager() {
               backgroundColor: "#f0f0f0",
               height: "100%",
               flexShrink: 0,
+              marginRight: 8,
             }}
           />
         </>
@@ -1159,7 +1423,7 @@ function FilesManager() {
             title={isSidebarVisible ? "Hide Sidebar" : "Show Sidebar"}
           />
           <Button
-            icon={<ArrowUpOutlined />}
+            icon={<ArrowLeftOutlined />}
             onClick={handleUp}
             disabled={currentFolder === "root"}
             size="small"
@@ -1171,7 +1435,7 @@ function FilesManager() {
                 onClick={() => handleNavigate(f.key)}
                 style={{ cursor: "pointer" }}
               >
-                {f.key === "root" ? <HomeOutlined /> : f.title}
+                {f.key === "root" ? "Projects" : f.title}
               </Breadcrumb.Item>
             ))}
           </Breadcrumb>
@@ -1184,6 +1448,12 @@ function FilesManager() {
                 : "Switch to Grid View"
             }
           />
+          <Button
+            icon={<FolderOpenOutlined />}
+            onClick={handleMountProjectDirectory}
+          >
+            Mount Project
+          </Button>
         </div>
 
         {/* Content Area */}
@@ -1255,6 +1525,11 @@ function FilesManager() {
                 setContextMenu(null);
                 if (key === "new_folder") startCreateFolder();
                 if (key === "upload") handleUploadClick();
+                if (key === "mount_project") handleMountProjectDirectory();
+                if (key === "unmount_project")
+                  handleUnmountProject(contextMenu.key);
+                if (key === "reveal_in_finder")
+                  handleRevealInFinder(contextMenu.key);
                 if (key === "rename") {
                   const item =
                     folders.find((f) => f.key === contextMenu.key) ||
@@ -1398,6 +1673,30 @@ function FilesManager() {
                   <span style={{ fontWeight: 500 }}>Size:</span>
                   <span>{propertiesData.size}</span>
                 </div>
+                {propertiesData.isMountedFolder && (
+                  <>
+                    <div
+                      style={{
+                        marginBottom: 12,
+                        display: "flex",
+                        justifyContent: "space-between",
+                      }}
+                    >
+                      <span style={{ fontWeight: 500 }}>Folders:</span>
+                      <span>{propertiesData.folderCount}</span>
+                    </div>
+                    <div
+                      style={{
+                        marginBottom: 12,
+                        display: "flex",
+                        justifyContent: "space-between",
+                      }}
+                    >
+                      <span style={{ fontWeight: 500 }}>Files:</span>
+                      <span>{propertiesData.fileCount}</span>
+                    </div>
+                  </>
+                )}
                 <div
                   style={{
                     marginBottom: 12,

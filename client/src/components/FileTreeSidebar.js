@@ -115,12 +115,55 @@ const FileTreeSidebar = ({
         onSelect={onSelectHandler}
         treeData={treeData}
         expandAction="click"
-        style={{ backgroundColor: "transparent" }}
+        style={{ backgroundColor: "transparent", fontSize: 13 }}
+        titleRender={(nodeData) => (
+          <span
+            style={{
+              display: "inline-block",
+              maxWidth: `calc(${width}px - 92px)`,
+              overflow: "hidden",
+              textOverflow: "ellipsis",
+              whiteSpace: "nowrap",
+              verticalAlign: "middle",
+              lineHeight: "22px",
+            }}
+            title={String(nodeData.title)}
+          >
+            {nodeData.title}
+          </span>
+        )}
         draggable
         blockNode
         onDrop={handleDrop}
         onRightClick={handleRightClick}
       />
+      <style>
+        {`
+          .ant-tree .ant-tree-treenode {
+            min-height: 28px;
+            padding: 0;
+          }
+          .ant-tree .ant-tree-node-content-wrapper {
+            min-height: 28px;
+            padding: 2px 6px;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+          }
+          .ant-tree .ant-tree-iconEle {
+            margin-right: 2px;
+          }
+          .ant-tree .ant-tree-switcher {
+            width: 16px;
+          }
+          .ant-tree .ant-tree-indent-unit {
+            width: 14px;
+          }
+          .ant-tree .ant-tree-list-holder-inner {
+            gap: 0;
+          }
+        `}
+      </style>
     </div>
   );
 };

@@ -7,6 +7,7 @@ const {
   dialog,
   Menu,
   screen,
+  shell,
 } = require("electron");
 
 let mainWindow;
@@ -167,6 +168,16 @@ ipcMain.handle("open-local-file", async (_event, options = {}) => {
   } else {
     return filePaths[0];
   }
+});
+
+ipcMain.handle("reveal-in-finder", async (_event, targetPath) => {
+  if (!targetPath) return null;
+  try {
+    await shell.showItemInFolder(targetPath);
+  } catch (err) {
+    return null;
+  }
+  return true;
 });
 
 app.on("ready", createWindow);

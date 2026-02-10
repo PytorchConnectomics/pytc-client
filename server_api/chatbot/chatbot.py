@@ -7,6 +7,7 @@
 # - RAG: Documentation search via FAISS vector store
 
 import os
+from pathlib import Path
 
 from langchain_ollama import OllamaEmbeddings, ChatOllama
 from langchain_community.vectorstores import FAISS
@@ -90,33 +91,35 @@ SUPERVISOR_PROMPT = """You are the **Supervisor Agent** for PyTorch Connectomics
 
 You help end users navigate and use the PyTC Client application.
 
-CRITICAL RULES:
-1. **Only state facts from retrieved documentation or tool output.** Do NOT invent features, shortcuts, buttons, or workflows that are not explicitly described in the retrieved context.
-2. **If the documentation does not cover something, say so.** For example: "The documentation does not mention this feature."
-3. **Answer every part of the user's question.** If they ask about two things, address both.
-4. **Be concise.** Give clear, direct answers. Avoid filler phrases like "Happy proofreading!" or restating the same information in multiple formats.
-5. **Do not fabricate keyboard shortcuts, API endpoints, or UI elements.** Only mention those explicitly listed in the retrieved docs.
+ROUTING — decide which tool to use BEFORE calling anything:
+- **UI, navigation, features, shortcuts, workflows** → search_documentation
+- **Training config, hyperparameters, training commands** → delegate_to_training_agent
+- **Inference, checkpoints, evaluation commands** → delegate_to_inference_agent
+- **General/greeting/off-topic** → answer directly, no tool needed
 
-Sub-agents available:
-1. **Training Agent**: Config selection, training job setup, hyperparameter overrides
-2. **Inference Agent**: Checkpoint management, inference/evaluation commands
+CRITICAL RULES:
+1. **For application questions, ground answers in retrieved documentation.** Call search_documentation and base your answer on the returned text. Do NOT invent features, shortcuts, buttons, or workflows.
+2. **Do not fabricate specifics.** Never make up keyboard shortcuts, button labels, or step-by-step instructions unless they come from retrieved docs or a sub-agent response.
+3. **Answer every part of the user's question.** If they ask about two things, address both.
+4. **Be concise and helpful.** If the docs partially cover the topic, share what is documented and note what is not covered. If the docs do not cover the topic at all, say so clearly.
+5. **Call search_documentation at most 2 times per question.** One broad search, then optionally one targeted follow-up.
+6. **Delegate, don't search, for training/inference tasks.** If the user asks for a training command or inference command, use the appropriate sub-agent directly.
+
+Sub-agents:
+- **Training Agent**: Config selection, training job setup, hyperparameter overrides
+- **Inference Agent**: Checkpoint management, inference/evaluation commands
 
 Tools:
-- search_documentation: Search PyTC docs for UI guides and feature explanations. Use this for any question about the application interface, pages, buttons, or workflows.
+- search_documentation: Search PyTC docs for UI guides and feature explanations. Use ONLY for questions about the application interface, pages, buttons, or workflows.
 - delegate_to_training_agent: Send training-related tasks to training agent
-- delegate_to_inference_agent: Send inference-related tasks to inference agent
-
-When using search_documentation results:
-- Base your entire answer on the returned text
-- Quote specific details (shortcuts, endpoints, steps) exactly as they appear
-- If the returned docs don't fully answer the question, state what is missing rather than guessing"""
+- delegate_to_inference_agent: Send inference-related tasks to inference agent"""
 
 
 def build_chain():
     """Build the multi-agent system with supervisor, training, and inference agents."""
     ollama_base_url = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434")
     ollama_model = os.getenv("OLLAMA_MODEL", "mistral:latest")
-    ollama_embed_model = os.getenv("OLLAMA_EMBED_MODEL", "mistral:latest")
+    ollama_embed_model = os.getenv("OLLAMA_EMBED_MODEL", "qwen3-embedding:8b")
     llm = ChatOllama(model=ollama_model, base_url=ollama_base_url, temperature=0)
     embeddings = OllamaEmbeddings(model=ollama_embed_model, base_url=ollama_base_url)
     faiss_path = process_path("server_api/chatbot/faiss_index")
@@ -126,6 +129,19 @@ def build_chain():
         allow_dangerous_deserialization=True,
     )
     retriever = vectorstore.as_retriever(search_kwargs={"k": 2})
+
+    # Load all docs from markdown files for reliable keyword search
+    summaries_dir = Path(process_path("server_api/chatbot/file_summaries"))
+    _all_docs = {}
+    for md_file in summaries_dir.rglob("*.md"):
+        _all_docs[md_file.name] = md_file.read_text(encoding="utf-8")
+    print(f"[SEARCH] Loaded {len(_all_docs)} docs for keyword search: {list(_all_docs.keys())}")
+
+    # Call counter to prevent infinite search loops (reset before each user message)
+    _search_call_count = [0]
+
+    def reset_search_counter():
+        _search_call_count[0] = 0
 
     training_agent = create_agent(
         model=llm,
@@ -151,13 +167,40 @@ def build_chain():
         Returns:
             Relevant documentation content
         """
-        print(f"[TOOL] search_documentation(query={query!r})")
+        _search_call_count[0] += 1
+        print(f"[TOOL] search_documentation(query={query!r}) [call {_search_call_count[0]}]")
+        if _search_call_count[0] > 2:
+            print("[TOOL] search limit reached (max 2 per question)")
+            return "Search limit reached. Please answer based on the documentation already retrieved."
+
+        # Primary: FAISS semantic search (chunked embeddings)
         docs = retriever.invoke(query)
-        if not docs:
-            print("[TOOL] search_documentation → no results")
-            return "No relevant documentation found."
-        print(f"[TOOL] search_documentation → {len(docs)} docs: {[d.metadata.get('source', '?') for d in docs]}")
-        return "\n\n".join([doc.page_content for doc in docs])
+        if docs:
+            sources = [d.metadata.get("source", "?") for d in docs]
+            print(f"[TOOL] RAG → {len(docs)} chunks: {sources}")
+            return "\n\n".join([doc.page_content for doc in docs])
+
+        # Fallback: keyword scoring against full docs
+        print("[TOOL] RAG returned nothing, trying keyword fallback")
+        query_lower = query.lower()
+        query_words = [w for w in query_lower.split() if len(w) > 2]
+        scored = []
+        for filename, content in _all_docs.items():
+            content_lower = content.lower()
+            name_lower = filename.replace(".md", "").lower()
+            word_hits = sum(1 for w in query_words if w in content_lower)
+            name_hits = sum(3 for w in query_words if w in name_lower)
+            score = word_hits + name_hits
+            if score > 0:
+                scored.append((score, filename, content))
+        scored.sort(key=lambda x: x[0], reverse=True)
+        if scored:
+            top = scored[:3]
+            print(f"[TOOL] keyword fallback → {len(top)} docs: {[s[1] for s in top]}")
+            return "\n\n".join([s[2] for s in top])
+
+        print("[TOOL] search_documentation → no results")
+        return "No relevant documentation found."
 
     @tool
     def delegate_to_training_agent(task: str) -> str:
@@ -213,4 +256,4 @@ def build_chain():
         system_prompt=SUPERVISOR_PROMPT,
     )
 
-    return supervisor, None
+    return supervisor, reset_search_counter
