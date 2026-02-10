@@ -28,6 +28,7 @@ except Exception as exc:  # pragma: no cover - exercised indirectly via endpoint
 
 chain = None
 _reset_search = None
+_chat_history = []
 
 
 def _ensure_chatbot():
@@ -521,9 +522,12 @@ async def chat_query(req: Request):
         raise HTTPException(status_code=400, detail="Query must be a non-empty string.")
     if _reset_search is not None:
         _reset_search()
-    result = chain.invoke({"messages": [{"role": "user", "content": query}]})
+    all_messages = _chat_history + [{"role": "user", "content": query}]
+    result = chain.invoke({"messages": all_messages})
     messages = result.get("messages", [])
     response = messages[-1].content if messages else "No response generated"
+    _chat_history.append({"role": "user", "content": query})
+    _chat_history.append({"role": "assistant", "content": response})
     return {"response": response}
 
 
@@ -536,7 +540,8 @@ async def clear_chat():
         raise HTTPException(status_code=503, detail=detail)
     if _reset_search is not None:
         _reset_search()
-    return {"message": "Chat history cleared"}
+    _chat_history.clear()
+    return {"message": "Chat session reset"}
 
 
 @app.get("/chat/status")
