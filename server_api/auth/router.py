@@ -26,7 +26,7 @@ oauth2_scheme = OAuth2PasswordBearer(tokenUrl="token", auto_error=False)
 # Mount operation guardrails to prevent self-DoS
 MAX_MOUNT_FILES = 10000  # Maximum number of files to mount
 MAX_MOUNT_FOLDERS = 5000  # Maximum number of folders to mount
-MAX_MOUNT_DEPTH = 20  # Maximum depth: 0 = mount root, 1 = direct children, etc.
+MAX_MOUNT_DEPTH = 19  # Maximum depth from mount root (0 = root, 19 = 19 levels deep)
 
 
 def _format_size(size_bytes: int) -> str:
@@ -76,7 +76,7 @@ def _validate_mount_size(source_dir: str) -> dict:
         max_depth = max(max_depth, current_depth)
         
         # Check depth limit (consistent with mounting logic)
-        if current_depth >= MAX_MOUNT_DEPTH:
+        if current_depth > MAX_MOUNT_DEPTH:
             dirnames[:] = []  # Stop traversing deeper
             continue
         
@@ -91,7 +91,7 @@ def _validate_mount_size(source_dir: str) -> dict:
     exceeds_limits = (
         file_count > MAX_MOUNT_FILES or 
         folder_count > MAX_MOUNT_FOLDERS or 
-        max_depth >= MAX_MOUNT_DEPTH
+        max_depth > MAX_MOUNT_DEPTH
     )
     
     return {
@@ -459,7 +459,7 @@ def mount_directory(
             f"Directory exceeds mount limits: "
             f"{count_prefix}{validation['file_count']} files (max {MAX_MOUNT_FILES}), "
             f"{count_prefix}{validation['folder_count']} folders (max {MAX_MOUNT_FOLDERS}), "
-            f"depth {validation['max_depth']} (max depth {MAX_MOUNT_DEPTH - 1} from mount root). "
+            f"depth {validation['max_depth']} (max {MAX_MOUNT_DEPTH}). "
             f"Consider mounting a smaller subdirectory."
         )
         raise HTTPException(status_code=400, detail=detail)
@@ -517,7 +517,7 @@ def mount_directory(
         
         # Enforce depth limit during traversal
         current_depth = os.path.normpath(current_dir).count(os.sep) - source_depth
-        if current_depth >= MAX_MOUNT_DEPTH:
+        if current_depth > MAX_MOUNT_DEPTH:
             dirnames[:] = []  # Stop going deeper
             continue
         
