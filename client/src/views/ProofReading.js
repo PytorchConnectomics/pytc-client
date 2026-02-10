@@ -32,7 +32,14 @@ function ProofReading() {
   useEffect(() => {
     const handleKeyPress = (e) => {
       // Don't trigger shortcuts when typing in input fields
-      if (e.target.tagName === "INPUT") return;
+      const target = e.target;
+      if (
+        target &&
+        (target.tagName === "INPUT" ||
+          target.tagName === "TEXTAREA" ||
+          target.isContentEditable)
+      )
+        return;
 
       switch (e.key.toLowerCase()) {
         case "c":

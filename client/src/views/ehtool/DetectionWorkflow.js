@@ -37,9 +37,12 @@ function DetectionWorkflow({ sessionId, setSessionId, refreshTrigger }) {
   useEffect(() => {
     const handleKeyPress = (e) => {
       // Don't trigger shortcuts when typing in input fields or when modal is open
+      const target = e.target;
       if (
-        e.target.tagName === "INPUT" ||
-        e.target.tagName === "TEXTAREA" ||
+        (target &&
+          (target.tagName === "INPUT" ||
+            target.tagName === "TEXTAREA" ||
+            target.isContentEditable)) ||
         editingLayer
       )
         return;
@@ -56,7 +59,7 @@ function DetectionWorkflow({ sessionId, setSessionId, refreshTrigger }) {
           if (selectedLayers.length > 0) handleClassify("unsure");
           break;
         case "a":
-          if (e.ctrlKey) {
+          if (e.ctrlKey || e.metaKey) {
             e.preventDefault();
             selectAllLayers();
           }

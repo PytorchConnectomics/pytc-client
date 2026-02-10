@@ -54,6 +54,7 @@ function createMenu() {
       label: "Electron",
       submenu: [{ role: "toggleDevTools" }, { role: "quit" }],
     },
+    { role: "editMenu" },
     {
       label: "Edit",
       submenu: [

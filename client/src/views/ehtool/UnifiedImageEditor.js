@@ -36,7 +36,13 @@ function UnifiedImageEditor({
       if (!visible) return;
 
       // Prevent shortcuts when typing in input fields
-      if (e.target.tagName === "INPUT" || e.target.tagName === "TEXTAREA")
+      const target = e.target;
+      if (
+        target &&
+        (target.tagName === "INPUT" ||
+          target.tagName === "TEXTAREA" ||
+          target.isContentEditable)
+      )
         return;
 
       switch (e.key.toLowerCase()) {

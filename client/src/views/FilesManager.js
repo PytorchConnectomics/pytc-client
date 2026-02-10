@@ -797,12 +797,19 @@ function FilesManager() {
         }
         return;
       }
-      if (e.target.tagName === "INPUT") return;
+      const target = e.target;
+      if (
+        target &&
+        (target.tagName === "INPUT" ||
+          target.tagName === "TEXTAREA" ||
+          target.isContentEditable)
+      )
+        return;
       if (e.key === "Delete") handleDelete();
       if (e.ctrlKey && e.key === "c") handleCopy();
       if (e.ctrlKey && e.key === "x") handleCut();
       if (e.ctrlKey && e.key === "v") handlePaste();
-      if (e.ctrlKey && e.key === "a") {
+      if ((e.ctrlKey || e.metaKey) && e.key === "a") {
         e.preventDefault();
         const allKeys = [
           ...folders
