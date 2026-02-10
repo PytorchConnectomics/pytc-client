@@ -17,6 +17,7 @@ from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langchain_community.vectorstores import FAISS
 from langchain_ollama import OllamaEmbeddings
 
+
 def main():
     # Parse CLI arguments
     parser = argparse.ArgumentParser(
@@ -66,7 +67,9 @@ def main():
     chunks = text_splitter.split_documents(documents)
     print(f"Split {len(documents)} docs into {len(chunks)} chunks")
     for c in chunks:
-        print(f"  - {c.metadata['source']} (start={c.metadata.get('start_index', '?')}, {len(c.page_content)} chars)")
+        print(
+            f"  - {c.metadata['source']} (start={c.metadata.get('start_index', '?')}, {len(c.page_content)} chars)"
+        )
 
     embeddings = OllamaEmbeddings(model=embed_model, base_url=base_url)
     vectorstore = FAISS.from_documents(chunks, embeddings)

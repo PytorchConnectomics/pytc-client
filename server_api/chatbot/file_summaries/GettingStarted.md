@@ -41,11 +41,11 @@ The chat supports markdown formatting, including tables, code blocks, and lists.
 
 These standard editing shortcuts work throughout the application:
 
-| Shortcut | Action |
-|----------|--------|
-| Cmd+C | Copy |
-| Cmd+V | Paste |
-| Cmd+X | Cut |
-| Cmd+A | Select All |
-| Cmd+Z | Undo |
-| Cmd+Shift+Z | Redo |
+| Shortcut    | Action     |
+| ----------- | ---------- |
+| Cmd+C       | Copy       |
+| Cmd+V       | Paste      |
+| Cmd+X       | Cut        |
+| Cmd+A       | Select All |
+| Cmd+Z       | Undo       |
+| Cmd+Shift+Z | Redo       |

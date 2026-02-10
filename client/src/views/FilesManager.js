@@ -95,8 +95,7 @@ function FilesManager() {
   const containerRef = useRef(null);
   const itemRefs = useRef({});
   const isDragSelecting = useRef(false);
-  const previewBaseUrl =
-    apiClient.defaults.baseURL || "http://localhost:4242";
+  const previewBaseUrl = apiClient.defaults.baseURL || "http://localhost:4242";
 
   // Sidebar Resize Logic
   const [sidebarWidth, setSidebarWidth] = useState(250);
@@ -215,7 +214,9 @@ function FilesManager() {
   const isImageFile = (file) => {
     if (!file || file.is_folder) return false;
     if (file.type && file.type.startsWith("image/")) return true;
-    const ext = `.${String(file.name || "").split(".").pop()}`.toLowerCase();
+    const ext = `.${String(file.name || "")
+      .split(".")
+      .pop()}`.toLowerCase();
     return IMAGE_EXTENSIONS.has(ext);
   };
 

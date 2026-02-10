@@ -64,25 +64,25 @@ Click on a file (single click or via the context menu **Open** action) to previe
 
 ## Toolbar Actions Summary
 
-| Button | Action |
-|--------|--------|
-| Mount Project | Add a server directory to the sidebar |
-| Unmount Project | Remove a mounted directory from the sidebar |
-| New Folder | Create a new folder in the current directory |
-| Upload | Upload files from your local machine |
-| Refresh | Reload the current folder contents |
-| Grid View / List View | Toggle between icon grid and detail table |
+| Button                | Action                                       |
+| --------------------- | -------------------------------------------- |
+| Mount Project         | Add a server directory to the sidebar        |
+| Unmount Project       | Remove a mounted directory from the sidebar  |
+| New Folder            | Create a new folder in the current directory |
+| Upload                | Upload files from your local machine         |
+| Refresh               | Reload the current folder contents           |
+| Grid View / List View | Toggle between icon grid and detail table    |
 
 ## Keyboard Shortcuts
 
-| Shortcut | Action |
-|----------|--------|
-| Ctrl+A / Cmd+A | Select all items |
-| Delete / Backspace | Delete selected items |
-| Ctrl+C / Cmd+C | Copy selected items |
-| Ctrl+X / Cmd+X | Cut selected items |
-| Ctrl+V / Cmd+V | Paste items |
-| Enter | Open/navigate into selected item |
+| Shortcut           | Action                           |
+| ------------------ | -------------------------------- |
+| Ctrl+A / Cmd+A     | Select all items                 |
+| Delete / Backspace | Delete selected items            |
+| Ctrl+C / Cmd+C     | Copy selected items              |
+| Ctrl+X / Cmd+X     | Cut selected items               |
+| Ctrl+V / Cmd+V     | Paste items                      |
+| Enter              | Open/navigate into selected item |
 
 ## File Input Fields (Used Across the App)
 

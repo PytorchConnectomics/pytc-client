@@ -135,7 +135,9 @@ def build_chain():
     _all_docs = {}
     for md_file in summaries_dir.rglob("*.md"):
         _all_docs[md_file.name] = md_file.read_text(encoding="utf-8")
-    print(f"[SEARCH] Loaded {len(_all_docs)} docs for keyword search: {list(_all_docs.keys())}")
+    print(
+        f"[SEARCH] Loaded {len(_all_docs)} docs for keyword search: {list(_all_docs.keys())}"
+    )
 
     # Call counter to prevent infinite search loops (reset before each user message)
     _search_call_count = [0]
@@ -168,7 +170,9 @@ def build_chain():
             Relevant documentation content
         """
         _search_call_count[0] += 1
-        print(f"[TOOL] search_documentation(query={query!r}) [call {_search_call_count[0]}]")
+        print(
+            f"[TOOL] search_documentation(query={query!r}) [call {_search_call_count[0]}]"
+        )
         if _search_call_count[0] > 2:
             print("[TOOL] search limit reached (max 2 per question)")
             return "Search limit reached. Please answer based on the documentation already retrieved."
@@ -219,7 +223,9 @@ def build_chain():
             {"messages": [{"role": "user", "content": task}]}
         )
         messages = result.get("messages", [])
-        response = messages[-1].content if messages else "Training agent did not respond."
+        response = (
+            messages[-1].content if messages else "Training agent did not respond."
+        )
         print(f"[TOOL] training_agent responded ({len(response)} chars)")
         return response
 
@@ -240,7 +246,9 @@ def build_chain():
             {"messages": [{"role": "user", "content": task}]}
         )
         messages = result.get("messages", [])
-        response = messages[-1].content if messages else "Inference agent did not respond."
+        response = (
+            messages[-1].content if messages else "Inference agent did not respond."
+        )
         print(f"[TOOL] inference_agent responded ({len(response)} chars)")
         return response
 

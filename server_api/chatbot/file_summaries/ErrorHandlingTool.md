@@ -42,6 +42,7 @@ Layers are displayed as a paginated grid of thumbnail cards (12 per page, in a 3
 - The **layer name** and **layer number** at the bottom of the card.
 
 **Interactions:**
+
 - **Click a card** to open the Image Inspection modal for detailed viewing and mask editing.
 - **Click the checkbox** to select/deselect a layer for bulk classification.
 - **Use the pagination controls** at the bottom to navigate between pages.
@@ -62,12 +63,12 @@ Layers are displayed as a paginated grid of thumbnail cards (12 per page, in a 3
 
 These shortcuts work when the main grid is visible (not when the image editor modal is open) and you are not typing in an input field:
 
-| Shortcut | Action |
-|----------|--------|
-| C | Classify selected layers as Correct |
-| X | Classify selected layers as Incorrect |
-| U | Classify selected layers as Unsure |
-| Ctrl+A | Select all layers on the current page |
+| Shortcut | Action                                |
+| -------- | ------------------------------------- |
+| C        | Classify selected layers as Correct   |
+| X        | Classify selected layers as Incorrect |
+| U        | Classify selected layers as Unsure    |
+| Ctrl+A   | Select all layers on the current page |
 
 ## Image Inspection Modal
 
@@ -106,19 +107,19 @@ The main editing area displays the image with the mask overlay. Interactions:
 
 ### Image Editor Keyboard Shortcuts
 
-| Shortcut | Action |
-|----------|--------|
-| P | Switch to Paint mode |
-| E | Switch to Erase mode |
-| H | Switch to Hand (pan) mode |
-| C | Set classification to Correct |
-| X | Set classification to Incorrect |
-| U | Set classification to Unsure |
-| Ctrl+Z / Cmd+Z | Undo |
-| Ctrl+Shift+Z / Cmd+Shift+Z | Redo |
-| Ctrl+Y / Cmd+Y | Redo (alternative) |
-| Ctrl+S / Cmd+S | Save mask and classification |
-| Escape | Close the modal |
+| Shortcut                   | Action                          |
+| -------------------------- | ------------------------------- |
+| P                          | Switch to Paint mode            |
+| E                          | Switch to Erase mode            |
+| H                          | Switch to Hand (pan) mode       |
+| C                          | Set classification to Correct   |
+| X                          | Set classification to Incorrect |
+| U                          | Set classification to Unsure    |
+| Ctrl+Z / Cmd+Z             | Undo                            |
+| Ctrl+Shift+Z / Cmd+Shift+Z | Redo                            |
+| Ctrl+Y / Cmd+Y             | Redo (alternative)              |
+| Ctrl+S / Cmd+S             | Save mask and classification    |
+| Escape                     | Close the modal                 |
 
 ## Typical Workflow
 

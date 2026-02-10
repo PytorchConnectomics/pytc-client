@@ -39,6 +39,7 @@ Once a config is loaded, you will see:
 Fine-tune detailed training parameters using structured controls organized into sections:
 
 **Common training knobs:**
+
 - Optimizer (SGD, Adam, AdamW)
 - LR scheduler (MultiStepLR, CosineAnnealingLR, StepLR)
 - Learning rate
@@ -48,11 +49,13 @@ Fine-tune detailed training parameters using structured controls organized into 
 - Validation interval
 
 **System:**
+
 - Distributed training (on/off)
 - Parallel mode (DP or DDP)
 - Debug mode (on/off)
 
 **Model:**
+
 - Block type (residual, plain)
 - Backbone (resnet, repvgg, botnet)
 - Normalization (bn, sync_bn, in, gn, none)
@@ -62,6 +65,7 @@ Fine-tune detailed training parameters using structured controls organized into 
 - Aux output (on/off)
 
 **Dataset:**
+
 - 2D dataset (on/off)
 - Load 2D slices (on/off)
 - Isotropic data (on/off)
@@ -71,6 +75,7 @@ Fine-tune detailed training parameters using structured controls organized into 
 - Pad mode (reflect, constant, symmetric)
 
 **Solver (advanced):**
+
 - Weight decay
 - Momentum
 - Clip gradients (on/off)

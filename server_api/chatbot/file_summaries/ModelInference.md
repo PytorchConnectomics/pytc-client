@@ -36,12 +36,14 @@ Once loaded, you will see:
 Fine-tune inference-specific parameters:
 
 **Common inference knobs:**
+
 - Batch size
 - Augmentations (AUG_NUM)
 - Blending mode (gaussian or constant)
 - Eval mode (on/off — whether to compute evaluation metrics)
 
 **Inference (advanced):**
+
 - Run singly (process volumes one at a time)
 - Unpad output (remove padding from output)
 - Augment mode (mean or max — how to combine augmented predictions)

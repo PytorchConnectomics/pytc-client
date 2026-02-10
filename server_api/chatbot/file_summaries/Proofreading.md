@@ -42,14 +42,14 @@ The proofreading page is divided into three panels:
 
 These shortcuts work when the proofreading page is active and you are not typing in an input field:
 
-| Shortcut | Action |
-|----------|--------|
-| C | Mark current synapse as Correct |
-| X | Mark current synapse as Incorrect |
-| U | Mark current synapse as Unsure |
-| S | Save current synapse |
-| Arrow Right (→) | Move to the next synapse |
-| Arrow Left (←) | Move to the previous synapse |
+| Shortcut        | Action                            |
+| --------------- | --------------------------------- |
+| C               | Mark current synapse as Correct   |
+| X               | Mark current synapse as Incorrect |
+| U               | Mark current synapse as Unsure    |
+| S               | Save current synapse              |
+| Arrow Right (→) | Move to the next synapse          |
+| Arrow Left (←)  | Move to the previous synapse      |
 
 ## Workflow Tips
 
