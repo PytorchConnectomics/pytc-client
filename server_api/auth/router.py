@@ -26,7 +26,7 @@ oauth2_scheme = OAuth2PasswordBearer(tokenUrl="token", auto_error=False)
 # Mount operation guardrails to prevent self-DoS
 MAX_MOUNT_FILES = 10000  # Maximum number of files to mount
 MAX_MOUNT_FOLDERS = 5000  # Maximum number of folders to mount
-MAX_MOUNT_DEPTH = 20  # Maximum directory depth to traverse
+MAX_MOUNT_DEPTH = 20  # Maximum depth: 0 = mount root, 1 = direct children, etc.
 
 
 def _format_size(size_bytes: int) -> str:
@@ -459,7 +459,7 @@ def mount_directory(
             f"Directory exceeds mount limits: "
             f"{count_prefix}{validation['file_count']} files (max {MAX_MOUNT_FILES}), "
             f"{count_prefix}{validation['folder_count']} folders (max {MAX_MOUNT_FOLDERS}), "
-            f"depth {validation['max_depth']} (max {MAX_MOUNT_DEPTH - 1}). "
+            f"depth {validation['max_depth']} (max depth {MAX_MOUNT_DEPTH - 1} from mount root). "
             f"Consider mounting a smaller subdirectory."
         )
         raise HTTPException(status_code=400, detail=detail)
