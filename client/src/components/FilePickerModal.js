@@ -46,6 +46,7 @@ const FilePickerModal = ({
     if (visible) {
       setCurrentPath("root");
       setOnlyImages(false);
+      setPreviewStatus({});
       loadAllData();
     }
   }, [visible]);
