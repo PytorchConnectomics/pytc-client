@@ -16,7 +16,7 @@ import ModelTraining from "./ModelTraining";
 import ModelInference from "./ModelInference";
 import Monitoring from "./Monitoring";
 import ProofReading from "./ProofReading";
-import WormErrorHandling from "./WormErrorHandling";
+import MaskProofreading from "./MaskProofreading";
 import WorkflowSelector from "../components/WorkflowSelector";
 import Chatbot from "../components/Chatbot";
 
@@ -48,8 +48,8 @@ function Views() {
     { label: "Tensorboard", key: "monitoring", icon: <DashboardOutlined /> },
     { label: "SynAnno", key: "synanno", icon: <ApartmentOutlined /> },
     {
-      label: "Worm Error Handling",
-      key: "worm-error-handling",
+      label: "Mask Proofreading",
+      key: "mask-proofreading",
       icon: <BugOutlined />,
     },
   ];
@@ -224,7 +224,7 @@ function Views() {
           />,
         )}
         {renderTabContent("synanno", <ProofReading />)}
-        {renderTabContent("worm-error-handling", <WormErrorHandling />)}
+        {renderTabContent("mask-proofreading", <MaskProofreading />)}
       </Content>
       <Drawer
         placement="right"

@@ -1,7 +1,7 @@
 import React, { useState } from "react";
 import EHTool from "./EHTool";
 
-function WormErrorHandling() {
+function MaskProofreading() {
   const [ehToolSession, setEhToolSession] = useState(null);
   const [refreshTrigger, setRefreshTrigger] = useState(0);
 
@@ -20,4 +20,4 @@ function WormErrorHandling() {
   );
 }
 
-export default WormErrorHandling;
+export default MaskProofreading;
