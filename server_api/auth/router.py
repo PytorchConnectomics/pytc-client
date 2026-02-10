@@ -85,7 +85,17 @@ def _delete_file_tree(
         and os.path.exists(node.physical_path)
         and _is_managed_upload_path(user_id, node.physical_path)
     ):
-        os.remove(node.physical_path)
+        try:
+            os.remove(node.physical_path)
+        except FileNotFoundError:
+            # File already removed; treat as successfully deleted
+            pass
+        except (PermissionError, OSError) as exc:
+            # Surface a controlled error so transaction handling remains consistent
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail=f"Failed to delete file from disk: {exc}",
+            )
     db.delete(node)
 
 
