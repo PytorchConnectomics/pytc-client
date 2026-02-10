@@ -149,6 +149,71 @@ def _delete_file_tree(
     db.delete(node)
 
 
+def _format_size(size_bytes: int) -> str:
+    if size_bytes < 1024:
+        return f"{size_bytes}B"
+    if size_bytes < 1024 * 1024:
+        return f"{size_bytes / 1024:.1f}KB"
+    if size_bytes < 1024 * 1024 * 1024:
+        return f"{size_bytes / (1024 * 1024):.1f}MB"
+    return f"{size_bytes / (1024 * 1024 * 1024):.1f}GB"
+
+
+def _ensure_unique_name(
+    db: Session, user_id: int, parent_path: str, base_name: str
+) -> str:
+    existing_names = {
+        row[0]
+        for row in db.query(models.File.name).filter(
+            models.File.user_id == user_id, models.File.path == parent_path
+        )
+    }
+    if base_name not in existing_names:
+        return base_name
+    index = 2
+    while True:
+        candidate = f"{base_name} ({index})"
+        if candidate not in existing_names:
+            return candidate
+        index += 1
+
+
+def _is_managed_upload_path(user_id: int, physical_path: Optional[str]) -> bool:
+    if not physical_path:
+        return False
+    uploads_root = os.path.abspath(os.path.join("uploads", str(user_id)))
+    target = os.path.abspath(os.path.expanduser(physical_path))
+    try:
+        return os.path.commonpath([uploads_root, target]) == uploads_root
+    except ValueError:
+        return False
+
+
+def _delete_file_tree(
+    db: Session,
+    user_id: int,
+    node: models.File,
+    delete_disk_files: bool = True,
+):
+    children = (
+        db.query(models.File)
+        .filter(models.File.path == str(node.id), models.File.user_id == user_id)
+        .all()
+    )
+    for child in children:
+        _delete_file_tree(db, user_id, child, delete_disk_files=delete_disk_files)
+
+    if (
+        delete_disk_files
+        and not node.is_folder
+        and node.physical_path
+        and os.path.exists(node.physical_path)
+        and _is_managed_upload_path(user_id, node.physical_path)
+    ):
+        os.remove(node.physical_path)
+    db.delete(node)
+
+
 def _get_or_create_guest_user(db: Session) -> models.User:
     """Return the shared guest user, creating it if needed."""
     guest = db.query(models.User).filter(models.User.username == "guest").first()
