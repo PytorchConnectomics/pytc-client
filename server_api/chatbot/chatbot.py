@@ -1,11 +1,10 @@
-"""Multi-agent chatbot system for PyTorch Connectomics.
+# Multi-agent chatbot system for PyTorch Connectomics.
 
-Architecture:
-- Supervisor Agent: Routes tasks to appropriate sub-agents
-- Training Agent: Handles config selection and training command generation
-- Inference Agent: Handles checkpoint listing and inference command generation
-- RAG: Documentation search via FAISS vector store
-"""
+# Architecture:
+# - Supervisor Agent: Routes tasks to appropriate sub-agents
+# - Training Agent: Handles config selection and training command generation
+# - Inference Agent: Handles checkpoint listing and inference command generation
+# - RAG: Documentation search via FAISS vector store
 
 import os
 
@@ -24,6 +23,11 @@ TRAINING_AGENT_PROMPT = """You are a **Training Agent** for PyTorch Connectomics
 
 You help users set up and configure training jobs for biomedical image segmentation.
 
+CRITICAL RULES:
+1. **Only report values that your tools return.** Do NOT invent hyperparameter values, config names, or file paths.
+2. **Always use tools before answering.** Call list_training_configs or read_config first — never guess.
+3. **Be concise.** Report the facts, generate the command, and stop.
+
 Tools:
 - list_training_configs: List available config files with descriptions
 - read_config: Read a config file to see its hyperparameters
@@ -36,21 +40,15 @@ Workflow:
 
 Command Format:
 ```
-cd /path/to/pytorch_connectomics
 python scripts/main.py --config <config_path> [OVERRIDES]
 ```
 
-Override Format (append to command):
-- SOLVER.BASE_LR=0.001          # Learning rate
-- SOLVER.SAMPLES_PER_BATCH=8    # Batch size  
-- SOLVER.ITERATION_TOTAL=50000  # Total iterations
-- SYSTEM.NUM_GPUS=2             # Number of GPUs
-- MODEL.INPUT_SIZE=[32,256,256] # Input dimensions
-
+Overrides use YAML key paths appended to the command: SECTION.KEY=value
 Example:
 ```
 python scripts/main.py --config configs/Lucchi-Mitochondria.yaml SOLVER.BASE_LR=0.001 SOLVER.SAMPLES_PER_BATCH=16
 ```
+Use read_config output to determine the correct key paths for any parameter.
 
 Always generate commands for the user to run - never execute directly."""
 
@@ -58,6 +56,11 @@ Always generate commands for the user to run - never execute directly."""
 INFERENCE_AGENT_PROMPT = """You are an **Inference Agent** for PyTorch Connectomics.
 
 You help users run inference and evaluation with trained segmentation models.
+
+CRITICAL RULES:
+1. **Only report values that your tools return.** Do NOT invent checkpoint paths, config names, or settings.
+2. **Always use tools before answering.** Call list_checkpoints or read_config first — never guess.
+3. **Be concise.** Report the facts, generate the command, and stop.
 
 Tools:
 - list_checkpoints: Find available trained model checkpoints
@@ -70,48 +73,43 @@ Workflow:
 
 Command Format:
 ```
-cd /path/to/pytorch_connectomics
 python scripts/main.py --config <config_path> --checkpoint <checkpoint_path> --inference [OVERRIDES]
 ```
 
-Override Format (append to command):
-- INFERENCE.IMAGE_NAME=/path/to/test_image.h5   # Test volume
-- INFERENCE.OUTPUT_PATH=/path/to/output         # Output directory
-- INFERENCE.AUG_MODE=mean                       # Enable test-time augmentation
-
+Overrides use YAML key paths appended to the command: SECTION.KEY=value
 Example:
 ```
-python scripts/main.py --config configs/Lucchi-Mitochondria.yaml --checkpoint outputs/Lucchi/checkpoint_100000.pth --inference
+python scripts/main.py --config configs/Lucchi-Mitochondria.yaml --checkpoint outputs/Lucchi/checkpoint_100000.pth --inference INFERENCE.OUTPUT_PATH=/path/to/output
 ```
+Use read_config output to determine the correct key paths for any parameter.
 
 Always generate commands for the user to run - never execute directly."""
 
 
-SUPERVISOR_PROMPT = """You are the **Supervisor Agent** for PyTorch Connectomics.
+SUPERVISOR_PROMPT = """You are the **Supervisor Agent** for PyTorch Connectomics (PyTC Client).
 
-You coordinate between specialized sub-agents to help users with biomedical image segmentation tasks.
+You help end users navigate and use the PyTC Client application.
+
+CRITICAL RULES:
+1. **Only state facts from retrieved documentation or tool output.** Do NOT invent features, shortcuts, buttons, or workflows that are not explicitly described in the retrieved context.
+2. **If the documentation does not cover something, say so.** For example: "The documentation does not mention this feature."
+3. **Answer every part of the user's question.** If they ask about two things, address both.
+4. **Be concise.** Give clear, direct answers. Avoid filler phrases like "Happy proofreading!" or restating the same information in multiple formats.
+5. **Do not fabricate keyboard shortcuts, API endpoints, or UI elements.** Only mention those explicitly listed in the retrieved docs.
 
 Sub-agents available:
 1. **Training Agent**: Config selection, training job setup, hyperparameter overrides
 2. **Inference Agent**: Checkpoint management, inference/evaluation commands
 
-Your responsibilities:
-- Understand user requests and delegate to the right agent
-- For documentation/UI questions, use search_documentation directly
-- Pass context between agents when needed (e.g., after discussing training, help with inference)
-- Synthesize responses from sub-agents into clear user-friendly answers
-
 Tools:
-- search_documentation: Search PyTC docs for UI guides and feature explanations
+- search_documentation: Search PyTC docs for UI guides and feature explanations. Use this for any question about the application interface, pages, buttons, or workflows.
 - delegate_to_training_agent: Send training-related tasks to training agent
 - delegate_to_inference_agent: Send inference-related tasks to inference agent
 
-Routing guidelines:
-- "train", "training", "config", "hyperparameters", "learning rate", "batch size" → Training Agent
-- "inference", "predict", "evaluate", "checkpoint", "test", "model output" → Inference Agent  
-- "how to", "where is", "what does", "UI", "interface" → search_documentation
-
-Provide clear, user-friendly responses. Focus on what users can do, not technical details."""
+When using search_documentation results:
+- Base your entire answer on the returned text
+- Quote specific details (shortcuts, endpoints, steps) exactly as they appear
+- If the returned docs don't fully answer the question, state what is missing rather than guessing"""
 
 
 def build_chain():
@@ -127,7 +125,7 @@ def build_chain():
         embeddings,
         allow_dangerous_deserialization=True,
     )
-    retriever = vectorstore.as_retriever()
+    retriever = vectorstore.as_retriever(search_kwargs={"k": 2})
 
     training_agent = create_agent(
         model=llm,
@@ -153,9 +151,12 @@ def build_chain():
         Returns:
             Relevant documentation content
         """
+        print(f"[TOOL] search_documentation(query={query!r})")
         docs = retriever.invoke(query)
         if not docs:
+            print("[TOOL] search_documentation → no results")
             return "No relevant documentation found."
+        print(f"[TOOL] search_documentation → {len(docs)} docs: {[d.metadata.get('source', '?') for d in docs]}")
         return "\n\n".join([doc.page_content for doc in docs])
 
     @tool
@@ -170,11 +171,14 @@ def build_chain():
         Returns:
             Response from the training agent
         """
+        print(f"[TOOL] delegate_to_training_agent(task={task!r})")
         result = training_agent.invoke(
             {"messages": [{"role": "user", "content": task}]}
         )
         messages = result.get("messages", [])
-        return messages[-1].content if messages else "Training agent did not respond."
+        response = messages[-1].content if messages else "Training agent did not respond."
+        print(f"[TOOL] training_agent responded ({len(response)} chars)")
+        return response
 
     @tool
     def delegate_to_inference_agent(task: str) -> str:
@@ -188,11 +192,14 @@ def build_chain():
         Returns:
             Response from the inference agent
         """
+        print(f"[TOOL] delegate_to_inference_agent(task={task!r})")
         result = inference_agent.invoke(
             {"messages": [{"role": "user", "content": task}]}
         )
         messages = result.get("messages", [])
-        return messages[-1].content if messages else "Inference agent did not respond."
+        response = messages[-1].content if messages else "Inference agent did not respond."
+        print(f"[TOOL] inference_agent responded ({len(response)} chars)")
+        return response
 
     supervisor_tools = [
         search_documentation,
