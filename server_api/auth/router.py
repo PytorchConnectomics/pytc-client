@@ -23,131 +23,6 @@ router = APIRouter()
 
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="token", auto_error=False)
 
-# Mount operation guardrails to prevent self-DoS
-MAX_MOUNT_FILES = 10000  # Maximum number of files to mount
-MAX_MOUNT_FOLDERS = 5000  # Maximum number of folders to mount
-MAX_MOUNT_DEPTH = 19  # Maximum depth from mount root (0 = root, 19 = 19 levels deep)
-
-
-def _format_size(size_bytes: int) -> str:
-    if size_bytes < 1024:
-        return f"{size_bytes}B"
-    if size_bytes < 1024 * 1024:
-        return f"{size_bytes / 1024:.1f}KB"
-    if size_bytes < 1024 * 1024 * 1024:
-        return f"{size_bytes / (1024 * 1024):.1f}MB"
-    return f"{size_bytes / (1024 * 1024 * 1024):.1f}GB"
-
-
-def _ensure_unique_name(
-    db: Session, user_id: int, parent_path: str, base_name: str
-) -> str:
-    existing_names = {
-        row[0]
-        for row in db.query(models.File.name).filter(
-            models.File.user_id == user_id, models.File.path == parent_path
-        )
-    }
-    if base_name not in existing_names:
-        return base_name
-    index = 2
-    while True:
-        candidate = f"{base_name} ({index})"
-        if candidate not in existing_names:
-            return candidate
-        index += 1
-
-
-def _validate_mount_size(source_dir: str) -> dict:
-    """
-    Pre-validate directory size and depth before mounting.
-    Returns a dict with file_count, folder_count, max_depth, and whether it exceeds limits.
-    Note: Counts may be partial if limits are exceeded during scanning.
-    """
-    file_count = 0
-    folder_count = 0
-    max_depth = 0
-    counts_are_partial = False
-
-    source_depth = os.path.normpath(source_dir).count(os.sep)
-
-    for current_dir, dirnames, filenames in os.walk(source_dir, topdown=True):
-        current_depth = os.path.normpath(current_dir).count(os.sep) - source_depth
-        max_depth = max(max_depth, current_depth)
-
-        # Check depth limit (consistent with mounting logic)
-        if current_depth > MAX_MOUNT_DEPTH:
-            dirnames[:] = []  # Stop traversing deeper
-            continue
-
-        folder_count += len(dirnames)
-        file_count += len(filenames)
-
-        # Early termination if limits exceeded
-        if file_count > MAX_MOUNT_FILES or folder_count > MAX_MOUNT_FOLDERS:
-            counts_are_partial = True
-            break
-
-    exceeds_limits = (
-        file_count > MAX_MOUNT_FILES
-        or folder_count > MAX_MOUNT_FOLDERS
-        or max_depth > MAX_MOUNT_DEPTH
-    )
-
-    return {
-        "file_count": file_count,
-        "folder_count": folder_count,
-        "max_depth": max_depth,
-        "exceeds_limits": exceeds_limits,
-        "counts_are_partial": counts_are_partial,
-    }
-
-
-def _is_managed_upload_path(user_id: int, physical_path: Optional[str]) -> bool:
-    if not physical_path:
-        return False
-    uploads_root = os.path.abspath(os.path.join("uploads", str(user_id)))
-    target = os.path.abspath(os.path.expanduser(physical_path))
-    try:
-        return os.path.commonpath([uploads_root, target]) == uploads_root
-    except ValueError:
-        return False
-
-
-def _delete_file_tree(
-    db: Session,
-    user_id: int,
-    node: models.File,
-    delete_disk_files: bool = True,
-):
-    children = (
-        db.query(models.File)
-        .filter(models.File.path == str(node.id), models.File.user_id == user_id)
-        .all()
-    )
-    for child in children:
-        _delete_file_tree(db, user_id, child, delete_disk_files=delete_disk_files)
-
-    if (
-        delete_disk_files
-        and not node.is_folder
-        and node.physical_path
-        and os.path.exists(node.physical_path)
-        and _is_managed_upload_path(user_id, node.physical_path)
-    ):
-        try:
-            os.remove(node.physical_path)
-        except FileNotFoundError:
-            # File already removed; treat as successfully deleted
-            pass
-        except (PermissionError, OSError) as exc:
-            # Surface a controlled error so transaction handling remains consistent
-            raise HTTPException(
-                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail=f"Failed to delete file from disk: {exc}",
-            )
-    db.delete(node)
-
 
 def _format_size(size_bytes: int) -> str:
     if size_bytes < 1024:
@@ -516,19 +391,6 @@ def mount_directory(
     if not os.path.isdir(source_dir):
         raise HTTPException(status_code=400, detail="Directory does not exist")
 
-    # Pre-validate directory size to prevent self-DoS
-    validation = _validate_mount_size(source_dir)
-    if validation["exceeds_limits"]:
-        count_prefix = "at least " if validation["counts_are_partial"] else ""
-        detail = (
-            f"Directory exceeds mount limits: "
-            f"{count_prefix}{validation['file_count']} files (max {MAX_MOUNT_FILES}), "
-            f"{count_prefix}{validation['folder_count']} folders (max {MAX_MOUNT_FOLDERS}), "
-            f"depth {validation['max_depth']} (max {MAX_MOUNT_DEPTH}). "
-            f"Consider mounting a smaller subdirectory."
-        )
-        raise HTTPException(status_code=400, detail=detail)
-
     destination_path = mount_request.destination_path or "root"
     if destination_path != "root":
         try:
@@ -573,28 +435,15 @@ def mount_directory(
     dir_to_id = {source_dir: str(mounted_root.id)}
     mounted_folders = 1
     mounted_files = 0
-    source_depth = os.path.normpath(source_dir).count(os.sep)
 
     for current_dir, dirnames, filenames in os.walk(source_dir, topdown=True):
         parent_id = dir_to_id.get(current_dir)
         if parent_id is None:
             continue
-
-        # Enforce depth limit during traversal
-        current_depth = os.path.normpath(current_dir).count(os.sep) - source_depth
-        if current_depth > MAX_MOUNT_DEPTH:
-            dirnames[:] = []  # Stop going deeper
-            continue
-
         dirnames.sort()
         filenames.sort()
 
         for dirname in dirnames:
-            # Check folder limit before processing
-            if mounted_folders >= MAX_MOUNT_FOLDERS:
-                dirnames[:] = []  # Stop processing more folders
-                break
-
             abs_subdir = os.path.join(current_dir, dirname)
             folder_name = _ensure_unique_name(db, current_user.id, parent_id, dirname)
             folder_record = models.File(
@@ -612,10 +461,6 @@ def mount_directory(
             mounted_folders += 1
 
         for filename in filenames:
-            # Check file limit before processing
-            if mounted_files >= MAX_MOUNT_FILES:
-                break
-
             abs_file = os.path.join(current_dir, filename)
             if not os.path.isfile(abs_file):
                 continue
@@ -637,20 +482,10 @@ def mount_directory(
             db.add(file_record)
             mounted_files += 1
 
-        # Stop early if limits reached
-        if mounted_files >= MAX_MOUNT_FILES:
-            break
-
     db.commit()
 
-    message = (
-        f"Mounted {mounted_files} files and {mounted_folders} folders from {source_dir}"
-    )
-    if mounted_files >= MAX_MOUNT_FILES or mounted_folders >= MAX_MOUNT_FOLDERS:
-        message += f" (limits reached: some files/folders may not be indexed)"
-
     return {
-        "message": message,
+        "message": f"Mounted {mounted_files} files from {source_dir}",
         "mounted_root_id": mounted_root.id,
         "mounted_folders": mounted_folders,
         "mounted_files": mounted_files,
