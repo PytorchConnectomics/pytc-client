@@ -27,22 +27,23 @@ except Exception as exc:  # pragma: no cover - exercised indirectly via endpoint
     _chatbot_error = exc
 
 chain = None
-memory = None
+_reset_search = None
+_chat_history = []
 
 
 def _ensure_chatbot():
-    global chain, memory, _chatbot_error
-    if chain is not None and memory is not None:
+    global chain, _reset_search, _chatbot_error
+    if chain is not None and _reset_search is not None:
         return True
     if build_chain is None:
         return False
     try:
-        chain, memory = build_chain()
+        chain, _reset_search = build_chain()
         _chatbot_error = None
         return True
     except Exception as exc:  # pragma: no cover - runtime config issue
         chain = None
-        memory = None
+        _reset_search = None
         _chatbot_error = exc
         return False
 
@@ -517,9 +518,16 @@ async def chat_query(req: Request):
         raise HTTPException(status_code=503, detail=detail)
     body = await req.json()
     query = body.get("query")
-    result = chain.invoke({"messages": [{"role": "user", "content": query}]})
+    if not isinstance(query, str) or not query.strip():
+        raise HTTPException(status_code=400, detail="Query must be a non-empty string.")
+    if _reset_search is not None:
+        _reset_search()
+    all_messages = _chat_history + [{"role": "user", "content": query}]
+    result = chain.invoke({"messages": all_messages})
     messages = result.get("messages", [])
     response = messages[-1].content if messages else "No response generated"
+    _chat_history.append({"role": "user", "content": query})
+    _chat_history.append({"role": "assistant", "content": response})
     return {"response": response}
 
 
@@ -530,9 +538,10 @@ async def clear_chat():
         if "_chatbot_error" in globals():
             detail = f"{detail}: {_chatbot_error}"
         raise HTTPException(status_code=503, detail=detail)
-    if memory is not None:
-        memory.clear()
-    return {"message": "Chat history cleared"}
+    if _reset_search is not None:
+        _reset_search()
+    _chat_history.clear()
+    return {"message": "Chat session reset"}
 
 
 @app.get("/chat/status")

@@ -36,8 +36,7 @@ const FilePickerModal = ({
   const [loading, setLoading] = useState(false);
   const [previewStatus, setPreviewStatus] = useState({});
   const [onlyImages, setOnlyImages] = useState(false);
-  const previewBaseUrl =
-    apiClient.defaults.baseURL || "http://localhost:4242";
+  const previewBaseUrl = apiClient.defaults.baseURL || "http://localhost:4242";
 
   // Refactored fetch to get all files once
   const [allData, setAllData] = useState([]);
@@ -46,6 +45,7 @@ const FilePickerModal = ({
     if (visible) {
       setCurrentPath("root");
       setOnlyImages(false);
+      setPreviewStatus({});
       loadAllData();
     }
   }, [visible]);
@@ -180,12 +180,13 @@ const FilePickerModal = ({
   const isImageFile = (item) => {
     if (!item || item.is_folder) return false;
     if (item.type && item.type.startsWith("image/")) return true;
-    const ext = `.${String(item.name || "").split(".").pop()}`.toLowerCase();
+    const ext = `.${String(item.name || "")
+      .split(".")
+      .pop()}`.toLowerCase();
     return IMAGE_EXTENSIONS.has(ext);
   };
 
-  const getPreviewUrl = (item) =>
-    `${previewBaseUrl}/files/preview/${item.id}`;
+  const getPreviewUrl = (item) => `${previewBaseUrl}/files/preview/${item.id}`;
 
   const markPreviewLoaded = (id) => {
     setPreviewStatus((prev) => ({ ...prev, [id]: "loaded" }));
