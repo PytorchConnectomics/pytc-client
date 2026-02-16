@@ -522,6 +522,7 @@ async def check_files(req: Request):
 
 # ── Chat history persistence endpoints ─────────────────────────────────────────
 
+
 @app.get("/chat/conversations", response_model=List[models.ConversationResponse])
 def list_conversations(
     user: models.User = Depends(get_current_user),
@@ -691,7 +692,9 @@ async def chat_query(
 
     # Persist to DB
     db.add(models.ChatMessage(conversation_id=convo_id, role="user", content=query))
-    db.add(models.ChatMessage(conversation_id=convo_id, role="assistant", content=response))
+    db.add(
+        models.ChatMessage(conversation_id=convo_id, role="assistant", content=response)
+    )
 
     # Auto-title: first user message becomes the title (truncated)
     if convo.title == "New Chat":
@@ -737,6 +740,7 @@ async def chat_status():
 # Helper chat endpoints (inline "?" popovers — RAG only, no training/inference)
 # ---------------------------------------------------------------------------
 
+
 def _ensure_helper_chat(task_key: str):
     """Lazily build a helper agent for *task_key*, reusing it on subsequent calls."""
     global _chatbot_error
@@ -777,7 +781,9 @@ async def chat_helper_query(req: Request):
 
     # Prepend field context to the first message so the LLM knows what field
     # the user is looking at.
-    user_content = f"[Field context: {field_context}]\n\n{query}" if field_context else query
+    user_content = (
+        f"[Field context: {field_context}]\n\n{query}" if field_context else query
+    )
 
     reset_fn()
     all_messages = history + [{"role": "user", "content": user_content}]

@@ -80,7 +80,9 @@ function Chatbot({ onClose }) {
         // server may not be ready yet
       }
     })();
-    return () => { cancelled = true; };
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   /* ── switch conversation ───────────────────────────────────────────────── */
@@ -355,9 +357,7 @@ function Chatbot({ onClose }) {
                       opacity: 0.4,
                       transition: "opacity 0.15s",
                     }}
-                    onMouseEnter={(e) =>
-                      (e.currentTarget.style.opacity = "1")
-                    }
+                    onMouseEnter={(e) => (e.currentTarget.style.opacity = "1")}
                     onMouseLeave={(e) =>
                       (e.currentTarget.style.opacity = "0.4")
                     }

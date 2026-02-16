@@ -330,7 +330,9 @@ def build_helper_chain():
         """
         _search_call_count[0] += 1
         if _search_call_count[0] > 2:
-            return "Search limit reached. Answer with the documentation already retrieved."
+            return (
+                "Search limit reached. Answer with the documentation already retrieved."
+            )
 
         docs = retriever.invoke(query)
         if docs:
