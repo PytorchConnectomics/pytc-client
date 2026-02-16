@@ -118,7 +118,7 @@ Tools:
 def build_chain():
     """Build the multi-agent system with supervisor, training, and inference agents."""
     ollama_base_url = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434")
-    ollama_model = os.getenv("OLLAMA_MODEL", "mistral:latest")
+    ollama_model = os.getenv("OLLAMA_MODEL", "gpt-oss:20b")
     ollama_embed_model = os.getenv("OLLAMA_EMBED_MODEL", "qwen3-embedding:8b")
     llm = ChatOllama(model=ollama_model, base_url=ollama_base_url, temperature=0)
     embeddings = OllamaEmbeddings(model=ollama_embed_model, base_url=ollama_base_url)
@@ -265,3 +265,99 @@ def build_chain():
     )
 
     return supervisor, reset_search_counter
+
+
+# ---------------------------------------------------------------------------
+# Helper chat: lightweight RAG-only agent for inline "?" help popovers.
+# Has access to search_documentation only — cannot start training/inference.
+# ---------------------------------------------------------------------------
+
+HELPER_PROMPT = """You are a concise UI helper for PyTorch Connectomics (PyTC Client).
+
+You answer questions about a SPECIFIC field or setting the user is looking at.
+You have access to the application documentation via the search_documentation tool.
+
+RULES:
+1. Lead with a concrete recommendation or explanation (2-4 sentences max).
+2. Use plain, non-technical language — the user has no programming knowledge.
+3. Describe things in terms of what users can see and click in the interface.
+4. If you have enough context, recommend a specific value or action.
+5. Do NOT mention API endpoints, code, environment variables, or internal implementation.
+6. You may call search_documentation up to 2 times per question — then answer with what you have.
+7. You CANNOT start training or inference jobs. If the user asks, tell them to use the main AI Chat panel instead."""
+
+
+def build_helper_chain():
+    """Build a lightweight RAG-only agent for inline field help.
+
+    Shares the same FAISS vectorstore and keyword-fallback docs as the main
+    chatbot but has NO access to training/inference sub-agents.
+    Returns ``(agent, reset_search_counter)`` — same interface as ``build_chain``.
+    """
+    ollama_base_url = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434")
+    ollama_model = os.getenv("OLLAMA_MODEL", "gpt-oss:20b")
+    ollama_embed_model = os.getenv("OLLAMA_EMBED_MODEL", "qwen3-embedding:8b")
+    llm = ChatOllama(model=ollama_model, base_url=ollama_base_url, temperature=0)
+    embeddings = OllamaEmbeddings(model=ollama_embed_model, base_url=ollama_base_url)
+    faiss_path = process_path("server_api/chatbot/faiss_index")
+    vectorstore = FAISS.load_local(
+        faiss_path,
+        embeddings,
+        allow_dangerous_deserialization=True,
+    )
+    retriever = vectorstore.as_retriever(search_kwargs={"k": 2})
+
+    # Keyword fallback docs (same pattern as main chatbot)
+    summaries_dir = Path(process_path("server_api/chatbot/file_summaries"))
+    _all_docs = {}
+    for md_file in summaries_dir.rglob("*.md"):
+        _all_docs[md_file.name] = md_file.read_text(encoding="utf-8")
+
+    _search_call_count = [0]
+
+    def reset_search_counter():
+        _search_call_count[0] = 0
+
+    @tool
+    def search_documentation(query: str) -> str:
+        """Search PyTC documentation for UI guides, field explanations, and feature descriptions.
+
+        Args:
+            query: The user's question
+
+        Returns:
+            Relevant documentation content
+        """
+        _search_call_count[0] += 1
+        if _search_call_count[0] > 2:
+            return "Search limit reached. Answer with the documentation already retrieved."
+
+        docs = retriever.invoke(query)
+        if docs:
+            return "\n\n".join([doc.page_content for doc in docs])
+
+        # Keyword fallback
+        query_lower = query.lower()
+        query_words = [w for w in query_lower.split() if len(w) > 2]
+        scored = []
+        for filename, content in _all_docs.items():
+            content_lower = content.lower()
+            name_lower = filename.replace(".md", "").lower()
+            word_hits = sum(1 for w in query_words if w in content_lower)
+            name_hits = sum(3 for w in query_words if w in name_lower)
+            score = word_hits + name_hits
+            if score > 0:
+                scored.append((score, filename, content))
+        scored.sort(key=lambda x: x[0], reverse=True)
+        if scored:
+            return "\n\n".join([s[2] for s in scored[:3]])
+
+        return "No relevant documentation found."
+
+    helper_agent = create_agent(
+        model=llm,
+        tools=[search_documentation],
+        system_prompt=HELPER_PROMPT,
+    )
+
+    return helper_agent, reset_search_counter

@@ -348,6 +348,27 @@ export async function clearChat() {
   }
 }
 
+export async function queryHelperChat(taskKey, query, fieldContext) {
+  try {
+    const res = await axios.post(`${BASE_URL}/chat/helper/query`, {
+      taskKey,
+      query,
+      fieldContext,
+    });
+    return res.data?.response;
+  } catch (error) {
+    handleError(error);
+  }
+}
+
+export async function clearHelperChat(taskKey) {
+  try {
+    await axios.post(`${BASE_URL}/chat/helper/clear`, { taskKey });
+  } catch (error) {
+    handleError(error);
+  }
+}
+
 export async function getConfigPresets() {
   return makeApiRequest("pytc/configs", "get");
 }
