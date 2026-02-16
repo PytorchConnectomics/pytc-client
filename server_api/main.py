@@ -7,11 +7,14 @@ from typing import List, Optional
 
 import requests
 import uvicorn
-from fastapi import FastAPI, HTTPException, Request, UploadFile
+from fastapi import Depends, FastAPI, HTTPException, Request, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
+from sqlalchemy.orm import Session
 from server_api.utils.io import readVol
 from server_api.utils.utils import process_path
 from server_api.auth import models, database, router as auth_router
+from server_api.auth.database import get_db
+from server_api.auth.router import get_current_user
 from server_api.synanno import router as synanno_router
 from server_api.ehtool import router as ehtool_router
 
@@ -29,7 +32,11 @@ except Exception as exc:  # pragma: no cover - exercised indirectly via endpoint
 
 chain = None
 _reset_search = None
-_chat_history = []
+
+# In-memory LangChain history, keyed by conversation ID for the main chatbot.
+# Rebuilt from DB when switching conversations.
+_active_convo_id: Optional[int] = None
+_chat_history: list = []
 
 # Helper chat (inline "?" popovers) — keyed by taskKey for isolated sessions
 _helper_chains = {}  # taskKey -> (agent, reset_fn)
@@ -513,9 +520,135 @@ async def check_files(req: Request):
         return {"error": str(e)}
 
 
+# ── Chat history persistence endpoints ─────────────────────────────────────────
+
+@app.get("/chat/conversations", response_model=List[models.ConversationResponse])
+def list_conversations(
+    user: models.User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Return all conversations for the current user, newest first."""
+    return (
+        db.query(models.Conversation)
+        .filter(models.Conversation.user_id == user.id)
+        .order_by(models.Conversation.updated_at.desc())
+        .all()
+    )
+
+
+@app.post("/chat/conversations", response_model=models.ConversationDetailResponse)
+def create_conversation(
+    user: models.User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Create a new empty conversation."""
+    convo = models.Conversation(user_id=user.id, title="New Chat")
+    db.add(convo)
+    db.commit()
+    db.refresh(convo)
+    return convo
+
+
+@app.get(
+    "/chat/conversations/{convo_id}",
+    response_model=models.ConversationDetailResponse,
+)
+def get_conversation(
+    convo_id: int,
+    user: models.User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Return a conversation and all its messages."""
+    convo = (
+        db.query(models.Conversation)
+        .filter(
+            models.Conversation.id == convo_id,
+            models.Conversation.user_id == user.id,
+        )
+        .first()
+    )
+    if not convo:
+        raise HTTPException(status_code=404, detail="Conversation not found")
+    return convo
+
+
+@app.delete("/chat/conversations/{convo_id}")
+def delete_conversation(
+    convo_id: int,
+    user: models.User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Delete a conversation and all its messages."""
+    convo = (
+        db.query(models.Conversation)
+        .filter(
+            models.Conversation.id == convo_id,
+            models.Conversation.user_id == user.id,
+        )
+        .first()
+    )
+    if not convo:
+        raise HTTPException(status_code=404, detail="Conversation not found")
+    db.delete(convo)
+    db.commit()
+    # Clear in-memory history if we just deleted the active conversation
+    global _active_convo_id, _chat_history
+    if _active_convo_id == convo_id:
+        _active_convo_id = None
+        _chat_history.clear()
+    return {"message": "Conversation deleted"}
+
+
+@app.patch(
+    "/chat/conversations/{convo_id}",
+    response_model=models.ConversationResponse,
+)
+def update_conversation(
+    convo_id: int,
+    req_body: dict,
+    user: models.User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Update a conversation's title."""
+    convo = (
+        db.query(models.Conversation)
+        .filter(
+            models.Conversation.id == convo_id,
+            models.Conversation.user_id == user.id,
+        )
+        .first()
+    )
+    if not convo:
+        raise HTTPException(status_code=404, detail="Conversation not found")
+    if "title" in req_body:
+        convo.title = req_body["title"][:120]  # cap at 120 chars
+    db.commit()
+    db.refresh(convo)
+    return convo
+
+
+def _load_history_for_convo(convo_id: int, db: Session):
+    """Rebuild the in-memory _chat_history from the DB for a given conversation."""
+    global _active_convo_id, _chat_history
+    if _active_convo_id == convo_id:
+        return  # already loaded
+    msgs = (
+        db.query(models.ChatMessage)
+        .filter(models.ChatMessage.conversation_id == convo_id)
+        .order_by(models.ChatMessage.created_at)
+        .all()
+    )
+    _chat_history = [{"role": m.role, "content": m.content} for m in msgs]
+    _active_convo_id = convo_id
+
+
 # Chatbot endpoints
 @app.post("/chat/query")
-async def chat_query(req: Request):
+async def chat_query(
+    req: Request,
+    user: models.User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
     if not _ensure_chatbot():
         detail = "Chatbot is not configured"
         if "_chatbot_error" in globals():
@@ -523,21 +656,62 @@ async def chat_query(req: Request):
         raise HTTPException(status_code=503, detail=detail)
     body = await req.json()
     query = body.get("query")
+    convo_id = body.get("conversationId")
     if not isinstance(query, str) or not query.strip():
         raise HTTPException(status_code=400, detail="Query must be a non-empty string.")
+
+    # Auto-create a conversation if none supplied
+    if not convo_id:
+        convo = models.Conversation(user_id=user.id, title="New Chat")
+        db.add(convo)
+        db.commit()
+        db.refresh(convo)
+        convo_id = convo.id
+    else:
+        convo = (
+            db.query(models.Conversation)
+            .filter(
+                models.Conversation.id == convo_id,
+                models.Conversation.user_id == user.id,
+            )
+            .first()
+        )
+        if not convo:
+            raise HTTPException(status_code=404, detail="Conversation not found")
+
+    # Rebuild in-memory history from DB when switching conversations
+    _load_history_for_convo(convo_id, db)
+
     if _reset_search is not None:
         _reset_search()
     all_messages = _chat_history + [{"role": "user", "content": query}]
     result = chain.invoke({"messages": all_messages})
     messages = result.get("messages", [])
     response = messages[-1].content if messages else "No response generated"
+
+    # Persist to DB
+    db.add(models.ChatMessage(conversation_id=convo_id, role="user", content=query))
+    db.add(models.ChatMessage(conversation_id=convo_id, role="assistant", content=response))
+
+    # Auto-title: first user message becomes the title (truncated)
+    if convo.title == "New Chat":
+        convo.title = query[:120].strip() or "New Chat"
+
+    db.commit()
+
+    # Update in-memory history
     _chat_history.append({"role": "user", "content": query})
     _chat_history.append({"role": "assistant", "content": response})
-    return {"response": response}
+
+    return {"response": response, "conversationId": convo_id}
 
 
 @app.post("/chat/clear")
-async def clear_chat():
+async def clear_chat(
+    user: models.User = Depends(get_current_user),
+):
+    """Reset the in-memory LangChain context (does NOT delete DB messages)."""
+    global _active_convo_id, _chat_history
     if not _ensure_chatbot():
         detail = "Chatbot is not configured"
         if "_chatbot_error" in globals():
@@ -546,6 +720,7 @@ async def clear_chat():
     if _reset_search is not None:
         _reset_search()
     _chat_history.clear()
+    _active_convo_id = None
     return {"message": "Chat session reset"}
 
 
