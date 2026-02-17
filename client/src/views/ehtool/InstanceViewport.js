@@ -179,6 +179,11 @@ function InstanceViewport({
               onChange={onAxisChange}
             />
           )}
+          {axisOptions && (
+            <Text type="secondary" style={{ fontSize: 11 }}>
+              1/2/3 switch planes
+            </Text>
+          )}
         </Space>
         <Space size="small">
           <Button

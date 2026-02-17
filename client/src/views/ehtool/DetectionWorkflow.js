@@ -81,6 +81,37 @@ function DetectionWorkflow({ sessionId, setSessionId, refreshTrigger }) {
   }, [sessionId, refreshTrigger]);
 
   useEffect(() => {
+    const storedAll = Number(localStorage.getItem("mask-proofreading-overlay-all"));
+    const storedActive = Number(
+      localStorage.getItem("mask-proofreading-overlay-active"),
+    );
+    const storedAxis = localStorage.getItem("mask-proofreading-axis");
+    if (!Number.isNaN(storedAll) && storedAll > 0) {
+      setOverlayAllAlpha(Math.min(Math.max(storedAll, 0.01), 1));
+    }
+    if (!Number.isNaN(storedActive) && storedActive > 0) {
+      setOverlayActiveAlpha(Math.min(Math.max(storedActive, 0.01), 1));
+    }
+    if (storedAxis && ["xy", "zx", "zy"].includes(storedAxis)) {
+      setViewAxis(storedAxis);
+    }
+  }, []);
+
+  useEffect(() => {
+    localStorage.setItem(
+      "mask-proofreading-overlay-all",
+      overlayAllAlpha.toString(),
+    );
+  }, [overlayAllAlpha]);
+
+  useEffect(() => {
+    localStorage.setItem(
+      "mask-proofreading-overlay-active",
+      overlayActiveAlpha.toString(),
+    );
+  }, [overlayActiveAlpha]);
+
+  useEffect(() => {
     const handleResize = () => setWindowWidth(window.innerWidth);
     window.addEventListener("resize", handleResize);
     return () => window.removeEventListener("resize", handleResize);
@@ -105,6 +136,15 @@ function DetectionWorkflow({ sessionId, setSessionId, refreshTrigger }) {
       if (!sessionId || !activeInstanceId) return;
 
       switch (e.key.toLowerCase()) {
+        case "1":
+          handleAxisChange("xy");
+          break;
+        case "2":
+          handleAxisChange("zx");
+          break;
+        case "3":
+          handleAxisChange("zy");
+          break;
         case "c":
           handleInstanceClassify("correct");
           break;
@@ -655,6 +695,7 @@ function DetectionWorkflow({ sessionId, setSessionId, refreshTrigger }) {
   const handleAxisChange = (nextAxis) => {
     const axisValue = nextAxis || "xy";
     setViewAxis(axisValue);
+    localStorage.setItem("mask-proofreading-axis", axisValue);
     const axisIndex = getAxisIndexForInstance(activeInstance, axisValue);
     setViewState((prev) => ({ ...prev, zIndex: axisIndex, axis: axisValue }));
     setSliderZ(axisIndex);
@@ -813,6 +854,23 @@ function DetectionWorkflow({ sessionId, setSessionId, refreshTrigger }) {
             }}
           >
             <div style={{ padding: "12px 12px", display: "grid", gap: 12 }}>
+              <div
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "space-between",
+                  padding: "8px 10px",
+                  borderRadius: 10,
+                  background: "#f8fafc",
+                  border: "1px solid #e2e8f0",
+                  fontSize: 12,
+                }}
+              >
+                <Text type="secondary">
+                  View {viewAxis.toUpperCase()} · Slice {viewState.zIndex + 1}
+                </Text>
+                <Text type="secondary">{axisTotal || totalLayers} total</Text>
+              </div>
               <div
                 style={{
                   display: "grid",
