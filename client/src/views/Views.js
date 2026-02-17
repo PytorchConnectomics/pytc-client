@@ -29,7 +29,7 @@ function Views() {
   const [visitedTabs, setVisitedTabs] = useState(new Set(["files"]));
   const [workflowModalVisible, setWorkflowModalVisible] = useState(true);
   const [isChatOpen, setIsChatOpen] = useState(false);
-  const [chatWidth, setChatWidth] = useState(380);
+  const [chatWidth, setChatWidth] = useState(560);
   const isResizing = useRef(false);
 
   // Lifted state from Workspace

@@ -331,10 +331,13 @@ export async function stopModelInference() {
   }
 }
 
-export async function queryChatBot(query) {
+export async function queryChatBot(query, conversationId) {
   try {
-    const res = await axios.post(`${BASE_URL}/chat/query`, { query });
-    return res.data?.response;
+    const res = await axios.post(`${BASE_URL}/chat/query`, {
+      query,
+      conversationId,
+    });
+    return res.data;
   } catch (error) {
     handleError(error);
   }
@@ -343,6 +346,75 @@ export async function queryChatBot(query) {
 export async function clearChat() {
   try {
     await axios.post(`${BASE_URL}/chat/clear`);
+  } catch (error) {
+    handleError(error);
+  }
+}
+
+// ── Conversation history endpoints ───────────────────────────────────────────
+
+export async function listConversations() {
+  try {
+    const res = await axios.get(`${BASE_URL}/chat/conversations`);
+    return res.data;
+  } catch (error) {
+    handleError(error);
+  }
+}
+
+export async function createConversation() {
+  try {
+    const res = await axios.post(`${BASE_URL}/chat/conversations`);
+    return res.data;
+  } catch (error) {
+    handleError(error);
+  }
+}
+
+export async function getConversation(convoId) {
+  try {
+    const res = await axios.get(`${BASE_URL}/chat/conversations/${convoId}`);
+    return res.data;
+  } catch (error) {
+    handleError(error);
+  }
+}
+
+export async function deleteConversation(convoId) {
+  try {
+    await axios.delete(`${BASE_URL}/chat/conversations/${convoId}`);
+  } catch (error) {
+    handleError(error);
+  }
+}
+
+export async function updateConversationTitle(convoId, title) {
+  try {
+    const res = await axios.patch(`${BASE_URL}/chat/conversations/${convoId}`, {
+      title,
+    });
+    return res.data;
+  } catch (error) {
+    handleError(error);
+  }
+}
+
+export async function queryHelperChat(taskKey, query, fieldContext) {
+  try {
+    const res = await axios.post(`${BASE_URL}/chat/helper/query`, {
+      taskKey,
+      query,
+      fieldContext,
+    });
+    return res.data?.response;
+  } catch (error) {
+    handleError(error);
+  }
+}
+
+export async function clearHelperChat(taskKey) {
+  try {
+    await axios.post(`${BASE_URL}/chat/helper/clear`, { taskKey });
   } catch (error) {
     handleError(error);
   }
