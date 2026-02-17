@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef, useLayoutEffect } from "react";
-import { Card, Button, Slider, Space, Typography, Spin } from "antd";
+import { Card, Button, Slider, Space, Typography, Spin, Segmented } from "antd";
 import {
   LeftOutlined,
   RightOutlined,
@@ -17,23 +17,33 @@ function InstanceViewport({
   maskActiveBase64,
   loading,
   zIndex,
+  sliderValue,
   totalLayers,
+  axis,
+  axisOptions,
+  onAxisChange,
   overlayAllAlpha,
   overlayActiveAlpha,
   onPrevSlice,
   onNextSlice,
   onSliceChange,
+  onSliceCommit,
   onOpenEditor,
   overlayControls,
 }) {
   const [zoom, setZoom] = useState(1);
   const [isPanning, setIsPanning] = useState(false);
+  const [cursorInfo, setCursorInfo] = useState(null);
   const panStart = useRef({ x: 0, y: 0 });
   const offsetRef = useRef({ x: 0, y: 0 });
   const zoomRef = useRef(1);
   const rafRef = useRef(null);
   const containerRef = useRef(null);
   const transformRef = useRef(null);
+  const imageRef = useRef(null);
+  const cursorRafRef = useRef(null);
+  const pendingCursorEvent = useRef(null);
+  const axisLabel = axis ? axis.toUpperCase() : "XY";
 
   useEffect(() => {
     setZoom(1);
@@ -90,6 +100,57 @@ function InstanceViewport({
     setIsPanning(false);
   };
 
+  const axisCursorLabel = () => {
+    if (axis === "zx") return { h: "X", v: "Z" };
+    if (axis === "zy") return { h: "Y", v: "Z" };
+    return { h: "X", v: "Y" };
+  };
+
+  const updateCursor = (event) => {
+    if (!imageRef.current) {
+      setCursorInfo(null);
+      return;
+    }
+    const imageRect = imageRef.current.getBoundingClientRect();
+    const within =
+      event.clientX >= imageRect.left &&
+      event.clientX <= imageRect.right &&
+      event.clientY >= imageRect.top &&
+      event.clientY <= imageRect.bottom;
+    if (!within) {
+      setCursorInfo(null);
+      return;
+    }
+    const relX = (event.clientX - imageRect.left) / imageRect.width;
+    const relY = (event.clientY - imageRect.top) / imageRect.height;
+    const naturalWidth = imageRef.current.naturalWidth || 0;
+    const naturalHeight = imageRef.current.naturalHeight || 0;
+    const x = Math.min(
+      Math.max(Math.round(relX * naturalWidth), 0),
+      Math.max(naturalWidth - 1, 0),
+    );
+    const y = Math.min(
+      Math.max(Math.round(relY * naturalHeight), 0),
+      Math.max(naturalHeight - 1, 0),
+    );
+    setCursorInfo({ x, y });
+  };
+
+  const handleCursorMove = (event) => {
+    pendingCursorEvent.current = event;
+    if (cursorRafRef.current) return;
+    cursorRafRef.current = requestAnimationFrame(() => {
+      cursorRafRef.current = null;
+      if (pendingCursorEvent.current) {
+        updateCursor(pendingCursorEvent.current);
+      }
+    });
+  };
+
+  const handleCursorLeave = () => {
+    setCursorInfo(null);
+  };
+
   return (
     <Card
       bordered={false}
@@ -106,9 +167,19 @@ function InstanceViewport({
           marginBottom: 8,
         }}
       >
-        <Text style={{ fontSize: 12 }}>
-          Slice {zIndex + 1} / {totalLayers}
-        </Text>
+        <Space size="middle" align="center">
+          <Text style={{ fontSize: 12 }}>
+            {axisLabel} {zIndex + 1} / {totalLayers}
+          </Text>
+          {axisOptions && onAxisChange && (
+            <Segmented
+              size="small"
+              options={axisOptions}
+              value={axis}
+              onChange={onAxisChange}
+            />
+          )}
+        </Space>
         <Space size="small">
           <Button
             type="text"
@@ -155,6 +226,28 @@ function InstanceViewport({
         onMouseUp={handleMouseUp}
         onMouseLeave={handleMouseUp}
       >
+        <div
+          style={{
+            position: "absolute",
+            left: 12,
+            top: 12,
+            zIndex: 2,
+            background: "rgba(15, 23, 42, 0.7)",
+            color: "#fff",
+            padding: "6px 10px",
+            borderRadius: 10,
+            fontSize: 12,
+          }}
+        >
+          {cursorInfo ? (
+            <Text style={{ color: "#fff" }}>
+              {axisCursorLabel().h}: {cursorInfo.x} · {axisCursorLabel().v}:{" "}
+              {cursorInfo.y}
+            </Text>
+          ) : (
+            <Text style={{ color: "#9ca3af" }}>Cursor: --</Text>
+          )}
+        </div>
         {overlayControls && (
           <div
             style={{
@@ -179,12 +272,15 @@ function InstanceViewport({
             willChange: "transform",
           }}
           ref={transformRef}
+          onMouseMove={handleCursorMove}
+          onMouseLeave={handleCursorLeave}
         >
           {imageBase64 && (
             <img
               src={imageBase64}
               alt="Slice"
               draggable={false}
+              ref={imageRef}
               style={{
                 width: "100%",
                 height: "100%",
@@ -246,9 +342,10 @@ function InstanceViewport({
         <Slider
           min={0}
           max={Math.max(totalLayers - 1, 0)}
-          value={zIndex}
+          value={sliderValue ?? zIndex}
           onChange={onSliceChange}
-          tooltip={{ formatter: (value) => `Slice ${value + 1}` }}
+          onAfterChange={onSliceCommit}
+          tooltip={{ formatter: (value) => `${axisLabel} ${value + 1}` }}
         />
       </div>
     </Card>

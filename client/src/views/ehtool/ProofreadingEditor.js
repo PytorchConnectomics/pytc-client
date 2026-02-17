@@ -109,7 +109,10 @@ const ProofreadingEditor = forwardRef(
         const img = new Image();
         if (!imageBase64) throw new Error("Image data is missing");
 
-        if (imageBase64.startsWith("data:image")) {
+        if (
+          imageBase64.startsWith("data:image") ||
+          imageBase64.startsWith("blob:")
+        ) {
           img.src = imageBase64;
         } else {
           img.src = `data:image/png;base64,${imageBase64}`;
@@ -134,7 +137,10 @@ const ProofreadingEditor = forwardRef(
 
         if (maskBase64) {
           const maskImg = new Image();
-          if (maskBase64.startsWith("data:image")) {
+          if (
+            maskBase64.startsWith("data:image") ||
+            maskBase64.startsWith("blob:")
+          ) {
             maskImg.src = maskBase64;
           } else {
             maskImg.src = `data:image/png;base64,${maskBase64}`;
