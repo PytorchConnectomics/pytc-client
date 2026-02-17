@@ -739,7 +739,7 @@ const ProofreadingEditor = forwardRef(
                   Previous (A)
                 </Button>
                 <span style={{ fontWeight: "bold" }}>
-                  {layerName || `Layer ${currentLayer + 1}`} / {totalLayers}
+                  {layerName || `Slice ${currentLayer + 1}`} / {totalLayers}
                 </span>
                 <Button
                   icon={<RightOutlined />}
@@ -774,8 +774,8 @@ const ProofreadingEditor = forwardRef(
               ref={containerRef}
               style={{
                 position: "relative",
-                width: "100%",
-                height: "100%",
+                width: "min(100%, 70vh)",
+                aspectRatio: "1 / 1",
                 display: "flex",
                 justifyContent: "center",
                 alignItems: "center",

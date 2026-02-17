@@ -1,13 +1,14 @@
 import React, { useState, useEffect } from "react";
-import { Layout } from "antd";
+import { Layout, Typography } from "antd";
 import { BugOutlined } from "@ant-design/icons";
 import DetectionWorkflow from "./ehtool/DetectionWorkflow";
 
 const { Content } = Layout;
+const { Title, Text } = Typography;
 
 /**
  * EHTool Main Component
- * Error Handling Tool for detecting and classifying errors in image stacks
+ * Mask proofreading workflow for reviewing slices in image stacks
  */
 function EHTool({
   onStartProofreading,
@@ -33,16 +34,25 @@ function EHTool({
   }, [sessionId, onSessionChange]);
 
   return (
-    <Layout style={{ height: "100%", background: "#fff" }}>
-      <Content style={{ padding: "16px" }}>
-        <div style={{ marginBottom: "16px" }}>
-          <h2 style={{ margin: 0 }}>
-            <BugOutlined style={{ marginRight: "8px" }} />
-            Error Handling Tool
-          </h2>
-          <p style={{ color: "#666", marginTop: "4px" }}>
-            Detect and classify errors in image stacks
-          </p>
+    <Layout style={{ height: "100%", background: "#f6f8fb" }}>
+      <Content style={{ padding: "20px 24px" }}>
+        <div
+          style={{
+            display: "flex",
+            alignItems: "center",
+            gap: 10,
+            marginBottom: 12,
+          }}
+        >
+          <BugOutlined style={{ fontSize: 18, color: "#1677ff" }} />
+          <div>
+            <Title level={5} style={{ margin: 0 }}>
+              Mask Proofreading
+            </Title>
+            <Text type="secondary" style={{ fontSize: 12 }}>
+              Review and correct instances in your volume.
+            </Text>
+          </div>
         </div>
 
         <DetectionWorkflow

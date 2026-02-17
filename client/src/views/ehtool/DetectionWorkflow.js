@@ -1,68 +1,97 @@
-import React, { useState, useEffect } from "react";
-import { Layout, message, Spin } from "antd";
+import React, { useState, useEffect, useMemo, useRef } from "react";
+import {
+  Layout,
+  message,
+  Space,
+  Typography,
+  Button,
+  Popover,
+  Slider,
+  Card,
+} from "antd";
+import { SettingOutlined } from "@ant-design/icons";
 import DatasetLoader from "./DatasetLoader";
-import LayerGrid from "./LayerGrid";
-import ClassificationPanel from "./ClassificationPanel";
 import ProgressTracker from "./ProgressTracker";
-import UnifiedImageEditor from "./UnifiedImageEditor";
+import InstanceNavigator from "./InstanceNavigator";
+import InstanceViewport from "./InstanceViewport";
+import ProofreadingEditor from "./ProofreadingEditor";
 import { apiClient } from "../../api";
 
 const { Sider, Content } = Layout;
+const { Title, Text } = Typography;
 
-/**
- * Detection Workflow Component
- * Main interface for error detection workflow
- */
 function DetectionWorkflow({ sessionId, setSessionId, refreshTrigger }) {
   const [projectName, setProjectName] = useState("");
   const [totalLayers, setTotalLayers] = useState(0);
-  const [currentPage, setCurrentPage] = useState(1);
-  const [layers, setLayers] = useState([]);
-  const [selectedLayers, setSelectedLayers] = useState([]);
-  const [stats, setStats] = useState(null);
-  const [loading, setLoading] = useState(false);
-  const [editingLayer, setEditingLayer] = useState(null);
+  const [instances, setInstances] = useState([]);
+  const [instanceMode, setInstanceMode] = useState("none");
+  const [activeInstanceId, setActiveInstanceId] = useState(null);
+  const [activeInstance, setActiveInstance] = useState(null);
+  const [filterText, setFilterText] = useState("");
+  const [loadingInstances, setLoadingInstances] = useState(false);
+  const [loadingView, setLoadingView] = useState(false);
+  const [viewState, setViewState] = useState({
+    imageBase64: null,
+    maskAllBase64: null,
+    maskActiveBase64: null,
+    maskRawBase64: null,
+    zIndex: 0,
+  });
+  const [overlayAllAlpha, setOverlayAllAlpha] = useState(0.08);
+  const [overlayActiveAlpha, setOverlayActiveAlpha] = useState(0.8);
+  const [showEditor, setShowEditor] = useState(false);
+  const [savingMask, setSavingMask] = useState(false);
+  const [windowWidth, setWindowWidth] = useState(
+    typeof window !== "undefined" ? window.innerWidth : 1440,
+  );
 
-  const pageSize = 12; // 12 layers per page (3x4 grid)
+  const requestRef = useRef(0);
 
-  // Load layers when session or page changes
   useEffect(() => {
     if (sessionId) {
-      loadLayers();
-      loadStats();
+      loadInstances();
     }
-  }, [sessionId, currentPage, refreshTrigger]);
+  }, [sessionId, refreshTrigger]);
 
-  // Keyboard shortcuts for main grid
+  useEffect(() => {
+    const handleResize = () => setWindowWidth(window.innerWidth);
+    window.addEventListener("resize", handleResize);
+    return () => window.removeEventListener("resize", handleResize);
+  }, []);
+
+  useEffect(() => {
+    if (!sessionId || !activeInstanceId) return;
+    loadInstanceView(activeInstanceId, viewState.zIndex);
+  }, [sessionId, activeInstanceId, viewState.zIndex]);
+
   useEffect(() => {
     const handleKeyPress = (e) => {
-      // Don't trigger shortcuts when typing in input fields or when modal is open
       const target = e.target;
       if (
-        (target &&
-          (target.tagName === "INPUT" ||
-            target.tagName === "TEXTAREA" ||
-            target.isContentEditable)) ||
-        editingLayer
+        target &&
+        (target.tagName === "INPUT" ||
+          target.tagName === "TEXTAREA" ||
+          target.isContentEditable)
       )
         return;
-      if (!sessionId) return;
+
+      if (!sessionId || !activeInstanceId) return;
 
       switch (e.key.toLowerCase()) {
         case "c":
-          if (selectedLayers.length > 0) handleClassify("correct");
+          handleInstanceClassify("correct");
           break;
         case "x":
-          if (selectedLayers.length > 0) handleClassify("incorrect");
+          handleInstanceClassify("incorrect");
           break;
         case "u":
-          if (selectedLayers.length > 0) handleClassify("unsure");
+          handleInstanceClassify("unsure");
           break;
-        case "a":
-          if (e.ctrlKey || e.metaKey) {
-            e.preventDefault();
-            selectAllLayers();
-          }
+        case "arrowright":
+          goToNextInstance();
+          break;
+        case "arrowleft":
+          goToPreviousInstance();
           break;
         default:
           break;
@@ -71,10 +100,30 @@ function DetectionWorkflow({ sessionId, setSessionId, refreshTrigger }) {
 
     window.addEventListener("keydown", handleKeyPress);
     return () => window.removeEventListener("keydown", handleKeyPress);
-  }, [sessionId, selectedLayers, layers, editingLayer]);
+  }, [sessionId, activeInstanceId, instances]);
+
+  const stats = useMemo(() => {
+    const total = instances.length;
+    const correct = instances.filter((i) => i.classification === "correct").length;
+    const incorrect = instances.filter((i) => i.classification === "incorrect").length;
+    const unsure = instances.filter((i) => i.classification === "unsure").length;
+    const error = instances.filter((i) => i.classification === "error").length;
+    const reviewed = total - error;
+    const progress_percent = total > 0 ? (reviewed / total) * 100 : 0;
+
+    return {
+      correct,
+      incorrect,
+      unsure,
+      error,
+      total,
+      reviewed,
+      progress_percent: Math.round(progress_percent * 100) / 100,
+    };
+  }, [instances]);
 
   const handleDatasetLoad = async (datasetPath, maskPath, projectName) => {
-    setLoading(true);
+    setLoadingInstances(true);
     try {
       const response = await apiClient.post("/eh/detection/load", {
         dataset_path: datasetPath,
@@ -85,223 +134,383 @@ function DetectionWorkflow({ sessionId, setSessionId, refreshTrigger }) {
       setSessionId(response.data.session_id);
       setProjectName(response.data.project_name);
       setTotalLayers(response.data.total_layers);
-      setCurrentPage(1);
       message.success(
-        `Loaded ${response.data.total_layers} layers successfully`,
+        `Loaded ${response.data.total_layers} slices successfully`,
       );
+      await loadInstances(response.data.session_id, true);
     } catch (error) {
       console.error("Failed to load dataset:", error);
       message.error(error.response?.data?.detail || "Failed to load dataset");
     } finally {
-      setLoading(false);
+      setLoadingInstances(false);
     }
   };
 
-  const loadLayers = async () => {
-    setLoading(true);
+  const loadInstances = async (overrideSessionId, forceView = false) => {
+    const sessionToUse = overrideSessionId ?? sessionId;
+    if (!sessionToUse) return;
+    setLoadingInstances(true);
     try {
-      const response = await apiClient.get("/eh/detection/layers", {
+      const response = await apiClient.get("/eh/detection/instances", {
+        params: { session_id: sessionToUse },
+      });
+
+      const instanceList = response.data.instances || [];
+      setInstances(instanceList);
+      setInstanceMode(response.data.instance_mode || "none");
+      setTotalLayers(response.data.total_layers || 0);
+
+      const firstUnreviewed = instanceList.find(
+        (inst) => inst.classification === "error",
+      );
+      const initialInstance = firstUnreviewed || instanceList[0];
+      if (initialInstance) {
+        setActiveInstanceId(initialInstance.id);
+        setActiveInstance(initialInstance);
+        setViewState((prev) => ({
+          ...prev,
+          zIndex: initialInstance.com_z,
+        }));
+        if (forceView) {
+          await loadInstanceView(
+            initialInstance.id,
+            initialInstance.com_z,
+            sessionToUse,
+          );
+        }
+      }
+    } catch (error) {
+      console.error("Failed to load instances:", error);
+      message.error("Failed to load instances");
+    } finally {
+      setLoadingInstances(false);
+    }
+  };
+
+  const loadInstanceView = async (instanceId, zIndex, overrideSessionId) => {
+    const sessionToUse = overrideSessionId ?? sessionId;
+    if (!sessionToUse) return;
+    const requestId = ++requestRef.current;
+    setLoadingView(true);
+    try {
+      const response = await apiClient.get("/eh/detection/instance-view", {
         params: {
-          session_id: sessionId,
-          page: currentPage,
-          page_size: pageSize,
-          include_images: true,
+          session_id: sessionToUse,
+          instance_id: instanceId,
+          z_index: zIndex,
         },
       });
 
-      setLayers(response.data.layers);
+      if (requestId !== requestRef.current) return;
+
+      setViewState({
+        imageBase64: response.data.image_base64,
+        maskAllBase64: response.data.mask_all_base64,
+        maskActiveBase64: response.data.mask_active_base64,
+        maskRawBase64: response.data.mask_raw_base64,
+        zIndex: response.data.z_index,
+      });
     } catch (error) {
-      console.error("Failed to load layers:", error);
-      message.error("Failed to load layers");
+      console.error("Failed to load instance view:", error);
+      message.error("Failed to load instance view");
     } finally {
-      setLoading(false);
+      if (requestId === requestRef.current) {
+        setLoadingView(false);
+      }
     }
   };
 
-  const loadStats = async () => {
-    try {
-      const response = await apiClient.get("/eh/detection/stats", {
-        params: { session_id: sessionId },
-      });
-
-      setStats(response.data);
-    } catch (error) {
-      console.error("Failed to load stats:", error);
-    }
+  const selectInstance = (instance) => {
+    setActiveInstanceId(instance.id);
+    setActiveInstance(instance);
+    setViewState((prev) => ({ ...prev, zIndex: instance.com_z }));
   };
 
-  const handleClassify = async (classification) => {
-    if (selectedLayers.length === 0) {
-      message.warning("Please select at least one layer");
-      return;
-    }
+  const goToNextInstance = () => {
+    if (!activeInstanceId || instances.length === 0) return;
+    const index = instances.findIndex((inst) => inst.id === activeInstanceId);
+    const next = instances[index + 1] || instances[0];
+    if (next) selectInstance(next);
+  };
 
+  const goToPreviousInstance = () => {
+    if (!activeInstanceId || instances.length === 0) return;
+    const index = instances.findIndex((inst) => inst.id === activeInstanceId);
+    const prev = instances[index - 1] || instances[instances.length - 1];
+    if (prev) selectInstance(prev);
+  };
+
+  const handleInstanceClassify = async (classification) => {
+    if (!activeInstanceId) return;
     try {
-      await apiClient.post("/eh/detection/classify", {
+      await apiClient.post("/eh/detection/instance-classify", {
         session_id: sessionId,
-        layer_ids: selectedLayers,
-        classification: classification,
+        instance_ids: [activeInstanceId],
+        classification,
       });
 
-      // Update local layer states
-      setLayers(
-        layers.map((layer) =>
-          selectedLayers.includes(layer.id)
-            ? { ...layer, classification }
-            : layer,
+      setInstances((prev) =>
+        prev.map((inst) =>
+          inst.id === activeInstanceId
+            ? { ...inst, classification }
+            : inst,
         ),
       );
 
-      // Reload stats
-      await loadStats();
+      if (activeInstance && activeInstance.id === activeInstanceId) {
+        setActiveInstance({ ...activeInstance, classification });
+      }
 
-      message.success(
-        `Classified ${selectedLayers.length} layer(s) as '${classification}'`,
-      );
-      setSelectedLayers([]);
+      message.success(`Instance ${activeInstanceId} marked ${classification}`);
     } catch (error) {
-      console.error("Failed to classify layers:", error);
-      message.error("Failed to classify layers");
+      console.error("Failed to classify instance:", error);
+      message.error("Failed to classify instance");
     }
   };
 
-  const handleLayerSelect = (layerId, e) => {
-    // If Ctrl or Shift is pressed, or if clicking the card normally (selection mode)
-    // We'll treat clicking the thumbnail as "Inspection" and clicking the card body as "Selection"
-    // OR we just use a specific area for selection.
-    // For simplicity, let's say normal click opens the editor, and we use the Badge/Checkbox for selection?
-    // Actually, the user said "On clicking any, open a high-resolution...".
-    // So click = Inspection.
-    // We'll pass both to LayerGrid and let it decide.
+  const handleSliceChange = (value) => {
+    setViewState((prev) => ({ ...prev, zIndex: value }));
   };
 
-  const handleOpenEditor = (layer) => {
-    setEditingLayer(layer);
+  const handleOpenEditor = () => {
+    if (!activeInstanceId) return;
+    setShowEditor((prev) => !prev);
   };
 
-  const selectAllLayers = () => {
-    const allLayerIds = layers.map((l) => l.id);
-    setSelectedLayers(allLayerIds);
+  const handleSaveMask = async (maskBase64) => {
+    if (!sessionId) return;
+    setSavingMask(true);
+    try {
+      await apiClient.post("/eh/detection/mask", {
+        session_id: sessionId,
+        layer_index: viewState.zIndex,
+        mask_base64: maskBase64,
+      });
+      message.success("Mask updated");
+      loadInstanceView(activeInstanceId, viewState.zIndex);
+    } catch (error) {
+      console.error("Failed to save mask:", error);
+      message.error(error.response?.data?.detail || "Failed to save mask");
+    } finally {
+      setSavingMask(false);
+    }
   };
 
-  const clearSelection = () => {
-    setSelectedLayers([]);
-  };
-
-  const handlePageChange = (page) => {
-    setCurrentPage(page);
-    setSelectedLayers([]); // Clear selection when changing pages
-  };
-
-  // Show dataset loader if no session
   if (!sessionId) {
     return (
-      <div style={{ padding: "24px" }}>
-        <DatasetLoader onLoad={handleDatasetLoad} loading={loading} />
+      <div style={{ padding: "24px 0" }}>
+        <DatasetLoader onLoad={handleDatasetLoad} loading={loadingInstances} />
       </div>
     );
   }
 
-  // Show main detection interface
   return (
-    <Layout style={{ height: "calc(100vh - 200px)", background: "#fff" }}>
-      {/* Left Panel: Progress Tracker */}
-      <Sider
-        width="20%"
-        theme="light"
-        style={{
-          borderRight: "1px solid #f0f0f0",
-          minWidth: "250px",
-          maxWidth: "350px",
-        }}
-      >
-        <ProgressTracker
-          stats={stats}
-          projectName={projectName}
-          totalLayers={totalLayers}
-          onNewSession={() => {
-            setSessionId(null);
-            setSelectedLayers([]);
+    <Layout
+      style={{
+        minHeight: "calc(100vh - 210px)",
+        background: "transparent",
+      }}
+    >
+      <Content style={{ padding: 0 }}>
+        <div
+          style={{
+            display: "flex",
+            justifyContent: "space-between",
+            alignItems: "center",
+            marginBottom: 8,
           }}
-          onStartProofreading={() => {
-            // Find first incorrect layer and open it
-            const firstIncorrect = layers.find(
-              (l) => l.classification === "incorrect",
-            );
-            if (firstIncorrect) {
-              setEditingLayer(firstIncorrect);
-            } else {
-              message.info(
-                "No incorrect layers visible on this page. Try scrolling or filtering.",
-              );
-            }
-          }}
-        />
-      </Sider>
+        >
+          <Title level={5} style={{ margin: 0 }}>
+            Instance proofreading
+          </Title>
+          <Text type="secondary" style={{ fontSize: 12 }}>
+            Instances are the unit of review
+          </Text>
+        </div>
 
-      {/* Center: Layer Grid */}
-      <Content
-        style={{ padding: "16px", background: "#fafafa", overflow: "auto" }}
-      >
-        {loading ? (
-          <div
+        <Layout style={{ background: "transparent" }}>
+          <Content style={{ padding: "0 14px 0 0" }}>
+            {loadingInstances && instances.length === 0 ? (
+              <div style={{ padding: 32, textAlign: "center" }}>
+                <Title level={4}>Preparing instances…</Title>
+                <Text type="secondary">
+                  Building the instance list and loading the first view.
+                </Text>
+              </div>
+            ) : instanceMode === "none" ? (
+              <div style={{ padding: 32, textAlign: "center" }}>
+                <Title level={4}>Mask required</Title>
+                <Text type="secondary">
+                  Load a dataset with a mask to enable instance proofreading.
+                </Text>
+              </div>
+            ) : (
+              <>
+                <InstanceViewport
+                  imageBase64={viewState.imageBase64}
+                  maskAllBase64={viewState.maskAllBase64}
+                  maskActiveBase64={viewState.maskActiveBase64}
+                  loading={loadingView || loadingInstances}
+                  zIndex={viewState.zIndex}
+                  totalLayers={totalLayers}
+                  overlayAllAlpha={overlayAllAlpha}
+                  overlayActiveAlpha={overlayActiveAlpha}
+                  onPrevSlice={() =>
+                    handleSliceChange(Math.max(viewState.zIndex - 1, 0))
+                  }
+                  onNextSlice={() =>
+                    handleSliceChange(
+                      Math.min(viewState.zIndex + 1, totalLayers - 1),
+                    )
+                  }
+                  onSliceChange={handleSliceChange}
+                  onOpenEditor={handleOpenEditor}
+                />
+
+                <div
+                  style={{
+                    marginTop: showEditor ? 16 : 0,
+                    maxHeight: showEditor ? "720px" : "0px",
+                    opacity: showEditor ? 1 : 0,
+                    overflow: "hidden",
+                    transition: "all 220ms ease",
+                    pointerEvents: showEditor ? "auto" : "none",
+                  }}
+                >
+                  <Card
+                    bodyStyle={{ height: "640px", padding: 16 }}
+                    title={`Mask editor · Slice ${viewState.zIndex + 1}`}
+                    extra={
+                      <Button onClick={() => setShowEditor(false)}>
+                        Close editor
+                      </Button>
+                    }
+                  >
+                    <ProofreadingEditor
+                      imageBase64={viewState.imageBase64}
+                      maskBase64={viewState.maskRawBase64}
+                      onSave={handleSaveMask}
+                      onNext={() =>
+                        handleSliceChange(
+                          Math.min(viewState.zIndex + 1, totalLayers - 1),
+                        )
+                      }
+                      onPrevious={() =>
+                        handleSliceChange(Math.max(viewState.zIndex - 1, 0))
+                      }
+                      currentLayer={viewState.zIndex}
+                      totalLayers={totalLayers}
+                      layerName={`Slice ${viewState.zIndex + 1}`}
+                    />
+                    {savingMask && (
+                      <div style={{ marginTop: 8 }}>
+                        <Text type="secondary">Saving mask…</Text>
+                      </div>
+                    )}
+                  </Card>
+                </div>
+              </>
+            )}
+          </Content>
+
+          <Sider
+            width={Math.max(260, Math.min(320, windowWidth * 0.26))}
+            theme="light"
             style={{
-              display: "flex",
-              justifyContent: "center",
-              alignItems: "center",
-              height: "100%",
+              borderLeft: "1px solid #eef2f7",
+              background: "transparent",
             }}
           >
-            <Spin size="large" tip="Loading layers..." />
-          </div>
-        ) : (
-          <LayerGrid
-            layers={layers}
-            selectedLayers={selectedLayers}
-            onLayerSelect={(layerId) => {
-              setSelectedLayers((prev) =>
-                prev.includes(layerId)
-                  ? prev.filter((id) => id !== layerId)
-                  : [...prev, layerId],
-              );
-            }}
-            onLayerClick={(layer) => setEditingLayer(layer)}
-            currentPage={currentPage}
-            totalPages={Math.ceil(totalLayers / pageSize)}
-            onPageChange={handlePageChange}
-          />
-        )}
+            <div style={{ padding: "12px 12px", display: "grid", gap: 12 }}>
+              {activeInstance && instanceMode !== "none" && (
+                <Card
+                  size="small"
+                  bordered={false}
+                  style={{ background: "#fff" }}
+                >
+                  <Text style={{ fontSize: 12 }} type="secondary">
+                    Active instance
+                  </Text>
+                  <div style={{ fontSize: 13, fontWeight: 600 }}>
+                    #{activeInstance.id}
+                  </div>
+                  <Space size="small" style={{ marginTop: 8 }}>
+                    <Button
+                      size="small"
+                      type="primary"
+                      onClick={() => handleInstanceClassify("correct")}
+                    >
+                      Looks good
+                    </Button>
+                    <Button
+                      size="small"
+                      danger
+                      onClick={() => handleInstanceClassify("incorrect")}
+                    >
+                      Needs fix
+                    </Button>
+                    <Button
+                      size="small"
+                      style={{ background: "#f59e0b", color: "#fff" }}
+                      onClick={() => handleInstanceClassify("unsure")}
+                    >
+                      Unsure
+                    </Button>
+                  </Space>
+                </Card>
+              )}
+
+              <Card size="small" bordered={false} style={{ background: "#fff" }}>
+                <Text style={{ fontSize: 12 }} type="secondary">
+                  View
+                </Text>
+                <div style={{ marginTop: 8 }}>
+                  <Text style={{ fontSize: 12 }}>All instances</Text>
+                  <Slider
+                    min={0}
+                    max={100}
+                    value={Math.round(overlayAllAlpha * 100)}
+                    onChange={(value) => setOverlayAllAlpha(value / 100)}
+                  />
+                  <Text style={{ fontSize: 12 }}>Active instance</Text>
+                  <Slider
+                    min={0}
+                    max={100}
+                    value={Math.round(overlayActiveAlpha * 100)}
+                    onChange={(value) => setOverlayActiveAlpha(value / 100)}
+                  />
+                </div>
+              </Card>
+
+              <ProgressTracker
+                stats={stats}
+                projectName={projectName}
+                totalLayers={instances.length}
+                unitLabel="instances"
+                onNewSession={() => {
+                  setSessionId(null);
+                  setActiveInstanceId(null);
+                  setInstances([]);
+                }}
+                onJumpToNext={goToNextInstance}
+              />
+
+              <InstanceNavigator
+                instances={instances}
+                activeInstanceId={activeInstanceId}
+                onSelect={selectInstance}
+                onPrev={goToPreviousInstance}
+                onNext={goToNextInstance}
+                filterText={filterText}
+                onFilterText={setFilterText}
+                instanceMode={instanceMode}
+              />
+            </div>
+          </Sider>
+        </Layout>
       </Content>
 
-      {/* Right Panel: Classification Controls */}
-      <Sider
-        width="20%"
-        theme="light"
-        style={{
-          borderLeft: "1px solid #f0f0f0",
-          minWidth: "250px",
-          maxWidth: "350px",
-        }}
-      >
-        <ClassificationPanel
-          selectedCount={selectedLayers.length}
-          onClassify={handleClassify}
-          onSelectAll={selectAllLayers}
-          onClearSelection={clearSelection}
-        />
-      </Sider>
-
-      {/* Integrated Image Editor Modal */}
-      <UnifiedImageEditor
-        visible={!!editingLayer}
-        layer={editingLayer}
-        sessionId={sessionId}
-        onClose={() => setEditingLayer(null)}
-        onSaveSuccess={() => {
-          loadLayers();
-          loadStats();
-        }}
-      />
+      {/* Editor is now inline to keep context */}
     </Layout>
   );
 }

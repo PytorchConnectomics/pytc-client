@@ -1,7 +1,9 @@
-import React, { useState } from "react";
-import { Card, Form, Input, Button, message } from "antd";
+import React from "react";
+import { Card, Form, Input, Button, message, Space, Typography } from "antd";
 import { FolderOpenOutlined, UploadOutlined } from "@ant-design/icons";
 import UnifiedFileInput from "../../components/UnifiedFileInput";
+
+const { Title, Text } = Typography;
 
 /**
  * Dataset Loader Component
@@ -30,14 +32,29 @@ function DatasetLoader({ onLoad, loading }) {
 
   return (
     <Card
-      title={
-        <span>
-          <FolderOpenOutlined style={{ marginRight: "8px" }} />
-          Load Dataset
-        </span>
-      }
-      style={{ maxWidth: "600px", margin: "0 auto" }}
+      bordered={false}
+      style={{
+        maxWidth: "720px",
+        margin: "0 auto",
+        boxShadow: "0 10px 30px rgba(15, 23, 42, 0.08)",
+        borderRadius: 16,
+      }}
     >
+      <Space direction="vertical" size={4} style={{ width: "100%" }}>
+        <Space align="center">
+          <FolderOpenOutlined style={{ color: "#1677ff", fontSize: 18 }} />
+          <Title level={4} style={{ margin: 0 }}>
+            Start a Mask Proofreading Session
+          </Title>
+        </Space>
+        <Text type="secondary">
+          Load a volume (single file, folder, or glob). Add a mask if you have
+          one.
+        </Text>
+      </Space>
+
+      <div style={{ height: 16 }} />
+
       <Form
         form={form}
         layout="vertical"
@@ -51,14 +68,14 @@ function DatasetLoader({ onLoad, loading }) {
           name="projectName"
           rules={[{ required: true, message: "Please enter a project name" }]}
         >
-          <Input placeholder="Enter project name" />
+          <Input placeholder="My EM volume" />
         </Form.Item>
 
         <Form.Item
           label="Dataset Path"
           name="datasetPath"
           rules={[{ required: true, message: "Please enter dataset path" }]}
-          help="Path to image file, directory, or glob pattern (e.g., /path/to/images/*.tif)"
+          help="File, directory, or glob (e.g., /path/to/images/*.tif)"
         >
           <UnifiedFileInput placeholder="/path/to/dataset" />
         </Form.Item>
@@ -66,12 +83,12 @@ function DatasetLoader({ onLoad, loading }) {
         <Form.Item
           label="Mask Path (Optional)"
           name="maskPath"
-          help="Path to mask file or directory (optional)"
+          help="Mask file or directory (optional)"
         >
           <UnifiedFileInput placeholder="/path/to/masks" />
         </Form.Item>
 
-        <Form.Item>
+        <Form.Item style={{ marginBottom: 0 }}>
           <Button
             type="primary"
             htmlType="submit"
@@ -85,20 +102,11 @@ function DatasetLoader({ onLoad, loading }) {
         </Form.Item>
       </Form>
 
-      <div
-        style={{
-          marginTop: "24px",
-          padding: "16px",
-          background: "#f5f5f5",
-          borderRadius: "4px",
-        }}
-      >
-        <h4 style={{ marginTop: 0 }}>Supported Formats:</h4>
-        <ul style={{ marginBottom: 0 }}>
-          <li>Single TIFF file (2D or 3D stack)</li>
-          <li>Directory of images (PNG, JPG, TIFF)</li>
-          <li>Glob pattern (e.g., *.tif)</li>
-        </ul>
+      <div style={{ marginTop: 16 }}>
+        <Text type="secondary" style={{ fontSize: 12 }}>
+          Supported: single TIFF (2D/3D), image folders (PNG/JPG/TIFF), or glob
+          patterns like `*.tif`.
+        </Text>
       </div>
     </Card>
   );
