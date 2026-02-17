@@ -51,9 +51,6 @@ function ProgressTracker({
     <div style={{ padding: "0" }}>
       <Space direction="vertical" size={6} style={{ width: "100%" }}>
         <Text strong style={{ fontSize: 13 }}>
-          {projectName}
-        </Text>
-        <Text type="secondary" style={{ fontSize: 12 }}>
           {totalLayers} {unitLabel}
         </Text>
         <Progress
@@ -93,11 +90,6 @@ function ProgressTracker({
         <Divider style={{ margin: "8px 0" }} />
 
         <Space direction="vertical" style={{ width: "100%" }} size="small">
-          {onJumpToNext && (
-            <Button type="primary" onClick={onJumpToNext} block size="small">
-              Next unreviewed
-            </Button>
-          )}
           <Button icon={<FolderOpenOutlined />} onClick={onNewSession} block size="small">
             Load dataset
           </Button>

@@ -72,9 +72,11 @@ function InstanceNavigator({
         <Text style={{ fontSize: 12 }} strong>
           Instances
         </Text>
-        <Tag color="blue" style={{ fontSize: 11 }}>
-          {instanceMode}
-        </Tag>
+        {instanceMode && instanceMode !== "none" && (
+          <Tag color="blue" style={{ fontSize: 11 }}>
+            {instanceMode === "semantic" ? "semantic (derived)" : "instance"}
+          </Tag>
+        )}
       </Space>
 
       <Space style={{ marginTop: 8 }}>
