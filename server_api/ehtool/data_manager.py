@@ -4,6 +4,8 @@ Handles loading and processing image datasets for error detection workflow
 """
 
 import os
+import json
+from datetime import datetime, timezone
 import glob
 import numpy as np
 import tifffile
@@ -37,6 +39,7 @@ class DataManager:
         self.image_volume: Optional[np.ndarray] = None
         self.mask_volume: Optional[np.ndarray] = None
         self.mask_path: Optional[str] = None
+        self.dataset_path: Optional[str] = None
         self.is_3d: bool = False
         self.total_layers: int = 0
         self.image_shape: Optional[Tuple[int, ...]] = None
@@ -44,6 +47,7 @@ class DataManager:
         self.instance_volume: Optional[np.ndarray] = None
         self.instances: Optional[List[Dict[str, Any]]] = None
         self.instance_classification: Dict[int, str] = {}
+        self.progress_path: Optional[str] = None
         self._slice_cache: "OrderedDict[int, Dict[str, Any]]" = OrderedDict()
         self._active_cache: "OrderedDict[Tuple[int, int], str]" = OrderedDict()
         self._raw_cache: "OrderedDict[int, str]" = OrderedDict()
@@ -82,6 +86,7 @@ class DataManager:
         self.image_volume = image_data["volume"]
         self.mask_volume = mask_data["volume"] if mask_data else None
         self.mask_path = mask_path
+        self.dataset_path = dataset_path
         self.is_3d = image_data["is_3d"]
         self.total_layers = image_data["num_slices"]
         self.image_shape = image_data["shape"]
@@ -92,6 +97,7 @@ class DataManager:
         self._slice_cache.clear()
         self._active_cache.clear()
         self._raw_cache.clear()
+        self.progress_path = self._resolve_progress_path()
 
         return {
             "total_layers": self.total_layers,
@@ -314,6 +320,65 @@ class DataManager:
         instances.sort(key=lambda item: item["voxel_count"], reverse=True)
         self.instances = instances
         self.instance_classification = {inst["id"]: "error" for inst in instances}
+        self._load_progress()
+
+    def _resolve_progress_path(self) -> Optional[str]:
+        base_path = self.mask_path or self.dataset_path
+        if not base_path:
+            return None
+        if any(char in base_path for char in ["*", "?"]):
+            root = Path(base_path).parent
+        else:
+            base = Path(base_path)
+            root = base if base.is_dir() else base.parent
+        if not root.exists():
+            return None
+        return str(root / ".pytc_proofreading.json")
+
+    def _load_progress(self) -> None:
+        if not self.progress_path or not os.path.exists(self.progress_path):
+            return
+        try:
+            with open(self.progress_path, "r", encoding="utf-8") as handle:
+                payload = json.load(handle)
+        except Exception:
+            return
+
+        stored = payload.get("instances", {})
+        if not isinstance(stored, dict):
+            return
+
+        valid = {"correct", "incorrect", "unsure", "error"}
+        for inst in self.instances or []:
+            key = str(inst["id"])
+            entry = stored.get(key)
+            if isinstance(entry, dict):
+                entry = entry.get("classification")
+            if isinstance(entry, str) and entry in valid:
+                self.instance_classification[inst["id"]] = entry
+
+    def save_progress(self) -> None:
+        if not self.progress_path:
+            return
+        try:
+            payload = {
+                "schema_version": 1,
+                "dataset_path": self.dataset_path,
+                "mask_path": self.mask_path,
+                "instance_mode": self.instance_mode,
+                "updated_at": datetime.now(timezone.utc).isoformat(),
+                "instances": {
+                    str(inst_id): {
+                        "classification": classification,
+                    }
+                    for inst_id, classification in self.instance_classification.items()
+                },
+            }
+            with open(self.progress_path, "w", encoding="utf-8") as handle:
+                json.dump(payload, handle, indent=2)
+        except Exception:
+            # Non-fatal: failing to persist progress should not block proofreading.
+            return
 
     def get_instance_slice(
         self, instance_id: int, z_index: Optional[int] = None

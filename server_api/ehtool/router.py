@@ -497,6 +497,8 @@ async def classify_instances(
             data_manager.instance_classification[instance_id] = request.classification
             updated += 1
 
+    data_manager.save_progress()
+
     return ClassifyResponse(
         updated_count=updated,
         message=f"Updated {updated} instance(s)",
