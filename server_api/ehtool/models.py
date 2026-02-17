@@ -58,6 +58,14 @@ class MaskSaveRequest(BaseModel):
     mask_base64: str
 
 
+class InstanceClassifyRequest(BaseModel):
+    """Request to classify instance(s)"""
+
+    session_id: int
+    instance_ids: List[int]
+    classification: str  # 'correct', 'incorrect', 'unsure', 'error'
+
+
 # Response Models
 class DetectionLoadResponse(BaseModel):
     """Response after loading detection dataset"""
@@ -105,3 +113,35 @@ class ClassifyResponse(BaseModel):
 
     updated_count: int
     message: str
+
+
+class InstanceInfo(BaseModel):
+    """Information about a single instance"""
+
+    id: int
+    voxel_count: int
+    com_z: int
+    com_y: int
+    com_x: int
+    classification: str
+
+
+class InstancesResponse(BaseModel):
+    """Response containing instance list and mode info"""
+
+    instances: List[InstanceInfo]
+    instance_mode: str
+    total_instances: int
+    total_layers: int
+
+
+class InstanceViewResponse(BaseModel):
+    """Response for a single instance view slice"""
+
+    instance_id: int
+    z_index: int
+    total_layers: int
+    image_base64: str
+    mask_raw_base64: Optional[str] = None
+    mask_all_base64: Optional[str] = None
+    mask_active_base64: Optional[str] = None

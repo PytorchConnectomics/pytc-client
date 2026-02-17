@@ -11,6 +11,65 @@ from PIL import Image
 import tifffile
 import cv2
 from typing import Optional, Tuple
+import colorsys
+
+GLASBEY_COLORS = []
+
+
+def _build_glasbey_palette(size: int = 256) -> None:
+    """
+    Build a Glasbey-style palette (highly distinct colors).
+    Deterministic HSV sampling for prototype use.
+    """
+    global GLASBEY_COLORS
+    if GLASBEY_COLORS:
+        return
+
+    colors = []
+    golden_ratio = 0.61803398875
+    h = 0.0
+    for i in range(size):
+        h = (h + golden_ratio) % 1.0
+        s = 0.65 + 0.3 * ((i % 3) / 2.0)
+        v = 0.9
+        r, g, b = colorsys.hsv_to_rgb(h, s, v)
+        colors.append((int(r * 255), int(g * 255), int(b * 255)))
+    GLASBEY_COLORS = colors
+
+
+def labels_to_rgba(label_slice: np.ndarray) -> np.ndarray:
+    """Convert a label slice into an RGBA overlay using a Glasbey-style palette."""
+    _build_glasbey_palette()
+    labels = np.unique(label_slice)
+    labels = labels[labels != 0]
+
+    h, w = label_slice.shape
+    rgba = np.zeros((h, w, 4), dtype=np.uint8)
+    if labels.size == 0:
+        return rgba
+
+    for label in labels:
+        color = GLASBEY_COLORS[int(label) % len(GLASBEY_COLORS)]
+        mask = label_slice == label
+        rgba[mask, 0] = color[0]
+        rgba[mask, 1] = color[1]
+        rgba[mask, 2] = color[2]
+        rgba[mask, 3] = 255
+    return rgba
+
+
+def mask_to_rgba(mask_slice: np.ndarray, color: Tuple[int, int, int]) -> np.ndarray:
+    """Convert a binary mask to a single-color RGBA overlay."""
+    h, w = mask_slice.shape
+    rgba = np.zeros((h, w, 4), dtype=np.uint8)
+    if mask_slice is None:
+        return rgba
+    mask = mask_slice.astype(bool)
+    rgba[mask, 0] = color[0]
+    rgba[mask, 1] = color[1]
+    rgba[mask, 2] = color[2]
+    rgba[mask, 3] = 255
+    return rgba
 
 
 def to_uint8(arr: np.ndarray) -> np.ndarray:

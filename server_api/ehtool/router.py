@@ -5,7 +5,7 @@ Handles error detection endpoints
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
-from typing import List
+from typing import List, Optional
 import math
 import logging
 
@@ -24,9 +24,14 @@ from .models import (
     LayerInfo,
     DetectionStatsResponse,
     MaskSaveRequest,
+    InstanceClassifyRequest,
+    InstancesResponse,
+    InstanceInfo,
+    InstanceViewResponse,
 )
 from .db_models import EHToolSession, EHToolLayer
 from .data_manager import DataManager
+from .utils import labels_to_rgba, mask_to_rgba, array_to_base64
 
 router = APIRouter()
 
@@ -256,6 +261,153 @@ async def classify_layers(
     return ClassifyResponse(
         updated_count=updated_count,
         message=f"Successfully classified {updated_count} layer(s) as '{request.classification}'",
+    )
+
+
+@router.get("/detection/instances", response_model=InstancesResponse)
+async def list_instances(
+    session_id: int,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    db_session = (
+        db.query(EHToolSession)
+        .filter(
+            EHToolSession.id == session_id, EHToolSession.user_id == current_user.id
+        )
+        .first()
+    )
+    if not db_session:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Session not found"
+        )
+
+    data_manager = get_data_manager(session_id, db)
+    data_manager.ensure_instances()
+
+    instances = data_manager.instances or []
+    instance_mode = data_manager.instance_mode or "none"
+
+    response_instances = [
+        InstanceInfo(
+            id=inst["id"],
+            voxel_count=inst["voxel_count"],
+            com_z=inst["com_z"],
+            com_y=inst["com_y"],
+            com_x=inst["com_x"],
+            classification=data_manager.instance_classification.get(
+                inst["id"], "error"
+            ),
+        )
+        for inst in instances
+    ]
+
+    return InstancesResponse(
+        instances=response_instances,
+        instance_mode=instance_mode,
+        total_instances=len(response_instances),
+        total_layers=data_manager.total_layers,
+    )
+
+
+@router.get("/detection/instance-view", response_model=InstanceViewResponse)
+async def get_instance_view(
+    session_id: int,
+    instance_id: int,
+    z_index: Optional[int] = None,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    db_session = (
+        db.query(EHToolSession)
+        .filter(
+            EHToolSession.id == session_id, EHToolSession.user_id == current_user.id
+        )
+        .first()
+    )
+    if not db_session:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Session not found"
+        )
+
+    data_manager = get_data_manager(session_id, db)
+    data_manager.ensure_instances()
+
+    if data_manager.instance_volume is None:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="No instance data available for this session",
+        )
+
+    image, label_slice, active_mask, resolved_z = data_manager.get_instance_slice(
+        instance_id=instance_id, z_index=z_index
+    )
+
+    mask_all_rgba = labels_to_rgba(label_slice)
+    active_color = (255, 255, 255)
+    if mask_all_rgba is not None:
+        active_pixels = mask_all_rgba[label_slice == instance_id]
+        if active_pixels.size >= 3:
+            active_color = tuple(active_pixels[0][:3])
+    mask_active_rgba = mask_to_rgba(active_mask, active_color)
+
+    image_base64 = array_to_base64(image, format="PNG")
+    mask_raw_base64 = None
+    if data_manager.mask_volume is not None:
+        _, mask_raw = data_manager.get_layer(resolved_z, enhance=False)
+        if mask_raw is not None:
+            mask_raw_base64 = array_to_base64(mask_raw, format="PNG")
+
+    return InstanceViewResponse(
+        instance_id=instance_id,
+        z_index=resolved_z,
+        total_layers=data_manager.total_layers,
+        image_base64=image_base64,
+        mask_raw_base64=mask_raw_base64,
+        mask_all_base64=array_to_base64(mask_all_rgba, format="PNG"),
+        mask_active_base64=array_to_base64(mask_active_rgba, format="PNG"),
+    )
+
+
+@router.post("/detection/instance-classify", response_model=ClassifyResponse)
+async def classify_instances(
+    request: InstanceClassifyRequest,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    db_session = (
+        db.query(EHToolSession)
+        .filter(
+            EHToolSession.id == request.session_id,
+            EHToolSession.user_id == current_user.id,
+        )
+        .first()
+    )
+
+    if not db_session:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Session not found"
+        )
+
+    valid_classifications = ["correct", "incorrect", "unsure", "error"]
+    if request.classification not in valid_classifications:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Invalid classification. Must be one of: {', '.join(valid_classifications)}",
+        )
+
+    data_manager = get_data_manager(request.session_id, db)
+    data_manager.ensure_instances()
+
+    updated = 0
+    for instance_id in request.instance_ids:
+        if instance_id in data_manager.instance_classification:
+            data_manager.instance_classification[instance_id] = request.classification
+            updated += 1
+
+    return ClassifyResponse(
+        updated_count=updated,
+        message=f"Updated {updated} instance(s)",
     )
 
 

@@ -10,6 +10,7 @@ import tifffile
 from PIL import Image
 from typing import List, Tuple, Optional, Dict, Any
 from pathlib import Path
+from scipy import ndimage
 
 from .utils import (
     to_uint8,
@@ -34,6 +35,10 @@ class DataManager:
         self.is_3d: bool = False
         self.total_layers: int = 0
         self.image_shape: Optional[Tuple[int, ...]] = None
+        self.instance_mode: Optional[str] = None
+        self.instance_volume: Optional[np.ndarray] = None
+        self.instances: Optional[List[Dict[str, Any]]] = None
+        self.instance_classification: Dict[int, str] = {}
 
     def load_dataset(
         self, dataset_path: str, mask_path: Optional[str] = None
@@ -70,6 +75,10 @@ class DataManager:
         self.is_3d = image_data["is_3d"]
         self.total_layers = image_data["num_slices"]
         self.image_shape = image_data["shape"]
+        self.instance_mode = None
+        self.instance_volume = None
+        self.instances = None
+        self.instance_classification = {}
 
         return {
             "total_layers": self.total_layers,
@@ -208,6 +217,113 @@ class DataManager:
             return f"Layer {layer_index + 1}"
         else:
             return "Image"
+
+    def ensure_instances(self) -> None:
+        """Compute instance metadata if not already available."""
+        if self.instances is not None:
+            return
+
+        if self.mask_volume is None:
+            self.instance_mode = "none"
+            self.instance_volume = None
+            self.instances = []
+            self.instance_classification = {}
+            return
+
+        mask = self.mask_volume
+        unique_vals = np.unique(mask)
+        unique_nonzero = unique_vals[unique_vals != 0]
+
+        # Heuristic: treat binary or near-binary as semantic.
+        is_integer = np.issubdtype(mask.dtype, np.integer)
+        is_binary = (
+            len(unique_vals) <= 2
+            and np.all(np.isin(unique_vals, np.array([0, 1, 255])))
+        )
+
+        if is_integer and (is_binary or len(unique_nonzero) <= 2):
+            # Semantic mask, derive instances via connected components
+            binary = mask > 0
+            labeled, _ = ndimage.label(binary)
+            self.instance_volume = labeled.astype(np.int32)
+            self.instance_mode = "semantic"
+        else:
+            # Instance mask with labels
+            self.instance_volume = mask.astype(np.int32)
+            self.instance_mode = "instance"
+
+        if self.instance_volume is None:
+            self.instances = []
+            self.instance_classification = {}
+            return
+
+        labels = np.unique(self.instance_volume)
+        labels = labels[labels != 0]
+
+        if labels.size == 0:
+            self.instances = []
+            self.instance_classification = {}
+            return
+
+        # Counts per label
+        max_label = int(labels.max())
+        counts = np.bincount(self.instance_volume.ravel(), minlength=max_label + 1)
+
+        # Center of mass per label (z, y, x). For 2D, z is 0.
+        label_indices = labels.tolist()
+        coms = ndimage.center_of_mass(
+            self.instance_volume > 0, labels=self.instance_volume, index=label_indices
+        )
+
+        instances: List[Dict[str, Any]] = []
+        for idx, label in enumerate(label_indices):
+            count = int(counts[label]) if label < len(counts) else 0
+            com = coms[idx]
+            if self.instance_volume.ndim == 2:
+                com_z = 0
+                com_y = int(round(com[0]))
+                com_x = int(round(com[1]))
+            else:
+                com_z = int(round(com[0]))
+                com_y = int(round(com[1]))
+                com_x = int(round(com[2]))
+            instances.append(
+                {
+                    "id": int(label),
+                    "voxel_count": count,
+                    "com_z": com_z,
+                    "com_y": com_y,
+                    "com_x": com_x,
+                }
+            )
+
+        # Sort largest-first to surface meaningful instances
+        instances.sort(key=lambda item: item["voxel_count"], reverse=True)
+        self.instances = instances
+        self.instance_classification = {inst["id"]: "error" for inst in instances}
+
+    def get_instance_slice(
+        self, instance_id: int, z_index: Optional[int] = None
+    ) -> Tuple[np.ndarray, np.ndarray, np.ndarray, int]:
+        """Return image, full label slice, active instance mask slice, and z index."""
+        if self.instance_volume is None:
+            raise ValueError("Instance volume is not available")
+
+        if self.instance_volume.ndim == 2:
+            z_index = 0
+            image = ensure_grayscale_2d(self.image_volume)
+            image = enhance_contrast(image)
+            label_slice = self.instance_volume
+        else:
+            if z_index is None:
+                # Fallback to middle slice if not provided
+                z_index = self.total_layers // 2
+            z_index = max(0, min(int(z_index), self.total_layers - 1))
+            image, _ = self.get_layer(z_index, enhance=True)
+            label_slice = self.instance_volume[z_index]
+
+        active_mask = (label_slice == instance_id).astype(np.uint8)
+        return image, label_slice, active_mask, z_index
 
     def _load_volume(self, path: str) -> Dict[str, Any]:
         """Load volume data from a path"""
