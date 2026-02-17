@@ -3,7 +3,7 @@ FastAPI router for EHTool detection workflow
 Handles error detection endpoints
 """
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, status, Response
 from sqlalchemy.orm import Session
 from typing import List, Optional
 import math
@@ -31,7 +31,7 @@ from .models import (
 )
 from .db_models import EHToolSession, EHToolLayer
 from .data_manager import DataManager
-from .utils import labels_to_rgba, mask_to_rgba, array_to_base64
+from .utils import array_to_base64, glasbey_color
 
 router = APIRouter()
 
@@ -315,6 +315,8 @@ async def get_instance_view(
     session_id: int,
     instance_id: int,
     z_index: Optional[int] = None,
+    include_raw_mask: bool = False,
+    axis: str = "xy",
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
@@ -339,34 +341,124 @@ async def get_instance_view(
             detail="No instance data available for this session",
         )
 
-    image, label_slice, active_mask, resolved_z = data_manager.get_instance_slice(
-        instance_id=instance_id, z_index=z_index
+    view_data = data_manager.get_instance_view_data(
+        instance_id=instance_id,
+        z_index=z_index,
+        include_raw_mask=include_raw_mask,
+        axis=axis,
     )
-
-    mask_all_rgba = labels_to_rgba(label_slice)
-    active_color = (255, 255, 255)
-    if mask_all_rgba is not None:
-        active_pixels = mask_all_rgba[label_slice == instance_id]
-        if active_pixels.size >= 3:
-            active_color = tuple(active_pixels[0][:3])
-    mask_active_rgba = mask_to_rgba(active_mask, active_color)
-
-    image_base64 = array_to_base64(image, format="PNG")
-    mask_raw_base64 = None
-    if data_manager.mask_volume is not None:
-        _, mask_raw = data_manager.get_layer(resolved_z, enhance=False)
-        if mask_raw is not None:
-            mask_raw_base64 = array_to_base64(mask_raw, format="PNG")
 
     return InstanceViewResponse(
         instance_id=instance_id,
-        z_index=resolved_z,
-        total_layers=data_manager.total_layers,
-        image_base64=image_base64,
-        mask_raw_base64=mask_raw_base64,
-        mask_all_base64=array_to_base64(mask_all_rgba, format="PNG"),
-        mask_active_base64=array_to_base64(mask_active_rgba, format="PNG"),
+        axis=view_data["axis"],
+        z_index=view_data["z_index"],
+        total_layers=view_data["total"],
+        image_base64=view_data["image_base64"],
+        mask_raw_base64=view_data["mask_raw_base64"],
+        mask_all_base64=view_data["mask_all_base64"],
+        mask_active_base64=view_data["mask_active_base64"],
     )
+
+
+@router.get("/detection/instance-image")
+async def get_instance_image(
+    session_id: int,
+    instance_id: int,
+    kind: str,
+    z_index: Optional[int] = None,
+    axis: str = "xy",
+    max_dim: Optional[int] = None,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    db_session = (
+        db.query(EHToolSession)
+        .filter(
+            EHToolSession.id == session_id, EHToolSession.user_id == current_user.id
+        )
+        .first()
+    )
+    if not db_session:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Session not found"
+        )
+
+    data_manager = get_data_manager(session_id, db)
+    data_manager.ensure_instances()
+
+    if data_manager.instance_volume is None:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="No instance data available for this session",
+        )
+
+    try:
+        png_bytes, resolved_index, total, resolved_axis = (
+            data_manager.get_instance_image_bytes(
+                instance_id=instance_id,
+                z_index=z_index,
+                axis=axis,
+                kind=kind,
+                max_dim=max_dim,
+            )
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    headers = {
+        "X-Z-Index": str(resolved_index),
+        "X-Total-Layers": str(total),
+        "X-Axis": resolved_axis,
+    }
+    return Response(content=png_bytes, media_type="image/png", headers=headers)
+
+
+@router.get("/detection/instance-mask-sparse")
+async def get_instance_mask_sparse(
+    session_id: int,
+    instance_id: int,
+    z_index: Optional[int] = None,
+    axis: str = "xy",
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    db_session = (
+        db.query(EHToolSession)
+        .filter(
+            EHToolSession.id == session_id, EHToolSession.user_id == current_user.id
+        )
+        .first()
+    )
+    if not db_session:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Session not found"
+        )
+
+    data_manager = get_data_manager(session_id, db)
+    data_manager.ensure_instances()
+
+    if data_manager.instance_volume is None:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="No instance data available for this session",
+        )
+
+    sparse = data_manager.get_sparse_active_mask(
+        instance_id=instance_id, z_index=z_index, axis=axis
+    )
+    color = glasbey_color(instance_id)
+    mask_base64 = array_to_base64(sparse["mask_crop"], format="PNG")
+
+    return {
+        "bbox": sparse["bbox"],
+        "mask_base64": mask_base64,
+        "color": list(color),
+        "width": sparse["width"],
+        "height": sparse["height"],
+        "z_index": sparse["z_index"],
+        "total_layers": sparse["total"],
+        "axis": sparse["axis"],
+    }
 
 
 @router.post("/detection/instance-classify", response_model=ClassifyResponse)

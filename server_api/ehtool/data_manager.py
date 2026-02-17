@@ -11,12 +11,17 @@ from PIL import Image
 from typing import List, Tuple, Optional, Dict, Any
 from pathlib import Path
 from scipy import ndimage
+from collections import OrderedDict
 
 from .utils import (
     to_uint8,
     ensure_grayscale_2d,
     enhance_contrast,
     array_to_base64,
+    array_to_png_bytes,
+    labels_to_rgba,
+    mask_to_rgba,
+    glasbey_color,
     load_image_file,
     get_image_dimensions,
 )
@@ -39,6 +44,11 @@ class DataManager:
         self.instance_volume: Optional[np.ndarray] = None
         self.instances: Optional[List[Dict[str, Any]]] = None
         self.instance_classification: Dict[int, str] = {}
+        self._slice_cache: "OrderedDict[int, Dict[str, Any]]" = OrderedDict()
+        self._active_cache: "OrderedDict[Tuple[int, int], str]" = OrderedDict()
+        self._raw_cache: "OrderedDict[int, str]" = OrderedDict()
+        self._slice_cache_limit = 24
+        self._active_cache_limit = 128
 
     def load_dataset(
         self, dataset_path: str, mask_path: Optional[str] = None
@@ -79,6 +89,9 @@ class DataManager:
         self.instance_volume = None
         self.instances = None
         self.instance_classification = {}
+        self._slice_cache.clear()
+        self._active_cache.clear()
+        self._raw_cache.clear()
 
         return {
             "total_layers": self.total_layers,
@@ -324,6 +337,229 @@ class DataManager:
 
         active_mask = (label_slice == instance_id).astype(np.uint8)
         return image, label_slice, active_mask, z_index
+
+    def get_instance_slice_axis(
+        self, instance_id: int, axis: str, index: Optional[int] = None
+    ) -> Tuple[np.ndarray, np.ndarray, np.ndarray, int, int]:
+        """Return image/mask slice for a given axis (xy, zx, zy)."""
+        if self.instance_volume is None:
+            raise ValueError("Instance volume is not available")
+
+        axis = axis.lower()
+        if self.instance_volume.ndim == 2:
+            axis = "xy"
+            index = 0
+
+        if axis not in {"xy", "zx", "zy"}:
+            raise ValueError(f"Unsupported axis: {axis}")
+
+        if axis == "xy":
+            z_index = 0 if index is None else int(index)
+            z_index = max(0, min(z_index, self.total_layers - 1))
+            image, _ = self.get_layer(z_index, enhance=True)
+            label_slice = self.instance_volume[z_index]
+            active_mask = (label_slice == instance_id).astype(np.uint8)
+            return image, label_slice, active_mask, z_index, self.total_layers
+
+        # For ZX and ZY, we swap axes for a view slice
+        volume = self.image_volume
+        label_volume = self.instance_volume
+        if axis == "zx":
+            # Slice across Y dimension
+            max_index = volume.shape[1] - 1
+            index = max_index // 2 if index is None else int(index)
+            index = max(0, min(index, max_index))
+            image_slice = volume[:, index, :]
+            label_slice = label_volume[:, index, :]
+            total = volume.shape[1]
+        else:  # zy
+            max_index = volume.shape[2] - 1
+            index = max_index // 2 if index is None else int(index)
+            index = max(0, min(index, max_index))
+            image_slice = volume[:, :, index]
+            label_slice = label_volume[:, :, index]
+            total = volume.shape[2]
+
+        image_slice = ensure_grayscale_2d(image_slice)
+        image_slice = enhance_contrast(image_slice)
+        label_slice = ensure_grayscale_2d(label_slice)
+        label_slice = to_uint8(label_slice)
+        active_mask = (label_slice == instance_id).astype(np.uint8)
+        return image_slice, label_slice, active_mask, index, total
+
+    def _resize_to_max_dim(
+        self, array: np.ndarray, max_dim: Optional[int], is_mask: bool = False
+    ) -> np.ndarray:
+        if not max_dim or max_dim <= 0:
+            return array
+
+        height, width = array.shape[:2]
+        largest = max(height, width)
+        if largest <= max_dim:
+            return array
+
+        scale = max_dim / float(largest)
+        new_w = max(1, int(round(width * scale)))
+        new_h = max(1, int(round(height * scale)))
+        resample = Image.NEAREST if is_mask else Image.BILINEAR
+        img = Image.fromarray(array)
+        resized = img.resize((new_w, new_h), resample=resample)
+        return np.array(resized)
+
+    def _cache_get(self, cache: OrderedDict, key):
+        if key in cache:
+            cache.move_to_end(key)
+            return cache[key]
+        return None
+
+    def _cache_set(self, cache: OrderedDict, key, value, limit: int):
+        cache[key] = value
+        cache.move_to_end(key)
+        if len(cache) > limit:
+            cache.popitem(last=False)
+
+    def get_instance_view_data(
+        self,
+        instance_id: int,
+        z_index: Optional[int],
+        include_raw_mask: bool,
+        axis: str = "xy",
+    ) -> Dict[str, Any]:
+        """Get cached base64 view data for an instance slice."""
+        image, label_slice, active_mask, resolved_z, total = (
+            self.get_instance_slice_axis(
+                instance_id=instance_id, axis=axis, index=z_index
+            )
+        )
+
+        cached_slice = self._cache_get(self._slice_cache, (axis, resolved_z))
+        if cached_slice:
+            image_base64 = cached_slice["image_base64"]
+            mask_all_base64 = cached_slice["mask_all_base64"]
+        else:
+            image_base64 = array_to_base64(image, format="PNG")
+            mask_all_rgba = labels_to_rgba(label_slice)
+            mask_all_base64 = array_to_base64(mask_all_rgba, format="PNG")
+            self._cache_set(
+                self._slice_cache,
+                (axis, resolved_z),
+                {
+                    "image_base64": image_base64,
+                    "mask_all_base64": mask_all_base64,
+                },
+                self._slice_cache_limit,
+            )
+
+        active_key = (instance_id, axis, resolved_z)
+        active_cached = self._cache_get(self._active_cache, active_key)
+        if active_cached:
+            mask_active_base64 = active_cached
+        else:
+            active_color = glasbey_color(instance_id)
+            mask_active_rgba = mask_to_rgba(active_mask, active_color)
+            mask_active_base64 = array_to_base64(mask_active_rgba, format="PNG")
+            self._cache_set(
+                self._active_cache,
+                active_key,
+                mask_active_base64,
+                self._active_cache_limit,
+            )
+
+        mask_raw_base64 = None
+        if include_raw_mask and self.mask_volume is not None and axis == "xy":
+            cached_raw = self._cache_get(self._raw_cache, resolved_z)
+            if cached_raw:
+                mask_raw_base64 = cached_raw
+            else:
+                _, mask_raw = self.get_layer(resolved_z, enhance=False)
+                if mask_raw is not None:
+                    mask_raw_base64 = array_to_base64(mask_raw, format="PNG")
+                    self._cache_set(
+                        self._raw_cache, resolved_z, mask_raw_base64, 12
+                    )
+
+        return {
+            "image_base64": image_base64,
+            "mask_all_base64": mask_all_base64,
+            "mask_active_base64": mask_active_base64,
+            "mask_raw_base64": mask_raw_base64,
+            "z_index": resolved_z,
+            "total": total,
+            "axis": axis,
+        }
+
+    def get_instance_image_bytes(
+        self,
+        instance_id: int,
+        z_index: Optional[int],
+        axis: str,
+        kind: str,
+        max_dim: Optional[int] = None,
+    ) -> Tuple[bytes, int, int, str]:
+        """Return PNG bytes for an instance view component."""
+        image, label_slice, active_mask, resolved_index, total = (
+            self.get_instance_slice_axis(
+                instance_id=instance_id, axis=axis, index=z_index
+            )
+        )
+
+        kind = kind.lower()
+        if kind == "image":
+            array = image
+            array = self._resize_to_max_dim(array, max_dim, is_mask=False)
+        elif kind == "mask_all":
+            array = labels_to_rgba(label_slice)
+            array = self._resize_to_max_dim(array, max_dim, is_mask=True)
+        elif kind == "mask_active":
+            active_color = glasbey_color(instance_id)
+            array = mask_to_rgba(active_mask, active_color)
+            array = self._resize_to_max_dim(array, max_dim, is_mask=True)
+        elif kind == "mask_raw":
+            if axis != "xy":
+                raise ValueError("Raw mask only supported for XY view")
+            _, mask_raw = self.get_layer(resolved_index, enhance=False)
+            if mask_raw is None:
+                array = np.zeros_like(image)
+            else:
+                array = ensure_grayscale_2d(mask_raw)
+            array = self._resize_to_max_dim(array, max_dim, is_mask=True)
+        else:
+            raise ValueError(f"Unsupported image kind: {kind}")
+
+        return array_to_png_bytes(array), resolved_index, total, axis
+
+    def get_sparse_active_mask(
+        self,
+        instance_id: int,
+        z_index: Optional[int],
+        axis: str,
+    ) -> Dict[str, Any]:
+        """Return a cropped active mask with bbox metadata."""
+        _, label_slice, active_mask, resolved_index, total = (
+            self.get_instance_slice_axis(
+                instance_id=instance_id, axis=axis, index=z_index
+            )
+        )
+
+        coords = np.argwhere(active_mask > 0)
+        if coords.size == 0:
+            bbox = [0, 0, 0, 0]
+            crop = np.zeros((1, 1), dtype=np.uint8)
+        else:
+            min_y, min_x = coords.min(axis=0)
+            max_y, max_x = coords.max(axis=0)
+            bbox = [int(min_x), int(min_y), int(max_x), int(max_y)]
+            crop = active_mask[min_y : max_y + 1, min_x : max_x + 1]
+
+        return {
+            "bbox": bbox,
+            "mask_crop": to_uint8(crop),
+            "width": int(label_slice.shape[1]),
+            "height": int(label_slice.shape[0]),
+            "z_index": resolved_index,
+            "total": total,
+            "axis": axis,
+        }
 
     def _load_volume(self, path: str) -> Dict[str, Any]:
         """Load volume data from a path"""

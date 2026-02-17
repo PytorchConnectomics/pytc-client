@@ -72,6 +72,12 @@ def mask_to_rgba(mask_slice: np.ndarray, color: Tuple[int, int, int]) -> np.ndar
     return rgba
 
 
+def glasbey_color(label_id: int) -> Tuple[int, int, int]:
+    """Return a deterministic distinct color for a label id."""
+    _build_glasbey_palette()
+    return GLASBEY_COLORS[int(label_id) % len(GLASBEY_COLORS)]
+
+
 def to_uint8(arr: np.ndarray) -> np.ndarray:
     """Convert array to uint8 format"""
     if arr.dtype == np.uint8:
@@ -152,6 +158,28 @@ def array_to_base64(arr: np.ndarray, format: str = "PNG") -> str:
     img_base64 = base64.b64encode(img_bytes).decode("utf-8")
 
     return f"data:image/{format.lower()};base64,{img_base64}"
+
+
+def array_to_png_bytes(arr: np.ndarray) -> bytes:
+    """Convert numpy array to PNG bytes."""
+    arr_uint8 = to_uint8(arr)
+
+    if arr_uint8.ndim == 2:
+        img = Image.fromarray(arr_uint8, mode="L")
+    elif arr_uint8.ndim == 3:
+        if arr_uint8.shape[2] == 3:
+            img = Image.fromarray(arr_uint8, mode="RGB")
+        elif arr_uint8.shape[2] == 4:
+            img = Image.fromarray(arr_uint8, mode="RGBA")
+        else:
+            raise ValueError(f"Unsupported number of channels: {arr_uint8.shape[2]}")
+    else:
+        raise ValueError(f"Unsupported array dimensions: {arr_uint8.ndim}")
+
+    buffer = io.BytesIO()
+    img.save(buffer, format="PNG")
+    buffer.seek(0)
+    return buffer.read()
 
 
 def base64_to_array(base64_str: str) -> np.ndarray:

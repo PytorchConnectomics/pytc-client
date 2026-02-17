@@ -139,6 +139,7 @@ class InstanceViewResponse(BaseModel):
     """Response for a single instance view slice"""
 
     instance_id: int
+    axis: str
     z_index: int
     total_layers: int
     image_base64: str
