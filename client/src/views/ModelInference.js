@@ -10,7 +10,7 @@ function ModelInference({ isInferring, setIsInferring }) {
   const handleStartButton = async () => {
     try {
       setIsInferring(true);
-      const inferenceConfig = localStorage.getItem("inferenceConfig");
+      const inferenceConfig = context.inferenceConfig;
 
       const getPath = (val) => {
         if (!val) return "";
@@ -18,9 +18,7 @@ function ModelInference({ isInferring, setIsInferring }) {
         return val.path || "";
       };
 
-      // const res = startModelInference(
       const res = await startModelInference(
-        context.uploadedYamlFile.name,
         inferenceConfig,
         getPath(context.outputPath),
         getPath(context.checkpointPath),

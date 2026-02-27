@@ -27,6 +27,7 @@ import {
   getModelArchitectures,
 } from "../api";
 import { findCommonPartOfString } from "../utils";
+import { adaptToPytcSchema } from "../utils/yamlSchemaAdapter";
 
 const YamlFileUploader = (props) => {
   const context = useContext(AppContext);
@@ -132,22 +133,39 @@ const YamlFileUploader = (props) => {
   };
 
   const updateInputSelectorInformation = (yamlData) => {
-    const inputImagePath = getPathValue(context.inputImage);
-    const inputLabelPath = getPathValue(context.inputLabel);
+    const ds = yamlData.DATASET || {};
+
+    // Phase 1: Auto-populate Step 0 path slots from YAML if UI fields are empty.
+    if (!getPathValue(context.inputImage) && ds.INPUT_PATH && ds.IMAGE_NAME) {
+      context.setInputImage(ds.INPUT_PATH + ds.IMAGE_NAME);
+    }
+    if (!getPathValue(context.inputLabel) && ds.INPUT_PATH && ds.LABEL_NAME) {
+      context.setInputLabel(ds.INPUT_PATH + ds.LABEL_NAME);
+    }
+    if (!getPathValue(context.outputPath) && ds.OUTPUT_PATH) {
+      context.setOutputPath(ds.OUTPUT_PATH);
+    }
+
+    // Phase 2: Write current UI values back into the YAML (only if set).
+    const inputImagePath =
+      getPathValue(context.inputImage) ||
+      (ds.INPUT_PATH && ds.IMAGE_NAME ? ds.INPUT_PATH + ds.IMAGE_NAME : "");
+    const inputLabelPath =
+      getPathValue(context.inputLabel) ||
+      (ds.INPUT_PATH && ds.LABEL_NAME ? ds.INPUT_PATH + ds.LABEL_NAME : "");
 
     if (!inputImagePath || !inputLabelPath) {
+      yamlData.DATASET = ds;
       return;
     }
 
-    // INPUT_PATH is the shared parent directory for image/label so names can be relative.
     const inputPath = findCommonPartOfString(inputImagePath, inputLabelPath);
-
-    yamlData.DATASET = yamlData.DATASET || {};
-    yamlData.DATASET.INPUT_PATH = inputPath || yamlData.DATASET.INPUT_PATH;
+    yamlData.DATASET = ds;
+    yamlData.DATASET.INPUT_PATH = inputPath || ds.INPUT_PATH;
     yamlData.DATASET.IMAGE_NAME = inputImagePath.replace(inputPath, "");
     yamlData.DATASET.LABEL_NAME = inputLabelPath.replace(inputPath, "");
 
-    const outputPath = getPathValue(context.outputPath);
+    const outputPath = getPathValue(context.outputPath) || ds.OUTPUT_PATH || "";
     if (outputPath) {
       yamlData.DATASET.OUTPUT_PATH = outputPath;
     }
@@ -183,10 +201,23 @@ const YamlFileUploader = (props) => {
     }
   };
 
-  const applyYamlData = (yamlData, sourceLabel) => {
-    if (!yamlData) {
+  const applyYamlData = (rawYamlData, sourceLabel) => {
+    if (!rawYamlData) {
       message.error("Failed to load YAML configuration.");
       return;
+    }
+
+    // Detect schema and adapt to pytorch_connectomics format if needed.
+    const {
+      adapted: yamlData,
+      originalSchema,
+      wasAdapted,
+    } = adaptToPytcSchema(rawYamlData);
+    if (wasAdapted) {
+      message.info(
+        `Detected '${originalSchema}' schema — automatically converted to pytorch_connectomics format.`,
+        5,
+      );
     }
 
     updateInputSelectorInformation(yamlData);

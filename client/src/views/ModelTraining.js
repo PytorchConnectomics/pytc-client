@@ -83,9 +83,7 @@ function ModelTraining() {
       }
 
       console.log(context.uploadedYamlFile);
-      const trainingConfig =
-        localStorage.getItem("trainingConfig") || context.trainingConfig;
-      console.log(trainingConfig);
+      const trainingConfig = context.trainingConfig;
 
       setIsTraining(true);
       setTrainingStatus(
