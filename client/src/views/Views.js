@@ -8,13 +8,22 @@ import {
   DashboardOutlined,
   BugOutlined,
   MessageOutlined,
+  BarChartOutlined,
+  ProjectOutlined,
 } from "@ant-design/icons";
 import FilesManager from "./FilesManager";
 import Visualization from "./Visualization";
 import ModelTraining from "./ModelTraining";
 import ModelInference from "./ModelInference";
 import Monitoring from "./Monitoring";
+<<<<<<< HEAD
 import MaskProofreading from "./MaskProofreading";
+=======
+import ProofReading from "./ProofReading";
+import WormErrorHandling from "./WormErrorHandling";
+import ProjectManager from "./project-manager/ProjectManager";
+import WorkflowSelector from "../components/WorkflowSelector";
+>>>>>>> c648179 (feat:  annotation management system)
 import Chatbot from "../components/Chatbot";
 
 const { Content } = Layout;
@@ -46,6 +55,34 @@ function Views() {
   const [viewers, setViewers] = useState([]);
   const [isInferring, setIsInferring] = useState(false);
 
+<<<<<<< HEAD
+=======
+  const allItems = [
+    { label: "File Management", key: "files", icon: <FolderOpenOutlined /> },
+    { label: "Visualization", key: "visualization", icon: <EyeOutlined /> },
+    { label: "Model Training", key: "training", icon: <ExperimentOutlined /> },
+    {
+      label: "Model Inference",
+      key: "inference",
+      icon: <ThunderboltOutlined />,
+    },
+    { label: "Tensorboard", key: "monitoring", icon: <DashboardOutlined /> },
+    { label: "SynAnno", key: "synanno", icon: <ApartmentOutlined /> },
+    {
+      label: "Worm Error Handling",
+      key: "worm-error-handling",
+      icon: <BugOutlined />,
+    },
+    {
+      label: "Project Manager",
+      key: "project-manager",
+      icon: <ProjectOutlined />,
+    },
+  ];
+
+  const items = allItems.filter((item) => visibleTabs.has(item.key));
+
+>>>>>>> c648179 (feat:  annotation management system)
   const onClick = (e) => {
     setCurrent(e.key);
     setVisitedTabs((prev) => new Set(prev).add(e.key));
@@ -140,7 +177,13 @@ function Views() {
             setIsInferring={setIsInferring}
           />,
         )}
+<<<<<<< HEAD
         {renderTabContent("mask-proofreading", <MaskProofreading />)}
+=======
+        {renderTabContent("synanno", <ProofReading />)}
+        {renderTabContent("worm-error-handling", <WormErrorHandling />)}
+        {renderTabContent("project-manager", <ProjectManager />)}
+>>>>>>> c648179 (feat:  annotation management system)
       </Content>
       <Drawer
         placement="right"
