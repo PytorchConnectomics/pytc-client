@@ -24,6 +24,7 @@ from .models import (
     LayerInfo,
     DetectionStatsResponse,
     MaskSaveRequest,
+    InstanceMaskSaveRequest,
     InstanceClassifyRequest,
     InstancesResponse,
     InstanceInfo,
@@ -63,6 +64,7 @@ def get_data_manager(session_id: int, db: Session) -> DataManager:
             data_manager.load_dataset(
                 dataset_path=db_session.dataset_path, mask_path=db_session.mask_path
             )
+            data_manager.project_name = db_session.project_name
             # Cache it
             _data_managers[session_id] = data_manager
         except Exception as e:
@@ -86,6 +88,7 @@ async def load_detection_dataset(
         dataset_info = data_manager.load_dataset(
             dataset_path=request.dataset_path, mask_path=request.mask_path
         )
+        data_manager.project_name = request.project_name
 
         # Create session in database
         db_session = EHToolSession(
@@ -307,6 +310,7 @@ async def list_instances(
         instance_mode=instance_mode,
         total_instances=len(response_instances),
         total_layers=data_manager.total_layers,
+        ui_state=data_manager.ui_state or None,
     )
 
 
@@ -368,6 +372,7 @@ async def get_instance_image(
     z_index: Optional[int] = None,
     axis: str = "xy",
     max_dim: Optional[int] = None,
+    format: str = "png",
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
@@ -393,13 +398,14 @@ async def get_instance_image(
         )
 
     try:
-        png_bytes, resolved_index, total, resolved_axis = (
+        image_bytes, resolved_index, total, resolved_axis, media_type = (
             data_manager.get_instance_image_bytes(
                 instance_id=instance_id,
                 z_index=z_index,
                 axis=axis,
                 kind=kind,
                 max_dim=max_dim,
+                format=format,
             )
         )
     except ValueError as exc:
@@ -410,7 +416,70 @@ async def get_instance_image(
         "X-Total-Layers": str(total),
         "X-Axis": resolved_axis,
     }
-    return Response(content=png_bytes, media_type="image/png", headers=headers)
+    return Response(content=image_bytes, media_type=media_type, headers=headers)
+
+
+@router.get("/detection/instance-filmstrip")
+async def get_instance_filmstrip(
+    session_id: int,
+    instance_id: int,
+    kind: str,
+    z_start: int = 0,
+    z_count: int = 16,
+    axis: str = "xy",
+    max_dim: Optional[int] = None,
+    format: str = "png",
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    db_session = (
+        db.query(EHToolSession)
+        .filter(
+            EHToolSession.id == session_id, EHToolSession.user_id == current_user.id
+        )
+        .first()
+    )
+    if not db_session:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Session not found"
+        )
+
+    data_manager = get_data_manager(session_id, db)
+    data_manager.ensure_instances()
+
+    if data_manager.instance_volume is None:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="No instance data available for this session",
+        )
+
+    try:
+        (
+            image_bytes,
+            resolved_start,
+            resolved_count,
+            total,
+            resolved_axis,
+            media_type,
+        ) = data_manager.get_instance_filmstrip_bytes(
+            instance_id=instance_id,
+            axis=axis,
+            z_start=z_start,
+            z_count=z_count,
+            kind=kind,
+            max_dim=max_dim,
+            format=format,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    headers = {
+        "X-Z-Start": str(resolved_start),
+        "X-Z-Count": str(resolved_count),
+        "X-Total-Layers": str(total),
+        "X-Axis": resolved_axis,
+    }
+    return Response(content=image_bytes, media_type=media_type, headers=headers)
 
 
 @router.get("/detection/instance-mask-sparse")
@@ -497,7 +566,8 @@ async def classify_instances(
             data_manager.instance_classification[instance_id] = request.classification
             updated += 1
 
-    data_manager.save_progress()
+    ui_state = request.ui_state.dict() if request.ui_state else None
+    data_manager.save_progress(ui_state=ui_state)
 
     return ClassifyResponse(
         updated_count=updated,
@@ -605,4 +675,46 @@ async def save_mask(
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to save mask: {str(e)}",
+        )
+
+
+@router.post("/detection/instance-mask")
+async def save_instance_mask(
+    request: InstanceMaskSaveRequest,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Save updated mask for an instance on a slice."""
+    db_session = (
+        db.query(EHToolSession)
+        .filter(
+            EHToolSession.id == request.session_id,
+            EHToolSession.user_id == current_user.id,
+        )
+        .first()
+    )
+
+    if not db_session:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Session not found"
+        )
+
+    try:
+        data_manager = get_data_manager(request.session_id, db)
+        data_manager.save_instance_mask_slice(
+            instance_id=request.instance_id,
+            axis=request.axis,
+            index=request.z_index,
+            mask_base64=request.mask_base64,
+        )
+        return {"message": "Instance mask saved successfully"}
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except Exception as e:
+        import traceback
+
+        traceback.print_exc()
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to save instance mask: {str(e)}",
         )

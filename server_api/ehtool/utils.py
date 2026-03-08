@@ -160,8 +160,8 @@ def array_to_base64(arr: np.ndarray, format: str = "PNG") -> str:
     return f"data:image/{format.lower()};base64,{img_base64}"
 
 
-def array_to_png_bytes(arr: np.ndarray) -> bytes:
-    """Convert numpy array to PNG bytes."""
+def array_to_image_bytes(arr: np.ndarray, format: str = "PNG") -> bytes:
+    """Convert numpy array to encoded image bytes."""
     arr_uint8 = to_uint8(arr)
 
     if arr_uint8.ndim == 2:
@@ -176,10 +176,16 @@ def array_to_png_bytes(arr: np.ndarray) -> bytes:
     else:
         raise ValueError(f"Unsupported array dimensions: {arr_uint8.ndim}")
 
+    fmt = (format or "PNG").upper()
     buffer = io.BytesIO()
-    img.save(buffer, format="PNG")
+    img.save(buffer, format=fmt)
     buffer.seek(0)
     return buffer.read()
+
+
+def array_to_png_bytes(arr: np.ndarray) -> bytes:
+    """Convert numpy array to PNG bytes."""
+    return array_to_image_bytes(arr, format="PNG")
 
 
 def base64_to_array(base64_str: str) -> np.ndarray:

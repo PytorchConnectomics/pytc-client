@@ -20,12 +20,13 @@ from .utils import (
     ensure_grayscale_2d,
     enhance_contrast,
     array_to_base64,
-    array_to_png_bytes,
+    array_to_image_bytes,
     labels_to_rgba,
     mask_to_rgba,
     glasbey_color,
     load_image_file,
     get_image_dimensions,
+    base64_to_array,
 )
 
 
@@ -47,12 +48,19 @@ class DataManager:
         self.instance_volume: Optional[np.ndarray] = None
         self.instances: Optional[List[Dict[str, Any]]] = None
         self.instance_classification: Dict[int, str] = {}
+        self.progress_payload: Optional[Dict[str, Any]] = None
+        self.ui_state: Dict[str, Any] = {}
+        self.project_name: Optional[str] = None
         self.progress_path: Optional[str] = None
         self._slice_cache: "OrderedDict[int, Dict[str, Any]]" = OrderedDict()
         self._active_cache: "OrderedDict[Tuple[int, int], str]" = OrderedDict()
         self._raw_cache: "OrderedDict[int, str]" = OrderedDict()
+        self._resized_cache: "OrderedDict[Tuple[Any, ...], bytes]" = OrderedDict()
+        self._filmstrip_cache: "OrderedDict[Tuple[Any, ...], bytes]" = OrderedDict()
         self._slice_cache_limit = 24
         self._active_cache_limit = 128
+        self._resized_cache_limit = 128
+        self._filmstrip_cache_limit = 64
 
     def load_dataset(
         self, dataset_path: str, mask_path: Optional[str] = None
@@ -97,7 +105,11 @@ class DataManager:
         self._slice_cache.clear()
         self._active_cache.clear()
         self._raw_cache.clear()
+        self._resized_cache.clear()
+        self._filmstrip_cache.clear()
         self.progress_path = self._resolve_progress_path()
+        self.progress_payload = None
+        self.ui_state = {}
 
         return {
             "total_layers": self.total_layers,
@@ -145,6 +157,90 @@ class DataManager:
         # Save to disk
         if self.mask_path:
             self._save_volume(self.mask_path, self.mask_volume, layer_index)
+
+    def save_instance_mask_slice(
+        self, instance_id: int, axis: str, index: int, mask_base64: str
+    ) -> None:
+        """Apply an edited binary mask to the active instance on a slice."""
+        if self.instance_volume is None:
+            raise ValueError("Instance volume is not available")
+        if self.instance_mode != "instance":
+            raise ValueError("Instance editing requires labeled masks")
+
+        axis = axis.lower()
+        if axis not in {"xy", "zx", "zy"}:
+            raise ValueError(f"Unsupported axis: {axis}")
+
+        if self.instance_volume.ndim == 2:
+            axis = "xy"
+            index = 0
+
+        # Decode mask and binarize
+        mask_arr = base64_to_array(mask_base64)
+        mask_arr = ensure_grayscale_2d(mask_arr)
+        binary = mask_arr > 0
+
+        # Select target slice
+        if axis == "xy":
+            max_index = self.total_layers - 1
+            index = max(0, min(int(index), max_index))
+            slice_ref = (
+                self.instance_volume
+                if self.instance_volume.ndim == 2
+                else self.instance_volume[index]
+            )
+        elif axis == "zx":
+            max_index = self.instance_volume.shape[1] - 1
+            index = max(0, min(int(index), max_index))
+            slice_ref = self.instance_volume[:, index, :]
+        else:  # zy
+            max_index = self.instance_volume.shape[2] - 1
+            index = max(0, min(int(index), max_index))
+            slice_ref = self.instance_volume[:, :, index]
+
+        # Resize to match slice shape if needed
+        if binary.shape != slice_ref.shape:
+            resized = Image.fromarray(binary.astype(np.uint8) * 255).resize(
+                (slice_ref.shape[1], slice_ref.shape[0]), Image.NEAREST
+            )
+            binary = np.array(resized) > 0
+
+        old_active = slice_ref == instance_id
+        slice_ref[old_active & ~binary] = 0
+        slice_ref[binary] = instance_id
+
+        # Keep mask_volume aligned with instance edits
+        if self.mask_volume is not None:
+            if axis == "xy":
+                mask_slice = (
+                    self.mask_volume
+                    if self.mask_volume.ndim == 2
+                    else self.mask_volume[index]
+                )
+            elif axis == "zx":
+                mask_slice = self.mask_volume[:, index, :]
+            else:
+                mask_slice = self.mask_volume[:, :, index]
+            if mask_slice.shape == binary.shape:
+                mask_slice[old_active & ~binary] = 0
+                mask_slice[binary] = instance_id
+
+        # Update instance voxel counts without resetting classifications
+        if self.instances:
+            max_label = int(np.max(self.instance_volume))
+            counts = np.bincount(self.instance_volume.ravel(), minlength=max_label + 1)
+            for inst in self.instances:
+                inst_id = inst["id"]
+                inst["voxel_count"] = (
+                    int(counts[inst_id]) if inst_id < len(counts) else 0
+                )
+
+        # Clear caches so overlays refresh
+        self._slice_cache.clear()
+        self._active_cache.clear()
+        self._raw_cache.clear()
+        self._resized_cache.clear()
+        self._filmstrip_cache.clear()
 
     def _save_volume(self, path: str, volume: np.ndarray, layer_index: int = -1):
         """Save volume to disk"""
@@ -255,9 +351,8 @@ class DataManager:
 
         # Heuristic: treat binary or near-binary as semantic.
         is_integer = np.issubdtype(mask.dtype, np.integer)
-        is_binary = (
-            len(unique_vals) <= 2
-            and np.all(np.isin(unique_vals, np.array([0, 1, 255])))
+        is_binary = len(unique_vals) <= 2 and np.all(
+            np.isin(unique_vals, np.array([0, 1, 255]))
         )
 
         if is_integer and (is_binary or len(unique_nonzero) <= 2):
@@ -343,8 +438,14 @@ class DataManager:
                 payload = json.load(handle)
         except Exception:
             return
+        self.progress_payload = payload if isinstance(payload, dict) else None
+        if isinstance(payload, dict):
+            ui_state = payload.get("ui_state")
+            self.ui_state = ui_state if isinstance(ui_state, dict) else {}
+        else:
+            self.ui_state = {}
 
-        stored = payload.get("instances", {})
+        stored = payload.get("instances", {}) if isinstance(payload, dict) else {}
         if not isinstance(stored, dict):
             return
 
@@ -357,25 +458,66 @@ class DataManager:
             if isinstance(entry, str) and entry in valid:
                 self.instance_classification[inst["id"]] = entry
 
-    def save_progress(self) -> None:
+    def save_progress(self, ui_state: Optional[Dict[str, Any]] = None) -> None:
         if not self.progress_path:
             return
         try:
-            payload = {
-                "schema_version": 1,
-                "dataset_path": self.dataset_path,
-                "mask_path": self.mask_path,
-                "instance_mode": self.instance_mode,
-                "updated_at": datetime.now(timezone.utc).isoformat(),
-                "instances": {
-                    str(inst_id): {
-                        "classification": classification,
+            payload = (
+                self.progress_payload if isinstance(self.progress_payload, dict) else {}
+            )
+            payload.setdefault("schema_version", 1)
+            payload["updated_at"] = datetime.now(timezone.utc).isoformat()
+
+            project = payload.get("project")
+            if not isinstance(project, dict):
+                project = {}
+            project["name"] = (
+                self.project_name or project.get("name") or "Untitled Project"
+            )
+            project["dataset_path"] = self.dataset_path
+            project["mask_path"] = self.mask_path
+            project["instance_mode"] = self.instance_mode
+            payload["project"] = project
+
+            if isinstance(ui_state, dict):
+                stored_ui = payload.get("ui_state")
+                if not isinstance(stored_ui, dict):
+                    stored_ui = {}
+                stored_ui.update(ui_state)
+                payload["ui_state"] = stored_ui
+                self.ui_state = stored_ui
+
+            instances_payload = payload.get("instances")
+            if not isinstance(instances_payload, dict):
+                instances_payload = {}
+
+            for inst_id, classification in self.instance_classification.items():
+                key = str(inst_id)
+                entry = instances_payload.get(key)
+                if not isinstance(entry, dict):
+                    entry = {}
+                entry["classification"] = classification
+                entry["reviewed_at"] = datetime.now(timezone.utc).isoformat()
+                entry.setdefault("notes", "")
+                history = entry.get("history")
+                if not isinstance(history, list):
+                    history = []
+                history.append(
+                    {
+                        "at": entry["reviewed_at"],
+                        "by": "local",
+                        "action": classification,
                     }
-                    for inst_id, classification in self.instance_classification.items()
-                },
-            }
+                )
+                entry["history"] = history
+                instances_payload[key] = entry
+
+            payload["instances"] = instances_payload
+            payload.setdefault("extensions", {})
+
             with open(self.progress_path, "w", encoding="utf-8") as handle:
                 json.dump(payload, handle, indent=2)
+            self.progress_payload = payload
         except Exception:
             # Non-fatal: failing to persist progress should not block proofreading.
             return
@@ -483,6 +625,17 @@ class DataManager:
         if len(cache) > limit:
             cache.popitem(last=False)
 
+    def _normalize_output_format(self, kind: str, format: str) -> Tuple[str, str]:
+        requested = (format or "png").lower()
+        if requested not in {"png", "webp"}:
+            raise ValueError(f"Unsupported format: {format}")
+
+        if kind != "image":
+            requested = "png"
+
+        media_type = "image/webp" if requested == "webp" else "image/png"
+        return requested, media_type
+
     def get_instance_view_data(
         self,
         instance_id: int,
@@ -539,9 +692,7 @@ class DataManager:
                 _, mask_raw = self.get_layer(resolved_z, enhance=False)
                 if mask_raw is not None:
                     mask_raw_base64 = array_to_base64(mask_raw, format="PNG")
-                    self._cache_set(
-                        self._raw_cache, resolved_z, mask_raw_base64, 12
-                    )
+                    self._cache_set(self._raw_cache, resolved_z, mask_raw_base64, 12)
 
         return {
             "image_base64": image_base64,
@@ -560,8 +711,9 @@ class DataManager:
         axis: str,
         kind: str,
         max_dim: Optional[int] = None,
-    ) -> Tuple[bytes, int, int, str]:
-        """Return PNG bytes for an instance view component."""
+        format: str = "png",
+    ) -> Tuple[bytes, int, int, str, str]:
+        """Return encoded image bytes for an instance view component."""
         image, label_slice, active_mask, resolved_index, total = (
             self.get_instance_slice_axis(
                 instance_id=instance_id, axis=axis, index=z_index
@@ -569,16 +721,33 @@ class DataManager:
         )
 
         kind = kind.lower()
+        output_format, media_type = self._normalize_output_format(kind, format)
+        max_dim_value = int(max_dim) if max_dim is not None else None
+        if max_dim_value and max_dim_value > 0:
+            cache_key = (
+                instance_id,
+                axis,
+                resolved_index,
+                kind,
+                max_dim_value,
+                output_format,
+            )
+            cached = self._cache_get(self._resized_cache, cache_key)
+            if cached:
+                return cached, resolved_index, total, axis, media_type
         if kind == "image":
             array = image
-            array = self._resize_to_max_dim(array, max_dim, is_mask=False)
+            array = self._resize_to_max_dim(array, max_dim_value, is_mask=False)
         elif kind == "mask_all":
             array = labels_to_rgba(label_slice)
-            array = self._resize_to_max_dim(array, max_dim, is_mask=True)
+            array = self._resize_to_max_dim(array, max_dim_value, is_mask=True)
         elif kind == "mask_active":
             active_color = glasbey_color(instance_id)
             array = mask_to_rgba(active_mask, active_color)
-            array = self._resize_to_max_dim(array, max_dim, is_mask=True)
+            array = self._resize_to_max_dim(array, max_dim_value, is_mask=True)
+        elif kind == "mask_active_binary":
+            array = to_uint8(active_mask * 255)
+            array = self._resize_to_max_dim(array, max_dim_value, is_mask=True)
         elif kind == "mask_raw":
             if axis != "xy":
                 raise ValueError("Raw mask only supported for XY view")
@@ -587,11 +756,127 @@ class DataManager:
                 array = np.zeros_like(image)
             else:
                 array = ensure_grayscale_2d(mask_raw)
-            array = self._resize_to_max_dim(array, max_dim, is_mask=True)
+            array = self._resize_to_max_dim(array, max_dim_value, is_mask=True)
         else:
             raise ValueError(f"Unsupported image kind: {kind}")
 
-        return array_to_png_bytes(array), resolved_index, total, axis
+        encoded_bytes = array_to_image_bytes(array, format=output_format)
+        if max_dim_value and max_dim_value > 0:
+            self._cache_set(
+                self._resized_cache,
+                (
+                    instance_id,
+                    axis,
+                    resolved_index,
+                    kind,
+                    max_dim_value,
+                    output_format,
+                ),
+                encoded_bytes,
+                self._resized_cache_limit,
+            )
+        return encoded_bytes, resolved_index, total, axis, media_type
+
+    def get_instance_filmstrip_bytes(
+        self,
+        instance_id: int,
+        axis: str,
+        z_start: int,
+        z_count: int,
+        kind: str,
+        max_dim: Optional[int] = None,
+        format: str = "png",
+    ) -> Tuple[bytes, int, int, int, str, str]:
+        """Return stacked filmstrip bytes for a contiguous z-range."""
+        if self.instance_volume is None:
+            raise ValueError("Instance volume is not available")
+
+        axis = axis.lower()
+        if axis not in {"xy", "zx", "zy"}:
+            raise ValueError(f"Unsupported axis: {axis}")
+
+        kind = kind.lower()
+        output_format, media_type = self._normalize_output_format(kind, format)
+
+        if self.instance_volume.ndim == 2:
+            total = 1
+            axis = "xy"
+        elif axis == "xy":
+            total = self.total_layers
+        elif axis == "zx":
+            total = int(self.image_volume.shape[1])
+        else:
+            total = int(self.image_volume.shape[2])
+
+        if z_count is None:
+            z_count = 1
+        z_count = max(1, int(z_count))
+        z_start = max(0, min(int(z_start), max(total - 1, 0)))
+        z_count = min(z_count, total - z_start)
+        if z_count <= 0:
+            raise ValueError("No slices available for requested filmstrip range")
+
+        max_dim_value = int(max_dim) if max_dim is not None else None
+        cache_key = (
+            instance_id,
+            axis,
+            z_start,
+            z_count,
+            kind,
+            max_dim_value,
+            output_format,
+        )
+        cached = self._cache_get(self._filmstrip_cache, cache_key)
+        if cached:
+            return cached, z_start, z_count, total, axis, media_type
+
+        slices: List[np.ndarray] = []
+        for offset in range(z_count):
+            z_index = z_start + offset
+            image, label_slice, active_mask, _, _ = self.get_instance_slice_axis(
+                instance_id=instance_id, axis=axis, index=z_index
+            )
+
+            if kind == "image":
+                frame = image
+                frame = self._resize_to_max_dim(frame, max_dim_value, is_mask=False)
+            elif kind == "mask_all":
+                frame = labels_to_rgba(label_slice)
+                frame = self._resize_to_max_dim(frame, max_dim_value, is_mask=True)
+            elif kind == "mask_active":
+                active_color = glasbey_color(instance_id)
+                frame = mask_to_rgba(active_mask, active_color)
+                frame = self._resize_to_max_dim(frame, max_dim_value, is_mask=True)
+            elif kind == "mask_active_binary":
+                frame = to_uint8(active_mask * 255)
+                frame = self._resize_to_max_dim(frame, max_dim_value, is_mask=True)
+            elif kind == "mask_raw":
+                if axis != "xy":
+                    raise ValueError("Raw mask only supported for XY view")
+                _, raw_mask = self.get_layer(z_index, enhance=False)
+                frame = (
+                    np.zeros_like(image)
+                    if raw_mask is None
+                    else ensure_grayscale_2d(raw_mask)
+                )
+                frame = self._resize_to_max_dim(frame, max_dim_value, is_mask=True)
+            else:
+                raise ValueError(f"Unsupported image kind: {kind}")
+
+            slices.append(frame)
+
+        if not slices:
+            raise ValueError("No slices generated for filmstrip")
+
+        filmstrip = np.concatenate(slices, axis=0)
+        encoded_bytes = array_to_image_bytes(filmstrip, format=output_format)
+        self._cache_set(
+            self._filmstrip_cache,
+            cache_key,
+            encoded_bytes,
+            self._filmstrip_cache_limit,
+        )
+        return encoded_bytes, z_start, z_count, total, axis, media_type
 
     def get_sparse_active_mask(
         self,

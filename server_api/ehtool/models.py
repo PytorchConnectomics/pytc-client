@@ -58,12 +58,33 @@ class MaskSaveRequest(BaseModel):
     mask_base64: str
 
 
+class InstanceMaskSaveRequest(BaseModel):
+    """Request to save an updated mask for an instance slice"""
+
+    session_id: int
+    instance_id: int
+    axis: str = "xy"
+    z_index: int
+    mask_base64: str
+
+
+class ProofreadingUIState(BaseModel):
+    """Optional UI state persisted with proofreading progress."""
+
+    axis: Optional[str] = None
+    overlay_all_alpha: Optional[float] = None
+    overlay_active_alpha: Optional[float] = None
+    last_instance_id: Optional[int] = None
+    last_slice_index: Optional[int] = None
+
+
 class InstanceClassifyRequest(BaseModel):
     """Request to classify instance(s)"""
 
     session_id: int
     instance_ids: List[int]
     classification: str  # 'correct', 'incorrect', 'unsure', 'error'
+    ui_state: Optional[ProofreadingUIState] = None
 
 
 # Response Models
@@ -133,6 +154,7 @@ class InstancesResponse(BaseModel):
     instance_mode: str
     total_instances: int
     total_layers: int
+    ui_state: Optional[ProofreadingUIState] = None
 
 
 class InstanceViewResponse(BaseModel):

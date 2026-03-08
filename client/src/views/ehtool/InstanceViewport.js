@@ -3,7 +3,6 @@ import { Card, Button, Slider, Space, Typography, Spin, Segmented } from "antd";
 import {
   LeftOutlined,
   RightOutlined,
-  EditOutlined,
   ZoomInOutlined,
   ZoomOutOutlined,
   CompressOutlined,
@@ -48,7 +47,7 @@ function InstanceViewport({
   useEffect(() => {
     setZoom(1);
     offsetRef.current = { x: 0, y: 0 };
-  }, [imageBase64, zIndex]);
+  }, [axis]);
 
   useLayoutEffect(() => {
     zoomRef.current = zoom;
@@ -105,6 +104,9 @@ function InstanceViewport({
     if (axis === "zy") return { h: "Y", v: "Z" };
     return { h: "X", v: "Y" };
   };
+
+  const shouldShowAll = overlayAllAlpha > 0.001;
+  const shouldShowActive = overlayActiveAlpha > 0.001;
 
   const updateCursor = (event) => {
     if (!imageRef.current) {
@@ -207,9 +209,11 @@ function InstanceViewport({
           />
           <Button type="text" onClick={onPrevSlice} icon={<LeftOutlined />} />
           <Button type="text" onClick={onNextSlice} icon={<RightOutlined />} />
-          <Button type="primary" size="small" onClick={onOpenEditor}>
-            Edit
-          </Button>
+          {onOpenEditor && (
+            <Button type="primary" size="small" onClick={onOpenEditor}>
+              Edit
+            </Button>
+          )}
         </Space>
       </Space>
 
@@ -306,6 +310,7 @@ function InstanceViewport({
                 position: "absolute",
                 inset: 0,
                 opacity: overlayAllAlpha,
+                display: shouldShowAll ? "block" : "none",
                 pointerEvents: "none",
               }}
             />
@@ -322,6 +327,7 @@ function InstanceViewport({
                 position: "absolute",
                 inset: 0,
                 opacity: overlayActiveAlpha,
+                display: shouldShowActive ? "block" : "none",
                 pointerEvents: "none",
               }}
             />

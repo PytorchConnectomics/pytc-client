@@ -2,7 +2,7 @@ import React, {
   useState,
   useRef,
   useEffect,
-  useCallback,
+  useMemo,
   forwardRef,
   useImperativeHandle,
 } from "react";
@@ -15,6 +15,9 @@ import {
   message,
   Tooltip,
   Divider,
+  Segmented,
+  Spin,
+  Typography,
 } from "antd";
 import {
   EditOutlined,
@@ -23,13 +26,14 @@ import {
   RedoOutlined,
   EyeOutlined,
   EyeInvisibleOutlined,
-  SaveOutlined,
   LeftOutlined,
   RightOutlined,
   ZoomInOutlined,
   ZoomOutOutlined,
   DragOutlined,
 } from "@ant-design/icons";
+
+const { Text } = Typography;
 
 /**
  * Proofreading Editor Component
@@ -40,6 +44,15 @@ const ProofreadingEditor = forwardRef(
     {
       imageBase64,
       maskBase64,
+      overlayAllBase64,
+      overlayActiveBase64,
+      overlayAllAlpha = 0.08,
+      overlayActiveAlpha = 0.8,
+      axis,
+      axisOptions,
+      onAxisChange,
+      loading,
+      activeInstanceId,
       onSave,
       onNext,
       onPrevious,
@@ -55,7 +68,7 @@ const ProofreadingEditor = forwardRef(
     const [tool, setTool] = useState("paint"); // 'paint', 'erase', or 'hand'
     const [paintBrushSize, setPaintBrushSize] = useState(10);
     const [eraseBrushSize, setEraseBrushSize] = useState(10);
-    const [showMask, setShowMask] = useState(true);
+    const [showMask, setShowMask] = useState(false);
     const [zoom, setZoom] = useState(1.0);
     const [isDrawing, setIsDrawing] = useState(false);
     const [cursorPos, setCursorPos] = useState({ x: 0, y: 0 }); // Image coordinates
@@ -65,6 +78,8 @@ const ProofreadingEditor = forwardRef(
     const imageDataRef = useRef(null);
     const maskDataRef = useRef(null);
     const originalMaskRef = useRef(null);
+    const overlayAllRef = useRef(null);
+    const overlayActiveRef = useRef(null);
 
     // Undo/Redo stacks
     const [undoStack, setUndoStack] = useState([]);
@@ -78,11 +93,28 @@ const ProofreadingEditor = forwardRef(
       width: 0,
       height: 0,
     });
+    const lastDrawRef = useRef(null);
+    const minimapRafRef = useRef(null);
+    const axisViewStateRef = useRef({});
 
     // Expose handleSave to parent
     useImperativeHandle(ref, () => ({
       save: handleSave,
     }));
+
+    useEffect(() => {
+      if (!axis) return;
+      const stored = axisViewStateRef.current[axis];
+      if (stored) {
+        setZoom(stored.zoom ?? 1);
+        setOffset(stored.offset ?? { x: 0, y: 0 });
+      }
+    }, [axis]);
+
+    useEffect(() => {
+      if (!axis) return;
+      axisViewStateRef.current[axis] = { zoom, offset };
+    }, [axis, zoom, offset]);
 
     // Load images when props change
     useEffect(() => {
@@ -97,7 +129,42 @@ const ProofreadingEditor = forwardRef(
         drawCanvas();
         drawMinimap();
       }
-    }, [zoom, offset, showMask, canvasDimensions]);
+    }, [
+      zoom,
+      offset,
+      showMask,
+      canvasDimensions,
+      overlayAllAlpha,
+      overlayActiveAlpha,
+    ]);
+
+    const resolveImageSource = (source) => {
+      if (!source) return "";
+      if (source.startsWith("data:image") || source.startsWith("blob:")) {
+        return source;
+      }
+      return `data:image/png;base64,${source}`;
+    };
+
+    const loadRenderableImage = async (source) => {
+      const normalized = resolveImageSource(source);
+      if (!normalized) throw new Error("Image source is missing");
+      if (typeof createImageBitmap === "function") {
+        try {
+          const response = await fetch(normalized);
+          const blob = await response.blob();
+          return await createImageBitmap(blob);
+        } catch (error) {
+          // Fall through to Image() decoder.
+        }
+      }
+      return await new Promise((resolve, reject) => {
+        const image = new Image();
+        image.onload = () => resolve(image);
+        image.onerror = () => reject(new Error("Failed to load image object"));
+        image.src = normalized;
+      });
+    };
 
     const loadImages = async () => {
       const canvas = canvasRef.current;
@@ -106,68 +173,39 @@ const ProofreadingEditor = forwardRef(
       const ctx = canvas.getContext("2d");
 
       try {
-        const img = new Image();
-        if (!imageBase64) throw new Error("Image data is missing");
+        const baseImage = await loadRenderableImage(imageBase64);
+        canvas.width = baseImage.width;
+        canvas.height = baseImage.height;
+        ctx.drawImage(baseImage, 0, 0, canvas.width, canvas.height);
+        imageDataRef.current = ctx.getImageData(
+          0,
+          0,
+          canvas.width,
+          canvas.height,
+        );
+        if (baseImage?.close) baseImage.close();
 
-        if (
-          imageBase64.startsWith("data:image") ||
-          imageBase64.startsWith("blob:")
-        ) {
-          img.src = imageBase64;
-        } else {
-          img.src = `data:image/png;base64,${imageBase64}`;
-        }
-
-        await new Promise((resolve, reject) => {
-          img.onload = () => {
-            canvas.width = img.width;
-            canvas.height = img.height;
-            ctx.drawImage(img, 0, 0);
-            imageDataRef.current = ctx.getImageData(
-              0,
-              0,
-              canvas.width,
-              canvas.height,
-            );
-            setCanvasDimensions({ width: img.width, height: img.height }); // Trigger redraw after ref is ready
-            resolve();
-          };
-          img.onerror = (e) => reject(new Error("Failed to load image object"));
-        });
+        setCanvasDimensions({ width: canvas.width, height: canvas.height });
 
         if (maskBase64) {
-          const maskImg = new Image();
-          if (
-            maskBase64.startsWith("data:image") ||
-            maskBase64.startsWith("blob:")
-          ) {
-            maskImg.src = maskBase64;
-          } else {
-            maskImg.src = `data:image/png;base64,${maskBase64}`;
-          }
-
-          await new Promise((resolve, reject) => {
-            maskImg.onload = () => {
-              const tempCanvas = document.createElement("canvas");
-              tempCanvas.width = canvas.width;
-              tempCanvas.height = canvas.height;
-              const tempCtx = tempCanvas.getContext("2d");
-              tempCtx.drawImage(maskImg, 0, 0);
-              maskDataRef.current = tempCtx.getImageData(
-                0,
-                0,
-                canvas.width,
-                canvas.height,
-              );
-              originalMaskRef.current = new ImageData(
-                new Uint8ClampedArray(maskDataRef.current.data),
-                canvas.width,
-                canvas.height,
-              );
-              resolve();
-            };
-            maskImg.onerror = (e) => reject(e);
-          });
+          const maskImage = await loadRenderableImage(maskBase64);
+          const tempCanvas = document.createElement("canvas");
+          tempCanvas.width = canvas.width;
+          tempCanvas.height = canvas.height;
+          const tempCtx = tempCanvas.getContext("2d");
+          tempCtx.drawImage(maskImage, 0, 0, canvas.width, canvas.height);
+          maskDataRef.current = tempCtx.getImageData(
+            0,
+            0,
+            canvas.width,
+            canvas.height,
+          );
+          if (maskImage?.close) maskImage.close();
+          originalMaskRef.current = new ImageData(
+            new Uint8ClampedArray(maskDataRef.current.data),
+            canvas.width,
+            canvas.height,
+          );
         } else {
           maskDataRef.current = new ImageData(canvas.width, canvas.height);
           originalMaskRef.current = new ImageData(canvas.width, canvas.height);
@@ -175,9 +213,6 @@ const ProofreadingEditor = forwardRef(
 
         setUndoStack([]);
         setRedoStack([]);
-        setZoom(1.0);
-        setOffset({ x: 0, y: 0 });
-        // Redraw will be triggered by hooks
       } catch (error) {
         console.error("Error loading images:", error);
         message.error("Failed to load images");
@@ -189,18 +224,75 @@ const ProofreadingEditor = forwardRef(
       if (!canvas || !imageDataRef.current) return;
       const ctx = canvas.getContext("2d");
       ctx.clearRect(0, 0, canvas.width, canvas.height);
+      ctx.imageSmoothingEnabled = false;
       ctx.putImageData(imageDataRef.current, 0, 0);
 
-      if (showMask && maskDataRef.current) {
-        const tempCanvas = document.createElement("canvas");
-        tempCanvas.width = canvas.width;
-        tempCanvas.height = canvas.height;
-        const tempCtx = tempCanvas.getContext("2d");
-        const overlayData = createMaskOverlay(maskDataRef.current);
-        tempCtx.putImageData(overlayData, 0, 0);
-        ctx.drawImage(tempCanvas, 0, 0);
+      if (overlayAllRef.current && overlayAllAlpha > 0.001) {
+        ctx.save();
+        ctx.globalAlpha = overlayAllAlpha;
+        ctx.drawImage(overlayAllRef.current, 0, 0, canvas.width, canvas.height);
+        ctx.restore();
+      }
+
+      if (overlayActiveAlpha > 0.001) {
+        // Use editable mask as the only active-layer source to avoid opacity
+        // compounding when repainting already-active pixels.
+        if (maskDataRef.current) {
+          const tempCanvas = document.createElement("canvas");
+          tempCanvas.width = canvas.width;
+          tempCanvas.height = canvas.height;
+          const tempCtx = tempCanvas.getContext("2d");
+          const overlayData = createMaskOverlay(
+            maskDataRef.current,
+            activeColor,
+            overlayActiveAlpha,
+          );
+          tempCtx.putImageData(overlayData, 0, 0);
+          ctx.drawImage(tempCanvas, 0, 0);
+        } else if (overlayActiveRef.current) {
+          ctx.save();
+          ctx.globalAlpha = overlayActiveAlpha;
+          ctx.drawImage(
+            overlayActiveRef.current,
+            0,
+            0,
+            canvas.width,
+            canvas.height,
+          );
+          ctx.restore();
+        }
       }
     };
+
+    const loadOverlayImage = (source, targetRef) => {
+      if (!source) {
+        targetRef.current = null;
+        drawCanvas();
+        return;
+      }
+      const overlay = new Image();
+      overlay.onload = () => {
+        targetRef.current = overlay;
+        drawCanvas();
+      };
+      overlay.onerror = () => {
+        targetRef.current = null;
+        drawCanvas();
+      };
+      if (source.startsWith("data:image") || source.startsWith("blob:")) {
+        overlay.src = source;
+      } else {
+        overlay.src = `data:image/png;base64,${source}`;
+      }
+    };
+
+    useEffect(() => {
+      loadOverlayImage(overlayAllBase64, overlayAllRef);
+    }, [overlayAllBase64]);
+
+    useEffect(() => {
+      loadOverlayImage(overlayActiveBase64, overlayActiveRef);
+    }, [overlayActiveBase64]);
 
     const handleMinimapClick = (e) => {
       const canvas = minimapRef.current;
@@ -231,8 +323,6 @@ const ProofreadingEditor = forwardRef(
         return;
 
       const ctx = minimapCanvas.getContext("2d");
-      const width = minimapCanvas.width;
-      const height = minimapCanvas.height;
 
       // Ensure internal canvas size matches DOM size for sharpness
       if (
@@ -243,22 +333,23 @@ const ProofreadingEditor = forwardRef(
         minimapCanvas.height = minimapCanvas.clientHeight || 180;
       }
 
+      const width = minimapCanvas.width;
+      const height = minimapCanvas.height;
+
       ctx.clearRect(0, 0, width, height);
-      ctx.fillStyle = "#000"; // Fallback background
+      ctx.fillStyle = "#000";
       ctx.fillRect(0, 0, width, height);
 
-      // Draw base image scale
-      const tempCanvas = document.createElement("canvas");
-      tempCanvas.width = canvasDimensions.width;
-      tempCanvas.height = canvasDimensions.height;
-      const tempCtx = tempCanvas.getContext("2d");
-      tempCtx.putImageData(imageDataRef.current, 0, 0);
-      ctx.drawImage(tempCanvas, 0, 0, width, height);
-
-      // Draw mask on minimap
-      if (showMask && maskDataRef.current) {
-        const maskOverlay = createMaskOverlay(maskDataRef.current);
-        tempCtx.putImageData(maskOverlay, 0, 0);
+      // Mirror the currently rendered viewport source so minimap stays faithful.
+      const mainCanvas = canvasRef.current;
+      if (mainCanvas) {
+        ctx.drawImage(mainCanvas, 0, 0, width, height);
+      } else {
+        const tempCanvas = document.createElement("canvas");
+        tempCanvas.width = canvasDimensions.width;
+        tempCanvas.height = canvasDimensions.height;
+        const tempCtx = tempCanvas.getContext("2d");
+        tempCtx.putImageData(imageDataRef.current, 0, 0);
         ctx.drawImage(tempCanvas, 0, 0, width, height);
       }
 
@@ -266,40 +357,123 @@ const ProofreadingEditor = forwardRef(
       const scaleX = width / canvasDimensions.width;
       const scaleY = height / canvasDimensions.height;
 
-      const viewWidth = container.clientWidth / zoom;
-      const viewHeight = container.clientHeight / zoom;
-      const viewX =
-        canvasDimensions.width / 2 - offset.x / zoom - viewWidth / 2;
-      const viewY =
-        canvasDimensions.height / 2 - offset.y / zoom - viewHeight / 2;
+      const halfW = container.clientWidth / 2;
+      const halfH = container.clientHeight / 2;
+      const viewLeft = (-halfW - offset.x) / zoom + canvasDimensions.width / 2;
+      const viewTop = (-halfH - offset.y) / zoom + canvasDimensions.height / 2;
+      const viewRight = (halfW - offset.x) / zoom + canvasDimensions.width / 2;
+      const viewBottom =
+        (halfH - offset.y) / zoom + canvasDimensions.height / 2;
+
+      const clampedLeft = Math.max(
+        0,
+        Math.min(viewLeft, canvasDimensions.width),
+      );
+      const clampedTop = Math.max(
+        0,
+        Math.min(viewTop, canvasDimensions.height),
+      );
+      const clampedRight = Math.max(
+        0,
+        Math.min(viewRight, canvasDimensions.width),
+      );
+      const clampedBottom = Math.max(
+        0,
+        Math.min(viewBottom, canvasDimensions.height),
+      );
+      const rectW = Math.max(0, clampedRight - clampedLeft);
+      const rectH = Math.max(0, clampedBottom - clampedTop);
 
       ctx.strokeStyle = "#ff4d4f";
       ctx.lineWidth = 2;
       ctx.strokeRect(
-        viewX * scaleX,
-        viewY * scaleY,
-        viewWidth * scaleX,
-        viewHeight * scaleY,
+        clampedLeft * scaleX,
+        clampedTop * scaleY,
+        rectW * scaleX,
+        rectH * scaleY,
       );
       ctx.fillStyle = "rgba(255, 77, 79, 0.2)";
       ctx.fillRect(
-        viewX * scaleX,
-        viewY * scaleY,
-        viewWidth * scaleX,
-        viewHeight * scaleY,
+        clampedLeft * scaleX,
+        clampedTop * scaleY,
+        rectW * scaleX,
+        rectH * scaleY,
       );
     };
 
-    const createMaskOverlay = (maskData) => {
+    const hsvToRgb = (h, s, v) => {
+      const i = Math.floor(h * 6);
+      const f = h * 6 - i;
+      const p = v * (1 - s);
+      const q = v * (1 - f * s);
+      const t = v * (1 - (1 - f) * s);
+      const mod = i % 6;
+      let r;
+      let g;
+      let b;
+      switch (mod) {
+        case 0:
+          r = v;
+          g = t;
+          b = p;
+          break;
+        case 1:
+          r = q;
+          g = v;
+          b = p;
+          break;
+        case 2:
+          r = p;
+          g = v;
+          b = t;
+          break;
+        case 3:
+          r = p;
+          g = q;
+          b = v;
+          break;
+        case 4:
+          r = t;
+          g = p;
+          b = v;
+          break;
+        default:
+          r = v;
+          g = p;
+          b = q;
+          break;
+      }
+      return [Math.round(r * 255), Math.round(g * 255), Math.round(b * 255)];
+    };
+
+    const glasbeyColor = (labelId) => {
+      if (!Number.isFinite(labelId)) return [255, 255, 255];
+      const idx = Math.abs(Math.floor(labelId)) % 256;
+      const golden = 0.61803398875;
+      const h = ((idx + 1) * golden) % 1.0;
+      const s = 0.65 + 0.3 * ((idx % 3) / 2.0);
+      const v = 0.9;
+      return hsvToRgb(h, s, v);
+    };
+
+    const activeColor = useMemo(
+      () => glasbeyColor(activeInstanceId),
+      [activeInstanceId],
+    );
+
+    const createMaskOverlay = (maskData, color, alpha = 0.7) => {
       const width = maskData.width;
       const height = maskData.height;
       const overlay = new ImageData(width, height);
+      const resolvedAlpha = Math.max(0, Math.min(alpha, 1));
+      const alphaValue = Math.round(255 * resolvedAlpha);
+      const [r, g, b] = color || [255, 255, 255];
       for (let i = 0; i < maskData.data.length; i += 4) {
         if (maskData.data[i] > 0) {
-          overlay.data[i] = 255;
-          overlay.data[i + 1] = 255;
-          overlay.data[i + 2] = 255;
-          overlay.data[i + 3] = 180;
+          overlay.data[i] = r;
+          overlay.data[i + 1] = g;
+          overlay.data[i + 2] = b;
+          overlay.data[i + 3] = alphaValue;
         } else {
           overlay.data[i] = 0;
           overlay.data[i + 1] = 0;
@@ -379,28 +553,44 @@ const ProofreadingEditor = forwardRef(
       const value = tool === "paint" ? 255 : 0;
       const data = maskDataRef.current.data;
       const width = maskDataRef.current.width;
+      const height = maskDataRef.current.height;
       for (let dy = -radius; dy <= radius; dy++) {
         for (let dx = -radius; dx <= radius; dx++) {
-          if (dx * dx + dy * dy <= radius * radius) {
-            const px = x + dx;
-            const py = y + dy;
-            if (
-              px >= 0 &&
-              px < width &&
-              py >= 0 &&
-              py < maskDataRef.current.height
-            ) {
-              const idx = (py * width + px) * 4;
-              data[idx] = value;
-              data[idx + 1] = value;
-              data[idx + 2] = value;
-              data[idx + 3] = 255;
-            }
+          const px = x + dx;
+          const py = y + dy;
+          if (px >= 0 && px < width && py >= 0 && py < height) {
+            const idx = (py * width + px) * 4;
+            data[idx] = value;
+            data[idx + 1] = value;
+            data[idx + 2] = value;
+            data[idx + 3] = 255;
           }
         }
       }
-      drawCanvas();
-      drawMinimap();
+    };
+
+    const drawLine = (from, to) => {
+      if (!from || !to) return;
+      const dx = to.x - from.x;
+      const dy = to.y - from.y;
+      const steps = Math.max(Math.abs(dx), Math.abs(dy));
+      if (steps === 0) {
+        drawBrush(from.x, from.y);
+        return;
+      }
+      for (let i = 0; i <= steps; i++) {
+        const x = Math.round(from.x + (dx * i) / steps);
+        const y = Math.round(from.y + (dy * i) / steps);
+        drawBrush(x, y);
+      }
+    };
+
+    const scheduleMinimap = () => {
+      if (minimapRafRef.current) return;
+      minimapRafRef.current = requestAnimationFrame(() => {
+        minimapRafRef.current = null;
+        drawMinimap();
+      });
     };
 
     const handleMouseDown = (e) => {
@@ -414,7 +604,10 @@ const ProofreadingEditor = forwardRef(
       if (!coords) return;
       saveToUndoStack();
       setIsDrawing(true);
+      lastDrawRef.current = coords;
       drawBrush(coords.x, coords.y);
+      drawCanvas();
+      scheduleMinimap();
     };
 
     const handleMouseMove = (e) => {
@@ -433,12 +626,19 @@ const ProofreadingEditor = forwardRef(
         return;
       }
       if (!isDrawing) return;
-      if (coords) drawBrush(coords.x, coords.y);
+      if (coords) {
+        drawLine(lastDrawRef.current, coords);
+        lastDrawRef.current = coords;
+        drawCanvas();
+        scheduleMinimap();
+      }
     };
 
     const handleMouseUp = () => {
       setIsDrawing(false);
       setIsPanning(false);
+      lastDrawRef.current = null;
+      drawMinimap();
     };
 
     const handleWheel = (e) => {
@@ -540,14 +740,22 @@ const ProofreadingEditor = forwardRef(
     const activeBrushSize = tool === "erase" ? eraseBrushSize : paintBrushSize;
     const setBrushSize =
       tool === "erase" ? setEraseBrushSize : setPaintBrushSize;
+    const axisLabel = axis ? axis.toUpperCase() : "XY";
+    const axisCursorLabel = () => {
+      if (axis === "zx") return { h: "X", v: "Z" };
+      if (axis === "zy") return { h: "Y", v: "Z" };
+      return { h: "X", v: "Y" };
+    };
+    const editorHeight = "clamp(520px, 68vh, 820px)";
 
     return (
       <div
         style={{
           display: "flex",
-          height: "100%",
+          height: editorHeight,
           gap: "16px",
           overflow: "hidden",
+          alignItems: "stretch",
         }}
       >
         {/* Left Panel - Tools */}
@@ -736,30 +944,46 @@ const ProofreadingEditor = forwardRef(
         >
           {totalLayers > 1 && (
             <Card size="small">
-              <Space style={{ width: "100%", justifyContent: "space-between" }}>
-                <Button
-                  icon={<LeftOutlined />}
-                  onClick={onPrevious}
-                  disabled={currentLayer === 0}
-                >
-                  Previous (A)
-                </Button>
-                <span style={{ fontWeight: "bold" }}>
-                  {layerName || `Slice ${currentLayer + 1}`} / {totalLayers}
-                </span>
-                <Button
-                  icon={<RightOutlined />}
-                  onClick={onNext}
-                  disabled={currentLayer === totalLayers - 1}
-                >
-                  Next (D)
-                </Button>
+              <Space
+                style={{ width: "100%", justifyContent: "space-between" }}
+                align="center"
+              >
+                <Space size="middle" align="center">
+                  {axisOptions && onAxisChange && (
+                    <Segmented
+                      size="small"
+                      options={axisOptions}
+                      value={axis}
+                      onChange={onAxisChange}
+                    />
+                  )}
+                  <Text style={{ fontWeight: 600 }}>
+                    {layerName || `${axisLabel} ${currentLayer + 1}`} /{" "}
+                    {totalLayers}
+                  </Text>
+                </Space>
+                <Space>
+                  <Button
+                    icon={<LeftOutlined />}
+                    onClick={onPrevious}
+                    disabled={currentLayer === 0}
+                  >
+                    Previous (A)
+                  </Button>
+                  <Button
+                    icon={<RightOutlined />}
+                    onClick={onNext}
+                    disabled={currentLayer === totalLayers - 1}
+                  >
+                    Next (D)
+                  </Button>
+                </Space>
               </Space>
             </Card>
           )}
 
           <Card
-            style={{ flex: 1, overflow: "hidden" }}
+            style={{ flex: 1, overflow: "hidden", height: "100%" }}
             bodyStyle={{
               height: "100%",
               position: "relative",
@@ -780,7 +1004,8 @@ const ProofreadingEditor = forwardRef(
               ref={containerRef}
               style={{
                 position: "relative",
-                width: "min(100%, 70vh)",
+                width: "min(100%, 720px)",
+                maxHeight: "100%",
                 aspectRatio: "1 / 1",
                 display: "flex",
                 justifyContent: "center",
@@ -793,6 +1018,28 @@ const ProofreadingEditor = forwardRef(
               onMouseUp={handleMouseUp}
               onMouseLeave={handleMouseUp}
             >
+              <div
+                style={{
+                  position: "absolute",
+                  left: 12,
+                  top: 12,
+                  zIndex: 2,
+                  background: "rgba(15, 23, 42, 0.7)",
+                  color: "#fff",
+                  padding: "6px 10px",
+                  borderRadius: 10,
+                  fontSize: 12,
+                }}
+              >
+                {cursorPos ? (
+                  <Text style={{ color: "#fff" }}>
+                    {axisCursorLabel().h}: {cursorPos.x} · {axisCursorLabel().v}
+                    : {cursorPos.y}
+                  </Text>
+                ) : (
+                  <Text style={{ color: "#9ca3af" }}>Cursor: --</Text>
+                )}
+              </div>
               <canvas
                 ref={canvasRef}
                 style={{
@@ -820,13 +1067,28 @@ const ProofreadingEditor = forwardRef(
                           ? "2px solid #1890ff"
                           : "2px dashed #ff4d4f",
                       boxShadow: tool === "erase" ? "0 0 0 1px white" : "none", // High contrast for eraser
-                      borderRadius: "50%",
+                      borderRadius: 4,
                       pointerEvents: "none",
                       transform: "translate(-50%, -50%)",
                       zIndex: 1001,
                     }}
                   />
                 )}
+              {loading && (
+                <div
+                  style={{
+                    position: "absolute",
+                    inset: 0,
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    background: "rgba(15, 23, 42, 0.45)",
+                    zIndex: 4,
+                  }}
+                >
+                  <Spin size="large" />
+                </div>
+              )}
             </div>
           </Card>
         </div>
