@@ -11,7 +11,6 @@ import {
 import DatasetLoader from "./DatasetLoader";
 import ProgressTracker from "./ProgressTracker";
 import InstanceNavigator from "./InstanceNavigator";
-import InstanceViewport from "./InstanceViewport";
 import ProofreadingEditor from "./ProofreadingEditor";
 import SliceRequestManager from "./SliceRequestManager";
 import { apiClient } from "../../api";
@@ -87,6 +86,16 @@ function DetectionWorkflow({ sessionId, setSessionId, refreshTrigger }) {
     if (perfState.events.length > 400) {
       perfState.events.shift();
     }
+    perfState.counters[label] = (perfState.counters[label] || 0) + 1;
+    window.__proofreadPerf = perfState;
+  };
+
+  const perfCount = (label) => {
+    if (typeof window === "undefined") return;
+    const perfState = window.__proofreadPerf || {
+      events: [],
+      counters: {},
+    };
     perfState.counters[label] = (perfState.counters[label] || 0) + 1;
     window.__proofreadPerf = perfState;
   };
@@ -179,13 +188,7 @@ function DetectionWorkflow({ sessionId, setSessionId, refreshTrigger }) {
     const needsActive =
       overlayActiveAlpha > 0.001 && !viewState.maskActiveBase64;
     if (needsAll || needsActive) {
-      loadInstanceView(
-        activeInstanceId,
-        committedZ,
-        viewAxis === "xy",
-        undefined,
-        viewAxis,
-      );
+      loadInstanceView(activeInstanceId, committedZ, true, undefined, viewAxis);
     }
     if (overlayAllAlpha <= 0.001 && viewState.maskAllBase64) {
       setViewState((prev) => ({ ...prev, maskAllBase64: null }));
@@ -214,13 +217,7 @@ function DetectionWorkflow({ sessionId, setSessionId, refreshTrigger }) {
   useEffect(() => {
     if (!sessionId || !activeInstanceId) return;
     if (isScrubbingRef.current) return;
-    loadInstanceView(
-      activeInstanceId,
-      committedZ,
-      viewAxis === "xy",
-      undefined,
-      viewAxis,
-    );
+    loadInstanceView(activeInstanceId, committedZ, true, undefined, viewAxis);
   }, [sessionId, activeInstanceId, viewAxis, committedZ]);
 
   useEffect(() => {
@@ -764,6 +761,7 @@ function DetectionWorkflow({ sessionId, setSessionId, refreshTrigger }) {
     axisTotalValue,
     includeAll,
     includeActive,
+    includeRaw,
   ) => {
     const totalForAxis = axisTotalValue || axisTotal || totalLayers;
     if (!sessionToUse || !totalForAxis) return;
@@ -778,6 +776,7 @@ function DetectionWorkflow({ sessionId, setSessionId, refreshTrigger }) {
     const kinds = ["image"];
     if (includeActive) kinds.push("mask_active");
     if (includeAll) kinds.push("mask_all");
+    if (includeRaw) kinds.push("mask_active_binary");
 
     await Promise.allSettled(
       neighbors.map((neighbor) => {
@@ -881,6 +880,7 @@ function DetectionWorkflow({ sessionId, setSessionId, refreshTrigger }) {
     });
     const cached = previewCache.current.get(cacheKey);
     if (cached) {
+      perfCount("preview-cache-hit");
       setPreviewView(cached);
       setSliderZ(cached.zIndex ?? zIndex);
       setAxisTotal(cached.total ?? axisTotal);
@@ -948,13 +948,14 @@ function DetectionWorkflow({ sessionId, setSessionId, refreshTrigger }) {
       quality: "full",
     });
     const cached = viewCache.current.get(cacheKey);
-    if (cached && (!includeRaw || cached.maskRawBase64 || axisToUse !== "xy")) {
+    if (cached && (!includeRaw || cached.maskRawBase64)) {
+      perfCount("full-cache-hit");
       setViewState(cached);
       setAxisTotal(cached.total ?? axisTotal);
       setSliderZ(cached.zIndex);
       return;
     }
-    if (cached && includeRaw && axisToUse === "xy" && !cached.maskRawBase64) {
+    if (cached && includeRaw && !cached.maskRawBase64) {
       try {
         const rawPayload = await fetchInstanceBundle({
           sessionId: sessionToUse,
@@ -992,6 +993,7 @@ function DetectionWorkflow({ sessionId, setSessionId, refreshTrigger }) {
           const kinds = ["image"];
           if (includeActive) kinds.push("mask_active");
           if (includeAll) kinds.push("mask_all");
+          if (includeRaw) kinds.push("mask_active_binary");
           const payload = await fetchInstanceBundle({
             sessionId: sessionToUse,
             instanceId,
@@ -1001,18 +1003,6 @@ function DetectionWorkflow({ sessionId, setSessionId, refreshTrigger }) {
             maxDim: null,
             signal,
           });
-          if (includeRaw && axisToUse === "xy") {
-            const rawPayload = await fetchInstanceBundle({
-              sessionId: sessionToUse,
-              instanceId,
-              axis: axisToUse,
-              zIndex: payload.zIndex,
-              kinds: ["mask_active_binary"],
-              maxDim: null,
-              signal,
-            });
-            payload.maskRawBase64 = rawPayload.maskRawBase64;
-          }
           return payload;
         },
       });
@@ -1030,6 +1020,7 @@ function DetectionWorkflow({ sessionId, setSessionId, refreshTrigger }) {
         fullPayload.total,
         includeAll,
         includeActive,
+        includeRaw,
       );
     } catch (error) {
       if (!isAbortError(error)) {
@@ -1117,7 +1108,6 @@ function DetectionWorkflow({ sessionId, setSessionId, refreshTrigger }) {
   const handleSliceChange = (value) => {
     const nextIndex = clampSliceIndex(value, axisTotal || totalLayers);
     setSliderZ(nextIndex);
-    setViewState((prev) => ({ ...prev, zIndex: nextIndex }));
     isScrubbingRef.current = true;
     if (!activeInstanceId || !sessionId) return;
 
@@ -1167,7 +1157,6 @@ function DetectionWorkflow({ sessionId, setSessionId, refreshTrigger }) {
     const nextIndex = clampSliceIndex(value, axisTotal || totalLayers);
     setSliderZ(nextIndex);
     setCommittedZ(nextIndex);
-    setViewState((prev) => ({ ...prev, zIndex: nextIndex }));
     if (previewDebounceRef.current) {
       clearTimeout(previewDebounceRef.current);
       previewDebounceRef.current = null;
@@ -1199,12 +1188,19 @@ function DetectionWorkflow({ sessionId, setSessionId, refreshTrigger }) {
         axis: viewAxis,
         z_index: viewState.zIndex,
         mask_base64: maskBase64,
+        ui_state: {
+          axis: viewAxis,
+          overlay_all_alpha: overlayAllAlpha,
+          overlay_active_alpha: overlayActiveAlpha,
+          last_instance_id: activeInstanceId,
+          last_slice_index: sliderZ ?? viewState.zIndex,
+        },
       });
       message.success("Instance mask updated");
       loadInstanceView(
         activeInstanceId,
         viewState.zIndex,
-        viewAxis === "xy",
+        true,
         undefined,
         viewAxis,
       );
@@ -1223,6 +1219,11 @@ function DetectionWorkflow({ sessionId, setSessionId, refreshTrigger }) {
       </div>
     );
   }
+
+  const currentSliceIndex = clampSliceIndex(
+    sliderZ ?? viewState.zIndex,
+    axisTotal || totalLayers,
+  );
 
   return (
     <Layout
@@ -1261,7 +1262,7 @@ function DetectionWorkflow({ sessionId, setSessionId, refreshTrigger }) {
                   Load a dataset with a mask to enable instance proofreading.
                 </Text>
               </div>
-            ) : viewAxis === "xy" ? (
+            ) : (
               <>
                 <ProofreadingEditor
                   imageBase64={viewState.imageBase64}
@@ -1279,23 +1280,23 @@ function DetectionWorkflow({ sessionId, setSessionId, refreshTrigger }) {
                   onNext={() =>
                     handleSliceCommit(
                       Math.min(
-                        viewState.zIndex + 1,
+                        currentSliceIndex + 1,
                         (axisTotal || totalLayers) - 1,
                       ),
                     )
                   }
                   onPrevious={() =>
-                    handleSliceCommit(Math.max(viewState.zIndex - 1, 0))
+                    handleSliceCommit(Math.max(currentSliceIndex - 1, 0))
                   }
-                  currentLayer={viewState.zIndex}
+                  currentLayer={currentSliceIndex}
                   totalLayers={axisTotal || totalLayers}
-                  layerName={`${viewAxis.toUpperCase()} ${viewState.zIndex + 1}`}
+                  layerName={`${viewAxis.toUpperCase()} ${currentSliceIndex + 1}`}
                 />
                 <div style={{ marginTop: 16 }}>
                   <Slider
                     min={0}
                     max={Math.max((axisTotal || totalLayers) - 1, 0)}
-                    value={sliderZ ?? viewState.zIndex}
+                    value={currentSliceIndex}
                     onChange={handleSliceChange}
                     onAfterChange={handleSliceCommit}
                     tooltip={{
@@ -1310,34 +1311,6 @@ function DetectionWorkflow({ sessionId, setSessionId, refreshTrigger }) {
                   </div>
                 )}
               </>
-            ) : (
-              <InstanceViewport
-                imageBase64={viewState.imageBase64}
-                maskAllBase64={viewState.maskAllBase64}
-                maskActiveBase64={viewState.maskActiveBase64}
-                loading={loadingView || loadingInstances}
-                zIndex={viewState.zIndex}
-                sliderValue={sliderZ}
-                totalLayers={axisTotal || totalLayers}
-                axis={viewAxis}
-                axisOptions={axisOptions}
-                onAxisChange={handleAxisChange}
-                overlayAllAlpha={overlayAllAlpha}
-                overlayActiveAlpha={overlayActiveAlpha}
-                onPrevSlice={() =>
-                  handleSliceCommit(Math.max(viewState.zIndex - 1, 0))
-                }
-                onNextSlice={() =>
-                  handleSliceCommit(
-                    Math.min(
-                      viewState.zIndex + 1,
-                      (axisTotal || totalLayers) - 1,
-                    ),
-                  )
-                }
-                onSliceChange={handleSliceChange}
-                onSliceCommit={handleSliceCommit}
-              />
             )}
           </Content>
 
@@ -1363,7 +1336,7 @@ function DetectionWorkflow({ sessionId, setSessionId, refreshTrigger }) {
                 }}
               >
                 <Text type="secondary">
-                  View {viewAxis.toUpperCase()} · Slice {viewState.zIndex + 1}
+                  View {viewAxis.toUpperCase()} · Slice {currentSliceIndex + 1}
                 </Text>
                 <Text type="secondary">{axisTotal || totalLayers} total</Text>
               </div>
