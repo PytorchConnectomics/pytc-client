@@ -350,7 +350,7 @@ const YamlFileUploader = (props) => {
         </Upload>
         <Select
           placeholder="Choose a preset config"
-          style={{ minWidth: 280 }}
+          style={{ width: 560 }}
           loading={isLoadingPresets}
           options={presetOptions}
           onChange={handlePresetSelect}

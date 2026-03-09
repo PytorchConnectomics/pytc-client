@@ -549,6 +549,147 @@ def unmount_project(
     return {"message": "Project unmounted"}
 
 
+@router.delete("/files/uploads/all")
+def delete_all_uploaded_files(
+    current_user: models.User = Depends(get_current_user),
+    db: Session = Depends(database.get_db),
+):
+    """
+    Remove uploads + app-created virtual entries only.
+    Mounted project indexes are not affected.
+    """
+    all_nodes = db.query(models.File).filter(models.File.user_id == current_user.id).all()
+    if not all_nodes:
+        return {"message": "No uploaded files found.", "deleted_count": 0}
+
+    def parent_key(node):
+        return str(node.path) if node.path is not None else "root"
+
+    nodes_by_id = {str(node.id): node for node in all_nodes}
+    children_by_parent = {}
+    for node in all_nodes:
+        children_by_parent.setdefault(parent_key(node), []).append(node)
+
+    # Mounted entries (outside managed uploads) and their ancestors are protected.
+    protected_ids = set()
+    mounted_ids = {
+        str(node.id)
+        for node in all_nodes
+        if node.physical_path
+        and not _is_managed_upload_path(current_user.id, node.physical_path)
+    }
+    for mounted_id in mounted_ids:
+        current_id = mounted_id
+        while current_id and current_id != "root" and current_id not in protected_ids:
+            protected_ids.add(current_id)
+            parent = nodes_by_id.get(current_id)
+            if not parent:
+                break
+            current_id = parent_key(parent)
+
+    # Removable: app virtual nodes or managed-upload nodes, excluding protected tree.
+    removable_ids = {
+        str(node.id)
+        for node in all_nodes
+        if (
+            (not node.physical_path)
+            or _is_managed_upload_path(current_user.id, node.physical_path)
+        )
+        and str(node.id) not in protected_ids
+    }
+    if not removable_ids:
+        return {"message": "No uploaded files found.", "deleted_count": 0}
+
+    deleted_count = 0
+
+    def delete_subtree(node_id: str):
+        nonlocal deleted_count
+        node = nodes_by_id.get(node_id)
+        if not node:
+            return
+
+        for child in children_by_parent.get(node_id, []):
+            child_id = str(child.id)
+            if child_id in removable_ids:
+                delete_subtree(child_id)
+
+        # Keep folders that still contain protected/non-removable children.
+        if node.is_folder and any(
+            str(child.id) not in removable_ids
+            for child in children_by_parent.get(node_id, [])
+        ):
+            return
+
+        if (
+            not node.is_folder
+            and node.physical_path
+            and os.path.exists(node.physical_path)
+            and _is_managed_upload_path(current_user.id, node.physical_path)
+        ):
+            os.remove(node.physical_path)
+
+        db.delete(node)
+        deleted_count += 1
+
+    root_ids = [node_id for node_id in removable_ids if parent_key(nodes_by_id[node_id]) not in removable_ids]
+    for node_id in root_ids:
+        delete_subtree(node_id)
+
+    # Reset uploads dir after cleanup.
+    uploads_root = os.path.abspath(os.path.join("uploads", str(current_user.id)))
+    if os.path.isdir(uploads_root):
+        shutil.rmtree(uploads_root, ignore_errors=True)
+    os.makedirs(uploads_root, exist_ok=True)
+
+    db.commit()
+    return {
+        "message": f"Deleted {deleted_count} upload item(s).",
+        "deleted_count": deleted_count,
+    }
+
+
+@router.delete("/files/mounted/all")
+def delete_all_mounted_projects(
+    current_user: models.User = Depends(get_current_user),
+    db: Session = Depends(database.get_db),
+):
+    """
+    Remove all mounted project indexes for the current user.
+    Source files on disk are not deleted.
+    """
+    root_folders = (
+        db.query(models.File)
+        .filter(
+            models.File.user_id == current_user.id,
+            models.File.is_folder.is_(True),
+            models.File.path == "root",
+        )
+        .all()
+    )
+    # Only mounted roots: physical path exists and points outside managed uploads.
+    target_roots = [
+        node
+        for node in root_folders
+        if node.physical_path
+        and not _is_managed_upload_path(current_user.id, node.physical_path)
+    ]
+
+    if not target_roots:
+        return {"message": "No mounted projects found.", "deleted_count": 0}
+
+    deleted_count = 0
+    for node in target_roots:
+        # Index-only removal; source files on disk remain untouched.
+        _delete_file_tree(db, current_user.id, node, delete_disk_files=False)
+        deleted_count += 1
+
+    db.commit()
+    return {
+        "message": f"Removed {deleted_count} mounted project(s).",
+        "deleted_count": deleted_count,
+    }
+
+
 @router.delete("/files/{file_id}")
 def delete_file(
     file_id: int,
