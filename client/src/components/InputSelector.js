@@ -197,7 +197,7 @@ function InputSelector(props) {
               placeholder="Model checkpoint file (e.g., /path/to/checkpoint_00010.pth.tar)"
               value={context.checkpointPath || ""}
               onChange={handleCheckpointPathChange}
-              selectionType="directory"
+              selectionType="file"
             />
           </Form.Item>
         )}

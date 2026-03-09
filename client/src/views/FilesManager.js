@@ -21,6 +21,7 @@ import {
   UploadOutlined,
   EyeOutlined,
   LayoutOutlined,
+  DeleteOutlined,
 } from "@ant-design/icons";
 import { apiClient } from "../api";
 import FileTreeSidebar from "../components/FileTreeSidebar";
@@ -95,6 +96,7 @@ function FilesManager() {
   const containerRef = useRef(null);
   const itemRefs = useRef({});
   const isDragSelecting = useRef(false);
+  const [dragOverFolderKey, setDragOverFolderKey] = useState(null);
   const previewBaseUrl = apiClient.defaults.baseURL || "http://localhost:4242";
 
   // Sidebar Resize Logic
@@ -606,13 +608,34 @@ function FilesManager() {
       itemsToDrag = [key];
       setSelectedItems([key]);
     }
+    setDragOverFolderKey(null);
     e.dataTransfer.setData("text/plain", JSON.stringify({ keys: itemsToDrag }));
   };
 
   const handleDragOver = (e) => e.preventDefault();
 
+  const handleFolderDragOver = (e, folderKey) => {
+    e.preventDefault();
+    e.stopPropagation();
+    if (dragOverFolderKey !== folderKey) {
+      setDragOverFolderKey(folderKey);
+    }
+  };
+
+  const handleFolderDragLeave = (e, folderKey) => {
+    const stillInside =
+      e.currentTarget && e.relatedTarget
+        ? e.currentTarget.contains(e.relatedTarget)
+        : false;
+    if (!stillInside && dragOverFolderKey === folderKey) {
+      setDragOverFolderKey(null);
+    }
+  };
+
   const handleDrop = async (e, targetFolderKey) => {
     e.preventDefault();
+    e.stopPropagation();
+    setDragOverFolderKey(null);
 
     // Check if dropping files from OS (external files)
     if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
@@ -637,6 +660,16 @@ function FilesManager() {
             .find((f) => f.key === key);
 
       if (!item) continue;
+      if (
+        !isFolder &&
+        Object.keys(files).find((fk) => files[fk].some((f) => f.key === key)) ===
+          targetFolderKey
+      ) {
+        continue;
+      }
+      if (isFolder && item.parent === targetFolderKey) {
+        continue;
+      }
 
       try {
         // Send name along with path to fix 422 error
@@ -852,6 +885,7 @@ function FilesManager() {
     const isSelected = selectedItems.includes(item.key);
     const isEditing = editingItem === item.key;
     const isImagePreview = type !== "folder" && isImageFile(item);
+    const isDropTarget = type === "folder" && dragOverFolderKey === item.key;
     const iconSize = viewMode === "grid" ? 48 : 24;
     const icon = isImagePreview ? (
       <div
@@ -899,7 +933,17 @@ function FilesManager() {
         ref={(el) => (itemRefs.current[item.key] = el)}
         draggable={!isEditing}
         onDragStart={(e) => handleDragStart(e, item.key, type)}
-        onDragOver={type === "folder" ? handleDragOver : undefined}
+        onDragEnd={() => setDragOverFolderKey(null)}
+        onDragOver={
+          type === "folder"
+            ? (e) => handleFolderDragOver(e, item.key)
+            : undefined
+        }
+        onDragLeave={
+          type === "folder"
+            ? (e) => handleFolderDragLeave(e, item.key)
+            : undefined
+        }
         onDrop={type === "folder" ? (e) => handleDrop(e, item.key) : undefined}
         onContextMenu={(e) => handleContextMenu(e, "item", item.key)}
         onClick={(e) => {
@@ -928,11 +972,21 @@ function FilesManager() {
           textAlign: viewMode === "grid" ? "center" : "left",
           cursor: "pointer",
           borderRadius: 4,
-          backgroundColor: isSelected ? "#e6f7ff" : "transparent",
-          border: isSelected ? "1px solid #1890ff" : "1px solid transparent",
+          backgroundColor: isDropTarget
+            ? "#d6e4ff"
+            : isSelected
+              ? "#e6f7ff"
+              : "transparent",
+          border: isDropTarget
+            ? "1px solid #2f54eb"
+            : isSelected
+              ? "1px solid #1890ff"
+              : "1px solid transparent",
+          boxShadow: isDropTarget ? "0 0 0 2px rgba(47, 84, 235, 0.22)" : "none",
           display: viewMode === "list" ? "flex" : "block",
           alignItems: "center",
           userSelect: "none",
+          transition: "background-color 120ms ease, border-color 120ms ease",
         }}
       >
         <div
@@ -1242,6 +1296,140 @@ function FilesManager() {
     }
   };
 
+  const handleDeleteAllUploads = () => {
+    Modal.confirm({
+      title: "Delete all uploads?",
+      content:
+        "This will permanently delete all files stored in your app uploads folder.",
+      okText: "Continue",
+      okButtonProps: { danger: true },
+      cancelText: "Cancel",
+      onOk: async () => {
+        let confirmText = "";
+        let finalConfirmModal = null;
+        finalConfirmModal = Modal.confirm({
+          title: "Final confirmation required",
+          content: (
+            <div>
+              <div style={{ marginBottom: 8 }}>
+                Type <strong>DELETE</strong> to confirm deleting all uploads.
+              </div>
+              <Input
+                placeholder='Type "DELETE"'
+                onChange={(e) => {
+                  confirmText = e.target.value;
+                  if (finalConfirmModal) {
+                    finalConfirmModal.update({
+                      okButtonProps: {
+                        danger: true,
+                        disabled: confirmText.trim() !== "DELETE",
+                      },
+                    });
+                  }
+                }}
+              />
+            </div>
+          ),
+          okText: "Delete All Uploads",
+          okButtonProps: { danger: true, disabled: true },
+          cancelText: "Cancel",
+          onOk: async () => {
+            if (confirmText.trim() !== "DELETE") {
+              return;
+            }
+            try {
+              const res = await apiClient.delete("/files/uploads/all", {
+                withCredentials: true,
+              });
+              const refreshed = await fetchFiles();
+              const folderStillExists =
+                currentFolder === "root" ||
+                refreshed?.folders?.some((folder) => folder.key === currentFolder);
+              if (!folderStillExists) {
+                handleNavigate("root");
+              }
+              setSelectedItems([]);
+              const deletedCount = res?.data?.deleted_count ?? 0;
+              if (deletedCount > 0) {
+                message.success(`Deleted ${deletedCount} uploaded item(s).`);
+              } else {
+                message.info("No uploaded files/folders found.");
+              }
+            } catch (err) {
+              console.error("Delete all uploads error", err);
+              message.error("Failed to delete uploaded files");
+            }
+          },
+        });
+      },
+    });
+  };
+
+  const handleClearAllMountedProjects = () => {
+    Modal.confirm({
+      title: "Clear all mounted projects?",
+      content:
+        "This removes mounted project indexes from explorer. Source files on disk are not deleted.",
+      okText: "Continue",
+      okButtonProps: { danger: true },
+      cancelText: "Cancel",
+      onOk: async () => {
+        let confirmText = "";
+        let finalConfirmModal = null;
+        finalConfirmModal = Modal.confirm({
+          title: "Final confirmation required",
+          content: (
+            <div>
+              <div style={{ marginBottom: 8 }}>
+                Type <strong>CLEAR</strong> to confirm removing all mounted
+                project indexes.
+              </div>
+              <Input
+                placeholder='Type "CLEAR"'
+                onChange={(e) => {
+                  confirmText = e.target.value;
+                  if (finalConfirmModal) {
+                    finalConfirmModal.update({
+                      okButtonProps: {
+                        danger: true,
+                        disabled: confirmText.trim() !== "CLEAR",
+                      },
+                    });
+                  }
+                }}
+              />
+            </div>
+          ),
+          okText: "Clear Mounted Projects",
+          okButtonProps: { danger: true, disabled: true },
+          cancelText: "Cancel",
+          onOk: async () => {
+            if (confirmText.trim() !== "CLEAR") {
+              return;
+            }
+            try {
+              const res = await apiClient.delete("/files/mounted/all", {
+                withCredentials: true,
+              });
+              const deletedCount = res?.data?.deleted_count ?? 0;
+              await fetchFiles();
+              handleNavigate("root");
+              setSelectedItems([]);
+              if (deletedCount > 0) {
+                message.success(`Cleared ${deletedCount} mounted project(s).`);
+              } else {
+                message.info("No mounted projects found.");
+              }
+            } catch (err) {
+              console.error("Clear mounted projects error", err);
+              message.error("Failed to clear mounted projects");
+            }
+          },
+        });
+      },
+    });
+  };
+
   return (
     <div
       style={{
@@ -1455,6 +1643,16 @@ function FilesManager() {
           >
             Mount Project
           </Button>
+          <Button
+            danger
+            icon={<DeleteOutlined />}
+            onClick={handleDeleteAllUploads}
+          >
+            Delete All Uploads
+          </Button>
+          <Button danger onClick={handleClearAllMountedProjects}>
+            Clear All Mounted Projects
+          </Button>
         </div>
 
         {/* Content Area */}
@@ -1475,6 +1673,7 @@ function FilesManager() {
           onMouseUp={handleMouseUp}
           onMouseLeave={handleMouseUp}
           onDragOver={handleDragOver}
+          onDragLeave={() => setDragOverFolderKey(null)}
           onDrop={(e) => handleDrop(e, currentFolder)}
         >
           {currentFolders.length === 0 &&
