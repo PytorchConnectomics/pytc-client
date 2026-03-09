@@ -68,7 +68,7 @@ const ProofreadingEditor = forwardRef(
     const [tool, setTool] = useState("paint"); // 'paint', 'erase', or 'hand'
     const [paintBrushSize, setPaintBrushSize] = useState(10);
     const [eraseBrushSize, setEraseBrushSize] = useState(10);
-    const [showMask, setShowMask] = useState(false);
+    const [showMask, setShowMask] = useState(true);
     const [zoom, setZoom] = useState(1.0);
     const [isDrawing, setIsDrawing] = useState(false);
     const [cursorPos, setCursorPos] = useState({ x: 0, y: 0 }); // Image coordinates
@@ -93,9 +93,15 @@ const ProofreadingEditor = forwardRef(
       width: 0,
       height: 0,
     });
+    const lastCanvasSizeRef = useRef({ width: 0, height: 0 });
     const lastDrawRef = useRef(null);
     const minimapRafRef = useRef(null);
     const axisViewStateRef = useRef({});
+    const mousePosRafRef = useRef(null);
+    const pendingMousePosRef = useRef(null);
+    const minimapLayoutRef = useRef(null);
+    const minimapSourceRef = useRef(null);
+    const minimapOverlayRef = useRef(null);
 
     // Expose handleSave to parent
     useImperativeHandle(ref, () => ({
@@ -138,12 +144,47 @@ const ProofreadingEditor = forwardRef(
       overlayActiveAlpha,
     ]);
 
+    useEffect(() => {
+      return () => {
+        if (minimapRafRef.current) {
+          cancelAnimationFrame(minimapRafRef.current);
+        }
+        if (mousePosRafRef.current) {
+          cancelAnimationFrame(mousePosRafRef.current);
+        }
+      };
+    }, []);
+
     const resolveImageSource = (source) => {
       if (!source) return "";
       if (source.startsWith("data:image") || source.startsWith("blob:")) {
         return source;
       }
       return `data:image/png;base64,${source}`;
+    };
+
+    const getMinimapLayout = (
+      targetWidth,
+      targetHeight,
+      sourceWidth,
+      sourceHeight,
+    ) => {
+      if (!targetWidth || !targetHeight || !sourceWidth || !sourceHeight) {
+        return null;
+      }
+      const scale = Math.min(
+        targetWidth / sourceWidth,
+        targetHeight / sourceHeight,
+      );
+      const drawWidth = sourceWidth * scale;
+      const drawHeight = sourceHeight * scale;
+      return {
+        scale,
+        drawWidth,
+        drawHeight,
+        drawX: (targetWidth - drawWidth) / 2,
+        drawY: (targetHeight - drawHeight) / 2,
+      };
     };
 
     const loadRenderableImage = async (source) => {
@@ -185,6 +226,26 @@ const ProofreadingEditor = forwardRef(
         );
         if (baseImage?.close) baseImage.close();
 
+        const previousCanvas = lastCanvasSizeRef.current;
+        if (previousCanvas.width > 0 && previousCanvas.height > 0) {
+          const scaleX = canvas.width / previousCanvas.width;
+          const scaleY = canvas.height / previousCanvas.height;
+          if (
+            Number.isFinite(scaleX) &&
+            Number.isFinite(scaleY) &&
+            scaleX > 0 &&
+            scaleY > 0
+          ) {
+            setOffset((prev) => ({
+              x: prev.x * scaleX,
+              y: prev.y * scaleY,
+            }));
+          }
+        }
+        lastCanvasSizeRef.current = {
+          width: canvas.width,
+          height: canvas.height,
+        };
         setCanvasDimensions({ width: canvas.width, height: canvas.height });
 
         if (maskBase64) {
@@ -227,14 +288,14 @@ const ProofreadingEditor = forwardRef(
       ctx.imageSmoothingEnabled = false;
       ctx.putImageData(imageDataRef.current, 0, 0);
 
-      if (overlayAllRef.current && overlayAllAlpha > 0.001) {
+      if (showMask && overlayAllRef.current && overlayAllAlpha > 0.001) {
         ctx.save();
         ctx.globalAlpha = overlayAllAlpha;
         ctx.drawImage(overlayAllRef.current, 0, 0, canvas.width, canvas.height);
         ctx.restore();
       }
 
-      if (overlayActiveAlpha > 0.001) {
+      if (showMask && overlayActiveAlpha > 0.001) {
         // Use editable mask as the only active-layer source to avoid opacity
         // compounding when repainting already-active pixels.
         if (maskDataRef.current) {
@@ -301,9 +362,24 @@ const ProofreadingEditor = forwardRef(
       const rect = canvas.getBoundingClientRect();
       const mx = e.clientX - rect.left;
       const my = e.clientY - rect.top;
-
-      const ix = (mx / rect.width) * canvasDimensions.width;
-      const iy = (my / rect.height) * canvasDimensions.height;
+      const layout = minimapLayoutRef.current;
+      if (!layout) return;
+      const clampedX = Math.max(
+        layout.drawX,
+        Math.min(mx, layout.drawX + layout.drawWidth),
+      );
+      const clampedY = Math.max(
+        layout.drawY,
+        Math.min(my, layout.drawY + layout.drawHeight),
+      );
+      const relX =
+        layout.drawWidth > 0 ? (clampedX - layout.drawX) / layout.drawWidth : 0;
+      const relY =
+        layout.drawHeight > 0
+          ? (clampedY - layout.drawY) / layout.drawHeight
+          : 0;
+      const ix = relX * canvasDimensions.width;
+      const iy = relY * canvasDimensions.height;
 
       setOffset({
         x: -(ix - canvasDimensions.width / 2) * zoom,
@@ -340,22 +416,82 @@ const ProofreadingEditor = forwardRef(
       ctx.fillStyle = "#000";
       ctx.fillRect(0, 0, width, height);
 
-      // Mirror the currently rendered viewport source so minimap stays faithful.
-      const mainCanvas = canvasRef.current;
-      if (mainCanvas) {
-        ctx.drawImage(mainCanvas, 0, 0, width, height);
-      } else {
-        const tempCanvas = document.createElement("canvas");
-        tempCanvas.width = canvasDimensions.width;
-        tempCanvas.height = canvasDimensions.height;
-        const tempCtx = tempCanvas.getContext("2d");
-        tempCtx.putImageData(imageDataRef.current, 0, 0);
-        ctx.drawImage(tempCanvas, 0, 0, width, height);
+      if (!minimapSourceRef.current) {
+        minimapSourceRef.current = document.createElement("canvas");
+      }
+      if (!minimapOverlayRef.current) {
+        minimapOverlayRef.current = document.createElement("canvas");
+      }
+      const sourceCanvas = minimapSourceRef.current;
+      sourceCanvas.width = canvasDimensions.width;
+      sourceCanvas.height = canvasDimensions.height;
+      const sourceCtx = sourceCanvas.getContext("2d");
+      sourceCtx.clearRect(0, 0, sourceCanvas.width, sourceCanvas.height);
+      sourceCtx.putImageData(imageDataRef.current, 0, 0);
+
+      if (showMask && overlayAllRef.current && overlayAllAlpha > 0.001) {
+        sourceCtx.save();
+        sourceCtx.globalAlpha = overlayAllAlpha;
+        sourceCtx.drawImage(
+          overlayAllRef.current,
+          0,
+          0,
+          sourceCanvas.width,
+          sourceCanvas.height,
+        );
+        sourceCtx.restore();
       }
 
+      if (showMask && overlayActiveAlpha > 0.001) {
+        if (maskDataRef.current) {
+          const overlayCanvas = minimapOverlayRef.current;
+          overlayCanvas.width = sourceCanvas.width;
+          overlayCanvas.height = sourceCanvas.height;
+          const overlayCtx = overlayCanvas.getContext("2d");
+          overlayCtx.clearRect(0, 0, overlayCanvas.width, overlayCanvas.height);
+          overlayCtx.putImageData(
+            createMaskOverlay(
+              maskDataRef.current,
+              activeColor,
+              overlayActiveAlpha,
+            ),
+            0,
+            0,
+          );
+          sourceCtx.drawImage(overlayCanvas, 0, 0);
+        } else if (overlayActiveRef.current) {
+          sourceCtx.save();
+          sourceCtx.globalAlpha = overlayActiveAlpha;
+          sourceCtx.drawImage(
+            overlayActiveRef.current,
+            0,
+            0,
+            sourceCanvas.width,
+            sourceCanvas.height,
+          );
+          sourceCtx.restore();
+        }
+      }
+
+      const layout = getMinimapLayout(
+        width,
+        height,
+        canvasDimensions.width,
+        canvasDimensions.height,
+      );
+      if (!layout) return;
+      minimapLayoutRef.current = layout;
+      ctx.drawImage(
+        sourceCanvas,
+        layout.drawX,
+        layout.drawY,
+        layout.drawWidth,
+        layout.drawHeight,
+      );
+
       // Draw viewport rectangle
-      const scaleX = width / canvasDimensions.width;
-      const scaleY = height / canvasDimensions.height;
+      const scaleX = layout.drawWidth / canvasDimensions.width;
+      const scaleY = layout.drawHeight / canvasDimensions.height;
 
       const halfW = container.clientWidth / 2;
       const halfH = container.clientHeight / 2;
@@ -387,15 +523,15 @@ const ProofreadingEditor = forwardRef(
       ctx.strokeStyle = "#ff4d4f";
       ctx.lineWidth = 2;
       ctx.strokeRect(
-        clampedLeft * scaleX,
-        clampedTop * scaleY,
+        layout.drawX + clampedLeft * scaleX,
+        layout.drawY + clampedTop * scaleY,
         rectW * scaleX,
         rectH * scaleY,
       );
       ctx.fillStyle = "rgba(255, 77, 79, 0.2)";
       ctx.fillRect(
-        clampedLeft * scaleX,
-        clampedTop * scaleY,
+        layout.drawX + clampedLeft * scaleX,
+        layout.drawY + clampedTop * scaleY,
         rectW * scaleX,
         rectH * scaleY,
       );
@@ -614,8 +750,16 @@ const ProofreadingEditor = forwardRef(
       const container = containerRef.current;
       if (container) {
         const rect = container.getBoundingClientRect();
-        // Use client coordinates directly for more speed-resilient tracking
-        setMousePos({ x: e.clientX - rect.left, y: e.clientY - rect.top });
+        pendingMousePosRef.current = {
+          x: e.clientX - rect.left,
+          y: e.clientY - rect.top,
+        };
+        if (!mousePosRafRef.current) {
+          mousePosRafRef.current = requestAnimationFrame(() => {
+            mousePosRafRef.current = null;
+            setMousePos(pendingMousePosRef.current);
+          });
+        }
       }
 
       const coords = getCanvasCoordinates(e);
@@ -638,6 +782,7 @@ const ProofreadingEditor = forwardRef(
       setIsDrawing(false);
       setIsPanning(false);
       lastDrawRef.current = null;
+      setMousePos(null);
       drawMinimap();
     };
 
