@@ -32,6 +32,10 @@ uv run --directory "${ROOT_DIR}" python -m server_pytc.main &
 
 echo "Starting React server (port 3000)..."
 pushd "${CLIENT_DIR}" >/dev/null
+if [[ "${SKIP_CLIENT_BUILD:-0}" != "1" ]]; then
+	echo "Building React client (set SKIP_CLIENT_BUILD=1 to skip)..."
+	npm run build
+fi
 BROWSER=none npm start >/dev/null 2>&1 &
 
 wait_for_react() {

@@ -7,12 +7,18 @@ import {
   Button,
   Slider,
   Drawer,
+  Collapse,
+  Modal,
+  Input,
+  Dropdown,
+  Tag,
 } from "antd";
+import { MoreOutlined } from "@ant-design/icons";
 import DatasetLoader from "./DatasetLoader";
 import ProgressTracker from "./ProgressTracker";
 import InstanceNavigator from "./InstanceNavigator";
 import ProofreadingEditor from "./ProofreadingEditor";
-import SliceRequestManager from "./SliceRequestManager";
+import SliceScheduler from "./SliceScheduler";
 import { apiClient } from "../../api";
 
 const { Sider, Content } = Layout;
@@ -25,11 +31,19 @@ const parsePositiveInt = (value, fallback) => {
 
 const PREVIEW_MAX_DIM = parsePositiveInt(
   process.env.REACT_APP_EH_PREVIEW_MAX_DIM,
-  320,
+  384,
+);
+const THUMB_MAX_DIM = parsePositiveInt(
+  process.env.REACT_APP_EH_THUMB_MAX_DIM,
+  192,
 );
 const FILMSTRIP_BATCH_SIZE = parsePositiveInt(
   process.env.REACT_APP_EH_FILMSTRIP_BATCH_SIZE,
-  16,
+  12,
+);
+const PREVIEW_PREFETCH_RADIUS = parsePositiveInt(
+  process.env.REACT_APP_EH_PREVIEW_PREFETCH_RADIUS,
+  6,
 );
 const ENABLE_FILMSTRIP_PREVIEW =
   process.env.REACT_APP_EH_ENABLE_FILMSTRIP_PREVIEW !== "false";
@@ -60,42 +74,92 @@ function DetectionWorkflow({ sessionId, setSessionId, refreshTrigger }) {
   const previewDebounceRef = useRef(null);
   const previewCache = useRef(new Map());
   const previewCacheOrder = useRef([]);
-  const previewCacheLimit = 80;
+  const previewCacheLimit = 180;
   const isScrubbingRef = useRef(false);
   const [overlayAllAlpha, setOverlayAllAlpha] = useState(0.08);
   const [overlayActiveAlpha, setOverlayActiveAlpha] = useState(0.8);
   const [savingMask, setSavingMask] = useState(false);
+  const [classificationPending, setClassificationPending] = useState(false);
   const [windowWidth, setWindowWidth] = useState(
     typeof window !== "undefined" ? window.innerWidth : 1440,
   );
   const [showInstanceBrowser, setShowInstanceBrowser] = useState(false);
+  const [showInspector, setShowInspector] = useState(true);
+  const [inspectorSections, setInspectorSections] = useState([
+    "review",
+    "instances",
+  ]);
+  const [persistence, setPersistence] = useState(null);
+  const [showExportModal, setShowExportModal] = useState(false);
+  const [exportPath, setExportPath] = useState("");
+  const [exportingMasks, setExportingMasks] = useState(false);
+  const [overwritingSource, setOverwritingSource] = useState(false);
+  const lastPersistenceErrorRef = useRef(null);
 
-  const requestManagerRef = useRef(new SliceRequestManager());
+  const schedulerRef = useRef(
+    new SliceScheduler({
+      interactiveConcurrency: 1,
+      nearbyConcurrency: 1,
+      backgroundConcurrency: 1,
+    }),
+  );
   const viewCache = useRef(new Map());
   const viewCacheOrder = useRef([]);
   const viewCacheLimit = 80;
 
+  const ensurePerfState = () => {
+    if (typeof window === "undefined") return null;
+    const current = window.__proofreadPerf;
+    if (current) return current;
+    const next = {
+      events: [],
+      counters: {},
+      timings: {},
+    };
+    window.__proofreadPerf = next;
+    return next;
+  };
+
+  const summarizeSamples = (samples) => {
+    if (!samples.length) return { median: 0, p95: 0 };
+    const sorted = [...samples].sort((a, b) => a - b);
+    const mid = Math.floor(sorted.length / 2);
+    const median =
+      sorted.length % 2 === 0
+        ? Number(((sorted[mid - 1] + sorted[mid]) / 2).toFixed(1))
+        : Number(sorted[mid].toFixed(1));
+    const p95Index = Math.max(0, Math.ceil(sorted.length * 0.95) - 1);
+    const p95 = Number(sorted[p95Index].toFixed(1));
+    return { median, p95 };
+  };
+
   const perfLog = (label, startAt) => {
     if (typeof window === "undefined") return;
     const duration = Number((performance.now() - startAt).toFixed(1));
-    const perfState = window.__proofreadPerf || {
-      events: [],
-      counters: {},
-    };
+    const perfState = ensurePerfState();
+    if (!perfState) return;
     perfState.events.push({ label, duration, at: Date.now() });
     if (perfState.events.length > 400) {
       perfState.events.shift();
     }
     perfState.counters[label] = (perfState.counters[label] || 0) + 1;
+    const timing = perfState.timings[label] || { samples: [] };
+    timing.samples.push(duration);
+    if (timing.samples.length > 300) {
+      timing.samples.shift();
+    }
+    const stats = summarizeSamples(timing.samples);
+    timing.median = stats.median;
+    timing.p95 = stats.p95;
+    timing.last = duration;
+    perfState.timings[label] = timing;
     window.__proofreadPerf = perfState;
   };
 
   const perfCount = (label) => {
     if (typeof window === "undefined") return;
-    const perfState = window.__proofreadPerf || {
-      events: [],
-      counters: {},
-    };
+    const perfState = ensurePerfState();
+    if (!perfState) return;
     perfState.counters[label] = (perfState.counters[label] || 0) + 1;
     window.__proofreadPerf = perfState;
   };
@@ -143,6 +207,18 @@ function DetectionWorkflow({ sessionId, setSessionId, refreshTrigger }) {
   }, [sessionId, refreshTrigger]);
 
   useEffect(() => {
+    const persistenceError = persistence?.last_error;
+    if (!persistenceError) return;
+    if (lastPersistenceErrorRef.current === persistenceError) return;
+    lastPersistenceErrorRef.current = persistenceError;
+    Modal.error({
+      title: "Persistence error",
+      content: persistenceError,
+      okText: "OK",
+    });
+  }, [persistence?.last_error]);
+
+  useEffect(() => {
     const storedAll = Number(
       localStorage.getItem("mask-proofreading-overlay-all"),
     );
@@ -177,7 +253,7 @@ function DetectionWorkflow({ sessionId, setSessionId, refreshTrigger }) {
 
   useEffect(() => {
     return () => {
-      requestManagerRef.current.clear();
+      schedulerRef.current.clear();
     };
   }, []);
 
@@ -311,7 +387,14 @@ function DetectionWorkflow({ sessionId, setSessionId, refreshTrigger }) {
       await loadInstances(response.data.session_id, true);
     } catch (error) {
       console.error("Failed to load dataset:", error);
-      message.error(getErrorMessage(error, "Failed to load dataset"));
+      Modal.error({
+        title: "Dataset load failed",
+        content: getErrorMessage(
+          error,
+          "Unable to load this dataset. Verify paths and mask availability, then retry.",
+        ),
+        okText: "OK",
+      });
     } finally {
       setLoadingInstances(false);
     }
@@ -507,6 +590,7 @@ function DetectionWorkflow({ sessionId, setSessionId, refreshTrigger }) {
     zIndex,
     kinds,
     maxDim,
+    quality = "full",
     signal,
     preferWebp = false,
   }) => {
@@ -519,6 +603,7 @@ function DetectionWorkflow({ sessionId, setSessionId, refreshTrigger }) {
           z_index: zIndex,
           kind,
           max_dim: maxDim || undefined,
+          quality,
           format: kind === "image" && preferWebp ? "webp" : "png",
         },
         responseType: "blob",
@@ -565,6 +650,7 @@ function DetectionWorkflow({ sessionId, setSessionId, refreshTrigger }) {
     zIndex,
     kinds,
     maxDim,
+    quality = "preview",
     signal,
   }) => {
     const batchStart =
@@ -580,6 +666,7 @@ function DetectionWorkflow({ sessionId, setSessionId, refreshTrigger }) {
           z_count: FILMSTRIP_BATCH_SIZE,
           kind,
           max_dim: maxDim || undefined,
+          quality,
           format: kind === "image" ? "webp" : "png",
         },
         responseType: "blob",
@@ -639,13 +726,17 @@ function DetectionWorkflow({ sessionId, setSessionId, refreshTrigger }) {
     zIndex,
     includeAll,
     includeActive,
+    maxDim = PREVIEW_MAX_DIM,
+    preferFilmstrip = ENABLE_FILMSTRIP_PREVIEW,
     signal,
   }) => {
     const kinds = ["image"];
     if (includeActive) kinds.push("mask_active");
     if (includeAll) kinds.push("mask_all");
 
-    if (ENABLE_FILMSTRIP_PREVIEW) {
+    const quality = "preview";
+
+    if (preferFilmstrip) {
       try {
         return await fetchFilmstripBundle({
           sessionId,
@@ -653,7 +744,8 @@ function DetectionWorkflow({ sessionId, setSessionId, refreshTrigger }) {
           axis,
           zIndex,
           kinds,
-          maxDim: PREVIEW_MAX_DIM,
+          maxDim,
+          quality,
           signal,
         });
       } catch (error) {
@@ -667,7 +759,8 @@ function DetectionWorkflow({ sessionId, setSessionId, refreshTrigger }) {
       axis,
       zIndex,
       kinds,
-      maxDim: PREVIEW_MAX_DIM,
+      maxDim,
+      quality,
       signal,
       preferWebp: true,
     });
@@ -677,7 +770,7 @@ function DetectionWorkflow({ sessionId, setSessionId, refreshTrigger }) {
     const sessionToUse = overrideSessionId ?? sessionId;
     if (!sessionToUse) return;
     setLoadingInstances(true);
-    requestManagerRef.current.clear();
+    schedulerRef.current.clear();
     clearFrameCaches();
     try {
       const response = await apiClient.get("/eh/detection/instances", {
@@ -688,6 +781,7 @@ function DetectionWorkflow({ sessionId, setSessionId, refreshTrigger }) {
       const nextInstanceMode = response.data.instance_mode || "none";
       const nextTotalLayers = response.data.total_layers || 0;
       const uiState = response.data.ui_state || null;
+      const persistenceStatus = response.data.persistence || null;
       const shouldRestore = forceView || !activeInstanceId;
       const storedAxis =
         uiState && ["xy", "zx", "zy"].includes(uiState.axis)
@@ -700,6 +794,7 @@ function DetectionWorkflow({ sessionId, setSessionId, refreshTrigger }) {
       setInstanceMode(nextInstanceMode);
       setTotalLayers(nextTotalLayers);
       setAxisTotal(nextTotalLayers);
+      setPersistence(persistenceStatus);
 
       if (uiState && shouldRestore) {
         setOverlayAllAlpha(
@@ -753,6 +848,19 @@ function DetectionWorkflow({ sessionId, setSessionId, refreshTrigger }) {
     }
   };
 
+  const refreshPersistenceStatus = async (overrideSessionId) => {
+    const sessionToUse = overrideSessionId ?? sessionId;
+    if (!sessionToUse) return;
+    try {
+      const response = await apiClient.get("/eh/detection/persistence-status", {
+        params: { session_id: sessionToUse },
+      });
+      setPersistence(response.data?.persistence || null);
+    } catch (error) {
+      console.warn("Failed to refresh persistence status:", error);
+    }
+  };
+
   const prefetchAdjacent = async (
     instanceId,
     zIndex,
@@ -790,10 +898,12 @@ function DetectionWorkflow({ sessionId, setSessionId, refreshTrigger }) {
         });
         if (viewCache.current.has(key)) return Promise.resolve();
         const lane = `prefetch-full:${instanceId}:${axisToUse}:${neighbor}`;
-        return requestManagerRef.current
+        return schedulerRef.current
           .run({
             key: `${lane}:${key}`,
-            lane,
+            lane: "background",
+            scope: `prefetch-full:${instanceId}:${axisToUse}`,
+            priority: 10,
             exec: (signal) =>
               fetchInstanceBundle({
                 sessionId: sessionToUse,
@@ -802,6 +912,7 @@ function DetectionWorkflow({ sessionId, setSessionId, refreshTrigger }) {
                 zIndex: neighbor,
                 kinds,
                 maxDim: null,
+                quality: "full",
                 signal,
               }),
           })
@@ -819,15 +930,18 @@ function DetectionWorkflow({ sessionId, setSessionId, refreshTrigger }) {
     axisToUse,
     includeAll,
     includeActive,
+    maxDim = PREVIEW_MAX_DIM,
+    qualityLabel = `preview-${PREVIEW_MAX_DIM}`,
+    distance = 1,
   ) => {
     const totalForAxis = axisTotal || totalLayers;
     if (!sessionId || !totalForAxis) return;
-    const neighbors = Array.from(
-      new Set([
-        Math.max(zIndex - 1, 0),
-        Math.min(zIndex + 1, totalForAxis - 1),
-      ]),
-    );
+    const neighborSet = new Set();
+    for (let offset = 1; offset <= distance; offset += 1) {
+      neighborSet.add(Math.max(zIndex - offset, 0));
+      neighborSet.add(Math.min(zIndex + offset, totalForAxis - 1));
+    }
+    const neighbors = Array.from(neighborSet);
 
     await Promise.allSettled(
       neighbors.map((neighbor) => {
@@ -837,14 +951,16 @@ function DetectionWorkflow({ sessionId, setSessionId, refreshTrigger }) {
           zIndex: neighbor,
           includeAll,
           includeActive,
-          quality: `preview-${PREVIEW_MAX_DIM}`,
+          quality: qualityLabel,
         });
         if (previewCache.current.has(key)) return Promise.resolve();
         const lane = `prefetch-preview:${instanceId}:${axisToUse}:${neighbor}`;
-        return requestManagerRef.current
+        return schedulerRef.current
           .run({
             key: `${lane}:${key}`,
-            lane,
+            lane: "nearby",
+            scope: `prefetch-preview:${instanceId}:${axisToUse}`,
+            priority: 30,
             exec: (signal) =>
               fetchPreviewPayload({
                 sessionId,
@@ -853,6 +969,7 @@ function DetectionWorkflow({ sessionId, setSessionId, refreshTrigger }) {
                 zIndex: neighbor,
                 includeAll,
                 includeActive,
+                maxDim,
                 signal,
               }),
           })
@@ -864,10 +981,19 @@ function DetectionWorkflow({ sessionId, setSessionId, refreshTrigger }) {
     );
   };
 
-  const loadInstancePreview = async (instanceId, zIndex, axisOverride) => {
+  const loadInstancePreview = async (
+    instanceId,
+    zIndex,
+    axisOverride,
+    options = {},
+  ) => {
     const sessionToUse = sessionId;
     if (!sessionToUse || !instanceId) return;
     const axisToUse = axisOverride ?? viewAxis;
+    const maxDim = parsePositiveInt(options.maxDim, PREVIEW_MAX_DIM);
+    const qualityLabel = options.qualityLabel || `preview-${maxDim}`;
+    const shouldPrefetch = options.prefetchNeighbors !== false;
+    const priority = Number.isFinite(options.priority) ? options.priority : 120;
     const includeAll = instanceMode === "instance" && overlayAllAlpha > 0.001;
     const includeActive = overlayActiveAlpha > 0.001;
     const cacheKey = buildCacheKey({
@@ -876,7 +1002,7 @@ function DetectionWorkflow({ sessionId, setSessionId, refreshTrigger }) {
       zIndex,
       includeAll,
       includeActive,
-      quality: `preview-${PREVIEW_MAX_DIM}`,
+      quality: qualityLabel,
     });
     const cached = previewCache.current.get(cacheKey);
     if (cached) {
@@ -891,9 +1017,12 @@ function DetectionWorkflow({ sessionId, setSessionId, refreshTrigger }) {
     const requestKey = `${lane}:${cacheKey}`;
     const startedAt = performance.now();
     try {
-      const previewPayload = await requestManagerRef.current.run({
+      perfCount("request_start");
+      const previewPayload = await schedulerRef.current.run({
         key: requestKey,
-        lane,
+        lane: "interactive",
+        scope: `preview:${instanceId}:${axisToUse}`,
+        priority,
         exec: (signal) =>
           fetchPreviewPayload({
             sessionId: sessionToUse,
@@ -902,6 +1031,7 @@ function DetectionWorkflow({ sessionId, setSessionId, refreshTrigger }) {
             zIndex,
             includeAll,
             includeActive,
+            maxDim,
             signal,
           }),
       });
@@ -910,16 +1040,23 @@ function DetectionWorkflow({ sessionId, setSessionId, refreshTrigger }) {
       setPreviewView(previewPayload);
       setSliderZ(previewPayload.zIndex);
       setAxisTotal(previewPayload.total);
-      perfLog("preview-load", startedAt);
-      prefetchPreviewNeighbors(
-        instanceId,
-        previewPayload.zIndex,
-        axisToUse,
-        includeAll,
-        includeActive,
-      );
+      perfLog("first_preview_paint", startedAt);
+      if (shouldPrefetch) {
+        prefetchPreviewNeighbors(
+          instanceId,
+          previewPayload.zIndex,
+          axisToUse,
+          includeAll,
+          includeActive,
+          maxDim,
+          qualityLabel,
+          PREVIEW_PREFETCH_RADIUS,
+        );
+      }
     } catch (error) {
-      if (!isAbortError(error)) {
+      if (isAbortError(error)) {
+        perfCount("dropped_request");
+      } else {
         console.warn("Preview load failed:", error);
       }
     }
@@ -964,6 +1101,7 @@ function DetectionWorkflow({ sessionId, setSessionId, refreshTrigger }) {
           zIndex: cached.zIndex,
           kinds: ["mask_active_binary"],
           maxDim: null,
+          quality: "full",
         });
         const merged = { ...cached, maskRawBase64: rawPayload.maskRawBase64 };
         cacheView(cacheKey, merged);
@@ -986,9 +1124,12 @@ function DetectionWorkflow({ sessionId, setSessionId, refreshTrigger }) {
     const requestKey = `${lane}:${cacheKey}`;
     const startedAt = performance.now();
     try {
-      const fullPayload = await requestManagerRef.current.run({
+      perfCount("request_start");
+      const fullPayload = await schedulerRef.current.run({
         key: requestKey,
-        lane,
+        lane: "interactive",
+        scope: `full:${instanceId}:${axisToUse}`,
+        priority: 100,
         exec: async (signal) => {
           const kinds = ["image"];
           if (includeActive) kinds.push("mask_active");
@@ -1001,6 +1142,7 @@ function DetectionWorkflow({ sessionId, setSessionId, refreshTrigger }) {
             zIndex,
             kinds,
             maxDim: null,
+            quality: "full",
             signal,
           });
           return payload;
@@ -1011,7 +1153,7 @@ function DetectionWorkflow({ sessionId, setSessionId, refreshTrigger }) {
       setViewState(fullPayload);
       setAxisTotal(fullPayload.total);
       setSliderZ(fullPayload.zIndex);
-      perfLog("full-load", startedAt);
+      perfLog("full_paint", startedAt);
       prefetchAdjacent(
         instanceId,
         fullPayload.zIndex,
@@ -1023,7 +1165,9 @@ function DetectionWorkflow({ sessionId, setSessionId, refreshTrigger }) {
         includeRaw,
       );
     } catch (error) {
-      if (!isAbortError(error)) {
+      if (isAbortError(error)) {
+        perfCount("dropped_request");
+      } else {
         console.error("Failed to load instance view:", error);
         message.error(getErrorMessage(error, "Failed to load instance view"));
       }
@@ -1074,34 +1218,53 @@ function DetectionWorkflow({ sessionId, setSessionId, refreshTrigger }) {
 
   const handleInstanceClassify = async (classification) => {
     if (!activeInstanceId) return;
+    if (classificationPending) return;
+
+    const instanceId = activeInstanceId;
+    const previousClassification =
+      activeInstance?.classification ||
+      instances.find((inst) => inst.id === instanceId)?.classification ||
+      "error";
+
+    const applyLocalClassification = (instanceToUpdate, nextClassification) => {
+      setInstances((prev) =>
+        prev.map((inst) =>
+          inst.id === instanceToUpdate
+            ? { ...inst, classification: nextClassification }
+            : inst,
+        ),
+      );
+      setActiveInstance((prev) =>
+        prev && prev.id === instanceToUpdate
+          ? { ...prev, classification: nextClassification }
+          : prev,
+      );
+    };
+
+    // Optimistic update to keep the interaction snappy.
+    applyLocalClassification(instanceId, classification);
+    setClassificationPending(true);
+
     try {
       await apiClient.post("/eh/detection/instance-classify", {
         session_id: sessionId,
-        instance_ids: [activeInstanceId],
+        instance_ids: [instanceId],
         classification,
         ui_state: {
           axis: viewAxis,
           overlay_all_alpha: overlayAllAlpha,
           overlay_active_alpha: overlayActiveAlpha,
-          last_instance_id: activeInstanceId,
+          last_instance_id: instanceId,
           last_slice_index: viewState.zIndex,
         },
       });
-
-      setInstances((prev) =>
-        prev.map((inst) =>
-          inst.id === activeInstanceId ? { ...inst, classification } : inst,
-        ),
-      );
-
-      if (activeInstance && activeInstance.id === activeInstanceId) {
-        setActiveInstance({ ...activeInstance, classification });
-      }
-
-      message.success(`Instance ${activeInstanceId} marked ${classification}`);
     } catch (error) {
       console.error("Failed to classify instance:", error);
+      // Roll back local optimistic state if save fails.
+      applyLocalClassification(instanceId, previousClassification);
       message.error(getErrorMessage(error, "Failed to classify instance"));
+    } finally {
+      setClassificationPending(false);
     }
   };
 
@@ -1137,18 +1300,43 @@ function DetectionWorkflow({ sessionId, setSessionId, refreshTrigger }) {
       includeActive,
       quality: `preview-${PREVIEW_MAX_DIM}`,
     });
+    const thumbKey = buildCacheKey({
+      instanceId: activeInstanceId,
+      axis: axisToUse,
+      zIndex: nextIndex,
+      includeAll,
+      includeActive,
+      quality: `thumb-${THUMB_MAX_DIM}`,
+    });
     const previewCached = previewCache.current.get(previewKey);
+    const thumbCached = previewCache.current.get(thumbKey);
     if (previewCached) {
       setPreviewView(previewCached);
       setAxisTotal(previewCached.total ?? axisTotal);
       return;
+    }
+    if (thumbCached) {
+      setPreviewView(thumbCached);
+      setAxisTotal(thumbCached.total ?? axisTotal);
+    } else {
+      loadInstancePreview(activeInstanceId, nextIndex, axisToUse, {
+        maxDim: THUMB_MAX_DIM,
+        qualityLabel: `thumb-${THUMB_MAX_DIM}`,
+        prefetchNeighbors: false,
+        priority: 160,
+      });
     }
 
     if (previewDebounceRef.current) {
       clearTimeout(previewDebounceRef.current);
     }
     previewDebounceRef.current = setTimeout(() => {
-      loadInstancePreview(activeInstanceId, nextIndex, axisToUse);
+      loadInstancePreview(activeInstanceId, nextIndex, axisToUse, {
+        maxDim: PREVIEW_MAX_DIM,
+        qualityLabel: `preview-${PREVIEW_MAX_DIM}`,
+        prefetchNeighbors: true,
+        priority: 120,
+      });
     }, 80);
   };
 
@@ -1197,6 +1385,7 @@ function DetectionWorkflow({ sessionId, setSessionId, refreshTrigger }) {
         },
       });
       message.success("Instance mask updated");
+      refreshPersistenceStatus();
       loadInstanceView(
         activeInstanceId,
         viewState.zIndex,
@@ -1212,6 +1401,86 @@ function DetectionWorkflow({ sessionId, setSessionId, refreshTrigger }) {
     }
   };
 
+  const openExportModal = () => {
+    const artifactPath = persistence?.artifact_path;
+    if (artifactPath && artifactPath.endsWith(".tif")) {
+      setExportPath(artifactPath.replace(".tif", ".exported.tif"));
+    } else if (artifactPath && artifactPath.endsWith(".tiff")) {
+      setExportPath(artifactPath.replace(".tiff", ".exported.tif"));
+    } else {
+      setExportPath("");
+    }
+    setShowExportModal(true);
+  };
+
+  const handleExportMasks = async () => {
+    const output = exportPath?.trim();
+    if (!output) {
+      message.warning("Enter an output path to export edited masks.");
+      return;
+    }
+    setExportingMasks(true);
+    try {
+      const response = await apiClient.post("/eh/detection/export-masks", {
+        session_id: sessionId,
+        mode: "new_file",
+        output_path: output,
+        create_backup: true,
+      });
+      setShowExportModal(false);
+      message.success(`Exported masks to ${response.data.written_path}`);
+      if (response.data.backup_path) {
+        message.info(`Backup created at ${response.data.backup_path}`);
+      }
+      refreshPersistenceStatus();
+    } catch (error) {
+      Modal.error({
+        title: "Export failed",
+        content: getErrorMessage(error, "Unable to export edited masks."),
+        okText: "OK",
+      });
+    } finally {
+      setExportingMasks(false);
+    }
+  };
+
+  const handleOverwriteSource = () => {
+    Modal.confirm({
+      title: "Overwrite source masks?",
+      content:
+        "This writes your edited masks back to the original source and always creates a timestamped backup first.",
+      okText: "Overwrite with backup",
+      okButtonProps: { danger: true, loading: overwritingSource },
+      cancelText: "Cancel",
+      onOk: async () => {
+        setOverwritingSource(true);
+        try {
+          const response = await apiClient.post("/eh/detection/export-masks", {
+            session_id: sessionId,
+            mode: "overwrite_source",
+            create_backup: true,
+          });
+          message.success(`Source masks updated at ${response.data.written_path}`);
+          if (response.data.backup_path) {
+            message.info(`Backup created at ${response.data.backup_path}`);
+          }
+          refreshPersistenceStatus();
+        } catch (error) {
+          Modal.error({
+            title: "Overwrite failed",
+            content: getErrorMessage(
+              error,
+              "Unable to overwrite source masks safely.",
+            ),
+            okText: "OK",
+          });
+        } finally {
+          setOverwritingSource(false);
+        }
+      },
+    });
+  };
+
   if (!sessionId) {
     return (
       <div style={{ padding: "24px 0" }}>
@@ -1224,6 +1493,137 @@ function DetectionWorkflow({ sessionId, setSessionId, refreshTrigger }) {
     sliderZ ?? viewState.zIndex,
     axisTotal || totalLayers,
   );
+
+  const reviewControls =
+    activeInstance && instanceMode !== "none" ? (
+      <div style={{ display: "grid", gap: 8 }}>
+        <Text style={{ fontSize: 13, fontWeight: 600 }}>
+          Instance #{activeInstance.id}
+        </Text>
+        <Space size="small" wrap>
+          <Button
+            size="small"
+            type="primary"
+            loading={classificationPending}
+            disabled={classificationPending}
+            onClick={() => handleInstanceClassify("correct")}
+          >
+            Looks good
+          </Button>
+          <Button
+            size="small"
+            danger
+            loading={classificationPending}
+            disabled={classificationPending}
+            onClick={() => handleInstanceClassify("incorrect")}
+          >
+            Needs fix
+          </Button>
+          <Button
+            size="small"
+            style={{ background: "#f59e0b", color: "#fff" }}
+            loading={classificationPending}
+            disabled={classificationPending}
+            onClick={() => handleInstanceClassify("unsure")}
+          >
+            Unsure
+          </Button>
+        </Space>
+      </div>
+    ) : (
+      <Text type="secondary" style={{ fontSize: 12 }}>
+        Select an instance to review.
+      </Text>
+    );
+
+  const viewControls = (
+    <div>
+      <Text style={{ fontSize: 12 }}>Other instances</Text>
+      <Slider
+        min={0}
+        max={100}
+        value={Math.round(overlayAllAlpha * 100)}
+        onChange={(value) => setOverlayAllAlpha(value / 100)}
+      />
+      <Text style={{ fontSize: 12 }}>Selected instance</Text>
+      <Slider
+        min={0}
+        max={100}
+        value={Math.round(overlayActiveAlpha * 100)}
+        onChange={(value) => setOverlayActiveAlpha(value / 100)}
+      />
+    </div>
+  );
+
+  const instanceControls =
+    instanceMode !== "none" && instances.length > 0 ? (
+      <div style={{ display: "grid", gap: 8 }}>
+        <Space size="small" wrap>
+          <Button size="small" type="primary" onClick={() => setShowInstanceBrowser(true)}>
+            Browse...
+          </Button>
+          <Button size="small" onClick={goToNextUnreviewed}>
+            Next unreviewed
+          </Button>
+          <Dropdown
+            trigger={["click"]}
+            menu={{
+              items: [
+                {
+                  key: "export",
+                  label: "Export edited masks...",
+                  onClick: openExportModal,
+                },
+                {
+                  key: "overwrite",
+                  label: "Overwrite source masks...",
+                  danger: true,
+                  onClick: handleOverwriteSource,
+                },
+              ],
+            }}
+          >
+            <Button size="small" icon={<MoreOutlined />} />
+          </Dropdown>
+        </Space>
+        <Space size="small" align="center">
+          <Text type="secondary" style={{ fontSize: 12 }}>
+            Instances
+          </Text>
+          <Tag style={{ margin: 0 }}>{instances.length}</Tag>
+        </Space>
+      </div>
+    ) : (
+      <Text type="secondary" style={{ fontSize: 12 }}>
+        No instances available.
+      </Text>
+    );
+
+  const inspectorItems = [
+    { key: "review", label: "Review", children: reviewControls },
+    { key: "instances", label: "Instances", children: instanceControls },
+    { key: "view", label: "View", children: viewControls },
+    {
+      key: "progress",
+      label: "Progress",
+      children: (
+        <ProgressTracker
+          stats={stats}
+          projectName={projectName}
+          totalLayers={instances.length}
+          unitLabel="instances"
+          compact
+          onNewSession={() => {
+            setSessionId(null);
+            setActiveInstanceId(null);
+            setInstances([]);
+            setPersistence(null);
+          }}
+          onJumpToNext={goToNextUnreviewed}
+        />
+      ),
+    },
+  ];
 
   return (
     <Layout
@@ -1238,16 +1638,25 @@ function DetectionWorkflow({ sessionId, setSessionId, refreshTrigger }) {
             display: "flex",
             justifyContent: "space-between",
             alignItems: "center",
-            marginBottom: 8,
+            marginBottom: 10,
           }}
         >
           <Title level={5} style={{ margin: 0 }}>
             Instance proofreading
           </Title>
+          <Space size="small">
+            <Button
+              size="small"
+              type={showInspector ? "default" : "primary"}
+              onClick={() => setShowInspector((prev) => !prev)}
+            >
+              {showInspector ? "Focus canvas" : "Show sidebar"}
+            </Button>
+          </Space>
         </div>
 
-        <Layout style={{ background: "transparent" }}>
-          <Content style={{ padding: "0 14px 0 0" }}>
+        <Layout style={{ background: "transparent", position: "relative" }}>
+          <Content style={{ padding: showInspector ? "0 14px 0 0" : 0 }}>
             {loadingInstances && instances.length === 0 ? (
               <div style={{ padding: 32, textAlign: "center" }}>
                 <Title level={4}>Preparing instances…</Title>
@@ -1291,6 +1700,7 @@ function DetectionWorkflow({ sessionId, setSessionId, refreshTrigger }) {
                   currentLayer={currentSliceIndex}
                   totalLayers={axisTotal || totalLayers}
                   layerName={`${viewAxis.toUpperCase()} ${currentSliceIndex + 1}`}
+                  minimalChrome
                 />
                 <div style={{ marginTop: 16 }}>
                   <Slider
@@ -1314,168 +1724,56 @@ function DetectionWorkflow({ sessionId, setSessionId, refreshTrigger }) {
             )}
           </Content>
 
-          <Sider
-            width={Math.max(260, Math.min(320, windowWidth * 0.26))}
-            theme="light"
-            style={{
-              borderLeft: "1px solid #eef2f7",
-              background: "transparent",
-            }}
-          >
-            <div style={{ padding: "12px 12px", display: "grid", gap: 12 }}>
-              <div
-                style={{
-                  display: "flex",
-                  alignItems: "center",
-                  justifyContent: "space-between",
-                  padding: "8px 10px",
-                  borderRadius: 10,
-                  background: "#f8fafc",
-                  border: "1px solid #e2e8f0",
-                  fontSize: 12,
-                }}
-              >
-                <Text type="secondary">
-                  View {viewAxis.toUpperCase()} · Slice {currentSliceIndex + 1}
-                </Text>
-                <Text type="secondary">{axisTotal || totalLayers} total</Text>
-              </div>
-              <div
-                style={{
-                  display: "grid",
-                  gap: 8,
-                  paddingBottom: 4,
-                  borderBottom: "1px solid #eef2f7",
-                }}
-              >
-                <Text
-                  style={{ fontSize: 12, letterSpacing: 0.4 }}
-                  type="secondary"
-                >
-                  REVIEW
-                </Text>
-                {activeInstance && instanceMode !== "none" && (
-                  <>
-                    <Text style={{ fontSize: 13, fontWeight: 600 }}>
-                      Instance #{activeInstance.id}
-                    </Text>
-                    <Space size="small">
-                      <Button
-                        size="small"
-                        type="primary"
-                        onClick={() => handleInstanceClassify("correct")}
-                      >
-                        Looks good
-                      </Button>
-                      <Button
-                        size="small"
-                        danger
-                        onClick={() => handleInstanceClassify("incorrect")}
-                      >
-                        Needs fix
-                      </Button>
-                      <Button
-                        size="small"
-                        style={{ background: "#f59e0b", color: "#fff" }}
-                        onClick={() => handleInstanceClassify("unsure")}
-                      >
-                        Unsure
-                      </Button>
-                    </Space>
-                  </>
-                )}
-              </div>
-
-              <div
-                style={{
-                  display: "grid",
-                  gap: 8,
-                  paddingBottom: 4,
-                  borderBottom: "1px solid #eef2f7",
-                }}
-              >
-                <Text
-                  style={{ fontSize: 12, letterSpacing: 0.4 }}
-                  type="secondary"
-                >
-                  VIEW
-                </Text>
-                <div>
-                  <Text style={{ fontSize: 12 }}>All instances opacity</Text>
-                  <Slider
-                    min={0}
-                    max={100}
-                    value={Math.round(overlayAllAlpha * 100)}
-                    onChange={(value) => setOverlayAllAlpha(value / 100)}
-                  />
-                  <Text style={{ fontSize: 12 }}>Active instance opacity</Text>
-                  <Slider
-                    min={0}
-                    max={100}
-                    value={Math.round(overlayActiveAlpha * 100)}
-                    onChange={(value) => setOverlayActiveAlpha(value / 100)}
-                  />
-                </div>
-              </div>
-
-              {instanceMode !== "none" && instances.length > 0 && (
-                <div style={{ display: "grid", gap: 8 }}>
-                  <Text
-                    style={{ fontSize: 12, letterSpacing: 0.4 }}
-                    type="secondary"
-                  >
-                    INSTANCES
-                  </Text>
-                  <Space>
-                    <Button size="small" onClick={goToPreviousInstance}>
-                      Prev
-                    </Button>
-                    <Button size="small" onClick={goToNextInstance}>
-                      Next
-                    </Button>
-                    <Button size="small" onClick={goToNextUnreviewed}>
-                      Next unreviewed
-                    </Button>
-                    <Button
-                      size="small"
-                      type="primary"
-                      onClick={() => setShowInstanceBrowser(true)}
-                    >
-                      Browse…
-                    </Button>
-                  </Space>
-                </div>
-              )}
-
-              <div
-                style={{
-                  display: "grid",
-                  gap: 8,
-                  paddingTop: 4,
-                  borderTop: "1px solid #eef2f7",
-                }}
-              >
-                <Text
-                  style={{ fontSize: 12, letterSpacing: 0.4 }}
-                  type="secondary"
-                >
-                  PROGRESS
-                </Text>
-                <ProgressTracker
-                  stats={stats}
-                  projectName={projectName}
-                  totalLayers={instances.length}
-                  unitLabel="instances"
-                  onNewSession={() => {
-                    setSessionId(null);
-                    setActiveInstanceId(null);
-                    setInstances([]);
+          {showInspector && (
+            <Sider
+              width={Math.max(260, Math.min(360, windowWidth * 0.3))}
+              theme="light"
+              style={{
+                borderLeft: "1px solid #eef2f7",
+                background: "transparent",
+              }}
+            >
+              <div style={{ padding: "12px 12px", display: "grid", gap: 12 }}>
+                <div
+                  style={{
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "space-between",
+                    padding: "0 2px 2px",
+                    borderBottom: "1px solid #eef2f7",
                   }}
-                  onJumpToNext={goToNextUnreviewed}
+                >
+                  <Space size={8} align="center">
+                    <Text
+                      type="secondary"
+                      style={{
+                        fontSize: 11,
+                        letterSpacing: 0.6,
+                        textTransform: "uppercase",
+                      }}
+                    >
+                      {viewAxis.toUpperCase()}
+                    </Text>
+                    <Text style={{ fontSize: 14, fontWeight: 500 }}>
+                      Slice {currentSliceIndex + 1}
+                    </Text>
+                  </Space>
+                  <Text type="secondary" style={{ fontSize: 12 }}>
+                    {axisTotal || totalLayers} slices
+                  </Text>
+                </div>
+                <Collapse
+                  bordered={false}
+                  size="small"
+                  activeKey={inspectorSections}
+                  onChange={(keys) =>
+                    setInspectorSections(Array.isArray(keys) ? keys : [keys])
+                  }
+                  items={inspectorItems}
                 />
               </div>
-            </div>
-          </Sider>
+            </Sider>
+          )}
         </Layout>
       </Content>
 
@@ -1500,6 +1798,26 @@ function DetectionWorkflow({ sessionId, setSessionId, refreshTrigger }) {
           instanceMode={instanceMode}
         />
       </Drawer>
+      <Modal
+        title="Export edited masks"
+        open={showExportModal}
+        onCancel={() => setShowExportModal(false)}
+        onOk={handleExportMasks}
+        confirmLoading={exportingMasks}
+        okText="Export"
+      >
+        <div style={{ display: "grid", gap: 8 }}>
+          <Text type="secondary" style={{ fontSize: 12 }}>
+            Choose where to write a TIFF containing the current edited instance
+            volume.
+          </Text>
+          <Input
+            value={exportPath}
+            onChange={(event) => setExportPath(event.target.value)}
+            placeholder="/path/to/edited_masks.tif"
+          />
+        </div>
+      </Modal>
     </Layout>
   );
 }

@@ -1,5 +1,5 @@
 import React, { useMemo, useRef, useState, useEffect } from "react";
-import { Card, Input, Tag, Space, Typography, Button } from "antd";
+import { Input, Tag, Space, Typography, Button } from "antd";
 import { LeftOutlined, RightOutlined } from "@ant-design/icons";
 
 const { Text } = Typography;
@@ -27,6 +27,7 @@ function InstanceNavigator({
   filterText,
   onFilterText,
   instanceMode,
+  showSummary = true,
 }) {
   const listRef = useRef(null);
   const [scrollTop, setScrollTop] = useState(0);
@@ -52,6 +53,11 @@ function InstanceNavigator({
       `${inst.id}`.toLowerCase().includes(lower),
     );
   }, [instances, filterText]);
+
+  const activeInstance = useMemo(
+    () => instances.find((inst) => inst.id === activeInstanceId) || null,
+    [instances, activeInstanceId],
+  );
 
   const total = filtered.length;
   const startIndex = Math.max(
@@ -91,6 +97,16 @@ function InstanceNavigator({
         style={{ marginTop: 8 }}
         size="small"
       />
+
+      {showSummary && (
+        <div style={{ marginTop: 8 }}>
+          <Text type="secondary" style={{ fontSize: 12 }}>
+            {activeInstance
+              ? `Selected #${activeInstance.id} • ${total} total`
+              : `${total} total`}
+          </Text>
+        </div>
+      )}
 
       <div
         ref={listRef}

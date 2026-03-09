@@ -14,7 +14,7 @@ import {
   Space,
   message,
   Tooltip,
-  Divider,
+  Collapse,
   Segmented,
   Spin,
   Typography,
@@ -59,6 +59,7 @@ const ProofreadingEditor = forwardRef(
       currentLayer,
       totalLayers,
       layerName,
+      minimalChrome = true,
     },
     ref,
   ) => {
@@ -66,6 +67,11 @@ const ProofreadingEditor = forwardRef(
     const minimapRef = useRef(null);
     const containerRef = useRef(null);
     const [tool, setTool] = useState("paint"); // 'paint', 'erase', or 'hand'
+    const [toolPanelCollapsed, setToolPanelCollapsed] = useState(true);
+    const [toolPanelSections, setToolPanelSections] = useState([
+      "editing",
+      "history",
+    ]);
     const [paintBrushSize, setPaintBrushSize] = useState(10);
     const [eraseBrushSize, setEraseBrushSize] = useState(10);
     const [showMask, setShowMask] = useState(true);
@@ -891,190 +897,277 @@ const ProofreadingEditor = forwardRef(
       if (axis === "zy") return { h: "Y", v: "Z" };
       return { h: "X", v: "Y" };
     };
-    const editorHeight = "clamp(520px, 68vh, 820px)";
+    const editorHeight = "clamp(560px, 74vh, 900px)";
 
     return (
       <div
         style={{
           display: "flex",
           height: editorHeight,
-          gap: "16px",
+          gap: "12px",
           overflow: "hidden",
           alignItems: "stretch",
         }}
       >
         {/* Left Panel - Tools */}
         <Card
-          title="Tools"
-          style={{ width: "280px", height: "100%" }}
+          title={
+            <div
+              style={{
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "space-between",
+              }}
+            >
+              <span>Tools</span>
+              <Tooltip
+                title={toolPanelCollapsed ? "Expand tools" : "Collapse tools"}
+              >
+                <Button
+                  size="small"
+                  icon={
+                    toolPanelCollapsed ? <RightOutlined /> : <LeftOutlined />
+                  }
+                  onClick={() => setToolPanelCollapsed((prev) => !prev)}
+                />
+              </Tooltip>
+            </div>
+          }
+          style={{
+            width: toolPanelCollapsed ? "74px" : "260px",
+            minWidth: toolPanelCollapsed ? "74px" : "260px",
+            height: "100%",
+            transition: "width 0.2s ease",
+          }}
           bodyStyle={{
             height: "calc(100% - 40px)",
             overflowY: "auto",
-            padding: "12px",
+            padding: toolPanelCollapsed ? "10px 8px" : "12px",
           }}
           size="small"
         >
-          <Space direction="vertical" style={{ width: "100%" }} size="middle">
-            <div>
-              <div style={{ marginBottom: "8px", fontWeight: "bold" }}>
-                Minimap
-              </div>
-              <div
-                style={{
-                  background: "#eee",
-                  border: "1px solid #d9d9d9",
-                  position: "relative",
-                  width: "240px", // Adjusted for sidebar width 280-padding
-                  height: "180px",
-                  margin: "0 auto",
-                  borderRadius: "4px",
-                  overflow: "hidden",
-                  cursor: "crosshair",
-                  display: canvasDimensions.width > 0 ? "block" : "none",
-                }}
-                onClick={handleMinimapClick}
-              >
-                <canvas
-                  ref={minimapRef}
-                  width={240}
-                  height={180}
-                  style={{ width: "100%", height: "100%", display: "block" }}
-                />
-                <div
-                  style={{
-                    position: "absolute",
-                    bottom: "4px",
-                    left: "4px",
-                    background: "rgba(0,0,0,0.5)",
-                    color: "white",
-                    fontSize: "10px",
-                    padding: "0 4px",
-                    borderRadius: "3px",
-                    pointerEvents: "none",
-                    opacity: 0.7,
-                  }}
-                >
-                  Minimap (Click to Jump)
-                </div>
-              </div>
-            </div>
-
-            <Divider style={{ margin: "8px 0" }} />
-
-            <div>
-              <div style={{ marginBottom: "8px", fontWeight: "bold" }}>
-                Mode
-              </div>
-              <Space>
-                <Tooltip title="Paint (P)">
-                  <Button
-                    type={tool === "paint" ? "primary" : "default"}
-                    icon={<EditOutlined />}
-                    onClick={() => setTool("paint")}
-                  />
-                </Tooltip>
-                <Tooltip title="Erase (E)">
-                  <Button
-                    type={tool === "erase" ? "primary" : "default"}
-                    icon={<ClearOutlined />}
-                    onClick={() => setTool("erase")}
-                  />
-                </Tooltip>
-                <Tooltip title="Hand (H)">
-                  <Button
-                    type={tool === "hand" ? "primary" : "default"}
-                    icon={<DragOutlined />}
-                    onClick={() => setTool("hand")}
-                  />
-                </Tooltip>
-              </Space>
-            </div>
-
-            {(tool === "paint" || tool === "erase") && (
-              <div>
-                <div style={{ marginBottom: "8px", fontWeight: "bold" }}>
-                  {tool === "erase" ? "Erase" : "Paint"} Size
-                </div>
-                <Slider
-                  min={1}
-                  max={64}
-                  value={activeBrushSize}
-                  onChange={setBrushSize}
-                />
-                <InputNumber
-                  min={1}
-                  max={64}
-                  value={activeBrushSize}
-                  onChange={setBrushSize}
-                  style={{ width: "100%" }}
-                />
-              </div>
-            )}
-
-            <Divider style={{ margin: "8px 0" }} />
-
-            <div>
-              <div style={{ marginBottom: "8px", fontWeight: "bold" }}>
-                History
-              </div>
-              <Space>
-                <Tooltip title="Undo (Ctrl+Z)">
-                  <Button
-                    icon={<UndoOutlined />}
-                    onClick={handleUndo}
-                    disabled={undoStack.length === 0}
-                  >
-                    Undo
-                  </Button>
-                </Tooltip>
-                <Tooltip title="Redo (Ctrl+Shift+Z)">
-                  <Button
-                    icon={<RedoOutlined />}
-                    onClick={handleRedo}
-                    disabled={redoStack.length === 0}
-                  >
-                    Redo
-                  </Button>
-                </Tooltip>
-              </Space>
-            </div>
-
-            <div>
-              <Button
-                icon={showMask ? <EyeInvisibleOutlined /> : <EyeOutlined />}
-                onClick={() => setShowMask(!showMask)}
-                block
-              >
-                {showMask ? "Hide Mask" : "Show Mask"}
-              </Button>
-            </div>
-
-            <div>
-              <div style={{ marginBottom: "8px", fontWeight: "bold" }}>
-                Zoom ({Math.round(zoom * 100)}%)
-              </div>
-              <Space>
+          {toolPanelCollapsed ? (
+            <Space
+              direction="vertical"
+              size="small"
+              style={{ width: "100%", alignItems: "center" }}
+            >
+              <Tooltip title="Paint (P)">
                 <Button
-                  icon={<ZoomOutOutlined />}
-                  onClick={() => setZoom((prev) => Math.max(0.1, prev - 0.1))}
+                  type={tool === "paint" ? "primary" : "default"}
+                  icon={<EditOutlined />}
+                  onClick={() => setTool("paint")}
                 />
+              </Tooltip>
+              <Tooltip title="Erase (E)">
                 <Button
-                  onClick={() => {
-                    setZoom(1.0);
-                    setOffset({ x: 0, y: 0 });
-                  }}
-                >
-                  Reset
-                </Button>
+                  type={tool === "erase" ? "primary" : "default"}
+                  icon={<ClearOutlined />}
+                  onClick={() => setTool("erase")}
+                />
+              </Tooltip>
+              <Tooltip title="Hand (H)">
+                <Button
+                  type={tool === "hand" ? "primary" : "default"}
+                  icon={<DragOutlined />}
+                  onClick={() => setTool("hand")}
+                />
+              </Tooltip>
+              <Tooltip title={showMask ? "Hide mask" : "Show mask"}>
+                <Button
+                  icon={showMask ? <EyeInvisibleOutlined /> : <EyeOutlined />}
+                  onClick={() => setShowMask(!showMask)}
+                />
+              </Tooltip>
+              <Tooltip title="Zoom in">
                 <Button
                   icon={<ZoomInOutlined />}
                   onClick={() => setZoom((prev) => Math.min(10.0, prev + 0.1))}
                 />
-              </Space>
-            </div>
-
-            <Divider style={{ margin: "8px 0" }} />
-          </Space>
+              </Tooltip>
+              <Tooltip title="Zoom out">
+                <Button
+                  icon={<ZoomOutOutlined />}
+                  onClick={() => setZoom((prev) => Math.max(0.1, prev - 0.1))}
+                />
+              </Tooltip>
+            </Space>
+          ) : (
+            <Collapse
+              bordered={false}
+              size="small"
+              activeKey={toolPanelSections}
+              onChange={(keys) =>
+                setToolPanelSections(Array.isArray(keys) ? keys : [keys])
+              }
+              items={[
+                {
+                  key: "minimap",
+                  label: "Minimap",
+                  children: (
+                    <div
+                      style={{
+                        background: "#eee",
+                        border: "1px solid #d9d9d9",
+                        position: "relative",
+                        width: "100%",
+                        aspectRatio: "4 / 3",
+                        margin: "0 auto",
+                        borderRadius: "4px",
+                        overflow: "hidden",
+                        cursor: "crosshair",
+                        display: canvasDimensions.width > 0 ? "block" : "none",
+                      }}
+                      onClick={handleMinimapClick}
+                    >
+                      <canvas
+                        ref={minimapRef}
+                        width={240}
+                        height={180}
+                        style={{
+                          width: "100%",
+                          height: "100%",
+                          display: "block",
+                        }}
+                      />
+                      <div
+                        style={{
+                          position: "absolute",
+                          bottom: "4px",
+                          left: "4px",
+                          background: "rgba(0,0,0,0.5)",
+                          color: "white",
+                          fontSize: "10px",
+                          padding: "0 4px",
+                          borderRadius: "3px",
+                          pointerEvents: "none",
+                          opacity: 0.7,
+                        }}
+                      >
+                        Minimap (click to jump)
+                      </div>
+                    </div>
+                  ),
+                },
+                {
+                  key: "editing",
+                  label: "Editing",
+                  children: (
+                    <Space direction="vertical" style={{ width: "100%" }}>
+                      <Space>
+                        <Tooltip title="Paint (P)">
+                          <Button
+                            type={tool === "paint" ? "primary" : "default"}
+                            icon={<EditOutlined />}
+                            onClick={() => setTool("paint")}
+                          />
+                        </Tooltip>
+                        <Tooltip title="Erase (E)">
+                          <Button
+                            type={tool === "erase" ? "primary" : "default"}
+                            icon={<ClearOutlined />}
+                            onClick={() => setTool("erase")}
+                          />
+                        </Tooltip>
+                        <Tooltip title="Hand (H)">
+                          <Button
+                            type={tool === "hand" ? "primary" : "default"}
+                            icon={<DragOutlined />}
+                            onClick={() => setTool("hand")}
+                          />
+                        </Tooltip>
+                      </Space>
+                      {(tool === "paint" || tool === "erase") && (
+                        <>
+                          <Text style={{ fontSize: 12, fontWeight: 500 }}>
+                            {tool === "erase" ? "Erase" : "Paint"} size
+                          </Text>
+                          <Slider
+                            min={1}
+                            max={64}
+                            value={activeBrushSize}
+                            onChange={setBrushSize}
+                          />
+                          <InputNumber
+                            min={1}
+                            max={64}
+                            value={activeBrushSize}
+                            onChange={setBrushSize}
+                            style={{ width: "100%" }}
+                          />
+                        </>
+                      )}
+                    </Space>
+                  ),
+                },
+                {
+                  key: "history",
+                  label: "History & visibility",
+                  children: (
+                    <Space direction="vertical" style={{ width: "100%" }}>
+                      <Space>
+                        <Tooltip title="Undo (Ctrl+Z)">
+                          <Button
+                            icon={<UndoOutlined />}
+                            onClick={handleUndo}
+                            disabled={undoStack.length === 0}
+                          >
+                            Undo
+                          </Button>
+                        </Tooltip>
+                        <Tooltip title="Redo (Ctrl+Shift+Z)">
+                          <Button
+                            icon={<RedoOutlined />}
+                            onClick={handleRedo}
+                            disabled={redoStack.length === 0}
+                          >
+                            Redo
+                          </Button>
+                        </Tooltip>
+                      </Space>
+                      <Button
+                        icon={
+                          showMask ? <EyeInvisibleOutlined /> : <EyeOutlined />
+                        }
+                        onClick={() => setShowMask(!showMask)}
+                        block
+                      >
+                        {showMask ? "Hide Mask" : "Show Mask"}
+                      </Button>
+                    </Space>
+                  ),
+                },
+                {
+                  key: "zoom",
+                  label: `Zoom (${Math.round(zoom * 100)}%)`,
+                  children: (
+                    <Space>
+                      <Button
+                        icon={<ZoomOutOutlined />}
+                        onClick={() =>
+                          setZoom((prev) => Math.max(0.1, prev - 0.1))
+                        }
+                      />
+                      <Button
+                        onClick={() => {
+                          setZoom(1.0);
+                          setOffset({ x: 0, y: 0 });
+                        }}
+                      >
+                        Reset
+                      </Button>
+                      <Button
+                        icon={<ZoomInOutlined />}
+                        onClick={() =>
+                          setZoom((prev) => Math.min(10.0, prev + 0.1))
+                        }
+                      />
+                    </Space>
+                  ),
+                },
+              ]}
+            />
+          )}
         </Card>
 
         {/* Center - Canvas */}
@@ -1083,7 +1176,7 @@ const ProofreadingEditor = forwardRef(
             flex: 1,
             display: "flex",
             flexDirection: "column",
-            gap: "16px",
+            gap: "10px",
             height: "100%",
           }}
         >
@@ -1113,14 +1206,14 @@ const ProofreadingEditor = forwardRef(
                     onClick={onPrevious}
                     disabled={currentLayer === 0}
                   >
-                    Previous (A)
+                    Previous
                   </Button>
                   <Button
                     icon={<RightOutlined />}
                     onClick={onNext}
                     disabled={currentLayer === totalLayers - 1}
                   >
-                    Next (D)
+                    Next
                   </Button>
                 </Space>
               </Space>
@@ -1142,14 +1235,14 @@ const ProofreadingEditor = forwardRef(
                     ? "none"
                     : "default",
               background: "#f5f5f5",
-              padding: 0,
+              padding: minimalChrome ? 0 : 4,
             }}
           >
             <div
               ref={containerRef}
               style={{
                 position: "relative",
-                width: "min(100%, 720px)",
+                width: "min(100%, 980px)",
                 maxHeight: "100%",
                 aspectRatio: "1 / 1",
                 display: "flex",

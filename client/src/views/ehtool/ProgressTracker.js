@@ -1,10 +1,6 @@
 import React from "react";
 import {
-  Card,
   Progress,
-  Statistic,
-  Row,
-  Col,
   Button,
   Divider,
   Space,
@@ -16,7 +12,6 @@ import {
   QuestionCircleOutlined,
   ExclamationCircleOutlined,
   FolderOpenOutlined,
-  EditOutlined,
 } from "@ant-design/icons";
 const { Text } = Typography;
 
@@ -32,15 +27,14 @@ function ProgressTracker({
   onNewSession,
   onStartProofreading,
   onJumpToNext,
+  compact = false,
 }) {
   if (!stats) {
     return (
-      <div style={{ padding: "16px" }}>
-        <Card bordered={false} style={{ background: "#f8fafc" }}>
-          <div style={{ textAlign: "center", padding: "16px 8px" }}>
-            <Text type="secondary">No session loaded yet.</Text>
-          </div>
-        </Card>
+      <div style={{ padding: compact ? "0" : "16px" }}>
+        <div style={{ textAlign: "center", padding: compact ? "8px 4px" : "16px 8px" }}>
+          <Text type="secondary">No session loaded yet.</Text>
+        </div>
       </div>
     );
   }
@@ -49,7 +43,7 @@ function ProgressTracker({
 
   return (
     <div style={{ padding: "0" }}>
-      <Space direction="vertical" size={6} style={{ width: "100%" }}>
+      <Space direction="vertical" size={compact ? 4 : 6} style={{ width: "100%" }}>
         <Text strong style={{ fontSize: 13 }}>
           {totalLayers} {unitLabel}
         </Text>
@@ -67,7 +61,7 @@ function ProgressTracker({
           style={{
             display: "grid",
             gridTemplateColumns: "1fr 1fr",
-            gap: 8,
+            gap: compact ? 6 : 8,
             fontSize: 12,
           }}
         >
@@ -87,7 +81,7 @@ function ProgressTracker({
           </div>
         </div>
 
-        <Divider style={{ margin: "8px 0" }} />
+        <Divider style={{ margin: compact ? "4px 0" : "8px 0" }} />
 
         <Space direction="vertical" style={{ width: "100%" }} size="small">
           <Button icon={<FolderOpenOutlined />} onClick={onNewSession} block size="small">
