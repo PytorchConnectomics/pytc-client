@@ -61,6 +61,8 @@ class DataManager:
         self._active_cache_limit = 128
         self._resized_cache_limit = 128
         self._filmstrip_cache_limit = 64
+        self._progress_schema_version = 2
+        self._history_limit = 200
 
     def load_dataset(
         self, dataset_path: str, mask_path: Optional[str] = None
@@ -205,9 +207,17 @@ class DataManager:
             )
             binary = np.array(resized) > 0
 
-        old_active = slice_ref == instance_id
-        slice_ref[old_active & ~binary] = 0
-        slice_ref[binary] = instance_id
+        previous_labels = np.array(slice_ref, copy=True)
+        old_active = previous_labels == instance_id
+        # Keep edits safe by default: paint can grow/shrink the active instance,
+        # but does not silently overwrite other labeled instances.
+        writable = (previous_labels == 0) | old_active
+        add_pixels = binary & writable & ~old_active
+        remove_pixels = old_active & ~binary
+        overwrite_blocked = binary & ~writable
+
+        slice_ref[remove_pixels] = 0
+        slice_ref[old_active | add_pixels] = instance_id
 
         # Keep mask_volume aligned with instance edits
         if self.mask_volume is not None:
@@ -222,18 +232,16 @@ class DataManager:
             else:
                 mask_slice = self.mask_volume[:, :, index]
             if mask_slice.shape == binary.shape:
-                mask_slice[old_active & ~binary] = 0
-                mask_slice[binary] = instance_id
+                previous_mask = np.array(mask_slice, copy=True)
+                old_mask_active = previous_mask == instance_id
+                writable_mask = (previous_mask == 0) | old_mask_active
+                add_mask = binary & writable_mask & ~old_mask_active
+                remove_mask = old_mask_active & ~binary
+                mask_slice[remove_mask] = 0
+                mask_slice[old_mask_active | add_mask] = instance_id
 
-        # Update instance voxel counts without resetting classifications
-        if self.instances:
-            max_label = int(np.max(self.instance_volume))
-            counts = np.bincount(self.instance_volume.ravel(), minlength=max_label + 1)
-            for inst in self.instances:
-                inst_id = inst["id"]
-                inst["voxel_count"] = (
-                    int(counts[inst_id]) if inst_id < len(counts) else 0
-                )
+        # Update active instance stats without resetting classifications.
+        self._update_instance_stats(instance_id)
 
         # Clear caches so overlays refresh
         self._slice_cache.clear()
@@ -241,6 +249,22 @@ class DataManager:
         self._raw_cache.clear()
         self._resized_cache.clear()
         self._filmstrip_cache.clear()
+
+        changed_pixels = int(
+            np.count_nonzero(add_pixels) + np.count_nonzero(remove_pixels)
+        )
+        blocked_pixels = int(np.count_nonzero(overwrite_blocked))
+        self.save_progress(
+            edit_event={
+                "instance_id": int(instance_id),
+                "axis": axis,
+                "z_index": int(index),
+                "pixels_added": int(np.count_nonzero(add_pixels)),
+                "pixels_removed": int(np.count_nonzero(remove_pixels)),
+                "pixels_changed": changed_pixels,
+                "pixels_blocked": blocked_pixels,
+            }
+        )
 
     def _save_volume(self, path: str, volume: np.ndarray, layer_index: int = -1):
         """Save volume to disk"""
@@ -458,14 +482,70 @@ class DataManager:
             if isinstance(entry, str) and entry in valid:
                 self.instance_classification[inst["id"]] = entry
 
-    def save_progress(self, ui_state: Optional[Dict[str, Any]] = None) -> None:
+    def _build_review_stats(self) -> Dict[str, Any]:
+        counts = {"correct": 0, "incorrect": 0, "unsure": 0, "error": 0}
+        for value in self.instance_classification.values():
+            if value in counts:
+                counts[value] += 1
+            else:
+                counts["error"] += 1
+        total = len(self.instance_classification)
+        reviewed = max(0, total - counts["error"])
+        progress = (reviewed / total) if total > 0 else 0.0
+        return {
+            "total_instances": total,
+            "reviewed_instances": reviewed,
+            "progress": round(progress, 6),
+            "counts": counts,
+        }
+
+    def _append_history(self, entry: Dict[str, Any], item: Dict[str, Any]) -> None:
+        history = entry.get("history")
+        if not isinstance(history, list):
+            history = []
+        history.append(item)
+        if len(history) > self._history_limit:
+            history = history[-self._history_limit :]
+        entry["history"] = history
+
+    def _update_instance_stats(self, instance_id: int) -> None:
+        if self.instance_volume is None or not self.instances:
+            return
+        target = None
+        for inst in self.instances:
+            if int(inst.get("id", -1)) == int(instance_id):
+                target = inst
+                break
+        if target is None:
+            return
+        coords = np.argwhere(self.instance_volume == int(instance_id))
+        target["voxel_count"] = int(coords.shape[0])
+        if coords.shape[0] == 0:
+            target["com_z"] = 0
+            target["com_y"] = 0
+            target["com_x"] = 0
+            return
+        if self.instance_volume.ndim == 2:
+            target["com_z"] = 0
+            target["com_y"] = int(np.rint(np.mean(coords[:, 0])))
+            target["com_x"] = int(np.rint(np.mean(coords[:, 1])))
+        else:
+            target["com_z"] = int(np.rint(np.mean(coords[:, 0])))
+            target["com_y"] = int(np.rint(np.mean(coords[:, 1])))
+            target["com_x"] = int(np.rint(np.mean(coords[:, 2])))
+
+    def save_progress(
+        self,
+        ui_state: Optional[Dict[str, Any]] = None,
+        edit_event: Optional[Dict[str, Any]] = None,
+    ) -> None:
         if not self.progress_path:
             return
         try:
             payload = (
                 self.progress_payload if isinstance(self.progress_payload, dict) else {}
             )
-            payload.setdefault("schema_version", 1)
+            payload["schema_version"] = self._progress_schema_version
             payload["updated_at"] = datetime.now(timezone.utc).isoformat()
 
             project = payload.get("project")
@@ -478,6 +558,8 @@ class DataManager:
             project["mask_path"] = self.mask_path
             project["instance_mode"] = self.instance_mode
             payload["project"] = project
+
+            payload["review"] = self._build_review_stats()
 
             if isinstance(ui_state, dict):
                 stored_ui = payload.get("ui_state")
@@ -496,21 +578,95 @@ class DataManager:
                 entry = instances_payload.get(key)
                 if not isinstance(entry, dict):
                     entry = {}
+                previous_classification = entry.get("classification", "error")
                 entry["classification"] = classification
-                entry["reviewed_at"] = datetime.now(timezone.utc).isoformat()
+                now_iso = datetime.now(timezone.utc).isoformat()
+                if previous_classification != classification:
+                    entry["reviewed_at"] = now_iso
+                    self._append_history(
+                        entry,
+                        {
+                            "at": now_iso,
+                            "by": "local",
+                            "type": "classification",
+                            "action": classification,
+                        },
+                    )
+                else:
+                    entry["reviewed_at"] = entry.get("reviewed_at")
                 entry.setdefault("notes", "")
-                history = entry.get("history")
-                if not isinstance(history, list):
-                    history = []
-                history.append(
-                    {
-                        "at": entry["reviewed_at"],
-                        "by": "local",
-                        "action": classification,
-                    }
-                )
-                entry["history"] = history
+
+                metadata = entry.get("metadata")
+                if not isinstance(metadata, dict):
+                    metadata = {}
+                matching_instance = None
+                if self.instances:
+                    matching_instance = next(
+                        (
+                            inst
+                            for inst in self.instances
+                            if int(inst.get("id", -1)) == int(inst_id)
+                        ),
+                        None,
+                    )
+                if matching_instance:
+                    metadata["voxel_count"] = int(
+                        matching_instance.get("voxel_count", 0)
+                    )
+                    metadata["com_z"] = int(matching_instance.get("com_z", 0))
+                    metadata["com_y"] = int(matching_instance.get("com_y", 0))
+                    metadata["com_x"] = int(matching_instance.get("com_x", 0))
+                entry["metadata"] = metadata
                 instances_payload[key] = entry
+
+            if isinstance(edit_event, dict):
+                inst_id = edit_event.get("instance_id")
+                if inst_id is not None:
+                    key = str(int(inst_id))
+                    entry = instances_payload.get(key)
+                    if not isinstance(entry, dict):
+                        entry = {"classification": "error", "notes": ""}
+                    edits = entry.get("edits")
+                    if not isinstance(edits, dict):
+                        edits = {}
+                    edits["last_edit_at"] = datetime.now(timezone.utc).isoformat()
+                    edits["count"] = int(edits.get("count", 0)) + 1
+                    edits["pixels_added"] = int(edits.get("pixels_added", 0)) + int(
+                        edit_event.get("pixels_added", 0)
+                    )
+                    edits["pixels_removed"] = int(edits.get("pixels_removed", 0)) + int(
+                        edit_event.get("pixels_removed", 0)
+                    )
+                    edits["pixels_changed"] = int(edits.get("pixels_changed", 0)) + int(
+                        edit_event.get("pixels_changed", 0)
+                    )
+                    edits["pixels_blocked"] = int(edits.get("pixels_blocked", 0)) + int(
+                        edit_event.get("pixels_blocked", 0)
+                    )
+                    by_axis = edits.get("by_axis")
+                    if not isinstance(by_axis, dict):
+                        by_axis = {}
+                    axis_key = str(edit_event.get("axis") or "xy").lower()
+                    by_axis[axis_key] = int(by_axis.get(axis_key, 0)) + int(
+                        edit_event.get("pixels_changed", 0)
+                    )
+                    edits["by_axis"] = by_axis
+                    entry["edits"] = edits
+                    self._append_history(
+                        entry,
+                        {
+                            "at": edits["last_edit_at"],
+                            "by": "local",
+                            "type": "mask_edit",
+                            "axis": axis_key,
+                            "z_index": int(edit_event.get("z_index", 0)),
+                            "pixels_added": int(edit_event.get("pixels_added", 0)),
+                            "pixels_removed": int(edit_event.get("pixels_removed", 0)),
+                            "pixels_changed": int(edit_event.get("pixels_changed", 0)),
+                            "pixels_blocked": int(edit_event.get("pixels_blocked", 0)),
+                        },
+                    )
+                    instances_payload[key] = entry
 
             payload["instances"] = instances_payload
             payload.setdefault("extensions", {})

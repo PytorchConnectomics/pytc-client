@@ -707,6 +707,8 @@ async def save_instance_mask(
             index=request.z_index,
             mask_base64=request.mask_base64,
         )
+        if request.ui_state:
+            data_manager.save_progress(ui_state=request.ui_state.dict())
         return {"message": "Instance mask saved successfully"}
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc

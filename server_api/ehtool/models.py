@@ -66,6 +66,7 @@ class InstanceMaskSaveRequest(BaseModel):
     axis: str = "xy"
     z_index: int
     mask_base64: str
+    ui_state: Optional[ProofreadingUIState] = None
 
 
 class ProofreadingUIState(BaseModel):
