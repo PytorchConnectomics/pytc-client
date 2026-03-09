@@ -5,6 +5,9 @@ Handles loading and processing image datasets for error detection workflow
 
 import os
 import json
+import time
+import shutil
+import tempfile
 from datetime import datetime, timezone
 import glob
 import numpy as np
@@ -61,8 +64,19 @@ class DataManager:
         self._active_cache_limit = 128
         self._resized_cache_limit = 128
         self._filmstrip_cache_limit = 64
-        self._progress_schema_version = 2
+        self._progress_schema_version = 3
         self._history_limit = 200
+        self.instance_artifact_path: Optional[str] = None
+        self.persistence_dirty: bool = False
+        self.last_saved_at: Optional[str] = None
+        self.last_export_at: Optional[str] = None
+        self.last_persist_error: Optional[str] = None
+        self.artifact_writable: bool = False
+        self.last_export_mode: Optional[str] = None
+        self.last_export_path: Optional[str] = None
+        self.last_backup_path: Optional[str] = None
+        self.mask_source_kind: str = "none"
+        self.mask_source_files: List[str] = []
 
     def load_dataset(
         self, dataset_path: str, mask_path: Optional[str] = None
@@ -110,8 +124,20 @@ class DataManager:
         self._resized_cache.clear()
         self._filmstrip_cache.clear()
         self.progress_path = self._resolve_progress_path()
+        self.instance_artifact_path = self._resolve_instance_artifact_path()
         self.progress_payload = None
         self.ui_state = {}
+        self.persistence_dirty = False
+        self.last_saved_at = None
+        self.last_export_at = None
+        self.last_persist_error = None
+        self.artifact_writable = self._is_path_writable(self.instance_artifact_path)
+        self.last_export_mode = None
+        self.last_export_path = None
+        self.last_backup_path = None
+        self.mask_source_kind, self.mask_source_files = self._resolve_source_layout(
+            self.mask_path
+        )
 
         return {
             "total_layers": self.total_layers,
@@ -253,6 +279,8 @@ class DataManager:
         changed_pixels = int(
             np.count_nonzero(add_pixels) + np.count_nonzero(remove_pixels)
         )
+        self.persistence_dirty = True
+        self._persist_instance_artifact(force=True)
         blocked_pixels = int(np.count_nonzero(overwrite_blocked))
         self.save_progress(
             edit_event={
@@ -300,6 +328,197 @@ class DataManager:
                         raise IndexError(
                             f"Layer index {layer_index} out of range for file list"
                         )
+
+    def _iso_now(self) -> str:
+        return datetime.now(timezone.utc).isoformat()
+
+    def _is_path_writable(self, path: Optional[str]) -> bool:
+        if not path:
+            return False
+        try:
+            path_obj = Path(path)
+            if path_obj.exists():
+                return os.access(path_obj, os.W_OK)
+            parent = path_obj.parent
+            if not parent.exists():
+                parent.mkdir(parents=True, exist_ok=True)
+            return os.access(parent, os.W_OK)
+        except Exception:
+            return False
+
+    def _resolve_source_layout(self, path: Optional[str]) -> Tuple[str, List[str]]:
+        if not path:
+            return "none", []
+        path_obj = Path(path)
+        if path_obj.is_file():
+            return "file", [str(path_obj)]
+        if path_obj.is_dir():
+            files: List[str] = []
+            for ext in ["*.tif", "*.tiff", "*.png", "*.jpg", "*.jpeg"]:
+                files.extend(glob.glob(os.path.join(path, ext)))
+                files.extend(glob.glob(os.path.join(path, ext.upper())))
+            files = sorted(set(files))
+            return "directory", files
+        if "*" in path or "?" in path:
+            files = sorted(set(glob.glob(path)))
+            return "glob", files
+        return "none", []
+
+    def _resolve_instance_artifact_path(self) -> Optional[str]:
+        base_path = self.mask_path or self.dataset_path
+        if not base_path:
+            return None
+        if any(char in base_path for char in ["*", "?"]):
+            root = Path(base_path).parent
+        else:
+            base = Path(base_path)
+            root = base if base.is_dir() else base.parent
+        if not root.exists():
+            return None
+        return str(root / ".pytc_instance_labels.tif")
+
+    def _atomic_write_tiff(self, path: str, volume: np.ndarray) -> None:
+        target = Path(path)
+        target.parent.mkdir(parents=True, exist_ok=True)
+        tmp_path = None
+        try:
+            with tempfile.NamedTemporaryFile(
+                suffix=".tmp.tif",
+                dir=str(target.parent),
+                delete=False,
+            ) as tmp:
+                tmp_path = Path(tmp.name)
+            tifffile.imwrite(str(tmp_path), volume, compression="zlib")
+            os.replace(str(tmp_path), str(target))
+        finally:
+            if tmp_path and tmp_path.exists():
+                try:
+                    tmp_path.unlink()
+                except Exception:
+                    pass
+
+    def _atomic_write_image(self, path: str, array: np.ndarray) -> None:
+        target = Path(path)
+        target.parent.mkdir(parents=True, exist_ok=True)
+        tmp_path = None
+        image_array = np.asarray(array)
+        if np.issubdtype(image_array.dtype, np.integer):
+            max_value = int(image_array.max()) if image_array.size else 0
+            if max_value <= 255:
+                image_array = image_array.astype(np.uint8, copy=False)
+            else:
+                image_array = image_array.astype(np.uint16, copy=False)
+        else:
+            image_array = np.clip(image_array, 0, 255).astype(np.uint8)
+
+        ext = target.suffix.lower()
+        if ext in {".jpg", ".jpeg"}:
+            image_array = np.clip(image_array, 0, 255).astype(np.uint8)
+        try:
+            with tempfile.NamedTemporaryFile(
+                suffix=target.suffix or ".tmp",
+                dir=str(target.parent),
+                delete=False,
+            ) as tmp:
+                tmp_path = Path(tmp.name)
+            Image.fromarray(image_array).save(str(tmp_path))
+            os.replace(str(tmp_path), str(target))
+        finally:
+            if tmp_path and tmp_path.exists():
+                try:
+                    tmp_path.unlink()
+                except Exception:
+                    pass
+
+    def _persist_instance_artifact(self, force: bool = False) -> None:
+        if self.instance_volume is None or not self.instance_artifact_path:
+            return
+        if not force and not self.persistence_dirty:
+            return
+
+        try:
+            self._atomic_write_tiff(
+                self.instance_artifact_path, self.instance_volume.astype(np.int32)
+            )
+            self.last_saved_at = self._iso_now()
+            self.last_persist_error = None
+            self.persistence_dirty = False
+        except Exception as exc:
+            self.last_persist_error = str(exc)
+        finally:
+            self.artifact_writable = self._is_path_writable(self.instance_artifact_path)
+
+    def _load_instance_artifact_if_available(self) -> None:
+        if self.instance_volume is None or not self.instance_artifact_path:
+            return
+        if not os.path.exists(self.instance_artifact_path):
+            return
+
+        try:
+            loaded = tifffile.imread(self.instance_artifact_path)
+            if loaded.shape != self.instance_volume.shape:
+                self.last_persist_error = (
+                    f"Ignored artifact with mismatched shape {loaded.shape}; "
+                    f"expected {self.instance_volume.shape}"
+                )
+                return
+            self.instance_volume = loaded.astype(np.int32, copy=False)
+            if self.mask_volume is not None and self.mask_volume.shape == loaded.shape:
+                self.mask_volume = loaded.astype(self.mask_volume.dtype, copy=False)
+            saved_at = datetime.fromtimestamp(
+                os.path.getmtime(self.instance_artifact_path), tz=timezone.utc
+            )
+            self.last_saved_at = saved_at.isoformat()
+            self.last_persist_error = None
+            self.persistence_dirty = False
+        except Exception as exc:
+            self.last_persist_error = f"Failed to load artifact: {exc}"
+
+    def _backup_file(self, source_path: str, timestamp: str) -> str:
+        source = Path(source_path)
+        backup = source.with_name(
+            f"{source.stem}.backup.{timestamp}{source.suffix or '.bak'}"
+        )
+        shutil.copy2(str(source), str(backup))
+        return str(backup)
+
+    def _backup_file_set(self, files: List[str], timestamp: str) -> str:
+        if not files:
+            raise ValueError("No source files available for backup")
+        first = Path(files[0])
+        backup_root = first.parent / ".pytc_backups" / timestamp
+        backup_root.mkdir(parents=True, exist_ok=True)
+        for idx, file_path in enumerate(files):
+            src = Path(file_path)
+            dest = backup_root / f"{idx:05d}_{src.name}"
+            shutil.copy2(str(src), str(dest))
+        return str(backup_root)
+
+    def _write_volume_to_files(self, files: List[str], volume: np.ndarray) -> None:
+        if not files:
+            raise ValueError("No target files available for overwrite")
+        if volume.ndim == 2:
+            if len(files) != 1:
+                raise ValueError("2D mask overwrite expects a single target file")
+            target = files[0]
+            if target.lower().endswith((".tif", ".tiff")):
+                self._atomic_write_tiff(target, volume)
+            else:
+                self._atomic_write_image(target, volume)
+            return
+
+        if len(files) != volume.shape[0]:
+            raise ValueError(
+                f"Slice count mismatch: source has {len(files)} files, "
+                f"edited volume has {volume.shape[0]} slices"
+            )
+
+        for idx, target in enumerate(files):
+            slice_data = volume[idx]
+            if target.lower().endswith((".tif", ".tiff")):
+                self._atomic_write_tiff(target, slice_data)
+            else:
+                self._atomic_write_image(target, slice_data)
 
     def get_layer(
         self, layer_index: int, enhance: bool = True
@@ -390,6 +609,9 @@ class DataManager:
             self.instance_volume = mask.astype(np.int32)
             self.instance_mode = "instance"
 
+        # Use persisted edited labels when available and shape-compatible.
+        self._load_instance_artifact_if_available()
+
         if self.instance_volume is None:
             self.instances = []
             self.instance_classification = {}
@@ -469,6 +691,48 @@ class DataManager:
         else:
             self.ui_state = {}
 
+        artifact = payload.get("artifact") if isinstance(payload, dict) else None
+        if isinstance(artifact, dict):
+            artifact_path = artifact.get("path")
+            if (
+                isinstance(artifact_path, str)
+                and artifact_path
+                and not self.instance_artifact_path
+            ):
+                self.instance_artifact_path = artifact_path
+            self.persistence_dirty = bool(artifact.get("dirty", False))
+            self.last_saved_at = (
+                artifact.get("last_saved_at")
+                if isinstance(artifact.get("last_saved_at"), str)
+                else self.last_saved_at
+            )
+            self.last_export_at = (
+                artifact.get("last_export_at")
+                if isinstance(artifact.get("last_export_at"), str)
+                else self.last_export_at
+            )
+            self.last_persist_error = (
+                artifact.get("last_error")
+                if isinstance(artifact.get("last_error"), str)
+                else self.last_persist_error
+            )
+            self.last_export_mode = (
+                artifact.get("last_export_mode")
+                if isinstance(artifact.get("last_export_mode"), str)
+                else self.last_export_mode
+            )
+            self.last_export_path = (
+                artifact.get("last_export_path")
+                if isinstance(artifact.get("last_export_path"), str)
+                else self.last_export_path
+            )
+            self.last_backup_path = (
+                artifact.get("last_backup_path")
+                if isinstance(artifact.get("last_backup_path"), str)
+                else self.last_backup_path
+            )
+        self.artifact_writable = self._is_path_writable(self.instance_artifact_path)
+
         stored = payload.get("instances", {}) if isinstance(payload, dict) else {}
         if not isinstance(stored, dict):
             return
@@ -497,6 +761,26 @@ class DataManager:
             "reviewed_instances": reviewed,
             "progress": round(progress, 6),
             "counts": counts,
+        }
+
+    def get_persistence_status(self) -> Dict[str, Any]:
+        artifact_exists = bool(
+            self.instance_artifact_path and os.path.exists(self.instance_artifact_path)
+        )
+        writable = self._is_path_writable(self.instance_artifact_path)
+        self.artifact_writable = writable
+        return {
+            "enabled": bool(self.instance_artifact_path),
+            "artifact_path": self.instance_artifact_path,
+            "artifact_exists": artifact_exists,
+            "dirty": bool(self.persistence_dirty),
+            "writable": bool(writable),
+            "last_saved_at": self.last_saved_at,
+            "last_error": self.last_persist_error,
+            "last_export_at": self.last_export_at,
+            "last_export_mode": self.last_export_mode,
+            "last_export_path": self.last_export_path,
+            "last_backup_path": self.last_backup_path,
         }
 
     def _append_history(self, entry: Dict[str, Any], item: Dict[str, Any]) -> None:
@@ -670,6 +954,7 @@ class DataManager:
 
             payload["instances"] = instances_payload
             payload.setdefault("extensions", {})
+            payload["artifact"] = self.get_persistence_status()
 
             with open(self.progress_path, "w", encoding="utf-8") as handle:
                 json.dump(payload, handle, indent=2)
@@ -677,6 +962,84 @@ class DataManager:
         except Exception:
             # Non-fatal: failing to persist progress should not block proofreading.
             return
+
+    def export_masks(
+        self,
+        mode: str,
+        output_path: Optional[str] = None,
+        create_backup: bool = True,
+    ) -> Dict[str, Any]:
+        if self.instance_volume is None:
+            raise ValueError("No instance volume available for export")
+
+        mode_value = (mode or "").strip().lower()
+        if mode_value not in {"new_file", "overwrite_source"}:
+            raise ValueError("mode must be 'new_file' or 'overwrite_source'")
+
+        timestamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+        backup_path = None
+        written_path = None
+
+        if mode_value == "new_file":
+            if not output_path:
+                raise ValueError("output_path is required for mode='new_file'")
+            target = Path(output_path).expanduser()
+            if target.exists() and target.is_dir():
+                target = target / "edited_instance_labels.tif"
+            if target.suffix.lower() not in {".tif", ".tiff"}:
+                target = target.with_suffix(".tif")
+            if target.exists() and create_backup:
+                backup_path = self._backup_file(str(target), timestamp)
+            self._atomic_write_tiff(str(target), self.instance_volume.astype(np.int32))
+            written_path = str(target)
+        else:
+            if not self.mask_path:
+                raise ValueError("No source mask path available for overwrite")
+
+            # Overwrite is always protected by backup in v1.
+            create_backup = True
+            source_kind, source_files = self._resolve_source_layout(self.mask_path)
+            if source_kind == "none" or not source_files:
+                raise ValueError("Unable to resolve source mask files for overwrite")
+
+            if source_kind == "file":
+                source_file = source_files[0]
+                if create_backup:
+                    backup_path = self._backup_file(source_file, timestamp)
+                if source_file.lower().endswith((".tif", ".tiff")):
+                    self._atomic_write_tiff(
+                        source_file, self.instance_volume.astype(np.int32)
+                    )
+                else:
+                    if self.instance_volume.ndim == 3:
+                        if self.instance_volume.shape[0] != 1:
+                            raise ValueError(
+                                "Cannot overwrite multi-slice volume into a single 2D source image"
+                            )
+                        slice_data = self.instance_volume[0]
+                    else:
+                        slice_data = self.instance_volume
+                    self._atomic_write_image(source_file, slice_data)
+                written_path = source_file
+            else:
+                if create_backup:
+                    backup_path = self._backup_file_set(source_files, timestamp)
+                self._write_volume_to_files(source_files, self.instance_volume)
+                written_path = self.mask_path
+
+        self.last_export_at = self._iso_now()
+        self.last_export_mode = mode_value
+        self.last_export_path = written_path
+        self.last_backup_path = backup_path
+        self.last_persist_error = None
+        self.save_progress()
+
+        return {
+            "message": "Masks exported successfully",
+            "written_path": written_path,
+            "backup_path": backup_path,
+            "timestamp": self.last_export_at,
+        }
 
     def get_instance_slice(
         self, instance_id: int, z_index: Optional[int] = None
@@ -867,9 +1230,13 @@ class DataManager:
         axis: str,
         kind: str,
         max_dim: Optional[int] = None,
+        quality: str = "full",
         format: str = "png",
-    ) -> Tuple[bytes, int, int, str, str]:
+    ) -> Tuple[bytes, int, int, str, str, Dict[str, Any]]:
         """Return encoded image bytes for an instance view component."""
+        quality = (quality or "full").lower()
+        if quality not in {"full", "preview"}:
+            raise ValueError(f"Unsupported quality: {quality}")
         image, label_slice, active_mask, resolved_index, total = (
             self.get_instance_slice_axis(
                 instance_id=instance_id, axis=axis, index=z_index
@@ -878,7 +1245,10 @@ class DataManager:
 
         kind = kind.lower()
         output_format, media_type = self._normalize_output_format(kind, format)
+        resize_ms = 0.0
         max_dim_value = int(max_dim) if max_dim is not None else None
+        if quality == "preview" and (not max_dim_value or max_dim_value <= 0):
+            max_dim_value = 384
         if max_dim_value and max_dim_value > 0:
             cache_key = (
                 instance_id,
@@ -886,11 +1256,20 @@ class DataManager:
                 resolved_index,
                 kind,
                 max_dim_value,
+                quality,
                 output_format,
             )
             cached = self._cache_get(self._resized_cache, cache_key)
             if cached:
-                return cached, resolved_index, total, axis, media_type
+                return (
+                    cached,
+                    resolved_index,
+                    total,
+                    axis,
+                    media_type,
+                    {"cache_hit": True, "decode_ms": 0.0, "resize_ms": 0.0},
+                )
+        resize_started = time.perf_counter()
         if kind == "image":
             array = image
             array = self._resize_to_max_dim(array, max_dim_value, is_mask=False)
@@ -915,6 +1294,8 @@ class DataManager:
             array = self._resize_to_max_dim(array, max_dim_value, is_mask=True)
         else:
             raise ValueError(f"Unsupported image kind: {kind}")
+        if max_dim_value and max_dim_value > 0:
+            resize_ms = (time.perf_counter() - resize_started) * 1000.0
 
         encoded_bytes = array_to_image_bytes(array, format=output_format)
         if max_dim_value and max_dim_value > 0:
@@ -926,12 +1307,20 @@ class DataManager:
                     resolved_index,
                     kind,
                     max_dim_value,
+                    quality,
                     output_format,
                 ),
                 encoded_bytes,
                 self._resized_cache_limit,
             )
-        return encoded_bytes, resolved_index, total, axis, media_type
+        return (
+            encoded_bytes,
+            resolved_index,
+            total,
+            axis,
+            media_type,
+            {"cache_hit": False, "decode_ms": 0.0, "resize_ms": resize_ms},
+        )
 
     def get_instance_filmstrip_bytes(
         self,
@@ -941,8 +1330,9 @@ class DataManager:
         z_count: int,
         kind: str,
         max_dim: Optional[int] = None,
+        quality: str = "preview",
         format: str = "png",
-    ) -> Tuple[bytes, int, int, int, str, str]:
+    ) -> Tuple[bytes, int, int, int, str, str, Dict[str, Any]]:
         """Return stacked filmstrip bytes for a contiguous z-range."""
         if self.instance_volume is None:
             raise ValueError("Instance volume is not available")
@@ -953,6 +1343,9 @@ class DataManager:
 
         kind = kind.lower()
         output_format, media_type = self._normalize_output_format(kind, format)
+        quality = (quality or "preview").lower()
+        if quality not in {"full", "preview"}:
+            raise ValueError(f"Unsupported quality: {quality}")
 
         if self.instance_volume.ndim == 2:
             total = 1
@@ -973,6 +1366,8 @@ class DataManager:
             raise ValueError("No slices available for requested filmstrip range")
 
         max_dim_value = int(max_dim) if max_dim is not None else None
+        if quality == "preview" and (not max_dim_value or max_dim_value <= 0):
+            max_dim_value = 384
         cache_key = (
             instance_id,
             axis,
@@ -980,12 +1375,22 @@ class DataManager:
             z_count,
             kind,
             max_dim_value,
+            quality,
             output_format,
         )
         cached = self._cache_get(self._filmstrip_cache, cache_key)
         if cached:
-            return cached, z_start, z_count, total, axis, media_type
+            return (
+                cached,
+                z_start,
+                z_count,
+                total,
+                axis,
+                media_type,
+                {"cache_hit": True, "decode_ms": 0.0, "resize_ms": 0.0},
+            )
 
+        resize_started = time.perf_counter()
         slices: List[np.ndarray] = []
         for offset in range(z_count):
             z_index = z_start + offset
@@ -1023,6 +1428,7 @@ class DataManager:
 
         if not slices:
             raise ValueError("No slices generated for filmstrip")
+        resize_ms = (time.perf_counter() - resize_started) * 1000.0
 
         filmstrip = np.concatenate(slices, axis=0)
         encoded_bytes = array_to_image_bytes(filmstrip, format=output_format)
@@ -1032,7 +1438,15 @@ class DataManager:
             encoded_bytes,
             self._filmstrip_cache_limit,
         )
-        return encoded_bytes, z_start, z_count, total, axis, media_type
+        return (
+            encoded_bytes,
+            z_start,
+            z_count,
+            total,
+            axis,
+            media_type,
+            {"cache_hit": False, "decode_ms": 0.0, "resize_ms": resize_ms},
+        )
 
     def get_sparse_active_mask(
         self,

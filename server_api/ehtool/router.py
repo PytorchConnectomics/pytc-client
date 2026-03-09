@@ -29,6 +29,9 @@ from .models import (
     InstancesResponse,
     InstanceInfo,
     InstanceViewResponse,
+    PersistenceStatusResponse,
+    ExportMasksRequest,
+    ExportMasksResponse,
 )
 from .db_models import EHToolSession, EHToolLayer
 from .data_manager import DataManager
@@ -311,7 +314,31 @@ async def list_instances(
         total_instances=len(response_instances),
         total_layers=data_manager.total_layers,
         ui_state=data_manager.ui_state or None,
+        persistence=data_manager.get_persistence_status(),
     )
+
+
+@router.get("/detection/persistence-status", response_model=PersistenceStatusResponse)
+async def get_persistence_status(
+    session_id: int,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    db_session = (
+        db.query(EHToolSession)
+        .filter(
+            EHToolSession.id == session_id, EHToolSession.user_id == current_user.id
+        )
+        .first()
+    )
+    if not db_session:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Session not found"
+        )
+
+    data_manager = get_data_manager(session_id, db)
+    data_manager.ensure_instances()
+    return PersistenceStatusResponse(persistence=data_manager.get_persistence_status())
 
 
 @router.get("/detection/instance-view", response_model=InstanceViewResponse)
@@ -372,6 +399,7 @@ async def get_instance_image(
     z_index: Optional[int] = None,
     axis: str = "xy",
     max_dim: Optional[int] = None,
+    quality: str = "full",
     format: str = "png",
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
@@ -398,15 +426,21 @@ async def get_instance_image(
         )
 
     try:
-        image_bytes, resolved_index, total, resolved_axis, media_type = (
-            data_manager.get_instance_image_bytes(
-                instance_id=instance_id,
-                z_index=z_index,
-                axis=axis,
-                kind=kind,
-                max_dim=max_dim,
-                format=format,
-            )
+        (
+            image_bytes,
+            resolved_index,
+            total,
+            resolved_axis,
+            media_type,
+            perf_meta,
+        ) = data_manager.get_instance_image_bytes(
+            instance_id=instance_id,
+            z_index=z_index,
+            axis=axis,
+            kind=kind,
+            max_dim=max_dim,
+            quality=quality,
+            format=format,
         )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
@@ -415,6 +449,9 @@ async def get_instance_image(
         "X-Z-Index": str(resolved_index),
         "X-Total-Layers": str(total),
         "X-Axis": resolved_axis,
+        "X-Cache-Hit": "1" if perf_meta.get("cache_hit") else "0",
+        "X-Decode-MS": f"{float(perf_meta.get('decode_ms', 0.0)):.2f}",
+        "X-Resize-MS": f"{float(perf_meta.get('resize_ms', 0.0)):.2f}",
     }
     return Response(content=image_bytes, media_type=media_type, headers=headers)
 
@@ -428,6 +465,7 @@ async def get_instance_filmstrip(
     z_count: int = 16,
     axis: str = "xy",
     max_dim: Optional[int] = None,
+    quality: str = "preview",
     format: str = "png",
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
@@ -461,6 +499,7 @@ async def get_instance_filmstrip(
             total,
             resolved_axis,
             media_type,
+            perf_meta,
         ) = data_manager.get_instance_filmstrip_bytes(
             instance_id=instance_id,
             axis=axis,
@@ -468,6 +507,7 @@ async def get_instance_filmstrip(
             z_count=z_count,
             kind=kind,
             max_dim=max_dim,
+            quality=quality,
             format=format,
         )
     except ValueError as exc:
@@ -478,6 +518,9 @@ async def get_instance_filmstrip(
         "X-Z-Count": str(resolved_count),
         "X-Total-Layers": str(total),
         "X-Axis": resolved_axis,
+        "X-Cache-Hit": "1" if perf_meta.get("cache_hit") else "0",
+        "X-Decode-MS": f"{float(perf_meta.get('decode_ms', 0.0)):.2f}",
+        "X-Resize-MS": f"{float(perf_meta.get('resize_ms', 0.0)):.2f}",
     }
     return Response(content=image_bytes, media_type=media_type, headers=headers)
 
@@ -720,3 +763,46 @@ async def save_instance_mask(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to save instance mask: {str(e)}",
         )
+
+
+@router.post("/detection/export-masks", response_model=ExportMasksResponse)
+async def export_masks(
+    request: ExportMasksRequest,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    db_session = (
+        db.query(EHToolSession)
+        .filter(
+            EHToolSession.id == request.session_id,
+            EHToolSession.user_id == current_user.id,
+        )
+        .first()
+    )
+    if not db_session:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Session not found"
+        )
+
+    try:
+        data_manager = get_data_manager(request.session_id, db)
+        data_manager.ensure_instances()
+        result = data_manager.export_masks(
+            mode=request.mode,
+            output_path=request.output_path,
+            create_backup=request.create_backup,
+        )
+        return ExportMasksResponse(
+            message=result["message"],
+            written_path=result["written_path"],
+            backup_path=result.get("backup_path"),
+            timestamp=result["timestamp"],
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except Exception as exc:
+        logger.exception("Failed to export masks")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to export masks: {exc}",
+        ) from exc
