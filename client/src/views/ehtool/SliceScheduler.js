@@ -17,7 +17,8 @@ class SliceScheduler {
       nearby: options.nearbyConcurrency ?? 1,
       background: options.backgroundConcurrency ?? 1,
     };
-    this.onEvent = typeof options.onEvent === "function" ? options.onEvent : null;
+    this.onEvent =
+      typeof options.onEvent === "function" ? options.onEvent : null;
     this.laneOrder = ["interactive", "nearby", "background"];
     this.flushScheduled = false;
   }

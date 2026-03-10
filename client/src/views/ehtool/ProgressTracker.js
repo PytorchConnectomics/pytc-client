@@ -1,11 +1,5 @@
 import React from "react";
-import {
-  Progress,
-  Button,
-  Divider,
-  Space,
-  Typography,
-} from "antd";
+import { Progress, Button, Divider, Space, Typography } from "antd";
 import {
   CheckCircleOutlined,
   CloseCircleOutlined,
@@ -32,7 +26,12 @@ function ProgressTracker({
   if (!stats) {
     return (
       <div style={{ padding: compact ? "0" : "16px" }}>
-        <div style={{ textAlign: "center", padding: compact ? "8px 4px" : "16px 8px" }}>
+        <div
+          style={{
+            textAlign: "center",
+            padding: compact ? "8px 4px" : "16px 8px",
+          }}
+        >
           <Text type="secondary">No session loaded yet.</Text>
         </div>
       </div>
@@ -43,7 +42,11 @@ function ProgressTracker({
 
   return (
     <div style={{ padding: "0" }}>
-      <Space direction="vertical" size={compact ? 4 : 6} style={{ width: "100%" }}>
+      <Space
+        direction="vertical"
+        size={compact ? 4 : 6}
+        style={{ width: "100%" }}
+      >
         <Text strong style={{ fontSize: 13 }}>
           {totalLayers} {unitLabel}
         </Text>
@@ -73,7 +76,8 @@ function ProgressTracker({
             {stats.incorrect}
           </div>
           <div>
-            <QuestionCircleOutlined style={{ color: "#f59e0b" }} /> {stats.unsure}
+            <QuestionCircleOutlined style={{ color: "#f59e0b" }} />{" "}
+            {stats.unsure}
           </div>
           <div>
             <ExclamationCircleOutlined style={{ color: "#cbd5f5" }} />{" "}
@@ -84,7 +88,12 @@ function ProgressTracker({
         <Divider style={{ margin: compact ? "4px 0" : "8px 0" }} />
 
         <Space direction="vertical" style={{ width: "100%" }} size="small">
-          <Button icon={<FolderOpenOutlined />} onClick={onNewSession} block size="small">
+          <Button
+            icon={<FolderOpenOutlined />}
+            onClick={onNewSession}
+            block
+            size="small"
+          >
             Load dataset
           </Button>
         </Space>

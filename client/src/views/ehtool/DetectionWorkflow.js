@@ -582,9 +582,10 @@ function DetectionWorkflow({ sessionId, setSessionId, refreshTrigger }) {
         if (!frameKey.startsWith(prefix)) return;
         filmstripFrameCache.current.delete(frameKey);
       });
-      filmstripFrameCacheOrder.current = filmstripFrameCacheOrder.current.filter(
-        (frameKey) => !frameKey.startsWith(prefix),
-      );
+      filmstripFrameCacheOrder.current =
+        filmstripFrameCacheOrder.current.filter(
+          (frameKey) => !frameKey.startsWith(prefix),
+        );
     }
     filmstripBatchCache.current.set(key, batch);
     touchCacheOrder(filmstripBatchCacheOrder.current, key);
@@ -596,9 +597,10 @@ function DetectionWorkflow({ sessionId, setSessionId, refreshTrigger }) {
         if (!frameKey.startsWith(prefix)) return;
         filmstripFrameCache.current.delete(frameKey);
       });
-      filmstripFrameCacheOrder.current = filmstripFrameCacheOrder.current.filter(
-        (frameKey) => !frameKey.startsWith(prefix),
-      );
+      filmstripFrameCacheOrder.current =
+        filmstripFrameCacheOrder.current.filter(
+          (frameKey) => !frameKey.startsWith(prefix),
+        );
     }
   };
 
@@ -714,7 +716,10 @@ function DetectionWorkflow({ sessionId, setSessionId, refreshTrigger }) {
       const frameHeight = Math.max(1, Math.floor(fullHeight / safeCount));
       const sourceY = Math.max(
         0,
-        Math.min(safeIndex * frameHeight, Math.max(fullHeight - frameHeight, 0)),
+        Math.min(
+          safeIndex * frameHeight,
+          Math.max(fullHeight - frameHeight, 0),
+        ),
       );
       const croppedBitmap = await createImageBitmap(
         blob,
@@ -916,9 +921,12 @@ function DetectionWorkflow({ sessionId, setSessionId, refreshTrigger }) {
             zCount: Number(
               response?.headers?.["x-z-count"] ?? FILMSTRIP_BATCH_SIZE,
             ),
-            total: Number(response?.headers?.["x-total-layers"] ?? totalLayers ?? 0),
+            total: Number(
+              response?.headers?.["x-total-layers"] ?? totalLayers ?? 0,
+            ),
             axis: response?.headers?.["x-axis"] ?? axis,
-            frameHeight: Number(response?.headers?.["x-frame-height"] ?? 0) || null,
+            frameHeight:
+              Number(response?.headers?.["x-frame-height"] ?? 0) || null,
           },
         };
         cacheFilmstripBatch(key, entry);
@@ -1640,16 +1648,19 @@ function DetectionWorkflow({ sessionId, setSessionId, refreshTrigger }) {
     if (scrubIdleRef.current) {
       clearTimeout(scrubIdleRef.current);
     }
-    previewDebounceRef.current = setTimeout(() => {
-      loadInstancePreview(activeInstanceId, nextIndex, axisToUse, {
-        maxDim: PREVIEW_MAX_DIM,
-        qualityLabel: `preview-${PREVIEW_MAX_DIM}`,
-        prefetchNeighbors: !isFastScrubRef.current,
-        prefetchDistance: isFastScrubRef.current ? 0 : 1,
-        imageOnly: true,
-        priority: 120,
-      });
-    }, isFastScrubRef.current ? 100 : 60);
+    previewDebounceRef.current = setTimeout(
+      () => {
+        loadInstancePreview(activeInstanceId, nextIndex, axisToUse, {
+          maxDim: PREVIEW_MAX_DIM,
+          qualityLabel: `preview-${PREVIEW_MAX_DIM}`,
+          prefetchNeighbors: !isFastScrubRef.current,
+          prefetchDistance: isFastScrubRef.current ? 0 : 1,
+          imageOnly: true,
+          priority: 120,
+        });
+      },
+      isFastScrubRef.current ? 100 : 60,
+    );
 
     scrubIdleRef.current = setTimeout(() => {
       if (!isScrubbingRef.current) return;
@@ -1788,7 +1799,9 @@ function DetectionWorkflow({ sessionId, setSessionId, refreshTrigger }) {
             mode: "overwrite_source",
             create_backup: true,
           });
-          message.success(`Source masks updated at ${response.data.written_path}`);
+          message.success(
+            `Source masks updated at ${response.data.written_path}`,
+          );
           if (response.data.backup_path) {
             message.info(`Backup created at ${response.data.backup_path}`);
           }
@@ -1869,7 +1882,10 @@ function DetectionWorkflow({ sessionId, setSessionId, refreshTrigger }) {
       <Text type="secondary" style={{ fontSize: 12 }}>
         Opacity controls
       </Text>
-      <Space size="small" style={{ width: "100%", justifyContent: "space-between" }}>
+      <Space
+        size="small"
+        style={{ width: "100%", justifyContent: "space-between" }}
+      >
         <Text style={{ fontSize: 12 }}>Other instances</Text>
         <Text type="secondary" style={{ fontSize: 12 }}>
           {Math.round(overlayAllAlpha * 100)}%
@@ -1881,7 +1897,10 @@ function DetectionWorkflow({ sessionId, setSessionId, refreshTrigger }) {
         value={Math.round(overlayAllAlpha * 100)}
         onChange={(value) => setOverlayAllAlpha(value / 100)}
       />
-      <Space size="small" style={{ width: "100%", justifyContent: "space-between" }}>
+      <Space
+        size="small"
+        style={{ width: "100%", justifyContent: "space-between" }}
+      >
         <Text style={{ fontSize: 12 }}>Selected instance</Text>
         <Text type="secondary" style={{ fontSize: 12 }}>
           {Math.round(overlayActiveAlpha * 100)}%
@@ -1900,7 +1919,11 @@ function DetectionWorkflow({ sessionId, setSessionId, refreshTrigger }) {
     instanceMode !== "none" && instances.length > 0 ? (
       <div style={{ display: "grid", gap: 8 }}>
         <Space size="small" wrap>
-          <Button size="small" type="primary" onClick={() => setShowInstanceBrowser(true)}>
+          <Button
+            size="small"
+            type="primary"
+            onClick={() => setShowInstanceBrowser(true)}
+          >
             Browse...
           </Button>
           <Button size="small" onClick={goToNextUnreviewed}>

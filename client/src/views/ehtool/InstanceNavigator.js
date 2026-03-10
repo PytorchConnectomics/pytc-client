@@ -60,10 +60,7 @@ function InstanceNavigator({
   );
 
   const total = filtered.length;
-  const startIndex = Math.max(
-    0,
-    Math.floor(scrollTop / rowHeight) - overscan,
-  );
+  const startIndex = Math.max(0, Math.floor(scrollTop / rowHeight) - overscan);
   const endIndex = Math.min(
     total,
     Math.ceil((scrollTop + containerHeight) / rowHeight) + overscan,
@@ -135,11 +132,16 @@ function InstanceNavigator({
               }}
             >
               <div style={{ width: "100%" }}>
-                <Space style={{ width: "100%", justifyContent: "space-between" }}>
+                <Space
+                  style={{ width: "100%", justifyContent: "space-between" }}
+                >
                   <Text style={{ fontSize: 12 }} strong>
                     #{item.id}
                   </Text>
-                  <Tag color={statusColor[item.classification]} style={{ fontSize: 10 }}>
+                  <Tag
+                    color={statusColor[item.classification]}
+                    style={{ fontSize: 10 }}
+                  >
                     {statusLabel[item.classification]}
                   </Tag>
                 </Space>
