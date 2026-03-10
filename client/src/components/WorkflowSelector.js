@@ -36,8 +36,8 @@ const WorkflowSelector = ({ visible, onSelect, onCancel }) => {
     { label: "Tensorboard", value: "monitoring", icon: <DashboardOutlined /> },
     { label: "SynAnno", value: "synanno", icon: <ApartmentOutlined /> },
     {
-      label: "Worm Error Handling",
-      value: "worm-error-handling",
+      label: "Mask Proofreading",
+      value: "mask-proofreading",
       icon: <BugOutlined />,
     },
   ];

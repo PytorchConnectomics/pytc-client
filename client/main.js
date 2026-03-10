@@ -54,6 +54,7 @@ function createMenu() {
       label: "Electron",
       submenu: [{ role: "toggleDevTools" }, { role: "quit" }],
     },
+    { role: "editMenu" },
     {
       label: "Edit",
       submenu: [
@@ -140,13 +141,13 @@ function createMenu() {
             ),
         },
         {
-          label: "Worm Error Handling",
+          label: "Mask Proofreading",
           type: "checkbox",
           checked: false,
           click: (menuItem) =>
             mainWindow.webContents.send(
               "toggle-tab",
-              "worm-error-handling",
+              "mask-proofreading",
               menuItem.checked,
             ),
         },

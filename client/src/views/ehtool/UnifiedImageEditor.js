@@ -19,6 +19,7 @@ function UnifiedImageEditor({
   sessionId,
   onClose,
   onSaveSuccess,
+  showClassification = true,
 }) {
   const [currentLabel, setCurrentLabel] = useState("error");
   const [saving, setSaving] = useState(false);
@@ -36,7 +37,13 @@ function UnifiedImageEditor({
       if (!visible) return;
 
       // Prevent shortcuts when typing in input fields
-      if (e.target.tagName === "INPUT" || e.target.tagName === "TEXTAREA")
+      const target = e.target;
+      if (
+        target &&
+        (target.tagName === "INPUT" ||
+          target.tagName === "TEXTAREA" ||
+          target.isContentEditable)
+      )
         return;
 
       switch (e.key.toLowerCase()) {
@@ -47,13 +54,13 @@ function UnifiedImageEditor({
           }
           break;
         case "c":
-          setCurrentLabel("correct");
+          if (showClassification) setCurrentLabel("correct");
           break;
         case "x":
-          setCurrentLabel("incorrect");
+          if (showClassification) setCurrentLabel("incorrect");
           break;
         case "u":
-          setCurrentLabel("unsure");
+          if (showClassification) setCurrentLabel("unsure");
           break;
         case "escape":
           onClose();
@@ -85,14 +92,16 @@ function UnifiedImageEditor({
         mask_base64: maskBase64,
       });
 
-      // 2. Save Classification
-      await apiClient.post("/eh/detection/classify", {
-        session_id: sessionId,
-        layer_ids: [layer.id],
-        classification: currentLabel,
-      });
+      if (showClassification) {
+        // 2. Save Classification
+        await apiClient.post("/eh/detection/classify", {
+          session_id: sessionId,
+          layer_ids: [layer.id],
+          classification: currentLabel,
+        });
+      }
 
-      message.success("Layer updated successfully");
+      message.success("Slice updated successfully");
       if (onSaveSuccess) onSaveSuccess();
       onClose();
     } catch (error) {
@@ -119,25 +128,29 @@ function UnifiedImageEditor({
           }}
         >
           <span>
-            Image Inspection: {layer.layer_name} (Layer {layer.layer_index + 1})
+            Slice Editor: {layer.layer_name} (Slice {layer.layer_index + 1})
           </span>
           <Space>
-            <Radio.Group
-              value={currentLabel}
-              onChange={handleLabelChange}
-              buttonStyle="solid"
-            >
-              <Radio.Button value="correct">
-                <CheckCircleOutlined /> Correct (C)
-              </Radio.Button>
-              <Radio.Button value="incorrect">
-                <CloseCircleOutlined /> Incorrect (X)
-              </Radio.Button>
-              <Radio.Button value="unsure">
-                <QuestionCircleOutlined /> Unsure (U)
-              </Radio.Button>
-            </Radio.Group>
-            <Divider type="vertical" />
+            {showClassification && (
+              <>
+                <Radio.Group
+                  value={currentLabel}
+                  onChange={handleLabelChange}
+                  buttonStyle="solid"
+                >
+                  <Radio.Button value="correct">
+                    <CheckCircleOutlined /> Correct (C)
+                  </Radio.Button>
+                  <Radio.Button value="incorrect">
+                    <CloseCircleOutlined /> Incorrect (X)
+                  </Radio.Button>
+                  <Radio.Button value="unsure">
+                    <QuestionCircleOutlined /> Unsure (U)
+                  </Radio.Button>
+                </Radio.Group>
+                <Divider type="vertical" />
+              </>
+            )}
             <Button
               type="primary"
               icon={<SaveOutlined />}

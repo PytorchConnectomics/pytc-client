@@ -27,6 +27,7 @@ import FileTreeSidebar from "../components/FileTreeSidebar";
 
 const HIDDEN_SYSTEM_FILES = new Set([
   "workflow_preference.json",
+  ".pytc_proofreading.json",
   ".ds_store",
   "thumbs.db",
 ]);
@@ -150,7 +151,6 @@ function FilesManager() {
           setServerUnavailable(true);
           if (!hasShownServerWarning && !silentNetworkError) {
             setHasShownServerWarning(true);
-            message.warning("API server is not available yet. Retrying...");
           }
         }
         if (!err.isAuthError && !isNetworkError) {
@@ -797,12 +797,19 @@ function FilesManager() {
         }
         return;
       }
-      if (e.target.tagName === "INPUT") return;
+      const target = e.target;
+      if (
+        target &&
+        (target.tagName === "INPUT" ||
+          target.tagName === "TEXTAREA" ||
+          target.isContentEditable)
+      )
+        return;
       if (e.key === "Delete") handleDelete();
       if (e.ctrlKey && e.key === "c") handleCopy();
       if (e.ctrlKey && e.key === "x") handleCut();
       if (e.ctrlKey && e.key === "v") handlePaste();
-      if (e.ctrlKey && e.key === "a") {
+      if ((e.ctrlKey || e.metaKey) && e.key === "a") {
         e.preventDefault();
         const allKeys = [
           ...folders
@@ -1251,29 +1258,6 @@ function FilesManager() {
         position: "relative",
       }}
     >
-      {serverUnavailable && (
-        <div
-          style={{
-            position: "absolute",
-            top: 80,
-            left: 24,
-            right: 24,
-            zIndex: 10,
-          }}
-        >
-          <div
-            style={{
-              padding: 12,
-              background: "#fffbe6",
-              border: "1px solid #ffe58f",
-              borderRadius: 8,
-            }}
-          >
-            API server is not ready yet. File list will load automatically when
-            it comes online.
-          </div>
-        </div>
-      )}
       {isSidebarVisible && (
         <>
           <FileTreeSidebar
