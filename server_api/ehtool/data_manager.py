@@ -1425,25 +1425,17 @@ class DataManager:
 
                 if kind == "image":
                     frame = image
-                    frame = self._resize_to_max_dim(
-                        frame, max_dim_value, is_mask=False
-                    )
+                    frame = self._resize_to_max_dim(frame, max_dim_value, is_mask=False)
                 elif kind == "mask_all":
                     frame = labels_to_rgba(label_slice)
-                    frame = self._resize_to_max_dim(
-                        frame, max_dim_value, is_mask=True
-                    )
+                    frame = self._resize_to_max_dim(frame, max_dim_value, is_mask=True)
                 elif kind == "mask_active":
                     active_color = glasbey_color(instance_id)
                     frame = mask_to_rgba(active_mask, active_color)
-                    frame = self._resize_to_max_dim(
-                        frame, max_dim_value, is_mask=True
-                    )
+                    frame = self._resize_to_max_dim(frame, max_dim_value, is_mask=True)
                 elif kind == "mask_active_binary":
                     frame = to_uint8(active_mask * 255)
-                    frame = self._resize_to_max_dim(
-                        frame, max_dim_value, is_mask=True
-                    )
+                    frame = self._resize_to_max_dim(frame, max_dim_value, is_mask=True)
                 elif kind == "mask_raw":
                     if axis != "xy":
                         raise ValueError("Raw mask only supported for XY view")
@@ -1453,9 +1445,7 @@ class DataManager:
                         if raw_mask is None
                         else ensure_grayscale_2d(raw_mask)
                     )
-                    frame = self._resize_to_max_dim(
-                        frame, max_dim_value, is_mask=True
-                    )
+                    frame = self._resize_to_max_dim(frame, max_dim_value, is_mask=True)
                 else:
                     raise ValueError(f"Unsupported image kind: {kind}")
 
