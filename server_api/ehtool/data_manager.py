@@ -1169,10 +1169,14 @@ class DataManager:
         axis: str = "xy",
     ) -> Dict[str, Any]:
         """Get cached base64 view data for an instance slice."""
-        image, label_slice, active_mask, resolved_z, total = (
-            self.get_instance_slice_axis(
-                instance_id=instance_id, axis=axis, index=z_index
-            )
+        (
+            image,
+            label_slice,
+            active_mask,
+            resolved_z,
+            total,
+        ) = self.get_instance_slice_axis(
+            instance_id=instance_id, axis=axis, index=z_index
         )
 
         cached_slice = self._cache_get(self._slice_cache, (axis, resolved_z))
@@ -1243,10 +1247,14 @@ class DataManager:
         quality = (quality or "full").lower()
         if quality not in {"full", "preview"}:
             raise ValueError(f"Unsupported quality: {quality}")
-        image, label_slice, active_mask, resolved_index, total = (
-            self.get_instance_slice_axis(
-                instance_id=instance_id, axis=axis, index=z_index
-            )
+        (
+            image,
+            label_slice,
+            active_mask,
+            resolved_index,
+            total,
+        ) = self.get_instance_slice_axis(
+            instance_id=instance_id, axis=axis, index=z_index
         )
 
         kind = kind.lower()
@@ -1490,10 +1498,14 @@ class DataManager:
         axis: str,
     ) -> Dict[str, Any]:
         """Return a cropped active mask with bbox metadata."""
-        _, label_slice, active_mask, resolved_index, total = (
-            self.get_instance_slice_axis(
-                instance_id=instance_id, axis=axis, index=z_index
-            )
+        (
+            _,
+            label_slice,
+            active_mask,
+            resolved_index,
+            total,
+        ) = self.get_instance_slice_axis(
+            instance_id=instance_id, axis=axis, index=z_index
         )
 
         coords = np.argwhere(active_mask > 0)
