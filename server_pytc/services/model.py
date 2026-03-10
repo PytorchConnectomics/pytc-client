@@ -71,7 +71,7 @@ def start_training(dict: dict):
     command = [sys.executable, str(script_path)]
 
     print(f"[MODEL.PY] Processing command-line arguments...")
-    for key, value in dict["arguments"].items():
+    for key, value in dict.get("arguments", {}).items():
         if value is not None:
             print(f"[MODEL.PY]   Adding --{key} {value}")
             command.extend([f"--{key}", str(value)])
