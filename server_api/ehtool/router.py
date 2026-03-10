@@ -498,6 +498,7 @@ async def get_instance_filmstrip(
             resolved_count,
             total,
             resolved_axis,
+            frame_height,
             media_type,
             perf_meta,
         ) = data_manager.get_instance_filmstrip_bytes(
@@ -518,6 +519,7 @@ async def get_instance_filmstrip(
         "X-Z-Count": str(resolved_count),
         "X-Total-Layers": str(total),
         "X-Axis": resolved_axis,
+        "X-Frame-Height": str(frame_height),
         "X-Cache-Hit": "1" if perf_meta.get("cache_hit") else "0",
         "X-Decode-MS": f"{float(perf_meta.get('decode_ms', 0.0)):.2f}",
         "X-Resize-MS": f"{float(perf_meta.get('resize_ms', 0.0)):.2f}",

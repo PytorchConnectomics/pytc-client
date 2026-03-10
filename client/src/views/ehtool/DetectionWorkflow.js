@@ -43,10 +43,17 @@ const FILMSTRIP_BATCH_SIZE = parsePositiveInt(
 );
 const PREVIEW_PREFETCH_RADIUS = parsePositiveInt(
   process.env.REACT_APP_EH_PREVIEW_PREFETCH_RADIUS,
-  6,
+  1,
 );
 const ENABLE_FILMSTRIP_PREVIEW =
   process.env.REACT_APP_EH_ENABLE_FILMSTRIP_PREVIEW !== "false";
+const FAST_SCRUB_SLICES_PER_SEC = Number.parseFloat(
+  process.env.REACT_APP_EH_FAST_SCRUB_SPS || "8",
+);
+const SCRUB_IDLE_MS = parsePositiveInt(
+  process.env.REACT_APP_EH_SCRUB_IDLE_MS,
+  120,
+);
 
 function DetectionWorkflow({ sessionId, setSessionId, refreshTrigger }) {
   const [projectName, setProjectName] = useState("");
@@ -72,10 +79,19 @@ function DetectionWorkflow({ sessionId, setSessionId, refreshTrigger }) {
   const [sliderZ, setSliderZ] = useState(0);
   const [committedZ, setCommittedZ] = useState(0);
   const previewDebounceRef = useRef(null);
+  const scrubIdleRef = useRef(null);
   const previewCache = useRef(new Map());
   const previewCacheOrder = useRef([]);
   const previewCacheLimit = 180;
+  const filmstripBatchCache = useRef(new Map());
+  const filmstripBatchCacheOrder = useRef([]);
+  const filmstripBatchCacheLimit = 48;
+  const filmstripFrameCache = useRef(new Map());
+  const filmstripFrameCacheOrder = useRef([]);
+  const filmstripFrameCacheLimit = 240;
   const isScrubbingRef = useRef(false);
+  const scrubTrackRef = useRef({ zIndex: 0, at: 0 });
+  const isFastScrubRef = useRef(false);
   const [overlayAllAlpha, setOverlayAllAlpha] = useState(0.08);
   const [overlayActiveAlpha, setOverlayActiveAlpha] = useState(0.8);
   const [savingMask, setSavingMask] = useState(false);
@@ -95,6 +111,8 @@ function DetectionWorkflow({ sessionId, setSessionId, refreshTrigger }) {
   const [exportingMasks, setExportingMasks] = useState(false);
   const [overwritingSource, setOverwritingSource] = useState(false);
   const lastPersistenceErrorRef = useRef(null);
+  const lastFullRequestKeyRef = useRef(null);
+  const fullRequestInFlightRef = useRef(null);
 
   const schedulerRef = useRef(
     new SliceScheduler({
@@ -254,16 +272,37 @@ function DetectionWorkflow({ sessionId, setSessionId, refreshTrigger }) {
   useEffect(() => {
     return () => {
       schedulerRef.current.clear();
+      if (previewDebounceRef.current) {
+        clearTimeout(previewDebounceRef.current);
+      }
+      if (scrubIdleRef.current) {
+        clearTimeout(scrubIdleRef.current);
+      }
     };
   }, []);
 
   useEffect(() => {
     if (!sessionId || !activeInstanceId || instanceMode !== "instance") return;
     if (isScrubbingRef.current) return;
-    const needsAll = overlayAllAlpha > 0.001 && !viewState.maskAllBase64;
-    const needsActive =
-      overlayActiveAlpha > 0.001 && !viewState.maskActiveBase64;
+    const includeAll = overlayAllAlpha > 0.001;
+    const includeActive = overlayActiveAlpha > 0.001;
+    const needsAll = includeAll && !viewState.maskAllBase64;
+    const needsActive = includeActive && !viewState.maskActiveBase64;
     if (needsAll || needsActive) {
+      const overlayRequestIdentity = [
+        activeInstanceId,
+        viewAxis,
+        committedZ,
+        includeAll ? "all" : "noall",
+        includeActive ? "active" : "noactive",
+        "raw",
+      ].join(":");
+      if (
+        lastFullRequestKeyRef.current === overlayRequestIdentity ||
+        fullRequestInFlightRef.current === overlayRequestIdentity
+      ) {
+        return;
+      }
       loadInstanceView(activeInstanceId, committedZ, true, undefined, viewAxis);
     }
     if (overlayAllAlpha <= 0.001 && viewState.maskAllBase64) {
@@ -293,8 +332,41 @@ function DetectionWorkflow({ sessionId, setSessionId, refreshTrigger }) {
   useEffect(() => {
     if (!sessionId || !activeInstanceId) return;
     if (isScrubbingRef.current) return;
+    const includeAll = instanceMode === "instance" && overlayAllAlpha > 0.001;
+    const includeActive = overlayActiveAlpha > 0.001;
+    const requestIdentity = [
+      activeInstanceId,
+      viewAxis,
+      committedZ,
+      includeAll ? "all" : "noall",
+      includeActive ? "active" : "noactive",
+      "raw",
+    ].join(":");
+    const hasCommittedView =
+      viewState.axis === viewAxis &&
+      viewState.zIndex === committedZ &&
+      Boolean(viewState.imageBase64) &&
+      Boolean(viewState.maskRawBase64) &&
+      (!includeAll || Boolean(viewState.maskAllBase64)) &&
+      (!includeActive || Boolean(viewState.maskActiveBase64));
+    if (hasCommittedView) return;
+    if (fullRequestInFlightRef.current === requestIdentity) return;
     loadInstanceView(activeInstanceId, committedZ, true, undefined, viewAxis);
-  }, [sessionId, activeInstanceId, viewAxis, committedZ]);
+  }, [
+    sessionId,
+    activeInstanceId,
+    viewAxis,
+    committedZ,
+    instanceMode,
+    overlayAllAlpha,
+    overlayActiveAlpha,
+    viewState.axis,
+    viewState.zIndex,
+    viewState.imageBase64,
+    viewState.maskRawBase64,
+    viewState.maskAllBase64,
+    viewState.maskActiveBase64,
+  ]);
 
   useEffect(() => {
     const handleKeyPress = (e) => {
@@ -412,6 +484,7 @@ function DetectionWorkflow({ sessionId, setSessionId, refreshTrigger }) {
 
   const revokePayloadUrls = (payload) => {
     if (!payload) return;
+    const frameUrls = new Set(filmstripFrameCache.current.values());
     [
       payload.imageBase64,
       payload.maskAllBase64,
@@ -419,16 +492,29 @@ function DetectionWorkflow({ sessionId, setSessionId, refreshTrigger }) {
       payload.maskRawBase64,
     ]
       .filter((url) => typeof url === "string" && url.startsWith("blob:"))
-      .forEach((url) => URL.revokeObjectURL(url));
+      .forEach((url) => {
+        if (!frameUrls.has(url)) {
+          URL.revokeObjectURL(url);
+        }
+      });
   };
 
   const clearFrameCaches = () => {
     viewCache.current.forEach((cached) => revokePayloadUrls(cached));
     previewCache.current.forEach((cached) => revokePayloadUrls(cached));
+    filmstripFrameCache.current.forEach((url) => {
+      if (typeof url === "string" && url.startsWith("blob:")) {
+        URL.revokeObjectURL(url);
+      }
+    });
     viewCache.current.clear();
     previewCache.current.clear();
+    filmstripBatchCache.current.clear();
+    filmstripFrameCache.current.clear();
     viewCacheOrder.current = [];
     previewCacheOrder.current = [];
+    filmstripBatchCacheOrder.current = [];
+    filmstripFrameCacheOrder.current = [];
   };
 
   useEffect(() => {
@@ -467,6 +553,64 @@ function DetectionWorkflow({ sessionId, setSessionId, refreshTrigger }) {
       quality,
     ].join(":");
 
+  const buildFilmstripBatchKey = ({
+    sessionId: sid,
+    instanceId,
+    axis,
+    batchStart,
+    zCount,
+    kind,
+    maxDim,
+    quality,
+  }) =>
+    [
+      sid,
+      instanceId,
+      axis,
+      batchStart,
+      zCount,
+      kind,
+      maxDim || "full",
+      quality,
+    ].join(":");
+
+  const cacheFilmstripBatch = (key, batch) => {
+    const existing = filmstripBatchCache.current.get(key);
+    if (existing && existing !== batch) {
+      const prefix = `${key}:`;
+      filmstripFrameCache.current.forEach((_, frameKey) => {
+        if (!frameKey.startsWith(prefix)) return;
+        filmstripFrameCache.current.delete(frameKey);
+      });
+      filmstripFrameCacheOrder.current = filmstripFrameCacheOrder.current.filter(
+        (frameKey) => !frameKey.startsWith(prefix),
+      );
+    }
+    filmstripBatchCache.current.set(key, batch);
+    touchCacheOrder(filmstripBatchCacheOrder.current, key);
+    while (filmstripBatchCacheOrder.current.length > filmstripBatchCacheLimit) {
+      const oldest = filmstripBatchCacheOrder.current.shift();
+      filmstripBatchCache.current.delete(oldest);
+      const prefix = `${oldest}:`;
+      filmstripFrameCache.current.forEach((_, frameKey) => {
+        if (!frameKey.startsWith(prefix)) return;
+        filmstripFrameCache.current.delete(frameKey);
+      });
+      filmstripFrameCacheOrder.current = filmstripFrameCacheOrder.current.filter(
+        (frameKey) => !frameKey.startsWith(prefix),
+      );
+    }
+  };
+
+  const cacheFilmstripFrame = (key, frameUrl) => {
+    filmstripFrameCache.current.set(key, frameUrl);
+    touchCacheOrder(filmstripFrameCacheOrder.current, key);
+    while (filmstripFrameCacheOrder.current.length > filmstripFrameCacheLimit) {
+      const oldest = filmstripFrameCacheOrder.current.shift();
+      filmstripFrameCache.current.delete(oldest);
+    }
+  };
+
   const cachePreview = (key, payload) => {
     const existing = previewCache.current.get(key);
     if (existing && existing !== payload) {
@@ -502,11 +646,11 @@ function DetectionWorkflow({ sessionId, setSessionId, refreshTrigger }) {
     setViewState((prev) => ({
       ...prev,
       imageBase64: payload.imageBase64 ?? prev.imageBase64,
-      maskAllBase64: payload.maskAllBase64 ?? null,
-      maskActiveBase64: payload.maskActiveBase64 ?? null,
-      // Preview payloads do not carry editable raw masks; never retain stale raw
-      // data from a previous slice.
-      maskRawBase64: payload.maskRawBase64 ?? null,
+      // Keep last-known overlays during scrub so the viewport does not flash
+      // blank between preview frames.
+      maskAllBase64: payload.maskAllBase64 ?? prev.maskAllBase64,
+      maskActiveBase64: payload.maskActiveBase64 ?? prev.maskActiveBase64,
+      maskRawBase64: payload.maskRawBase64 ?? prev.maskRawBase64,
       zIndex: payload.zIndex,
       axis: payload.axis,
       total: payload.total,
@@ -525,62 +669,121 @@ function DetectionWorkflow({ sessionId, setSessionId, refreshTrigger }) {
     frameIndex,
     frameCount,
     signal,
+    frameCachePrefix,
   }) => {
     if (!blob) return null;
     if (signal?.aborted) throw createAbortError();
-    if (frameCount <= 1) return URL.createObjectURL(blob);
+    const safeCount = Math.max(1, Number(frameCount) || 1);
+    const safeIndex = Math.max(0, Math.min(frameIndex, safeCount - 1));
+    const frameCacheKey = frameCachePrefix
+      ? `${frameCachePrefix}:${safeIndex}`
+      : null;
+    if (frameCacheKey) {
+      const cachedFrame = filmstripFrameCache.current.get(frameCacheKey);
+      if (cachedFrame) return cachedFrame;
+    }
 
-    const makeFrameUrl = (source, width, height, drawFrame) =>
+    const encodeBitmapToObjectUrl = (bitmap, outputType) =>
       new Promise((resolve, reject) => {
-        const frameHeight = Math.max(1, Math.floor(height / frameCount));
-        const safeIndex = Math.max(0, Math.min(frameIndex, frameCount - 1));
-        const sourceY = safeIndex * frameHeight;
         const canvas = document.createElement("canvas");
-        canvas.width = width;
-        canvas.height = frameHeight;
+        canvas.width = bitmap.width;
+        canvas.height = bitmap.height;
         const ctx = canvas.getContext("2d");
-        drawFrame(ctx, sourceY, frameHeight);
-        canvas.toBlob((frameBlob) => {
-          if (!frameBlob) {
-            reject(new Error("Failed to create filmstrip frame"));
-            return;
-          }
-          resolve(URL.createObjectURL(frameBlob));
-        }, blob.type || "image/png");
+        ctx.drawImage(bitmap, 0, 0);
+        canvas.toBlob(
+          (frameBlob) => {
+            if (!frameBlob) {
+              reject(new Error("Failed to create filmstrip frame"));
+              return;
+            }
+            resolve(URL.createObjectURL(frameBlob));
+          },
+          outputType || "image/png",
+          0.9,
+        );
       });
 
-    if (typeof createImageBitmap === "function") {
-      const bitmap = await createImageBitmap(blob);
+    let frameUrl = null;
+    if (safeCount <= 1) {
+      frameUrl = URL.createObjectURL(blob);
+    } else if (typeof createImageBitmap === "function") {
+      const probe = await createImageBitmap(blob);
+      const fullWidth = probe.width;
+      const fullHeight = probe.height;
+      probe.close?.();
+      const frameHeight = Math.max(1, Math.floor(fullHeight / safeCount));
+      const sourceY = Math.max(
+        0,
+        Math.min(safeIndex * frameHeight, Math.max(fullHeight - frameHeight, 0)),
+      );
+      const croppedBitmap = await createImageBitmap(
+        blob,
+        0,
+        sourceY,
+        fullWidth,
+        frameHeight,
+      );
       try {
         if (signal?.aborted) throw createAbortError();
-        return await makeFrameUrl(
-          bitmap,
-          bitmap.width,
-          bitmap.height,
-          (ctx, y, h) =>
-            ctx.drawImage(bitmap, 0, y, bitmap.width, h, 0, 0, bitmap.width, h),
-        );
+        frameUrl = await encodeBitmapToObjectUrl(croppedBitmap, blob.type);
       } finally {
-        if (bitmap?.close) bitmap.close();
+        croppedBitmap.close?.();
+      }
+    } else {
+      const sourceUrl = URL.createObjectURL(blob);
+      try {
+        const image = await new Promise((resolve, reject) => {
+          const img = new Image();
+          img.onload = () => resolve(img);
+          img.onerror = () =>
+            reject(new Error("Failed to decode filmstrip image"));
+          img.src = sourceUrl;
+        });
+        const frameHeight = Math.max(1, Math.floor(image.height / safeCount));
+        const sourceY = Math.max(
+          0,
+          Math.min(
+            safeIndex * frameHeight,
+            Math.max(image.height - frameHeight, 0),
+          ),
+        );
+        const canvas = document.createElement("canvas");
+        canvas.width = image.width;
+        canvas.height = frameHeight;
+        const ctx = canvas.getContext("2d");
+        ctx.drawImage(
+          image,
+          0,
+          sourceY,
+          image.width,
+          frameHeight,
+          0,
+          0,
+          image.width,
+          frameHeight,
+        );
+        frameUrl = await new Promise((resolve, reject) => {
+          canvas.toBlob(
+            (frameBlob) => {
+              if (!frameBlob) {
+                reject(new Error("Failed to create filmstrip frame"));
+                return;
+              }
+              resolve(URL.createObjectURL(frameBlob));
+            },
+            blob.type || "image/png",
+            0.9,
+          );
+        });
+      } finally {
+        URL.revokeObjectURL(sourceUrl);
       }
     }
 
-    const sourceUrl = URL.createObjectURL(blob);
-    try {
-      const image = await new Promise((resolve, reject) => {
-        const img = new Image();
-        img.onload = () => resolve(img);
-        img.onerror = () =>
-          reject(new Error("Failed to decode filmstrip image"));
-        img.src = sourceUrl;
-      });
-      if (signal?.aborted) throw createAbortError();
-      return await makeFrameUrl(image, image.width, image.height, (ctx, y, h) =>
-        ctx.drawImage(image, 0, y, image.width, h, 0, 0, image.width, h),
-      );
-    } finally {
-      URL.revokeObjectURL(sourceUrl);
+    if (frameCacheKey && frameUrl) {
+      cacheFilmstripFrame(frameCacheKey, frameUrl);
     }
+    return frameUrl;
   };
 
   const fetchInstanceBundle = async ({
@@ -629,6 +832,10 @@ function DetectionWorkflow({ sessionId, setSessionId, refreshTrigger }) {
       zIndex: resolvedIndex,
       axis: resolvedAxis,
       total,
+      batchStart: resolvedIndex,
+      batchCount: 1,
+      quality,
+      kindSet: kinds,
     };
 
     responses.forEach((response, idx) => {
@@ -653,39 +860,78 @@ function DetectionWorkflow({ sessionId, setSessionId, refreshTrigger }) {
     quality = "preview",
     signal,
   }) => {
-    const batchStart =
+    const requestedStart =
       Math.floor(Math.max(zIndex, 0) / FILMSTRIP_BATCH_SIZE) *
       FILMSTRIP_BATCH_SIZE;
-    const requests = kinds.map((kind) =>
-      apiClient.get("/eh/detection/instance-filmstrip", {
-        params: {
-          session_id: sessionId,
-          instance_id: instanceId,
-          axis,
-          z_start: batchStart,
-          z_count: FILMSTRIP_BATCH_SIZE,
-          kind,
-          max_dim: maxDim || undefined,
-          quality,
-          format: kind === "image" ? "webp" : "png",
-        },
-        responseType: "blob",
-        signal,
-      }),
-    );
+    const requestedCount = FILMSTRIP_BATCH_SIZE;
+    const entriesByKind = new Map();
+    const missingKinds = [];
 
-    const responses = requests.length ? await Promise.all(requests) : [];
-    const metaResponse = responses[0];
-    const resolvedStart = Number(
-      metaResponse?.headers?.["x-z-start"] ?? batchStart,
-    );
-    const resolvedCount = Number(
-      metaResponse?.headers?.["x-z-count"] ?? FILMSTRIP_BATCH_SIZE,
-    );
-    const total = Number(
-      metaResponse?.headers?.["x-total-layers"] ?? totalLayers ?? 0,
-    );
-    const resolvedAxis = metaResponse?.headers?.["x-axis"] ?? axis;
+    kinds.forEach((kind) => {
+      const batchKey = buildFilmstripBatchKey({
+        sessionId,
+        instanceId,
+        axis,
+        batchStart: requestedStart,
+        zCount: requestedCount,
+        kind,
+        maxDim,
+        quality,
+      });
+      const cached = filmstripBatchCache.current.get(batchKey);
+      if (cached) {
+        entriesByKind.set(kind, { key: batchKey, ...cached });
+      } else {
+        missingKinds.push({ kind, key: batchKey });
+      }
+    });
+
+    if (missingKinds.length > 0) {
+      const responses = await Promise.all(
+        missingKinds.map(({ kind }) =>
+          apiClient.get("/eh/detection/instance-filmstrip", {
+            params: {
+              session_id: sessionId,
+              instance_id: instanceId,
+              axis,
+              z_start: requestedStart,
+              z_count: requestedCount,
+              kind,
+              max_dim: maxDim || undefined,
+              quality,
+              format: kind === "image" ? "webp" : "png",
+            },
+            responseType: "blob",
+            signal,
+          }),
+        ),
+      );
+
+      responses.forEach((response, idx) => {
+        const { kind, key } = missingKinds[idx];
+        const entry = {
+          blob: response.data,
+          meta: {
+            zStart: Number(response?.headers?.["x-z-start"] ?? requestedStart),
+            zCount: Number(
+              response?.headers?.["x-z-count"] ?? FILMSTRIP_BATCH_SIZE,
+            ),
+            total: Number(response?.headers?.["x-total-layers"] ?? totalLayers ?? 0),
+            axis: response?.headers?.["x-axis"] ?? axis,
+            frameHeight: Number(response?.headers?.["x-frame-height"] ?? 0) || null,
+          },
+        };
+        cacheFilmstripBatch(key, entry);
+        entriesByKind.set(kind, { key, ...entry });
+      });
+    }
+
+    const firstEntry = entriesByKind.get(kinds[0]);
+    const meta = firstEntry?.meta;
+    const resolvedStart = Number(meta?.zStart ?? requestedStart);
+    const resolvedCount = Number(meta?.zCount ?? requestedCount);
+    const total = Number(meta?.total ?? totalLayers ?? 0);
+    const resolvedAxis = meta?.axis ?? axis;
     const frameOffset = Math.max(
       0,
       Math.min(zIndex - resolvedStart, Math.max(resolvedCount - 1, 0)),
@@ -699,16 +945,22 @@ function DetectionWorkflow({ sessionId, setSessionId, refreshTrigger }) {
       zIndex: resolvedStart + frameOffset,
       axis: resolvedAxis,
       total,
+      batchStart: resolvedStart,
+      batchCount: resolvedCount,
+      quality,
+      kindSet: kinds,
     };
 
-    for (let idx = 0; idx < responses.length; idx += 1) {
+    for (let idx = 0; idx < kinds.length; idx += 1) {
       const kind = kinds[idx];
-      const response = responses[idx];
+      const entry = entriesByKind.get(kind);
+      if (!entry?.blob) continue;
       const frameUrl = await extractFilmstripFrameBlob({
-        blob: response.data,
+        blob: entry.blob,
         frameIndex: frameOffset,
         frameCount: resolvedCount,
         signal,
+        frameCachePrefix: entry.key,
       });
       if (kind === "image") payload.imageBase64 = frameUrl;
       if (kind === "mask_all") payload.maskAllBase64 = frameUrl;
@@ -726,13 +978,16 @@ function DetectionWorkflow({ sessionId, setSessionId, refreshTrigger }) {
     zIndex,
     includeAll,
     includeActive,
+    imageOnly = false,
     maxDim = PREVIEW_MAX_DIM,
     preferFilmstrip = ENABLE_FILMSTRIP_PREVIEW,
     signal,
   }) => {
     const kinds = ["image"];
-    if (includeActive) kinds.push("mask_active");
-    if (includeAll) kinds.push("mask_all");
+    if (!imageOnly) {
+      if (includeActive) kinds.push("mask_active");
+      if (includeAll) kinds.push("mask_all");
+    }
 
     const quality = "preview";
 
@@ -875,10 +1130,8 @@ function DetectionWorkflow({ sessionId, setSessionId, refreshTrigger }) {
     if (!sessionToUse || !totalForAxis) return;
     const neighbors = Array.from(
       new Set([
-        Math.max(zIndex - 2, 0),
         Math.max(zIndex - 1, 0),
         Math.min(zIndex + 1, totalForAxis - 1),
-        Math.min(zIndex + 2, totalForAxis - 1),
       ]),
     );
     const kinds = ["image"];
@@ -933,6 +1186,7 @@ function DetectionWorkflow({ sessionId, setSessionId, refreshTrigger }) {
     maxDim = PREVIEW_MAX_DIM,
     qualityLabel = `preview-${PREVIEW_MAX_DIM}`,
     distance = 1,
+    imageOnly = false,
   ) => {
     const totalForAxis = axisTotal || totalLayers;
     if (!sessionId || !totalForAxis) return;
@@ -969,6 +1223,7 @@ function DetectionWorkflow({ sessionId, setSessionId, refreshTrigger }) {
                 zIndex: neighbor,
                 includeAll,
                 includeActive,
+                imageOnly,
                 maxDim,
                 signal,
               }),
@@ -992,10 +1247,16 @@ function DetectionWorkflow({ sessionId, setSessionId, refreshTrigger }) {
     const axisToUse = axisOverride ?? viewAxis;
     const maxDim = parsePositiveInt(options.maxDim, PREVIEW_MAX_DIM);
     const qualityLabel = options.qualityLabel || `preview-${maxDim}`;
-    const shouldPrefetch = options.prefetchNeighbors !== false;
+    const imageOnly = options.imageOnly === true;
+    const shouldPrefetch =
+      options.prefetchNeighbors !== false && !isFastScrubRef.current;
+    const prefetchDistance =
+      options.prefetchDistance ??
+      (isFastScrubRef.current ? 0 : PREVIEW_PREFETCH_RADIUS);
     const priority = Number.isFinite(options.priority) ? options.priority : 120;
-    const includeAll = instanceMode === "instance" && overlayAllAlpha > 0.001;
-    const includeActive = overlayActiveAlpha > 0.001;
+    const includeAll =
+      !imageOnly && instanceMode === "instance" && overlayAllAlpha > 0.001;
+    const includeActive = !imageOnly && overlayActiveAlpha > 0.001;
     const cacheKey = buildCacheKey({
       instanceId,
       axis: axisToUse,
@@ -1031,6 +1292,7 @@ function DetectionWorkflow({ sessionId, setSessionId, refreshTrigger }) {
             zIndex,
             includeAll,
             includeActive,
+            imageOnly,
             maxDim,
             signal,
           }),
@@ -1041,7 +1303,7 @@ function DetectionWorkflow({ sessionId, setSessionId, refreshTrigger }) {
       setSliderZ(previewPayload.zIndex);
       setAxisTotal(previewPayload.total);
       perfLog("first_preview_paint", startedAt);
-      if (shouldPrefetch) {
+      if (shouldPrefetch && prefetchDistance > 0) {
         prefetchPreviewNeighbors(
           instanceId,
           previewPayload.zIndex,
@@ -1050,7 +1312,8 @@ function DetectionWorkflow({ sessionId, setSessionId, refreshTrigger }) {
           includeActive,
           maxDim,
           qualityLabel,
-          PREVIEW_PREFETCH_RADIUS,
+          prefetchDistance,
+          imageOnly,
         );
       }
     } catch (error) {
@@ -1076,6 +1339,17 @@ function DetectionWorkflow({ sessionId, setSessionId, refreshTrigger }) {
     const includeAll =
       (modeOverride ?? instanceMode) === "instance" && overlayAllAlpha > 0.001;
     const includeActive = overlayActiveAlpha > 0.001;
+    const requestIdentity = [
+      instanceId,
+      axisToUse,
+      zIndex,
+      includeAll ? "all" : "noall",
+      includeActive ? "active" : "noactive",
+      includeRaw ? "raw" : "noraw",
+    ].join(":");
+    if (fullRequestInFlightRef.current === requestIdentity) {
+      return;
+    }
     const cacheKey = buildCacheKey({
       instanceId,
       axis: axisToUse,
@@ -1087,6 +1361,7 @@ function DetectionWorkflow({ sessionId, setSessionId, refreshTrigger }) {
     const cached = viewCache.current.get(cacheKey);
     if (cached && (!includeRaw || cached.maskRawBase64)) {
       perfCount("full-cache-hit");
+      lastFullRequestKeyRef.current = requestIdentity;
       setViewState(cached);
       setAxisTotal(cached.total ?? axisTotal);
       setSliderZ(cached.zIndex);
@@ -1105,6 +1380,7 @@ function DetectionWorkflow({ sessionId, setSessionId, refreshTrigger }) {
         });
         const merged = { ...cached, maskRawBase64: rawPayload.maskRawBase64 };
         cacheView(cacheKey, merged);
+        lastFullRequestKeyRef.current = requestIdentity;
         setViewState(merged);
         setAxisTotal(merged.total ?? axisTotal);
         setSliderZ(merged.zIndex);
@@ -1120,6 +1396,7 @@ function DetectionWorkflow({ sessionId, setSessionId, refreshTrigger }) {
     }
 
     setLoadingView(true);
+    fullRequestInFlightRef.current = requestIdentity;
     const lane = `full:${instanceId}:${axisToUse}`;
     const requestKey = `${lane}:${cacheKey}`;
     const startedAt = performance.now();
@@ -1150,6 +1427,7 @@ function DetectionWorkflow({ sessionId, setSessionId, refreshTrigger }) {
       });
 
       cacheView(cacheKey, fullPayload);
+      lastFullRequestKeyRef.current = requestIdentity;
       setViewState(fullPayload);
       setAxisTotal(fullPayload.total);
       setSliderZ(fullPayload.zIndex);
@@ -1172,12 +1450,28 @@ function DetectionWorkflow({ sessionId, setSessionId, refreshTrigger }) {
         message.error(getErrorMessage(error, "Failed to load instance view"));
       }
     } finally {
+      if (fullRequestInFlightRef.current === requestIdentity) {
+        fullRequestInFlightRef.current = null;
+      }
       setLoadingView(false);
     }
   };
 
+  const clearScrubTimers = () => {
+    if (previewDebounceRef.current) {
+      clearTimeout(previewDebounceRef.current);
+      previewDebounceRef.current = null;
+    }
+    if (scrubIdleRef.current) {
+      clearTimeout(scrubIdleRef.current);
+      scrubIdleRef.current = null;
+    }
+  };
+
   const selectInstance = (instance) => {
+    clearScrubTimers();
     isScrubbingRef.current = false;
+    isFastScrubRef.current = false;
     const axisIndex = clampSliceIndex(
       getAxisIndexForInstance(instance, viewAxis),
       axisTotal || totalLayers,
@@ -1270,19 +1564,31 @@ function DetectionWorkflow({ sessionId, setSessionId, refreshTrigger }) {
 
   const handleSliceChange = (value) => {
     const nextIndex = clampSliceIndex(value, axisTotal || totalLayers);
+    const now =
+      typeof performance !== "undefined" ? performance.now() : Date.now();
+    const previous = scrubTrackRef.current;
+    const dt = Math.max(now - (previous?.at || 0), 1);
+    const delta = Math.abs(nextIndex - (previous?.zIndex ?? nextIndex));
+    const slicesPerSec = (delta * 1000) / dt;
+    isFastScrubRef.current = slicesPerSec >= FAST_SCRUB_SLICES_PER_SEC;
+    scrubTrackRef.current = { zIndex: nextIndex, at: now };
+
     setSliderZ(nextIndex);
     isScrubbingRef.current = true;
     if (!activeInstanceId || !sessionId) return;
 
     const axisToUse = viewAxis;
-    const includeAll = instanceMode === "instance" && overlayAllAlpha > 0.001;
-    const includeActive = overlayActiveAlpha > 0.001;
+    const fullIncludeAll =
+      instanceMode === "instance" && overlayAllAlpha > 0.001;
+    const fullIncludeActive = overlayActiveAlpha > 0.001;
+    const includeAll = false;
+    const includeActive = false;
     const fullKey = buildCacheKey({
       instanceId: activeInstanceId,
       axis: axisToUse,
       zIndex: nextIndex,
-      includeAll,
-      includeActive,
+      includeAll: fullIncludeAll,
+      includeActive: fullIncludeActive,
       quality: "full",
     });
     const fullCached = viewCache.current.get(fullKey);
@@ -1323,6 +1629,7 @@ function DetectionWorkflow({ sessionId, setSessionId, refreshTrigger }) {
         maxDim: THUMB_MAX_DIM,
         qualityLabel: `thumb-${THUMB_MAX_DIM}`,
         prefetchNeighbors: false,
+        imageOnly: true,
         priority: 160,
       });
     }
@@ -1330,14 +1637,31 @@ function DetectionWorkflow({ sessionId, setSessionId, refreshTrigger }) {
     if (previewDebounceRef.current) {
       clearTimeout(previewDebounceRef.current);
     }
+    if (scrubIdleRef.current) {
+      clearTimeout(scrubIdleRef.current);
+    }
     previewDebounceRef.current = setTimeout(() => {
       loadInstancePreview(activeInstanceId, nextIndex, axisToUse, {
         maxDim: PREVIEW_MAX_DIM,
         qualityLabel: `preview-${PREVIEW_MAX_DIM}`,
-        prefetchNeighbors: true,
+        prefetchNeighbors: !isFastScrubRef.current,
+        prefetchDistance: isFastScrubRef.current ? 0 : 1,
+        imageOnly: true,
         priority: 120,
       });
-    }, 80);
+    }, isFastScrubRef.current ? 100 : 60);
+
+    scrubIdleRef.current = setTimeout(() => {
+      if (!isScrubbingRef.current) return;
+      loadInstancePreview(activeInstanceId, nextIndex, axisToUse, {
+        maxDim: PREVIEW_MAX_DIM,
+        qualityLabel: `preview-rich-${PREVIEW_MAX_DIM}`,
+        prefetchNeighbors: !isFastScrubRef.current,
+        prefetchDistance: isFastScrubRef.current ? 0 : 1,
+        imageOnly: false,
+        priority: 110,
+      });
+    }, SCRUB_IDLE_MS);
   };
 
   const handleSliceCommit = (value) => {
@@ -1345,16 +1669,20 @@ function DetectionWorkflow({ sessionId, setSessionId, refreshTrigger }) {
     const nextIndex = clampSliceIndex(value, axisTotal || totalLayers);
     setSliderZ(nextIndex);
     setCommittedZ(nextIndex);
-    if (previewDebounceRef.current) {
-      clearTimeout(previewDebounceRef.current);
-      previewDebounceRef.current = null;
-    }
+    clearScrubTimers();
     isScrubbingRef.current = false;
+    isFastScrubRef.current = false;
+    scrubTrackRef.current = {
+      zIndex: nextIndex,
+      at: typeof performance !== "undefined" ? performance.now() : Date.now(),
+    };
   };
 
   const handleAxisChange = (nextAxis) => {
+    clearScrubTimers();
     const axisValue = nextAxis || "xy";
     isScrubbingRef.current = false;
+    isFastScrubRef.current = false;
     localStorage.setItem("mask-proofreading-axis", axisValue);
     setViewAxis(axisValue);
     const axisIndex = clampSliceIndex(
@@ -1537,15 +1865,28 @@ function DetectionWorkflow({ sessionId, setSessionId, refreshTrigger }) {
     );
 
   const viewControls = (
-    <div>
-      <Text style={{ fontSize: 12 }}>Other instances</Text>
+    <div style={{ display: "grid", gap: 6 }}>
+      <Text type="secondary" style={{ fontSize: 12 }}>
+        Opacity controls
+      </Text>
+      <Space size="small" style={{ width: "100%", justifyContent: "space-between" }}>
+        <Text style={{ fontSize: 12 }}>Other instances</Text>
+        <Text type="secondary" style={{ fontSize: 12 }}>
+          {Math.round(overlayAllAlpha * 100)}%
+        </Text>
+      </Space>
       <Slider
         min={0}
         max={100}
         value={Math.round(overlayAllAlpha * 100)}
         onChange={(value) => setOverlayAllAlpha(value / 100)}
       />
-      <Text style={{ fontSize: 12 }}>Selected instance</Text>
+      <Space size="small" style={{ width: "100%", justifyContent: "space-between" }}>
+        <Text style={{ fontSize: 12 }}>Selected instance</Text>
+        <Text type="secondary" style={{ fontSize: 12 }}>
+          {Math.round(overlayActiveAlpha * 100)}%
+        </Text>
+      </Space>
       <Slider
         min={0}
         max={100}
@@ -1602,7 +1943,7 @@ function DetectionWorkflow({ sessionId, setSessionId, refreshTrigger }) {
   const inspectorItems = [
     { key: "review", label: "Review", children: reviewControls },
     { key: "instances", label: "Instances", children: instanceControls },
-    { key: "view", label: "View", children: viewControls },
+    { key: "view", label: "Overlay", children: viewControls },
     {
       key: "progress",
       label: "Progress",

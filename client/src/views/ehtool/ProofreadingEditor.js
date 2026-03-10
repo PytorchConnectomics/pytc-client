@@ -108,6 +108,10 @@ const ProofreadingEditor = forwardRef(
     const minimapLayoutRef = useRef(null);
     const minimapSourceRef = useRef(null);
     const minimapOverlayRef = useRef(null);
+    const activeOverlayCanvasRef = useRef(null);
+    const minimapComposedRef = useRef(null);
+    const activeOverlayDirtyRef = useRef(true);
+    const minimapSourceDirtyRef = useRef(true);
 
     // Expose handleSave to parent
     useImperativeHandle(ref, () => ({
@@ -151,6 +155,14 @@ const ProofreadingEditor = forwardRef(
     ]);
 
     useEffect(() => {
+      minimapSourceDirtyRef.current = true;
+      if (canvasRef.current && imageDataRef.current) {
+        drawCanvas();
+        drawMinimap();
+      }
+    }, [showMask, overlayAllAlpha, overlayActiveAlpha]);
+
+    useEffect(() => {
       return () => {
         if (minimapRafRef.current) {
           cancelAnimationFrame(minimapRafRef.current);
@@ -191,6 +203,38 @@ const ProofreadingEditor = forwardRef(
         drawX: (targetWidth - drawWidth) / 2,
         drawY: (targetHeight - drawHeight) / 2,
       };
+    };
+
+    const markOverlayDirty = () => {
+      activeOverlayDirtyRef.current = true;
+      minimapSourceDirtyRef.current = true;
+    };
+
+    const getActiveOverlayCanvas = () => {
+      if (!maskDataRef.current || canvasDimensions.width === 0) return null;
+      if (!activeOverlayCanvasRef.current) {
+        activeOverlayCanvasRef.current = document.createElement("canvas");
+      }
+      const overlayCanvas = activeOverlayCanvasRef.current;
+      if (
+        overlayCanvas.width !== canvasDimensions.width ||
+        overlayCanvas.height !== canvasDimensions.height
+      ) {
+        overlayCanvas.width = canvasDimensions.width;
+        overlayCanvas.height = canvasDimensions.height;
+        activeOverlayDirtyRef.current = true;
+      }
+      if (!activeOverlayDirtyRef.current) return overlayCanvas;
+
+      const overlayCtx = overlayCanvas.getContext("2d");
+      overlayCtx.clearRect(0, 0, overlayCanvas.width, overlayCanvas.height);
+      overlayCtx.putImageData(
+        createMaskOverlay(maskDataRef.current, activeColor),
+        0,
+        0,
+      );
+      activeOverlayDirtyRef.current = false;
+      return overlayCanvas;
     };
 
     const loadRenderableImage = async (source) => {
@@ -278,8 +322,11 @@ const ProofreadingEditor = forwardRef(
           originalMaskRef.current = new ImageData(canvas.width, canvas.height);
         }
 
+        markOverlayDirty();
         setUndoStack([]);
         setRedoStack([]);
+        drawCanvas();
+        drawMinimap();
       } catch (error) {
         console.error("Error loading images:", error);
         message.error("Failed to load images");
@@ -302,20 +349,12 @@ const ProofreadingEditor = forwardRef(
       }
 
       if (showMask && overlayActiveAlpha > 0.001) {
-        // Use editable mask as the only active-layer source to avoid opacity
-        // compounding when repainting already-active pixels.
-        if (maskDataRef.current) {
-          const tempCanvas = document.createElement("canvas");
-          tempCanvas.width = canvas.width;
-          tempCanvas.height = canvas.height;
-          const tempCtx = tempCanvas.getContext("2d");
-          const overlayData = createMaskOverlay(
-            maskDataRef.current,
-            activeColor,
-            overlayActiveAlpha,
-          );
-          tempCtx.putImageData(overlayData, 0, 0);
-          ctx.drawImage(tempCanvas, 0, 0);
+        const activeOverlayCanvas = getActiveOverlayCanvas();
+        if (activeOverlayCanvas) {
+          ctx.save();
+          ctx.globalAlpha = overlayActiveAlpha;
+          ctx.drawImage(activeOverlayCanvas, 0, 0, canvas.width, canvas.height);
+          ctx.restore();
         } else if (overlayActiveRef.current) {
           ctx.save();
           ctx.globalAlpha = overlayActiveAlpha;
@@ -334,17 +373,23 @@ const ProofreadingEditor = forwardRef(
     const loadOverlayImage = (source, targetRef) => {
       if (!source) {
         targetRef.current = null;
+        minimapSourceDirtyRef.current = true;
         drawCanvas();
+        drawMinimap();
         return;
       }
       const overlay = new Image();
       overlay.onload = () => {
         targetRef.current = overlay;
+        minimapSourceDirtyRef.current = true;
         drawCanvas();
+        drawMinimap();
       };
       overlay.onerror = () => {
         targetRef.current = null;
+        minimapSourceDirtyRef.current = true;
         drawCanvas();
+        drawMinimap();
       };
       if (source.startsWith("data:image") || source.startsWith("blob:")) {
         overlay.src = source;
@@ -422,54 +467,35 @@ const ProofreadingEditor = forwardRef(
       ctx.fillStyle = "#000";
       ctx.fillRect(0, 0, width, height);
 
+      if (!minimapComposedRef.current) {
+        minimapComposedRef.current = document.createElement("canvas");
+      }
       if (!minimapSourceRef.current) {
         minimapSourceRef.current = document.createElement("canvas");
       }
       if (!minimapOverlayRef.current) {
         minimapOverlayRef.current = document.createElement("canvas");
       }
-      const sourceCanvas = minimapSourceRef.current;
-      sourceCanvas.width = canvasDimensions.width;
-      sourceCanvas.height = canvasDimensions.height;
-      const sourceCtx = sourceCanvas.getContext("2d");
-      sourceCtx.clearRect(0, 0, sourceCanvas.width, sourceCanvas.height);
-      sourceCtx.putImageData(imageDataRef.current, 0, 0);
-
-      if (showMask && overlayAllRef.current && overlayAllAlpha > 0.001) {
-        sourceCtx.save();
-        sourceCtx.globalAlpha = overlayAllAlpha;
-        sourceCtx.drawImage(
-          overlayAllRef.current,
-          0,
-          0,
-          sourceCanvas.width,
-          sourceCanvas.height,
-        );
-        sourceCtx.restore();
+      const sourceCanvas = minimapComposedRef.current;
+      if (
+        sourceCanvas.width !== canvasDimensions.width ||
+        sourceCanvas.height !== canvasDimensions.height
+      ) {
+        sourceCanvas.width = canvasDimensions.width;
+        sourceCanvas.height = canvasDimensions.height;
+        minimapSourceDirtyRef.current = true;
       }
 
-      if (showMask && overlayActiveAlpha > 0.001) {
-        if (maskDataRef.current) {
-          const overlayCanvas = minimapOverlayRef.current;
-          overlayCanvas.width = sourceCanvas.width;
-          overlayCanvas.height = sourceCanvas.height;
-          const overlayCtx = overlayCanvas.getContext("2d");
-          overlayCtx.clearRect(0, 0, overlayCanvas.width, overlayCanvas.height);
-          overlayCtx.putImageData(
-            createMaskOverlay(
-              maskDataRef.current,
-              activeColor,
-              overlayActiveAlpha,
-            ),
-            0,
-            0,
-          );
-          sourceCtx.drawImage(overlayCanvas, 0, 0);
-        } else if (overlayActiveRef.current) {
+      if (minimapSourceDirtyRef.current) {
+        const sourceCtx = sourceCanvas.getContext("2d");
+        sourceCtx.clearRect(0, 0, sourceCanvas.width, sourceCanvas.height);
+        sourceCtx.putImageData(imageDataRef.current, 0, 0);
+
+        if (showMask && overlayAllRef.current && overlayAllAlpha > 0.001) {
           sourceCtx.save();
-          sourceCtx.globalAlpha = overlayActiveAlpha;
+          sourceCtx.globalAlpha = overlayAllAlpha;
           sourceCtx.drawImage(
-            overlayActiveRef.current,
+            overlayAllRef.current,
             0,
             0,
             sourceCanvas.width,
@@ -477,6 +503,30 @@ const ProofreadingEditor = forwardRef(
           );
           sourceCtx.restore();
         }
+
+        if (showMask && overlayActiveAlpha > 0.001) {
+          if (maskDataRef.current) {
+            const activeOverlayCanvas = getActiveOverlayCanvas();
+            if (activeOverlayCanvas) {
+              sourceCtx.save();
+              sourceCtx.globalAlpha = overlayActiveAlpha;
+              sourceCtx.drawImage(activeOverlayCanvas, 0, 0);
+              sourceCtx.restore();
+            }
+          } else if (overlayActiveRef.current) {
+            sourceCtx.save();
+            sourceCtx.globalAlpha = overlayActiveAlpha;
+            sourceCtx.drawImage(
+              overlayActiveRef.current,
+              0,
+              0,
+              sourceCanvas.width,
+              sourceCanvas.height,
+            );
+            sourceCtx.restore();
+          }
+        }
+        minimapSourceDirtyRef.current = false;
       }
 
       const layout = getMinimapLayout(
@@ -603,12 +653,19 @@ const ProofreadingEditor = forwardRef(
       [activeInstanceId],
     );
 
-    const createMaskOverlay = (maskData, color, alpha = 0.7) => {
+    useEffect(() => {
+      markOverlayDirty();
+      if (canvasRef.current && imageDataRef.current) {
+        drawCanvas();
+        drawMinimap();
+      }
+    }, [activeColor]);
+
+    const createMaskOverlay = (maskData, color) => {
       const width = maskData.width;
       const height = maskData.height;
       const overlay = new ImageData(width, height);
-      const resolvedAlpha = Math.max(0, Math.min(alpha, 1));
-      const alphaValue = Math.round(255 * resolvedAlpha);
+      const alphaValue = 255;
       const [r, g, b] = color || [255, 255, 255];
       for (let i = 0; i < maskData.data.length; i += 4) {
         if (maskData.data[i] > 0) {
@@ -652,6 +709,7 @@ const ProofreadingEditor = forwardRef(
         previousState.height,
       );
       setUndoStack((prev) => prev.slice(0, -1));
+      markOverlayDirty();
       drawCanvas();
       drawMinimap();
     };
@@ -671,6 +729,7 @@ const ProofreadingEditor = forwardRef(
         nextState.height,
       );
       setRedoStack((prev) => prev.slice(0, -1));
+      markOverlayDirty();
       drawCanvas();
       drawMinimap();
     };
@@ -748,6 +807,7 @@ const ProofreadingEditor = forwardRef(
       setIsDrawing(true);
       lastDrawRef.current = coords;
       drawBrush(coords.x, coords.y);
+      markOverlayDirty();
       drawCanvas();
       scheduleMinimap();
     };
@@ -779,6 +839,7 @@ const ProofreadingEditor = forwardRef(
       if (coords) {
         drawLine(lastDrawRef.current, coords);
         lastDrawRef.current = coords;
+        markOverlayDirty();
         drawCanvas();
         scheduleMinimap();
       }
@@ -916,28 +977,43 @@ const ProofreadingEditor = forwardRef(
               style={{
                 display: "flex",
                 alignItems: "center",
-                justifyContent: "space-between",
+                justifyContent: toolPanelCollapsed ? "center" : "space-between",
+                gap: 8,
               }}
             >
-              <span>Tools</span>
+              {!toolPanelCollapsed && <span>Tools</span>}
               <Tooltip
                 title={toolPanelCollapsed ? "Expand tools" : "Collapse tools"}
               >
                 <Button
+                  type="text"
                   size="small"
                   icon={
                     toolPanelCollapsed ? <RightOutlined /> : <LeftOutlined />
                   }
                   onClick={() => setToolPanelCollapsed((prev) => !prev)}
+                  aria-label={
+                    toolPanelCollapsed ? "Expand tools" : "Collapse tools"
+                  }
+                  style={{
+                    width: 28,
+                    height: 28,
+                    display: "inline-flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                  }}
                 />
               </Tooltip>
             </div>
           }
           style={{
-            width: toolPanelCollapsed ? "74px" : "260px",
-            minWidth: toolPanelCollapsed ? "74px" : "260px",
+            width: toolPanelCollapsed ? "84px" : "260px",
+            minWidth: toolPanelCollapsed ? "84px" : "260px",
             height: "100%",
             transition: "width 0.2s ease",
+          }}
+          headStyle={{
+            padding: toolPanelCollapsed ? "0 8px" : "0 12px",
           }}
           bodyStyle={{
             height: "calc(100% - 40px)",

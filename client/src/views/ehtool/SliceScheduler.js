@@ -17,6 +17,7 @@ class SliceScheduler {
       nearby: options.nearbyConcurrency ?? 1,
       background: options.backgroundConcurrency ?? 1,
     };
+    this.onEvent = typeof options.onEvent === "function" ? options.onEvent : null;
     this.laneOrder = ["interactive", "nearby", "background"];
     this.flushScheduled = false;
   }
@@ -90,9 +91,26 @@ class SliceScheduler {
           }
         }
         task.resolve(result);
+        if (this.onEvent) {
+          this.onEvent("task_success", {
+            lane,
+            key: task.key,
+            scope: task.scope,
+            queues: this.getState(),
+          });
+        }
       })
       .catch((error) => {
         task.reject(error);
+        if (this.onEvent) {
+          this.onEvent("task_error", {
+            lane,
+            key: task.key,
+            scope: task.scope,
+            error: error?.name || "Error",
+            queues: this.getState(),
+          });
+        }
       })
       .finally(() => {
         this.runningByLane[lane] = Math.max(0, this.runningByLane[lane] - 1);
@@ -180,6 +198,18 @@ class SliceScheduler {
     });
     this.pendingByKey.clear();
     this.latestScopeVersion.clear();
+  }
+
+  getState() {
+    return {
+      queued: {
+        interactive: this.queues.interactive.length,
+        nearby: this.queues.nearby.length,
+        background: this.queues.background.length,
+      },
+      running: { ...this.runningByLane },
+      pending: this.pendingByKey.size,
+    };
   }
 }
 

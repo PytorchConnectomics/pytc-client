@@ -59,10 +59,14 @@ class DataManager:
         self._active_cache: "OrderedDict[Tuple[int, int], str]" = OrderedDict()
         self._raw_cache: "OrderedDict[int, str]" = OrderedDict()
         self._resized_cache: "OrderedDict[Tuple[Any, ...], bytes]" = OrderedDict()
+        self._resized_frame_cache: "OrderedDict[Tuple[Any, ...], np.ndarray]" = (
+            OrderedDict()
+        )
         self._filmstrip_cache: "OrderedDict[Tuple[Any, ...], bytes]" = OrderedDict()
         self._slice_cache_limit = 24
         self._active_cache_limit = 128
         self._resized_cache_limit = 128
+        self._resized_frame_cache_limit = 192
         self._filmstrip_cache_limit = 64
         self._progress_schema_version = 3
         self._history_limit = 200
@@ -122,6 +126,7 @@ class DataManager:
         self._active_cache.clear()
         self._raw_cache.clear()
         self._resized_cache.clear()
+        self._resized_frame_cache.clear()
         self._filmstrip_cache.clear()
         self.progress_path = self._resolve_progress_path()
         self.instance_artifact_path = self._resolve_instance_artifact_path()
@@ -274,6 +279,7 @@ class DataManager:
         self._active_cache.clear()
         self._raw_cache.clear()
         self._resized_cache.clear()
+        self._resized_frame_cache.clear()
         self._filmstrip_cache.clear()
 
         changed_pixels = int(
@@ -1332,7 +1338,7 @@ class DataManager:
         max_dim: Optional[int] = None,
         quality: str = "preview",
         format: str = "png",
-    ) -> Tuple[bytes, int, int, int, str, str, Dict[str, Any]]:
+    ) -> Tuple[bytes, int, int, int, str, int, str, Dict[str, Any]]:
         """Return stacked filmstrip bytes for a contiguous z-range."""
         if self.instance_volume is None:
             raise ValueError("Instance volume is not available")
@@ -1380,12 +1386,17 @@ class DataManager:
         )
         cached = self._cache_get(self._filmstrip_cache, cache_key)
         if cached:
+            if isinstance(cached, tuple):
+                cached_bytes, cached_height = cached
+            else:
+                cached_bytes, cached_height = cached, int(max_dim_value or 0)
             return (
-                cached,
+                cached_bytes,
                 z_start,
                 z_count,
                 total,
                 axis,
+                cached_height,
                 media_type,
                 {"cache_hit": True, "decode_ms": 0.0, "resize_ms": 0.0},
             )
@@ -1394,35 +1405,67 @@ class DataManager:
         slices: List[np.ndarray] = []
         for offset in range(z_count):
             z_index = z_start + offset
-            image, label_slice, active_mask, _, _ = self.get_instance_slice_axis(
-                instance_id=instance_id, axis=axis, index=z_index
+            frame_cache_key = (
+                instance_id,
+                axis,
+                z_index,
+                kind,
+                max_dim_value or 0,
+                quality,
             )
-
-            if kind == "image":
-                frame = image
-                frame = self._resize_to_max_dim(frame, max_dim_value, is_mask=False)
-            elif kind == "mask_all":
-                frame = labels_to_rgba(label_slice)
-                frame = self._resize_to_max_dim(frame, max_dim_value, is_mask=True)
-            elif kind == "mask_active":
-                active_color = glasbey_color(instance_id)
-                frame = mask_to_rgba(active_mask, active_color)
-                frame = self._resize_to_max_dim(frame, max_dim_value, is_mask=True)
-            elif kind == "mask_active_binary":
-                frame = to_uint8(active_mask * 255)
-                frame = self._resize_to_max_dim(frame, max_dim_value, is_mask=True)
-            elif kind == "mask_raw":
-                if axis != "xy":
-                    raise ValueError("Raw mask only supported for XY view")
-                _, raw_mask = self.get_layer(z_index, enhance=False)
-                frame = (
-                    np.zeros_like(image)
-                    if raw_mask is None
-                    else ensure_grayscale_2d(raw_mask)
+            frame = (
+                self._cache_get(self._resized_frame_cache, frame_cache_key)
+                if max_dim_value and max_dim_value > 0
+                else None
+            )
+            if frame is None:
+                image, label_slice, active_mask, _, _ = self.get_instance_slice_axis(
+                    instance_id=instance_id, axis=axis, index=z_index
                 )
-                frame = self._resize_to_max_dim(frame, max_dim_value, is_mask=True)
-            else:
-                raise ValueError(f"Unsupported image kind: {kind}")
+
+                if kind == "image":
+                    frame = image
+                    frame = self._resize_to_max_dim(
+                        frame, max_dim_value, is_mask=False
+                    )
+                elif kind == "mask_all":
+                    frame = labels_to_rgba(label_slice)
+                    frame = self._resize_to_max_dim(
+                        frame, max_dim_value, is_mask=True
+                    )
+                elif kind == "mask_active":
+                    active_color = glasbey_color(instance_id)
+                    frame = mask_to_rgba(active_mask, active_color)
+                    frame = self._resize_to_max_dim(
+                        frame, max_dim_value, is_mask=True
+                    )
+                elif kind == "mask_active_binary":
+                    frame = to_uint8(active_mask * 255)
+                    frame = self._resize_to_max_dim(
+                        frame, max_dim_value, is_mask=True
+                    )
+                elif kind == "mask_raw":
+                    if axis != "xy":
+                        raise ValueError("Raw mask only supported for XY view")
+                    _, raw_mask = self.get_layer(z_index, enhance=False)
+                    frame = (
+                        np.zeros_like(image)
+                        if raw_mask is None
+                        else ensure_grayscale_2d(raw_mask)
+                    )
+                    frame = self._resize_to_max_dim(
+                        frame, max_dim_value, is_mask=True
+                    )
+                else:
+                    raise ValueError(f"Unsupported image kind: {kind}")
+
+                if max_dim_value and max_dim_value > 0:
+                    self._cache_set(
+                        self._resized_frame_cache,
+                        frame_cache_key,
+                        frame,
+                        self._resized_frame_cache_limit,
+                    )
 
             slices.append(frame)
 
@@ -1430,12 +1473,13 @@ class DataManager:
             raise ValueError("No slices generated for filmstrip")
         resize_ms = (time.perf_counter() - resize_started) * 1000.0
 
+        frame_height = int(slices[0].shape[0]) if slices else 0
         filmstrip = np.concatenate(slices, axis=0)
         encoded_bytes = array_to_image_bytes(filmstrip, format=output_format)
         self._cache_set(
             self._filmstrip_cache,
             cache_key,
-            encoded_bytes,
+            (encoded_bytes, frame_height),
             self._filmstrip_cache_limit,
         )
         return (
@@ -1444,6 +1488,7 @@ class DataManager:
             z_count,
             total,
             axis,
+            frame_height,
             media_type,
             {"cache_hit": False, "decode_ms": 0.0, "resize_ms": resize_ms},
         )
