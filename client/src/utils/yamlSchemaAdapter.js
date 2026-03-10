@@ -4,27 +4,69 @@
  * Detects the schema family of a parsed YAML object and translates it to the
  * flat uppercase schema required by pytorch_connectomics / yacs.
  *
+ * This adapter identifies "standard" configuration schemas as defined in the
+ * pytorch_connectomics core library. Both uppercase (YACS-style) and lowercase
+ * (Hydra/general-style) YAML configurations are recognised generically,
+ * without hardcoding any specific dataset names.
+ *
  * Supported schemas:
- *  - "pytc"    : pytorch_connectomics native  (SYSTEM, MODEL, DATASET, SOLVER, INFERENCE)
- *  - "lucchi+" : Lucchi++ / MONAI-style        (system, model, data, optimization, inference)
+ *  - "pytc"     : pytorch_connectomics client config  (contains pytc_version or workflow)
+ *  - "standard" : pytorch_connectomics core library config, uppercase or lowercase form
+ *                   Pattern A (uppercase / YACS):   ≥2 of MODEL, DATASET, SOLVER, INFERENCE, SYSTEM
+ *                   Pattern B (lowercase / Hydra):  ≥2 of model, data, optimization, train, monitor
+ *  - "unknown"  : does not match any known schema
  */
 
 // ─── Schema Detection ─────────────────────────────────────────────────────────
 
 /**
+ * Top-level keys that identify a pytc client-enriched config (highest priority).
+ * These fields are added by the pytc-client and are not present in plain
+ * pytorch_connectomics library configs.
+ */
+const PYTC_KEYS = ["pytc_version", "workflow"];
+
+/**
+ * Pattern A: uppercase (YACS-style) pytorch_connectomics core keys.
+ * A YAML must contain at least STANDARD_MIN_MATCH of these to be "standard".
+ */
+const STANDARD_KEYS_UPPER = ["MODEL", "DATASET", "SOLVER", "INFERENCE", "SYSTEM"];
+
+/**
+ * Pattern B: lowercase (Hydra/general-style) pytorch_connectomics core keys.
+ * A YAML must contain at least STANDARD_MIN_MATCH of these to be "standard".
+ */
+const STANDARD_KEYS_LOWER = ["model", "data", "optimization", "train", "monitor"];
+
+/** Minimum number of matching keys required to classify a config as "standard". */
+const STANDARD_MIN_MATCH = 2;
+
+/**
  * Returns the schema family name for the given parsed YAML object,
  * or "unknown" if it cannot be identified.
+ *
+ * Detection order (highest → lowest priority):
+ *  1. "pytc"     — contains any key in PYTC_KEYS
+ *  2. "standard" — Pattern A: ≥2 keys from STANDARD_KEYS_UPPER
+ *  3. "standard" — Pattern B: ≥2 keys from STANDARD_KEYS_LOWER
+ *  4. "unknown"
+ *
  * @param {object} yamlData
- * @returns {"pytc"|"lucchi+"|"unknown"}
+ * @returns {"pytc"|"standard"|"unknown"}
  */
 export function detectSchema(yamlData) {
   if (!yamlData || typeof yamlData !== "object") return "unknown";
 
-  const pytcKeys = ["SYSTEM", "MODEL", "DATASET", "SOLVER", "INFERENCE"];
-  if (pytcKeys.some((k) => k in yamlData)) return "pytc";
+  // 1. Highest priority: pytc client-enriched config
+  if (PYTC_KEYS.some((k) => k in yamlData)) return "pytc";
 
-  const lucchiKeys = ["data", "optimization", "experiment_name"];
-  if (lucchiKeys.some((k) => k in yamlData)) return "lucchi+";
+  // 2. Pattern A — uppercase YACS-style core config
+  const upperMatches = STANDARD_KEYS_UPPER.filter((k) => k in yamlData).length;
+  if (upperMatches >= STANDARD_MIN_MATCH) return "standard";
+
+  // 3. Pattern B — lowercase Hydra/general-style core config
+  const lowerMatches = STANDARD_KEYS_LOWER.filter((k) => k in yamlData).length;
+  if (lowerMatches >= STANDARD_MIN_MATCH) return "standard";
 
   return "unknown";
 }
@@ -36,9 +78,9 @@ export function detectSchema(yamlData) {
  * adapter works correctly on Windows as well as POSIX systems.
  *
  * Examples:
- *   "datasets/lucchi++/train_im.h5"   → ["datasets/lucchi++/", "train_im.h5"]
- *   "C:\\data\\train.tif"             → ["C:\\data\\",           "train.tif"]
- *   "train_im.h5"                     → ["",                     "train_im.h5"]
+ *   "datasets/train_im.h5"   → ["datasets/", "train_im.h5"]
+ *   "C:\\data\\train.tif"    → ["C:\\data\\", "train.tif"]
+ *   "train_im.h5"            → ["",           "train_im.h5"]
  */
 function _splitPath(fullPath) {
   if (!fullPath || typeof fullPath !== "string") return ["", ""];
@@ -49,7 +91,7 @@ function _splitPath(fullPath) {
 }
 
 /**
- * Maps Lucchi++ architecture names to pytorch_connectomics MODEL_MAP keys.
+ * Maps general lowercase architecture names to pytorch_connectomics MODEL_MAP keys.
  */
 function _mapArchitecture(arch) {
   const map = {
@@ -66,7 +108,7 @@ function _mapArchitecture(arch) {
 }
 
 /**
- * Maps Lucchi++ scheduler names to pytorch_connectomics scheduler names.
+ * Maps general lowercase scheduler names to pytorch_connectomics scheduler names.
  */
 function _mapScheduler(name) {
   const map = {
@@ -90,17 +132,19 @@ function _computeStride(windowSize, overlap) {
   return ws.map((s) => Math.round(s * (1 - ov)));
 }
 
-// ─── Adapter: Lucchi++ / MONAI → pytorch_connectomics ────────────────────────
+// ─── Adapter: lowercase / Hydra-style → pytorch_connectomics uppercase ────────
 
 /**
- * Translates a Lucchi++ schema YAML object to the pytorch_connectomics schema.
+ * Translates a lowercase (Hydra/general) standard schema YAML object to the
+ * pytorch_connectomics uppercase (YACS) schema.
+ *
  * Keys that have no equivalent are preserved in a top-level `_EXTRA` object
  * so that no data is silently discarded during translation.
  *
- * @param {object} src - Parsed Lucchi++ YAML object.
+ * @param {object} src - Parsed lowercase standard YAML object.
  * @returns {object} - Translated pytorch_connectomics schema object.
  */
-function adaptLucchiPlus(src) {
+function adaptStandardLower(src) {
   const out = {};
 
   // ── SYSTEM ──────────────────────────────────────────────────────────────
@@ -209,9 +253,10 @@ function adaptLucchiPlus(src) {
 
 /**
  * Takes a parsed YAML object (any supported schema) and returns a parsed YAML
- * object conforming to the pytorch_connectomics flat uppercase schema.
+ * object conforming to the pytorch_connectomics flat uppercase (YACS) schema.
  *
- * - If the schema is already "pytc", returns the object unchanged.
+ * - If the schema is "pytc" or already uppercase "standard", returns unchanged.
+ * - If the schema is lowercase "standard", translates to uppercase.
  * - If the schema is unknown, returns the object unchanged with a console warn.
  *
  * @param {object} yamlData
@@ -223,9 +268,16 @@ export function adaptToPytcSchema(yamlData) {
   if (schema === "pytc") {
     return { adapted: yamlData, originalSchema: "pytc", wasAdapted: false };
   }
-  if (schema === "lucchi+") {
-    const adapted = adaptLucchiPlus(yamlData);
-    return { adapted, originalSchema: "lucchi+", wasAdapted: true };
+
+  if (schema === "standard") {
+    // Check whether this is already uppercase (Pattern A) — if so, pass through.
+    const upperMatches = STANDARD_KEYS_UPPER.filter((k) => k in yamlData).length;
+    if (upperMatches >= STANDARD_MIN_MATCH) {
+      return { adapted: yamlData, originalSchema: "standard", wasAdapted: false };
+    }
+    // Pattern B: lowercase — translate to uppercase.
+    const adapted = adaptStandardLower(yamlData);
+    return { adapted, originalSchema: "standard", wasAdapted: true };
   }
 
   console.warn(
