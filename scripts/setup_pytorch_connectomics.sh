@@ -7,8 +7,8 @@ if ! command -v git >/dev/null 2>&1; then
 	exit 1
 fi
 
-PYTORCH_CONNECTOMICS_COMMIT="20ccfde"
-REPO_URL="https://github.com/zudi-lin/pytorch_connectomics.git"
+PYTORCH_CONNECTOMICS_COMMIT="0a0dceb"
+REPO_URL="https://github.com/PytorchConnectomics/pytorch_connectomics.git"
 PYTORCH_CONNECTOMICS_DIR="pytorch_connectomics"
 
 if [ -d "${PYTORCH_CONNECTOMICS_DIR}/.git" ]; then
