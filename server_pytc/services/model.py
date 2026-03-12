@@ -238,7 +238,7 @@ def stop_training():
         finally:
             _training_process = None
 
-    stop_process_by_name("pytorch_connectomics/scripts/main.py")
+    stop_process_by_name("pytorch_connectomics/scripts/main.py --mode train")
     stop_tensorboard()
     cleanup_temp_files()
     return {"status": "stopped"}
@@ -335,7 +335,7 @@ def stop_inference():
         finally:
             _inference_process = None
 
-    stop_process_by_name("pytorch_connectomics/scripts/main.py")
+    stop_process_by_name("pytorch_connectomics/scripts/main.py --mode test")
     stop_tensorboard()
     cleanup_temp_files()
     return {"status": "stopped"}
