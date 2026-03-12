@@ -98,8 +98,7 @@ async def get_tensorboard_url():
 async def start_model_inference(req: Request):
     req = await req.json()
     print("start model inference")
-    # log_dir = req["log_dir"]
-    start_inference(req)
+    return start_inference(req)
 
 
 @app.post("/stop_model_inference")
