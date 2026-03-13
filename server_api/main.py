@@ -21,6 +21,7 @@ from server_api.auth import models, database, router as auth_router
 from server_api.auth.database import get_db
 from server_api.auth.router import get_current_user
 from server_api.ehtool import router as ehtool_router
+from server_api.project_manager import router as pm_router
 
 from fastapi.staticfiles import StaticFiles
 import os
@@ -77,10 +78,12 @@ app.mount("/uploads", StaticFiles(directory="uploads"), name="uploads")
 
 app.include_router(auth_router.router)
 app.include_router(ehtool_router.router, prefix="/eh", tags=["ehtool"])
+app.include_router(pm_router.router, prefix="/api/pm", tags=["project-manager"])
 
 app.add_middleware(
     CORSMiddleware,
     allow_origins=get_allowed_origins(),
+    allow_origins=["http://localhost:3000"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],

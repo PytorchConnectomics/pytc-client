@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from "react";
+import React, { useMemo } from "react";
 import {
     Card,
     Table,
@@ -15,6 +15,8 @@ import {
     Progress,
     Tooltip,
     message,
+    Popconfirm,
+    Spin,
 } from "antd";
 import {
     ScheduleOutlined,
@@ -23,52 +25,23 @@ import {
     LeftOutlined,
     RightOutlined,
     EditOutlined,
+    ReloadOutlined,
+    SaveOutlined,
 } from "@ant-design/icons";
 import dayjs from "dayjs";
 import weekday from "dayjs/plugin/weekday";
 import localeData from "dayjs/plugin/localeData";
+import { useState } from "react";
+import { useProjectManager } from "../../contexts/ProjectManagerContext";
 
 dayjs.extend(weekday);
 dayjs.extend(localeData);
 
 const { Title, Text } = Typography;
-const { RangePicker } = DatePicker;
 const { TextArea } = Input;
 
-// ─── Seed Data ───────────────────────────────────────────────────────────────
+// ─── Sparkline trend data for the last 8 weeks (attainment percentages) ──────
 
-const QUOTA_DATA = [
-    {
-        key: "1",
-        name: "Alex Rivera",
-        datasets: ["Hippocampus_CA3", "Motor_Cortex_M1"],
-        mon: 300, tue: 300, wed: 300, thu: 300, fri: 300, sat: 150, sun: 100,
-        actualMon: 310, actualTue: 290, actualWed: 320, actualThu: 280, actualFri: 300, actualSat: 160, actualSun: 90,
-    },
-    {
-        key: "2",
-        name: "Jordan Smith",
-        datasets: ["Cerebellum_PC"],
-        mon: 250, tue: 250, wed: 250, thu: 250, fri: 250, sat: 0, sun: 0,
-        actualMon: 240, actualTue: 260, actualWed: 230, actualThu: 250, actualFri: 220, actualSat: 0, actualSun: 0,
-    },
-    {
-        key: "3",
-        name: "Sam Taylor",
-        datasets: ["Retina_GCL"],
-        mon: 200, tue: 200, wed: 200, thu: 200, fri: 200, sat: 250, sun: 250,
-        actualMon: 180, actualTue: 190, actualWed: 170, actualThu: 210, actualFri: 200, actualSat: 100, actualSun: 0,
-    },
-    {
-        key: "4",
-        name: "Casey Chen",
-        datasets: ["Visual_Cortex_V1"],
-        mon: 240, tue: 240, wed: 240, thu: 240, fri: 240, sat: 0, sun: 0,
-        actualMon: 250, actualTue: 260, actualWed: 270, actualThu: 240, actualFri: 230, actualSat: 0, actualSun: 0,
-    },
-];
-
-// Sparkline trend data for the last 8 weeks (attainment percentages)
 const PERFORMANCE_TRENDS = {
     "1": [98, 102, 100, 95, 105, 101, 100, 99],
     "2": [90, 92, 88, 85, 90, 94, 91, 89],
@@ -79,9 +52,9 @@ const PERFORMANCE_TRENDS = {
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
 function getAttainmentColor(percent) {
-    if (percent >= 100) return "#52c41a"; // success
-    if (percent >= 75) return "#faad14"; // warning
-    return "#f5222d"; // error
+    if (percent >= 100) return "#52c41a";
+    if (percent >= 75) return "#faad14";
+    return "#f5222d";
 }
 
 // ─── Sub-components ──────────────────────────────────────────────────────────
@@ -91,21 +64,13 @@ function Sparkline({ data }) {
     const H = 20;
     const gap = 2;
     const barW = (W - (data.length - 1) * gap) / data.length;
-
     return (
         <svg width={W} height={H} style={{ display: "block" }}>
             {data.map((v, i) => {
-                const h = (v / 120) * H; // scaled to 120% max
+                const h = (v / 120) * H;
                 return (
-                    <rect
-                        key={i}
-                        x={i * (barW + gap)}
-                        y={H - h}
-                        width={barW}
-                        height={h}
-                        fill={getAttainmentColor(v)}
-                        rx={1}
-                    />
+                    <rect key={i} x={i * (barW + gap)} y={H - h}
+                        width={barW} height={h} fill={getAttainmentColor(v)} rx={1} />
                 );
             })}
         </svg>
@@ -115,20 +80,22 @@ function Sparkline({ data }) {
 // ─── Main Component ───────────────────────────────────────────────────────────
 
 function QuotaManagement() {
-    const [data, setData] = useState(QUOTA_DATA);
+    const {
+        quotaData,
+        msgPreview,
+        setQuotaData,
+        setMsgPreview,
+        saving,
+        resetData,
+    } = useProjectManager();
+
     const [selectedWeek, setSelectedWeek] = useState(dayjs().startOf("week"));
-    const [msgPreview, setMsgPreview] = useState(
-        "Hi Team,\n\nI've just assigned the quotas for the upcoming week. Please review your targets in the dashboard. Our goal for this week is to maintain 95%+ accuracy while meeting the sample volume targets.\n\nGood luck!"
-    );
 
     const handleUpdateQuota = (key, day, val) => {
-        const newData = data.map(item => {
-            if (item.key === key) {
-                return { ...item, [day]: val };
-            }
-            return item;
-        });
-        setData(newData);
+        const updated = quotaData.map(item =>
+            item.key === key ? { ...item, [day]: val } : item
+        );
+        setQuotaData(updated);
     };
 
     const handleAutoAllocate = () => {
@@ -138,114 +105,50 @@ function QuotaManagement() {
     };
 
     const handleSendQuotas = () => {
-        message.success("Weekly quotas dispatched to 4 proofreaders.");
+        message.success("Weekly quotas dispatched to proofreaders.");
     };
 
-    const columns = [
-        {
-            title: "Name",
-            dataIndex: "name",
-            key: "name",
-            width: 150,
-            render: (text, record) => (
-                <div>
-                    <Text strong>{text}</Text>
-                    <div style={{ fontSize: 10, color: "#8c8c8c" }}>
-                        {record.datasets.join(", ")}
-                    </div>
-                </div>
-            )
-        },
-        {
-            title: "Target / Actual",
-            children: [
-                { title: "Mon", dataIndex: "mon", key: "mon", width: 80 },
-                { title: "Tue", dataIndex: "tue", key: "tue", width: 80 },
-                { title: "Wed", dataIndex: "wed", key: "wed", width: 80 },
-                { title: "Thu", dataIndex: "thu", key: "thu", width: 80 },
-                { title: "Fri", dataIndex: "fri", key: "fri", width: 80 },
-                { title: "Sat", dataIndex: "sat", key: "sat", width: 80 },
-                { title: "Sun", dataIndex: "sun", key: "sun", width: 80 },
-            ],
-            render: (_, record) => {
-                // This is a complex render because we want Target (editable) over Actual
-                // For simplicity in this mock, we'll just show the target as an input for the day selected
-                // but Ant Design tables handle nested children differently.
-                // We'll map the days below for clarity.
-            }
-        },
-        {
-            title: "Weekly Total",
-            key: "total",
-            width: 120,
-            align: "right",
-            render: (_, record) => {
-                const targetTotal = record.mon + record.tue + record.wed + record.thu + record.fri + record.sat + record.sun;
-                const actualTotal = record.actualMon + record.actualTue + record.actualWed + record.actualThu + record.actualFri + record.actualSat + record.actualSun;
-                const attainment = Math.round((actualTotal / targetTotal) * 100);
-                return (
-                    <div style={{ textAlign: "right" }}>
-                        <Text strong>{actualTotal.toLocaleString()}</Text>
-                        <Text type="secondary" style={{ fontSize: 11 }}> / {targetTotal.toLocaleString()}</Text>
-                        <br />
-                        <Tag color={getAttainmentColor(attainment)} style={{ margin: 0, fontSize: 10 }}>
-                            {attainment}%
-                        </Tag>
-                    </div>
-                );
-            }
-        },
-        {
-            title: "Capacity",
-            key: "capacity",
-            width: 100,
-            render: (_, record) => {
-                const total = record.mon + record.tue + record.wed + record.thu + record.fri + record.sat + record.sun;
-                const load = Math.min(100, Math.round((total / 2000) * 100)); // Assuming 2000 is max capacity
-                return <Progress percent={load} size="small" status={load > 90 ? "exception" : "active"} />;
-            }
-        },
-        {
-            title: "8-Week Trend",
-            key: "trend",
-            width: 120,
-            render: (_, record) => <Sparkline data={PERFORMANCE_TRENDS[record.key] || []} />
-        }
-    ];
-
-    // Manual mapping of day columns to enable per-cell editing UI
+    // Day columns
     const dayCols = ["mon", "tue", "wed", "thu", "fri", "sat", "sun"].map(day => ({
         title: day.charAt(0).toUpperCase() + day.slice(1),
         dataIndex: day,
         key: day,
-        width: 80,
+        width: 100,
         render: (val, record) => {
             const actual = record[`actual${day.charAt(0).toUpperCase() + day.slice(1)}`];
             const attainment = val > 0 ? Math.round((actual / val) * 100) : 100;
             return (
-                <div style={{ padding: "4px 0" }}>
-                    <InputNumber
-                        size="small"
-                        value={val}
-                        onChange={(v) => handleUpdateQuota(record.key, day, v)}
-                        bordered={false}
-                        style={{ width: "100%", fontWeight: "bold", padding: 0 }}
-                        controls={false}
-                    />
-                    <Tooltip title={`Actual: ${actual}`}>
-                        <Text style={{
-                            fontSize: 10,
-                            color: getAttainmentColor(attainment),
-                            display: "block",
-                            borderTop: "1px solid #f0f0f0",
-                            marginTop: 2
-                        }}>
-                            {actual} ({attainment}%)
-                        </Text>
-                    </Tooltip>
+                <div style={{ padding: "8px 4px", borderRadius: 4 }}>
+                    <div style={{ marginBottom: 4 }}>
+                        <Text type="secondary" style={{ fontSize: 9, display: "block", textTransform: "uppercase" }}>Target</Text>
+                        <InputNumber
+                            size="small"
+                            value={val}
+                            onChange={(v) => handleUpdateQuota(record.key, day, v)}
+                            style={{ 
+                                width: "100%", 
+                                fontWeight: "bold", 
+                                background: "#e6f7ff",
+                                borderRadius: 4,
+                                border: "1px solid #91d5ff"
+                            }}
+                            controls={false}
+                        />
+                    </div>
+                    <div>
+                        <Text type="secondary" style={{ fontSize: 9, display: "block", textTransform: "uppercase" }}>Actual</Text>
+                        <Tooltip title={`Attainment: ${attainment}%`}>
+                            <Tag 
+                                color={getAttainmentColor(attainment)} 
+                                style={{ width: "100%", margin: 0, textAlign: "center", borderRadius: 4, fontSize: 11, fontWeight: "600" }}
+                            >
+                                {actual}
+                            </Tag>
+                        </Tooltip>
+                    </div>
                 </div>
             );
-        }
+        },
     }));
 
     const finalColumns = [
@@ -260,7 +163,7 @@ function QuotaManagement() {
                     <Text strong>{text}</Text>
                     <div style={{ fontSize: 10, color: "#8c8c8c" }}>{record.datasets.join(", ")}</div>
                 </div>
-            )
+            ),
         },
         ...dayCols,
         {
@@ -278,24 +181,32 @@ function QuotaManagement() {
                             <Text strong>{actualTotal}</Text>
                             <Text type="secondary">/ {targetTotal}</Text>
                         </div>
-                        <Progress
-                            percent={attainment}
-                            size={[100, 4]}
-                            strokeColor={getAttainmentColor(attainment)}
-                            showInfo={false}
-                        />
+                        <Progress percent={attainment} size={[100, 4]} strokeColor={getAttainmentColor(attainment)} showInfo={false} />
                     </div>
                 );
-            }
+            },
         },
         {
             title: "8-Wk Trend",
             key: "trend",
             width: 120,
             fixed: "right",
-            render: (_, record) => <Sparkline data={PERFORMANCE_TRENDS[record.key] || []} />
-        }
+            render: (_, record) => <Sparkline data={PERFORMANCE_TRENDS[record.key] || []} />,
+        },
     ];
+
+    // Dynamic Calculations for Summary
+    const totals = useMemo(() => {
+        return quotaData.reduce((acc, row) => {
+            acc.target += (row.mon + row.tue + row.wed + row.thu + row.fri + row.sat + row.sun);
+            acc.actual += ((row.actualMon || 0) + (row.actualTue || 0) + (row.actualWed || 0) + 
+                          (row.actualThu || 0) + (row.actualFri || 0) + (row.actualSat || 0) + (row.actualSun || 0));
+            return acc;
+        }, { target: 0, actual: 0 });
+    }, [quotaData]);
+
+    const globalUtilization = totals.target > 0 ? Math.round((totals.actual / totals.target) * 100) : 0;
+    const remainingBuffer = Math.max(0, totals.target - totals.actual);
 
     return (
         <div style={{ padding: "0 4px" }}>
@@ -303,7 +214,10 @@ function QuotaManagement() {
             <Row justify="space-between" align="middle" style={{ marginBottom: 20 }}>
                 <Col>
                     <Title level={4} style={{ margin: 0 }}>Weekly Quota Management</Title>
-                    <Text type="secondary">Plan targets and track capacity utilization</Text>
+                    <Text type="secondary">
+                        Plan targets and track capacity utilization · <b>Real-time Sync</b>
+                        {saving && <> · <Spin size="small" style={{ marginLeft: 6 }} /> saving…</>}
+                    </Text>
                 </Col>
                 <Col>
                     <Space>
@@ -314,12 +228,22 @@ function QuotaManagement() {
                             onChange={setSelectedWeek}
                             allowClear={false}
                             format="MMM D, YYYY"
-                            style={{ width: 220 }}
+                            style={{ width: 220, borderRadius: 6 }}
                         />
                         <Button icon={<RightOutlined />} onClick={() => setSelectedWeek(selectedWeek.add(1, "week"))} />
-                        <Button type="primary" ghost icon={<ThunderboltOutlined />} onClick={handleAutoAllocate}>
+                        <Button type="primary" ghost icon={<ThunderboltOutlined />} onClick={handleAutoAllocate} style={{ borderRadius: 6 }}>
                             Auto-Allocate
                         </Button>
+                        <Popconfirm
+                            title="Reset all quota data to defaults?"
+                            description="This will overwrite server data with original seed values."
+                            onConfirm={resetData}
+                            okText="Reset"
+                            cancelText="Cancel"
+                            okButtonProps={{ danger: true }}
+                        >
+                            <Button icon={<ReloadOutlined />} danger style={{ borderRadius: 6 }}>Reset to Defaults</Button>
+                        </Popconfirm>
                     </Space>
                 </Col>
             </Row>
@@ -330,16 +254,16 @@ function QuotaManagement() {
                 bodyStyle={{ padding: 0 }}
                 title={
                     <Space>
-                        <ScheduleOutlined />
+                        <ScheduleOutlined style={{ color: "#1890ff" }} />
                         <Text strong>Targets vs Actuals</Text>
-                        <Tag color="blue">Week 10 (Current)</Tag>
+                        <Tag color="blue" style={{ borderRadius: 4 }}>Week 10 (Current)</Tag>
                     </Space>
                 }
-                extra={<Text type="secondary" style={{ fontSize: 12 }}>Click values to edit targets</Text>}
-                style={{ marginBottom: 20 }}
+                extra={<Text type="secondary" style={{ fontSize: 12 }}>Input numbers in blue cells to update targets instantly.</Text>}
+                style={{ marginBottom: 20, borderRadius: 8, overflow: "hidden" }}
             >
                 <Table
-                    dataSource={data}
+                    dataSource={quotaData}
                     columns={finalColumns}
                     pagination={false}
                     size="small"
@@ -349,26 +273,28 @@ function QuotaManagement() {
             </Card>
 
             <Row gutter={16}>
-                {/* Statistics Component (Small subset) */}
+                {/* Capacity Summary */}
                 <Col span={8}>
-                    <Card size="small" title={<Text strong>Capacity Summary</Text>}>
+                    <Card size="small" title={<Text strong>Capacity Summary</Text>} style={{ borderRadius: 8 }}>
                         <div style={{ padding: "8px 0" }}>
-                            <Tooltip title="Total capacity utilization across all proofreaders">
-                                <Text type="secondary">Global Utilization</Text>
-                                <Progress percent={76} status="active" />
+                            <Tooltip title="Total capacity utilization based on current active targets">
+                                <Text type="secondary" style={{ fontSize: 12 }}>Global Utilization</Text>
+                                <Progress percent={globalUtilization} status="active" strokeColor={getAttainmentColor(globalUtilization)} />
                             </Tooltip>
                             <Divider style={{ margin: "12px 0" }} />
                             <div style={{ display: "flex", justifyContent: "space-between" }}>
-                                <Text type="secondary">Total Weekly Goal</Text>
-                                <Text strong>7,200 samples</Text>
+                                <Text type="secondary">Total Weekly Target</Text>
+                                <Text strong>{totals.target.toLocaleString()} points</Text>
                             </div>
                             <div style={{ display: "flex", justifyContent: "space-between", marginTop: 8 }}>
-                                <Text type="secondary">Allocated So Far</Text>
-                                <Text strong>5,480 samples</Text>
+                                <Text type="secondary">Actual points so far</Text>
+                                <Text strong>{totals.actual.toLocaleString()} points</Text>
                             </div>
                             <div style={{ display: "flex", justifyContent: "space-between", marginTop: 8 }}>
-                                <Text type="secondary">Remaining Buffer</Text>
-                                <Text strong style={{ color: "#52c41a" }}>1,720 (24%)</Text>
+                                <Text type="secondary">Remaining to target</Text>
+                                <Text strong style={{ color: remainingBuffer > 0 ? "#faad14" : "#52c41a" }}>
+                                    {remainingBuffer.toLocaleString()}
+                                </Text>
                             </div>
                         </div>
                     </Card>
@@ -393,7 +319,7 @@ function QuotaManagement() {
                         />
                         <div style={{ marginTop: 8 }}>
                             <Text type="secondary" style={{ fontSize: 11 }}>
-                                This message will be sent to 4 proofreaders via the internal notification system.
+                                This message will be sent to proofreaders via the internal notification system.
                             </Text>
                         </div>
                     </Card>

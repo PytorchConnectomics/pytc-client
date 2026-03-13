@@ -16,14 +16,10 @@ import Visualization from "./Visualization";
 import ModelTraining from "./ModelTraining";
 import ModelInference from "./ModelInference";
 import Monitoring from "./Monitoring";
-<<<<<<< HEAD
 import MaskProofreading from "./MaskProofreading";
-=======
 import ProofReading from "./ProofReading";
 import WormErrorHandling from "./WormErrorHandling";
 import ProjectManager from "./project-manager/ProjectManager";
-import WorkflowSelector from "../components/WorkflowSelector";
->>>>>>> c648179 (feat:  annotation management system)
 import Chatbot from "../components/Chatbot";
 
 const { Content } = Layout;
@@ -178,46 +174,46 @@ function Views() {
           />,
         )}
 <<<<<<< HEAD
-        {renderTabContent("mask-proofreading", <MaskProofreading />)}
+  { renderTabContent("mask-proofreading", <MaskProofreading />) }
 =======
         {renderTabContent("synanno", <ProofReading />)}
         {renderTabContent("worm-error-handling", <WormErrorHandling />)}
         {renderTabContent("project-manager", <ProjectManager />)}
 >>>>>>> c648179 (feat:  annotation management system)
-      </Content>
-      <Drawer
-        placement="right"
-        open={isChatOpen}
-        onClose={() => setIsChatOpen(false)}
-        width={chatWidth}
-        mask={false}
-        closable={false}
-        destroyOnClose
-        styles={{ header: { display: "none" }, body: { padding: 0 } }}
-      >
-        <div
-          onMouseDown={startResizing}
-          style={{
-            position: "absolute",
-            left: 0,
-            top: 0,
-            bottom: 0,
-            width: "4px",
-            cursor: "ew-resize",
-            backgroundColor: "transparent",
-            zIndex: 10,
-          }}
-          onMouseEnter={(e) =>
-            (e.currentTarget.style.backgroundColor = "#1890ff")
-          }
-          onMouseLeave={(e) =>
-            !isResizing.current &&
-            (e.currentTarget.style.backgroundColor = "transparent")
-          }
-        />
-        <Chatbot onClose={() => setIsChatOpen(false)} />
-      </Drawer>
-    </Layout>
+      </Content >
+    <Drawer
+      placement="right"
+      open={isChatOpen}
+      onClose={() => setIsChatOpen(false)}
+      width={chatWidth}
+      mask={false}
+      closable={false}
+      destroyOnClose
+      styles={{ header: { display: "none" }, body: { padding: 0 } }}
+    >
+      <div
+        onMouseDown={startResizing}
+        style={{
+          position: "absolute",
+          left: 0,
+          top: 0,
+          bottom: 0,
+          width: "4px",
+          cursor: "ew-resize",
+          backgroundColor: "transparent",
+          zIndex: 10,
+        }}
+        onMouseEnter={(e) =>
+          (e.currentTarget.style.backgroundColor = "#1890ff")
+        }
+        onMouseLeave={(e) =>
+          !isResizing.current &&
+          (e.currentTarget.style.backgroundColor = "transparent")
+        }
+      />
+      <Chatbot onClose={() => setIsChatOpen(false)} />
+    </Drawer>
+    </Layout >
   );
 }
 
