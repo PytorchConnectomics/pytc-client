@@ -27,108 +27,12 @@ import {
 } from "@ant-design/icons";
 import dayjs from "dayjs";
 
-const { Title, Text } = Typography;
+import { useProjectManager } from "../../contexts/ProjectManagerContext";
 
-// ─── Seed Data ───────────────────────────────────────────────────────────────
+const { Title, Text } = Typography;
 
 const PROJECT_START = dayjs("2025-10-01");
 const PROJECT_END = dayjs("2026-03-31");
-
-const MILESTONES = [
-    { label: "Model v1", date: dayjs("2025-11-15"), color: "#1890ff" },
-    { label: "Mid-Review", date: dayjs("2025-12-20"), color: "#722ed1" },
-    { label: "Model v2", date: dayjs("2026-01-28"), color: "#1890ff" },
-    { label: "Data Freeze", date: dayjs("2026-02-15"), color: "#fa8c16" },
-    { label: "Model v3", date: dayjs("2026-03-20"), color: "#1890ff" },
-];
-
-const DATASETS = [
-    {
-        key: "1",
-        name: "Hippocampus_CA3",
-        experiment: "Synapse detection",
-        total: 12450,
-        proofread: 38,
-        status: "in_progress",
-        eta: "Jan 18",
-        priority: "high",
-    },
-    {
-        key: "2",
-        name: "Motor_Cortex_M1",
-        experiment: "Axon tracing",
-        total: 9800,
-        proofread: 72,
-        status: "in_progress",
-        eta: "Jan 22",
-        priority: "high",
-    },
-    {
-        key: "3",
-        name: "Cerebellum_PC",
-        experiment: "Dendrite segmentation",
-        total: 6200,
-        proofread: 91,
-        status: "done",
-        eta: "Complete",
-        priority: "normal",
-    },
-    {
-        key: "4",
-        name: "Retina_GCL",
-        experiment: "Cell classification",
-        total: 3300,
-        proofread: 5,
-        status: "blocked",
-        eta: "TBD",
-        priority: "high",
-    },
-    {
-        key: "5",
-        name: "Olfactory_Bulb",
-        experiment: "Glomeruli mapping",
-        total: 7650,
-        proofread: 0,
-        status: "not_started",
-        eta: "Feb 28",
-        priority: "normal",
-    },
-    {
-        key: "6",
-        name: "Visual_Cortex_V1",
-        experiment: "Spine detection",
-        total: 15000,
-        proofread: 55,
-        status: "in_progress",
-        eta: "Feb 10",
-        priority: "normal",
-    },
-];
-
-// Weekly cumulative progress (weeks 1–26)
-const CUMULATIVE_DATA = [
-    0, 480, 1100, 1950, 2800, 3900, 5100, 6200, 7450, 8600, 9900, 11200, 12600,
-    13900, 15400, 17000, 18500, 20100, 21800, 23400, 25000, 26700, 28500, 30200,
-    32000, 33800,
-];
-const CUMULATIVE_TARGET = [
-    0, 600, 1200, 1800, 2400, 3000, 3600, 4800, 6000, 7200, 8400, 9600, 10800,
-    12000, 13200, 14400, 15600, 16800, 18000, 19200, 20400, 21600, 22800, 24000,
-    25200, 26400,
-];
-
-const AT_RISK = [
-    { label: "Hippocampus_CA3", reason: "Low progress (38%)", icon: "progress" },
-    { label: "Motor_Cortex_M1", reason: "Deadline approaching", icon: "clock" },
-    { label: "Retina_GCL", reason: "Blocked — awaiting data", icon: "blocked" },
-];
-
-const UPCOMING_MILESTONES = [
-    { label: "Model v2 data freeze", date: "JAN 28" },
-    { label: "Mid-project review", date: "FEB 5" },
-    { label: "Final data freeze", date: "FEB 15" },
-    { label: "Model v3 launch", date: "MAR 20" },
-];
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -154,7 +58,7 @@ function dateToFrac(d) {
 // ─── Sub-components ──────────────────────────────────────────────────────────
 
 /** Custom SVG 6-month horizontal timeline */
-function SixMonthTimeline() {
+function SixMonthTimeline({ milestones }) {
     const W = 900; // viewBox width
     const H = 80;
     const PAD = 40;
@@ -212,10 +116,10 @@ function SixMonthTimeline() {
             })}
 
             {/* Milestones */}
-            {MILESTONES.map((ms) => {
+            {milestones.map((ms) => {
                 const x = PAD + dateToFrac(ms.date) * trackW;
                 return (
-                    <Tooltip key={ms.label} title={`${ms.label} — ${ms.date.format("MMM D, YYYY")}`}>
+                    <Tooltip key={ms.label} title={`${ms.label} — ${dayjs(ms.date).format("MMM D, YYYY")}`}>
                         <g style={{ cursor: "pointer" }}>
                             {/* Diamond shape */}
                             <polygon
@@ -255,7 +159,7 @@ function SixMonthTimeline() {
 }
 
 /** Cumulative progress SVG line chart */
-function CumulativeChart() {
+function CumulativeChart({ cumulativeData, cumulativeTarget }) {
     const W = 800;
     const H = 180;
     const PADL = 52;
@@ -265,8 +169,8 @@ function CumulativeChart() {
     const chartW = W - PADL - PADR;
     const chartH = H - PADT - PADB;
 
-    const maxVal = Math.max(...CUMULATIVE_DATA, ...CUMULATIVE_TARGET) * 1.05;
-    const weeks = CUMULATIVE_DATA.length;
+    const maxVal = Math.max(...cumulativeData, ...cumulativeTarget) * 1.05;
+    const weeks = cumulativeData.length;
 
     const toX = (i) => PADL + (i / (weeks - 1)) * chartW;
     const toY = (v) => PADT + chartH - (v / maxVal) * chartH;
@@ -306,16 +210,16 @@ function CumulativeChart() {
             ))}
 
             {/* Target area fill */}
-            <path d={areaD(CUMULATIVE_TARGET)} fill="#1890ff" opacity={0.06} />
+            <path d={areaD(cumulativeTarget)} fill="#1890ff" opacity={0.06} />
 
             {/* Target line */}
-            <path d={pathD(CUMULATIVE_TARGET)} fill="none" stroke="#1890ff" strokeWidth={1.5} strokeDasharray="5 3" />
+            <path d={pathD(cumulativeTarget)} fill="none" stroke="#1890ff" strokeWidth={1.5} strokeDasharray="5 3" />
 
             {/* Actual area fill */}
-            <path d={areaD(CUMULATIVE_DATA)} fill="#52c41a" opacity={0.12} />
+            <path d={areaD(cumulativeData)} fill="#52c41a" opacity={0.12} />
 
             {/* Actual line */}
-            <path d={pathD(CUMULATIVE_DATA)} fill="none" stroke="#52c41a" strokeWidth={2} />
+            <path d={pathD(cumulativeData)} fill="none" stroke="#52c41a" strokeWidth={2} />
 
             {/* Legend */}
             <g transform={`translate(${PADL + chartW - 160}, ${PADT})`}>
@@ -327,6 +231,7 @@ function CumulativeChart() {
         </svg>
     );
 }
+
 
 // ─── Column definitions ───────────────────────────────────────────────────────
 
@@ -385,28 +290,46 @@ const DATASET_COLUMNS = [
 // ─── Main Component ───────────────────────────────────────────────────────────
 
 function AnnotationDashboard() {
+    const {
+        quotaData,
+        proofreaderData,
+        datasets,
+        milestones,
+        cumulativeData,
+        cumulativeTarget,
+        atRisk,
+        upcomingMilestones
+    } = useProjectManager();
+
     const [filter, setFilter] = useState("all");
 
-    // Derived stats
-    const totalSamples = useMemo(
-        () => DATASETS.reduce((s, d) => s + d.total, 0),
-        []
+    // Dynamic Calculations
+    const totalActual = useMemo(() =>
+        quotaData.reduce((sum, row) =>
+            sum + row.actualMon + row.actualTue + row.actualWed + row.actualThu + row.actualFri + row.actualSat + row.actualSun,
+            0),
+        [quotaData]
     );
-    const totalProofread = useMemo(
-        () =>
-            DATASETS.reduce((s, d) => s + Math.round((d.proofread / 100) * d.total), 0),
-        []
+
+    const totalTarget = useMemo(() =>
+        quotaData.reduce((sum, row) =>
+            sum + row.mon + row.tue + row.wed + row.thu + row.fri + row.sat + row.sun,
+            0),
+        [quotaData]
     );
-    const overallPct = Math.round((totalProofread / totalSamples) * 100);
-    const activeDatasets = DATASETS.filter((d) => d.status === "in_progress").length;
+
+    const totalSamplesCount = useMemo(() => datasets.reduce((s, d) => s + d.total, 0), [datasets]);
+    const overallPct = totalTarget > 0 ? Math.round((totalActual / totalTarget) * 100) : 0;
+    const activeDatasetsCount = datasets.filter((d) => d.status === "in_progress").length;
+    const activeProofreadersCount = proofreaderData.filter(p => p.status === "online" || p.status === "away").length;
 
     // Filtered datasets
     const filteredDatasets = useMemo(() => {
-        if (filter === "all") return DATASETS;
-        if (filter === "high") return DATASETS.filter((d) => d.priority === "high");
-        if (filter === "blocked") return DATASETS.filter((d) => d.status === "blocked");
-        return DATASETS;
-    }, [filter]);
+        if (filter === "all") return datasets;
+        if (filter === "high") return datasets.filter((d) => d.priority === "high");
+        if (filter === "blocked") return datasets.filter((d) => d.status === "blocked");
+        return datasets;
+    }, [filter, datasets]);
 
     const filterBtns = [
         { key: "all", label: "All" },
@@ -421,55 +344,64 @@ function AnnotationDashboard() {
                 <Title level={4} style={{ margin: 0, color: "#262626" }}>
                     Neural Dataset Proofreading – 6 Months
                 </Title>
-                <Text type="secondary">
-                    {PROJECT_START.format("MMM D, YYYY")} → {PROJECT_END.format("MMM D, YYYY")}
+                <Text type="secondary" style={{ fontSize: 13 }}>
+                    {PROJECT_START.format("MMM D, YYYY")} → {PROJECT_END.format("MMM D, YYYY")} · <b>Real-time Context Sync</b>
                 </Text>
             </div>
 
-            {/* ── KPI Cards ── */}
+            {/* ── KPI Cards: Read-only Status Displays ── */}
             <Row gutter={16} style={{ marginBottom: 20 }}>
                 <Col span={6}>
-                    <Card size="small" bordered={false} style={{ background: "#f6ffed", borderLeft: "4px solid #52c41a" }}>
+                    <Card size="small" bordered={false} style={{ background: "#f6ffed", borderLeft: "4px solid #52c41a", boxShadow: "0 1px 2px rgba(0,0,0,0.03)" }}>
                         <Statistic
-                            title="Total Annotated"
-                            value={totalProofread.toLocaleString()}
-                            suffix={`/ ${totalSamples.toLocaleString()}`}
+                            title={<Text type="secondary" style={{ fontSize: 12 }}>Total Annotated (Points)</Text>}
+                            value={totalActual.toLocaleString()}
+                            suffix={`/ ${totalTarget.toLocaleString()}`}
                             prefix={<CheckCircleOutlined style={{ color: "#52c41a" }} />}
-                            valueStyle={{ color: "#52c41a", fontSize: 18 }}
+                            valueStyle={{ color: "#52c41a", fontSize: 20, fontWeight: "bold" }}
                         />
-                        <Progress percent={overallPct} size="small" showInfo={false} strokeColor="#52c41a" style={{ marginTop: 6 }} />
+                        <div style={{ marginTop: 8 }}>
+                            <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 2 }}>
+                                <Text style={{ fontSize: 11 }}>Progress vs. Weekly Target</Text>
+                                <Text strong style={{ fontSize: 11 }}>{overallPct}%</Text>
+                            </div>
+                            <Progress percent={overallPct} size="small" showInfo={false} strokeColor="#52c41a" />
+                        </div>
                     </Card>
                 </Col>
                 <Col span={6}>
-                    <Card size="small" bordered={false} style={{ background: "#e6f7ff", borderLeft: "4px solid #1890ff" }}>
+                    <Card size="small" bordered={false} style={{ background: "#e6f7ff", borderLeft: "4px solid #1890ff", boxShadow: "0 1px 2px rgba(0,0,0,0.03)" }}>
                         <Statistic
-                            title="Active Datasets"
-                            value={activeDatasets}
-                            suffix="/ 6"
+                            title={<Text type="secondary" style={{ fontSize: 12 }}>Active Datasets</Text>}
+                            value={activeDatasetsCount}
+                            suffix={`/ ${datasets.length}`}
                             prefix={<FileTextOutlined style={{ color: "#1890ff" }} />}
-                            valueStyle={{ color: "#1890ff", fontSize: 18 }}
+                            valueStyle={{ color: "#1890ff", fontSize: 20, fontWeight: "bold" }}
                         />
+                        <Text type="secondary" style={{ fontSize: 11 }}>{totalSamplesCount.toLocaleString()} total samples</Text>
                     </Card>
                 </Col>
                 <Col span={6}>
-                    <Card size="small" bordered={false} style={{ background: "#f9f0ff", borderLeft: "4px solid #722ed1" }}>
+                    <Card size="small" bordered={false} style={{ background: "#f9f0ff", borderLeft: "4px solid #722ed1", boxShadow: "0 1px 2px rgba(0,0,0,0.03)" }}>
                         <Statistic
-                            title="Active Proofreaders"
-                            value={8}
+                            title={<Text type="secondary" style={{ fontSize: 12 }}>Proofreaders Online</Text>}
+                            value={activeProofreadersCount}
+                            suffix={`/ ${proofreaderData.length}`}
                             prefix={<TeamOutlined style={{ color: "#722ed1" }} />}
-                            valueStyle={{ color: "#722ed1", fontSize: 18 }}
+                            valueStyle={{ color: "#722ed1", fontSize: 20, fontWeight: "bold" }}
                         />
+                        <Text type="secondary" style={{ fontSize: 11 }}>Team-wide active status</Text>
                     </Card>
                 </Col>
                 <Col span={6}>
-                    <Card size="small" bordered={false} style={{ background: "#fff7e6", borderLeft: "4px solid #fa8c16" }}>
+                    <Card size="small" bordered={false} style={{ background: "#fff7e6", borderLeft: "4px solid #fa8c16", boxShadow: "0 1px 2px rgba(0,0,0,0.03)" }}>
                         <Statistic
-                            title="Weekly Velocity"
-                            value={1420}
-                            suffix="items / wk"
+                            title={<Text type="secondary" style={{ fontSize: 12 }}>Current Points (Actual)</Text>}
+                            value={totalActual}
                             prefix={<RiseOutlined style={{ color: "#fa8c16" }} />}
-                            valueStyle={{ color: "#fa8c16", fontSize: 18 }}
+                            valueStyle={{ color: "#fa8c16", fontSize: 20, fontWeight: "bold" }}
                         />
+                        <Text type="secondary" style={{ fontSize: 11 }}>Cumulative for current window</Text>
                     </Card>
                 </Col>
             </Row>
@@ -478,10 +410,10 @@ function AnnotationDashboard() {
             <Card
                 size="small"
                 title={<Text strong>6-Month Project Timeline</Text>}
-                style={{ marginBottom: 20 }}
+                style={{ marginBottom: 20, borderRadius: 8 }}
                 bodyStyle={{ paddingTop: 8 }}
             >
-                <SixMonthTimeline />
+                <SixMonthTimeline milestones={milestones} />
             </Card>
 
             {/* ── Main content: Table + Right Sidebar ── */}
@@ -506,7 +438,7 @@ function AnnotationDashboard() {
                                 ))}
                             </Space>
                         }
-                        style={{ marginBottom: 20 }}
+                        style={{ marginBottom: 20, borderRadius: 8 }}
                     >
                         <Table
                             dataSource={filteredDatasets}
@@ -526,21 +458,21 @@ function AnnotationDashboard() {
                         title={
                             <Space>
                                 <ThunderboltOutlined style={{ color: "#1890ff" }} />
-                                <Text strong>This Week</Text>
+                                <Text strong>Weekly Progress</Text>
                             </Space>
                         }
-                        style={{ marginBottom: 12 }}
+                        style={{ marginBottom: 12, borderRadius: 8 }}
                     >
-                        <Text type="secondary" style={{ fontSize: 12 }}>Items proofread vs. target</Text>
+                        <Text type="secondary" style={{ fontSize: 12 }}>Total items annotated vs. target</Text>
                         <div style={{ marginTop: 10 }}>
                             <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 4 }}>
                                 <Text style={{ fontSize: 12 }}>Completed</Text>
-                                <Text strong style={{ fontSize: 12 }}>1,420</Text>
+                                <Text strong style={{ fontSize: 12 }}>{totalActual.toLocaleString()}</Text>
                             </div>
-                            <Progress percent={80} strokeColor="#1890ff" size="small" />
+                            <Progress percent={overallPct} strokeColor="#1890ff" size="small" />
                             <div style={{ display: "flex", justifyContent: "space-between", marginTop: 4 }}>
-                                <Text type="secondary" style={{ fontSize: 11 }}>Target: 1,750</Text>
-                                <Text type="secondary" style={{ fontSize: 11 }}>80%</Text>
+                                <Text type="secondary" style={{ fontSize: 11 }}>Target: {totalTarget.toLocaleString()}</Text>
+                                <Text type="secondary" style={{ fontSize: 11 }}>{overallPct}%</Text>
                             </div>
                         </div>
                     </Card>
@@ -554,9 +486,9 @@ function AnnotationDashboard() {
                                 <Text strong>At Risk</Text>
                             </Space>
                         }
-                        style={{ marginBottom: 12 }}
+                        style={{ marginBottom: 12, borderRadius: 8 }}
                     >
-                        {AT_RISK.map((item, idx) => (
+                        {atRisk.map((item, idx) => (
                             <div key={idx}>
                                 {idx > 0 && <Divider style={{ margin: "6px 0" }} />}
                                 <div style={{ display: "flex", alignItems: "flex-start", gap: 8 }}>
@@ -586,13 +518,14 @@ function AnnotationDashboard() {
                                 <Text strong>Upcoming Milestones</Text>
                             </Space>
                         }
+                        style={{ borderRadius: 8 }}
                     >
-                        {UPCOMING_MILESTONES.map((ms, idx) => (
+                        {upcomingMilestones.map((ms, idx) => (
                             <div key={idx}>
                                 {idx > 0 && <Divider style={{ margin: "6px 0" }} />}
                                 <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
                                     <Text style={{ fontSize: 12 }}>{ms.label}</Text>
-                                    <Tag color="blue" style={{ fontSize: 10, margin: 0 }}>{ms.date}</Tag>
+                                    <Tag color="cyan" style={{ fontSize: 10, margin: 0 }}>{ms.date}</Tag>
                                 </div>
                             </div>
                         ))}
@@ -604,10 +537,10 @@ function AnnotationDashboard() {
             <Card
                 size="small"
                 title={<Text strong>Cumulative Items Proofread over 6 Months</Text>}
-                style={{ marginBottom: 8 }}
+                style={{ marginBottom: 8, borderRadius: 8 }}
                 bodyStyle={{ paddingTop: 8 }}
             >
-                <CumulativeChart />
+                <CumulativeChart cumulativeData={cumulativeData} cumulativeTarget={cumulativeTarget} />
             </Card>
         </div>
     );

@@ -14,6 +14,7 @@ import AnnotationDashboard from "./AnnotationDashboard";
 import ProofreaderProgress from "./ProofreaderProgress";
 import QuotaManagement from "./QuotaManagement";
 import ModelQualityDashboard from "./ModelQualityDashboard";
+import { ProjectManagerProvider } from "../../contexts/ProjectManagerContext";
 
 const { Sider, Content } = Layout;
 const { Title, Text } = Typography;
@@ -108,7 +109,10 @@ const ProjectManager = () => {
                     />
                 </Sider>
                 <Content style={{ padding: "24px", overflow: "auto", background: "#fff" }}>
-                    {renderSubView()}
+                    {/* Single data fetch for all sub-views */}
+                    <ProjectManagerProvider>
+                        {renderSubView()}
+                    </ProjectManagerProvider>
                 </Content>
             </Layout>
         </ConfigProvider>

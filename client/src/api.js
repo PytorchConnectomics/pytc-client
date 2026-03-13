@@ -462,3 +462,33 @@ export async function getConfigPresetContent(path) {
 export async function getModelArchitectures() {
   return makeApiRequest("pytc/architectures", "get");
 }
+
+// ── Project Manager persistence ───────────────────────────────────────────────
+
+export async function getPMData() {
+  try {
+    const res = await apiClient.get("/api/pm/data");
+    return res.data;
+  } catch (error) {
+    handleError(error);
+  }
+}
+
+export async function savePMData(state) {
+  try {
+    const res = await apiClient.post("/api/pm/data", state);
+    return res.data;
+  } catch (error) {
+    handleError(error);
+  }
+}
+
+export async function resetPMData() {
+  try {
+    const res = await apiClient.post("/api/pm/data/reset");
+    return res.data;
+  } catch (error) {
+    handleError(error);
+  }
+}
+
