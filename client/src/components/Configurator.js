@@ -51,9 +51,6 @@ function Configurator(props) {
     if (!getPathValue(context.inputImage)) missing.push("input image");
     if (!getPathValue(context.inputLabel)) missing.push("input label");
     if (!getPathValue(context.outputPath)) missing.push("output path");
-    if (type === "training" && !getPathValue(context.logPath)) {
-      missing.push("log path");
-    }
     if (type === "inference" && !getPathValue(context.checkpointPath)) {
       missing.push("checkpoint path");
     }
@@ -62,7 +59,6 @@ function Configurator(props) {
     context.inputImage,
     context.inputLabel,
     context.outputPath,
-    context.logPath,
     context.checkpointPath,
     type,
   ]);
@@ -72,9 +68,10 @@ function Configurator(props) {
       ? Boolean(context.trainingConfig)
       : Boolean(context.inferenceConfig);
 
-  const missingBase = hasConfig
-    ? []
-    : ["base configuration (preset or upload)"];
+  const missingBase = useMemo(
+    () => (hasConfig ? [] : ["base configuration (preset or upload)"]),
+    [hasConfig],
+  );
 
   const missingByStep = useMemo(() => {
     if (current === 0) return missingInputs;

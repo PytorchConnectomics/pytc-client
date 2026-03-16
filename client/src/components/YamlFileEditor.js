@@ -12,6 +12,7 @@ import {
 } from "antd";
 import yaml from "js-yaml";
 import { AppContext } from "../contexts/GlobalContext";
+import { hasPath } from "../configSchema";
 
 const getYamlValue = (data, path) => {
   if (!data) return undefined;
@@ -290,6 +291,9 @@ const YamlFileEditor = (props) => {
 
   const updateYaml = (path, value) => {
     if (!yamlData) return;
+    if (!hasPath(yamlData, path)) {
+      return;
+    }
     const updated = setYamlValue(yamlData, path, value);
     const updatedText = yaml
       .dump(updated, { indent: 2 })
@@ -340,11 +344,13 @@ const YamlFileEditor = (props) => {
 
   const renderControl = (control) => {
     const value = getYamlValue(yamlData, control.path);
+    const isSupported = hasPath(yamlData, control.path);
 
     if (control.type === "switch") {
       return (
         <Switch
           checked={Boolean(value)}
+          disabled={!isSupported}
           onChange={(checked) => updateYaml(control.path, checked)}
         />
       );
@@ -354,6 +360,7 @@ const YamlFileEditor = (props) => {
       return (
         <Select
           value={value}
+          disabled={!isSupported}
           onChange={(val) => updateYaml(control.path, val)}
           options={control.options.map((option) => ({
             value: option,
@@ -368,6 +375,7 @@ const YamlFileEditor = (props) => {
       return (
         <InputNumber
           value={typeof value === "number" ? value : undefined}
+          disabled={!isSupported}
           min={control.min}
           max={control.max}
           step={control.step || 1}

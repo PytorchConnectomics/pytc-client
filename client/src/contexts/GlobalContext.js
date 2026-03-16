@@ -121,6 +121,10 @@ export const ContextWrapper = (props) => {
     "inferenceConfig",
     null,
   );
+  const [trainingConfigOriginPath, setTrainingConfigOriginPath] =
+    usePersistedState("trainingConfigOriginPath", "");
+  const [inferenceConfigOriginPath, setInferenceConfigOriginPath] =
+    usePersistedState("inferenceConfigOriginPath", "");
   const [uploadedYamlFile, setUploadedYamlFile] = usePersistedState(
     "uploadedYamlFile",
     "",
@@ -203,12 +207,16 @@ export const ContextWrapper = (props) => {
         setViewer,
         trainingConfig,
         setTrainingConfig,
+        trainingConfigOriginPath,
+        setTrainingConfigOriginPath,
         imageFileList,
         setImageFileList,
         labelFileList,
         setLabelFileList,
         inferenceConfig,
         setInferenceConfig,
+        inferenceConfigOriginPath,
+        setInferenceConfigOriginPath,
         uploadedYamlFile,
         setUploadedYamlFile,
         selectedYamlPreset,
