@@ -89,6 +89,89 @@ def health():
     return {"status": "ok"}
 
 
+def _worker_url(path: str) -> str:
+    return f"{REACT_APP_SERVER_PROTOCOL}://{REACT_APP_SERVER_URL}{path}"
+
+
+def _extract_upstream_payload(response: requests.Response):
+    try:
+        return response.json()
+    except ValueError:
+        text = (response.text or "").strip()
+        return text or None
+
+
+def _proxy_to_worker(
+    method: str,
+    path: str,
+    *,
+    json_body: Optional[dict] = None,
+    params: Optional[dict] = None,
+    timeout: int = 30,
+):
+    target_url = _worker_url(path)
+    try:
+        response = requests.request(
+            method=method,
+            url=target_url,
+            json=json_body,
+            params=params,
+            timeout=timeout,
+        )
+    except requests.exceptions.ConnectionError as exc:
+        raise HTTPException(
+            status_code=503,
+            detail={
+                "message": "Failed to connect to PyTC worker. Is server_pytc running?",
+                "worker_url": target_url,
+                "error": "ConnectionError",
+                "reason": str(exc),
+            },
+        ) from exc
+    except requests.exceptions.Timeout as exc:
+        raise HTTPException(
+            status_code=504,
+            detail={
+                "message": "PyTC worker request timed out.",
+                "worker_url": target_url,
+                "error": "Timeout",
+            },
+        ) from exc
+    except requests.RequestException as exc:
+        raise HTTPException(
+            status_code=502,
+            detail={
+                "message": "Unexpected error while calling PyTC worker.",
+                "worker_url": target_url,
+                "error": type(exc).__name__,
+                "reason": str(exc),
+            },
+        ) from exc
+    except Exception as exc:
+        raise HTTPException(
+            status_code=502,
+            detail={
+                "message": "Unhandled error while calling PyTC worker.",
+                "worker_url": target_url,
+                "error": type(exc).__name__,
+                "reason": str(exc),
+            },
+        ) from exc
+
+    payload = _extract_upstream_payload(response)
+    if response.status_code >= 400:
+        raise HTTPException(
+            status_code=response.status_code,
+            detail={
+                "message": "PyTC worker returned an error.",
+                "worker_url": target_url,
+                "upstream_status": response.status_code,
+                "upstream_body": payload,
+            },
+        )
+    return payload
+
+
 BASE_DIR = pathlib.Path(__file__).resolve().parent.parent
 PYTC_ROOT = BASE_DIR / "pytorch_connectomics"
 PYTC_CONFIG_ROOTS = (
@@ -295,215 +378,86 @@ async def neuroglancer(req: Request):
 
 @app.post("/start_model_training")
 async def start_model_training(req: Request):
-    print("\n========== SERVER_API: START_MODEL_TRAINING ENDPOINT CALLED ==========")
-    req = await req.json()
-    print(f"[SERVER_API] Received request payload keys: {list(req.keys())}")
-    print(f"[SERVER_API] Arguments: {req.get('arguments', {})}")
-    print(f"[SERVER_API] Log path: {req.get('logPath', 'NOT PROVIDED')}")
-    print(f"[SERVER_API] Output path: {req.get('outputPath', 'NOT PROVIDED')}")
-    print(
-        f"[SERVER_API] Training config length: {len(req.get('trainingConfig', '')) if req.get('trainingConfig') else 0} chars"
+    body = await req.json()
+    worker_data = _proxy_to_worker(
+        "post",
+        "/start_model_training",
+        json_body=body,
+        timeout=30,
     )
-    print(
-        f"[SERVER_API] NOTE: TensorBoard will monitor outputPath where PyTorch Connectomics writes logs"
-    )
-
-    try:
-        target_url = (
-            REACT_APP_SERVER_PROTOCOL
-            + "://"
-            + REACT_APP_SERVER_URL
-            + "/start_model_training"
-        )
-        print(f"[SERVER_API] Proxying to PyTC server at: {target_url}")
-
-        response = requests.post(
-            target_url, json=req, timeout=30  # TODO: Add timeout to prevent hanging
-        )
-
-        print(f"[SERVER_API] PyTC server response status: {response.status_code}")
-        print(
-            f"[SERVER_API] PyTC server response: {response.text[:500]}"
-        )  # First 500 chars
-
-        if response.status_code == 200:
-            print("[SERVER_API] ✓ Training request proxied successfully")
-            return {
-                "message": "Model training started successfully",
-                "data": response.json(),
-            }
-        else:
-            print(
-                f"[SERVER_API] ✗ PyTC server returned error status: {response.status_code}"
-            )
-            return {
-                "message": f"Failed to start model training: {response.status_code}",
-                "error": response.text,
-            }
-    except requests.exceptions.ConnectionError as e:
-        print(
-            f"[SERVER_API] ✗ CONNECTION ERROR: Cannot reach PyTC server at {REACT_APP_SERVER_URL}"
-        )
-        print(f"[SERVER_API] Error details: {e}")
-        return {
-            "message": "Failed to connect to PyTC server. Is server_pytc running?",
-            "error": "ConnectionError",
-        }
-    except requests.exceptions.Timeout:
-        print("[SERVER_API] ✗ TIMEOUT: PyTC server did not respond within 30 seconds")
-        return {
-            "message": "Request timed out. PyTC server may be overloaded.",
-            "error": "Timeout",
-        }
-    except Exception as e:
-        print(f"[SERVER_API] ✗ UNEXPECTED ERROR: {type(e).__name__}: {str(e)}")
-        import traceback
-
-        print(traceback.format_exc())
-        return {"message": f"Failed to start model training: {str(e)}", "error": str(e)}
-    finally:
-        print("========== SERVER_API: END OF START_MODEL_TRAINING ==========\n")
+    return {
+        "message": "Model training started successfully",
+        "data": worker_data,
+    }
 
 
 @app.post("/stop_model_training")
 async def stop_model_training():
-    try:
-        response = requests.post(
-            REACT_APP_SERVER_PROTOCOL
-            + "://"
-            + REACT_APP_SERVER_URL
-            + "/stop_model_training",
-            timeout=30,
-        )
-
-        if response.status_code == 200:
-            return {
-                "message": "Model training stopped successfully",
-                "data": response.json(),
-            }
-        else:
-            return {
-                "message": f"Failed to stop model training: {response.status_code}",
-                "error": response.text,
-            }
-    except requests.exceptions.ConnectionError:
-        return {
-            "message": "Failed to connect to PyTC server. Is server_pytc running?",
-            "error": "ConnectionError",
-        }
-    except requests.exceptions.Timeout:
-        return {"message": "Request timed out.", "error": "Timeout"}
-    except Exception as e:
-        return {"message": f"Failed to stop model training: {str(e)}", "error": str(e)}
+    worker_data = _proxy_to_worker("post", "/stop_model_training", timeout=30)
+    return {
+        "message": "Model training stopped successfully",
+        "data": worker_data,
+    }
 
 
 @app.get("/training_status")
 async def get_training_status():
     """Proxy training status check to PyTC server"""
-    try:
-        response = requests.get(
-            REACT_APP_SERVER_PROTOCOL
-            + "://"
-            + REACT_APP_SERVER_URL
-            + "/training_status",
-            timeout=5,
-        )
-        return response.json()
-    except requests.exceptions.ConnectionError:
-        return {"isRunning": False, "error": "Cannot connect to PyTC server"}
-    except Exception as e:
-        return {"isRunning": False, "error": str(e)}
+    return _proxy_to_worker("get", "/training_status", timeout=5)
+
+
+@app.get("/training_logs")
+async def get_training_logs():
+    return _proxy_to_worker("get", "/training_logs", timeout=5)
 
 
 @app.post("/start_model_inference")
 async def start_model_inference(req: Request):
-    req = await req.json()
-    try:
-        response = requests.post(
-            REACT_APP_SERVER_PROTOCOL
-            + "://"
-            + REACT_APP_SERVER_URL
-            + "/start_model_inference",
-            json=req,
-            timeout=30,
-        )
-
-        if response.status_code == 200:
-            return {
-                "message": "Model inference started successfully",
-                "data": response.json(),
-            }
-        else:
-            return {
-                "message": f"Failed to start model inference: {response.status_code}",
-                "error": response.text,
-            }
-    except requests.exceptions.ConnectionError:
-        return {
-            "message": "Failed to connect to PyTC server. Is server_pytc running?",
-            "error": "ConnectionError",
-        }
-    except requests.exceptions.Timeout:
-        return {
-            "message": "Request timed out. PyTC server may be overloaded.",
-            "error": "Timeout",
-        }
-    except Exception as e:
-        return {
-            "message": f"Failed to start model inference: {str(e)}",
-            "error": str(e),
-        }
+    body = await req.json()
+    worker_data = _proxy_to_worker(
+        "post",
+        "/start_model_inference",
+        json_body=body,
+        timeout=30,
+    )
+    return {
+        "message": "Model inference started successfully",
+        "data": worker_data,
+    }
 
 
 @app.post("/stop_model_inference")
 async def stop_model_inference():
-    try:
-        response = requests.post(
-            REACT_APP_SERVER_PROTOCOL
-            + "://"
-            + REACT_APP_SERVER_URL
-            + "/stop_model_inference",
-            timeout=30,
-        )
+    worker_data = _proxy_to_worker("post", "/stop_model_inference", timeout=30)
+    return {
+        "message": "Model inference stopped successfully",
+        "data": worker_data,
+    }
 
-        if response.status_code == 200:
-            return {
-                "message": "Model inference stopped successfully",
-                "data": response.json(),
-            }
-        else:
-            return {
-                "message": f"Failed to stop model inference: {response.status_code}",
-                "error": response.text,
-            }
-    except requests.exceptions.ConnectionError:
-        return {
-            "message": "Failed to connect to PyTC server. Is server_pytc running?",
-            "error": "ConnectionError",
-        }
-    except requests.exceptions.Timeout:
-        return {"message": "Request timed out.", "error": "Timeout"}
-    except Exception as e:
-        return {"message": f"Failed to stop model inference: {str(e)}", "error": str(e)}
+
+@app.get("/inference_status")
+async def get_inference_status():
+    return _proxy_to_worker("get", "/inference_status", timeout=5)
+
+
+@app.get("/inference_logs")
+async def get_inference_logs():
+    return _proxy_to_worker("get", "/inference_logs", timeout=5)
+
+
+@app.get("/start_tensorboard")
+async def start_tensorboard(logPath: Optional[str] = None):
+    return _proxy_to_worker(
+        "get",
+        "/start_tensorboard",
+        params={"logPath": logPath} if logPath else None,
+        timeout=30,
+    )
 
 
 @app.get("/get_tensorboard_url")
 async def get_tensorboard_url():
-    return "http://localhost:6006/"
-    # response = requests.get(
-    #     REACT_APP_SERVER_PROTOCOL +
-    #     "://" +
-    #     REACT_APP_SERVER_URL +
-    #     "/get_tensorboard_url"
-    #   )
-    #
-    # if response.status_code == 200:
-    #     # {"message": "Get tensorboard URL successfully"}
-    #     print(response.json())
-    #     return response.json()
-    # else:
-    #     # {"message": "Failed to get tensorboard URL"}
-    #     return None
+    return _proxy_to_worker("get", "/get_tensorboard_url", timeout=5)
 
 
 # TODO: Improve on this: basic idea: labels are binary -- black or white?

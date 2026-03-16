@@ -27,6 +27,15 @@ import {
   getModelArchitectures,
 } from "../api";
 import { findCommonPartOfString } from "../utils";
+import {
+  applyInputPaths,
+  getArchitectureValue,
+  getSliderValue,
+  isArchitectureSupported,
+  isSliderSupported,
+  setArchitectureValue,
+  setSliderValue,
+} from "../configSchema";
 
 const YamlFileUploader = (props) => {
   const context = useContext(AppContext);
@@ -44,33 +53,30 @@ const YamlFileUploader = (props) => {
     if (type === "training") {
       return [
         {
+          key: "batch_size",
           label: "Batch size",
           min: 1,
           max: 32,
           marks: { 1: 1, 8: 8, 16: 16, 32: 32 },
           value: YAMLContext.solverSamplesPerBatch,
-          location: "SOLVER",
-          property: "SAMPLES_PER_BATCH",
           step: 1,
         },
         {
+          key: "gpus",
           label: "GPUs",
           min: 0,
           max: 8,
           marks: { 0: 0, 4: 4, 8: 8 },
           value: YAMLContext.numGPUs,
-          location: "SYSTEM",
-          property: "NUM_GPUS",
           step: 1,
         },
         {
+          key: "cpus",
           label: "CPUs",
           min: 1,
           max: 16,
           marks: { 1: 1, 8: 8, 16: 16 },
           value: YAMLContext.numCPUs,
-          location: "SYSTEM",
-          property: "NUM_CPUS",
           step: 1,
         },
       ];
@@ -78,23 +84,21 @@ const YamlFileUploader = (props) => {
 
     return [
       {
+        key: "batch_size",
         label: "Batch size",
         min: 1,
         max: 32,
         marks: { 1: 1, 8: 8, 16: 16, 32: 32 },
         value: YAMLContext.inferenceSamplesPerBatch,
-        location: "INFERENCE",
-        property: "SAMPLES_PER_BATCH",
         step: 1,
       },
       {
+        key: "augmentations",
         label: "Augmentations",
         min: 1,
         max: 16,
         marks: { 1: 1, 8: 8, 16: 16 },
         value: YAMLContext.augNum,
-        location: "INFERENCE",
-        property: "AUG_NUM",
         step: 1,
       },
     ];
@@ -109,6 +113,14 @@ const YamlFileUploader = (props) => {
 
   const getCurrentConfig = () =>
     type === "training" ? context.trainingConfig : context.inferenceConfig;
+
+  const setCurrentOriginPath = (nextOriginPath) => {
+    if (type === "training") {
+      context.setTrainingConfigOriginPath(nextOriginPath || "");
+    } else {
+      context.setInferenceConfigOriginPath(nextOriginPath || "");
+    }
+  };
 
   const setCurrentConfig = (nextContent) => {
     if (type === "training") {
@@ -134,52 +146,43 @@ const YamlFileUploader = (props) => {
   const updateInputSelectorInformation = (yamlData) => {
     const inputImagePath = getPathValue(context.inputImage);
     const inputLabelPath = getPathValue(context.inputLabel);
-
-    if (!inputImagePath || !inputLabelPath) {
-      return;
-    }
-
-    // INPUT_PATH is the shared parent directory for image/label so names can be relative.
     const inputPath = findCommonPartOfString(inputImagePath, inputLabelPath);
-
-    yamlData.DATASET = yamlData.DATASET || {};
-    yamlData.DATASET.INPUT_PATH = inputPath || yamlData.DATASET.INPUT_PATH;
-    yamlData.DATASET.IMAGE_NAME = inputImagePath.replace(inputPath, "");
-    yamlData.DATASET.LABEL_NAME = inputLabelPath.replace(inputPath, "");
-
     const outputPath = getPathValue(context.outputPath);
-    if (outputPath) {
-      yamlData.DATASET.OUTPUT_PATH = outputPath;
-    }
+    applyInputPaths(yamlData, {
+      mode: type,
+      inputImagePath,
+      inputLabelPath,
+      inputPath,
+      outputPath,
+    });
   };
 
   const syncYamlContext = (yamlData) => {
     if (!yamlData) return;
-    if (yamlData.SYSTEM) {
-      if (typeof yamlData.SYSTEM.NUM_GPUS === "number") {
-        YAMLContext.setNumGPUs(yamlData.SYSTEM.NUM_GPUS);
-      }
-      if (typeof yamlData.SYSTEM.NUM_CPUS === "number") {
-        YAMLContext.setNumCPUs(yamlData.SYSTEM.NUM_CPUS);
-      }
+    const gpus = getSliderValue(yamlData, "training", "gpus");
+    if (typeof gpus === "number") {
+      YAMLContext.setNumGPUs(gpus);
     }
-    if (yamlData.SOLVER) {
-      if (typeof yamlData.SOLVER.BASE_LR === "number") {
-        YAMLContext.setLearningRate(yamlData.SOLVER.BASE_LR);
-      }
-      if (typeof yamlData.SOLVER.SAMPLES_PER_BATCH === "number") {
-        YAMLContext.setSolverSamplesPerBatch(yamlData.SOLVER.SAMPLES_PER_BATCH);
-      }
+    const cpus = getSliderValue(yamlData, "training", "cpus");
+    if (typeof cpus === "number") {
+      YAMLContext.setNumCPUs(cpus);
     }
-    if (yamlData.INFERENCE) {
-      if (typeof yamlData.INFERENCE.SAMPLES_PER_BATCH === "number") {
-        YAMLContext.setInferenceSamplesPerBatch(
-          yamlData.INFERENCE.SAMPLES_PER_BATCH,
-        );
-      }
-      if (typeof yamlData.INFERENCE.AUG_NUM === "number") {
-        YAMLContext.setAugNum(yamlData.INFERENCE.AUG_NUM);
-      }
+    const trainBatch = getSliderValue(yamlData, "training", "batch_size");
+    if (typeof trainBatch === "number") {
+      YAMLContext.setSolverSamplesPerBatch(trainBatch);
+    }
+    const inferenceBatch = getSliderValue(yamlData, "inference", "batch_size");
+    if (typeof inferenceBatch === "number") {
+      YAMLContext.setInferenceSamplesPerBatch(inferenceBatch);
+    }
+    const augNum = getSliderValue(yamlData, "inference", "augmentations");
+    if (typeof augNum === "number") {
+      YAMLContext.setAugNum(augNum);
+    }
+    const learningRate =
+      yamlData.SOLVER?.BASE_LR ?? yamlData.optimization?.optimizer?.lr;
+    if (typeof learningRate === "number") {
+      YAMLContext.setLearningRate(learningRate);
     }
   };
 
@@ -199,6 +202,10 @@ const YamlFileUploader = (props) => {
     if (sourceLabel) {
       message.success(`${sourceLabel} loaded.`);
     }
+  };
+
+  const serializeYaml = (yamlData) => {
+    return yaml.dump(yamlData, { indent: 2 }).replace(/^\s*\n/gm, "");
   };
 
   const normalizeYamlText = (text) => {
@@ -227,6 +234,7 @@ const YamlFileUploader = (props) => {
     context.setUploadedYamlFile(file);
     context.setSelectedYamlPreset(null);
     setPresetYamlText(null);
+    setCurrentOriginPath(getPathValue(file));
     const reader = new FileReader();
     reader.onload = (e) => {
       const contents = e.target.result;
@@ -246,24 +254,13 @@ const YamlFileUploader = (props) => {
       if (!yamlData) return;
       context.setSelectedYamlPreset(value);
       context.setUploadedYamlFile("");
+      setCurrentOriginPath(value);
       applyYamlData(yamlData, "Preset config");
     } catch (error) {
       message.error(error?.message || "Failed to load preset config.");
     } finally {
       setIsLoadingPresets(false);
     }
-  };
-
-  const updateYamlValue = (location, property, newValue) => {
-    const currentConfig = getCurrentConfig();
-    if (!currentConfig) {
-      message.warning("Load a preset or upload a YAML file first.");
-      return null;
-    }
-    const yamlData = parseYaml(currentConfig) || {};
-    yamlData[location] = yamlData[location] || {};
-    yamlData[location][property] = newValue;
-    return yamlData;
   };
 
   const handleRevertPreset = () => {
@@ -273,15 +270,33 @@ const YamlFileUploader = (props) => {
     applyYamlData(yamlData, "Preset restored");
   };
 
-  const handleSliderChange = (location, property, newValue) => {
-    const yamlData = updateYamlValue(location, property, newValue);
-    if (!yamlData) return;
+  const handleSliderChange = (sliderKey, newValue) => {
+    const currentConfig = getCurrentConfig();
+    if (!currentConfig) {
+      message.warning("Load a preset or upload a YAML file first.");
+      return;
+    }
+    const yamlData = parseYaml(currentConfig) || {};
+    const updated = setSliderValue(yamlData, type, sliderKey, newValue);
+    if (!updated) {
+      message.info("This setting is not available for the loaded config.");
+      return;
+    }
     applyYamlData(yamlData);
   };
 
   const handleArchitectureChange = (value) => {
-    const yamlData = updateYamlValue("MODEL", "ARCHITECTURE", value);
-    if (!yamlData) return;
+    const currentConfig = getCurrentConfig();
+    if (!currentConfig) {
+      message.warning("Load a preset or upload a YAML file first.");
+      return;
+    }
+    const yamlData = parseYaml(currentConfig) || {};
+    const updated = setArchitectureValue(yamlData, value);
+    if (!updated) {
+      message.info("Architecture field is not supported by this config.");
+      return;
+    }
     applyYamlData(yamlData, "Model architecture updated");
   };
 
@@ -333,12 +348,40 @@ const YamlFileUploader = (props) => {
     }
   }, [context.trainingConfig, context.inferenceConfig, type]);
 
-  const currentArchitecture = useMemo(() => {
+  useEffect(() => {
     const currentConfig = getCurrentConfig();
-    if (!currentConfig) return undefined;
+    if (!currentConfig) return;
+
     const yamlData = parseYaml(currentConfig, false);
-    return yamlData?.MODEL?.ARCHITECTURE;
+    if (!yamlData) return;
+
+    updateInputSelectorInformation(yamlData);
+    const nextSerialized = serializeYaml(yamlData);
+    if (nextSerialized !== currentConfig) {
+      setCurrentConfig(nextSerialized);
+    }
+  }, [
+    context.inputImage,
+    context.inputLabel,
+    context.outputPath,
+    context.trainingConfig,
+    context.inferenceConfig,
+    type,
+  ]);
+
+  const currentYamlData = useMemo(() => {
+    const currentConfig = getCurrentConfig();
+    if (!currentConfig) return null;
+    return parseYaml(currentConfig, false);
   }, [context.trainingConfig, context.inferenceConfig, type]);
+
+  const currentArchitecture = useMemo(() => {
+    return getArchitectureValue(currentYamlData);
+  }, [currentYamlData]);
+
+  const architectureSupported = useMemo(() => {
+    return isArchitectureSupported(currentYamlData);
+  }, [currentYamlData]);
 
   return (
     <div style={{ margin: "10px" }}>
@@ -437,7 +480,7 @@ const YamlFileUploader = (props) => {
                 style={{ width: "100%" }}
                 value={currentArchitecture}
                 onChange={handleArchitectureChange}
-                disabled={!yamlContent}
+                disabled={!yamlContent || !architectureSupported}
               />
             </Space>
           </div>
@@ -448,31 +491,36 @@ const YamlFileUploader = (props) => {
 
       {yamlContent ? (
         <Row>
-          {sliderData.map((param, index) => (
-            <Fragment key={index}>
-              <Col span={8} offset={2}>
-                <div>
-                  <Space align="center">
-                    <h4 style={{ marginBottom: 0 }}>{param.label}</h4>
-                  </Space>
-                  <Slider
-                    min={param.min}
-                    max={param.max}
-                    marks={param.marks}
-                    value={param.value}
-                    onChange={(newValue) =>
-                      handleSliderChange(
-                        param.location,
-                        param.property,
-                        newValue,
-                      )
-                    }
-                    step={param.step}
-                  />
-                </div>
-              </Col>
-            </Fragment>
-          ))}
+          {sliderData.map((param, index) => {
+            const sliderValue = getSliderValue(currentYamlData, type, param.key);
+            const sliderSupported = isSliderSupported(
+              currentYamlData,
+              type,
+              param.key,
+            );
+            return (
+              <Fragment key={index}>
+                <Col span={8} offset={2}>
+                  <div>
+                    <Space align="center">
+                      <h4 style={{ marginBottom: 0 }}>{param.label}</h4>
+                    </Space>
+                    <Slider
+                      min={param.min}
+                      max={param.max}
+                      marks={param.marks}
+                      value={typeof sliderValue === "number" ? sliderValue : param.value}
+                      disabled={!sliderSupported}
+                      onChange={(newValue) =>
+                        handleSliderChange(param.key, newValue)
+                      }
+                      step={param.step}
+                    />
+                  </div>
+                </Col>
+              </Fragment>
+            );
+          })}
         </Row>
       ) : (
         <div style={{ color: "#8c8c8c" }}>

@@ -1,5 +1,11 @@
 import axios from "axios";
 import { message } from "antd";
+import yaml from "js-yaml";
+import {
+  setInferenceExecutionDefaults,
+  setInferenceOutputPath,
+  setTrainingOutputPath,
+} from "./configSchema";
 
 const BASE_URL = `${process.env.REACT_APP_SERVER_PROTOCOL || "http"}://${process.env.REACT_APP_SERVER_URL || "localhost:4242"}`;
 
@@ -21,6 +27,30 @@ const buildFilePath = (file) => {
 };
 
 const hasBrowserFile = (file) => file && file.originFileObj instanceof File;
+
+const getErrorDetailMessage = (detail) => {
+  if (!detail) return "";
+  if (typeof detail === "string") return detail;
+  if (Array.isArray(detail)) {
+    return detail.map(getErrorDetailMessage).filter(Boolean).join("; ");
+  }
+  if (typeof detail === "object") {
+    const nestedUpstream =
+      detail.upstream_body !== undefined
+        ? getErrorDetailMessage(detail.upstream_body)
+        : "";
+    return [
+      detail.message,
+      detail.detail,
+      detail.reason,
+      nestedUpstream,
+      detail.error,
+    ]
+      .filter(Boolean)
+      .join(" | ");
+  }
+  return String(detail);
+};
 
 export async function getNeuroglancerViewer(image, label, scales) {
   try {
@@ -76,7 +106,7 @@ export async function checkFile(file) {
 function handleError(error) {
   if (error.response) {
     const detail = error.response.data?.detail;
-    const detailMessage = typeof detail === "string" ? detail : detail?.data;
+    const detailMessage = getErrorDetailMessage(detail);
     throw new Error(
       `${error.response.status}: ${detailMessage || error.response.statusText}`,
     );
@@ -106,7 +136,12 @@ export async function makeApiRequest(url, method, data = null) {
   }
 }
 
-export async function startModelTraining(trainingConfig, logPath, outputPath) {
+export async function startModelTraining(
+  trainingConfig,
+  logPath,
+  outputPath,
+  configOriginPath = "",
+) {
   try {
     console.log("[API] ===== Starting Training Configuration =====");
     console.log("[API] logPath:", logPath);
@@ -115,26 +150,13 @@ export async function startModelTraining(trainingConfig, logPath, outputPath) {
     // Parse the YAML config and inject the outputPath
     let configToSend = trainingConfig;
 
-    if (outputPath) {
+    if (outputPath && trainingConfig) {
       try {
-        // Parse YAML to object
-        const yaml = require("js-yaml");
-        const configObj = yaml.load(trainingConfig);
+        const configObj = yaml.load(trainingConfig) || {};
+        setTrainingOutputPath(configObj, outputPath);
 
-        console.log(
-          "[API] Original DATASET.OUTPUT_PATH:",
-          configObj.DATASET?.OUTPUT_PATH,
-        );
-
-        // Inject the output path from UI
-        if (!configObj.DATASET) {
-          configObj.DATASET = {};
-        }
-        configObj.DATASET.OUTPUT_PATH = outputPath;
-
-        // Convert back to YAML
         configToSend = yaml.dump(configObj);
-        console.log("[API] Injected DATASET.OUTPUT_PATH:", outputPath);
+        console.log("[API] Injected training output path:", outputPath);
         console.log(
           "[API] Modified config preview:",
           configToSend.substring(0, 500),
@@ -155,6 +177,7 @@ export async function startModelTraining(trainingConfig, logPath, outputPath) {
       logPath, // Keep for backwards compatibility, but won't be used for TensorBoard
       outputPath, // TensorBoard will use this instead
       trainingConfig: configToSend,
+      configOriginPath,
     });
 
     console.log("[API] Request payload size:", data.length, "bytes");
@@ -180,8 +203,16 @@ export async function getTrainingStatus() {
     const res = await axios.get(`${BASE_URL}/training_status`);
     return res.data;
   } catch (error) {
-    console.error("Failed to get training status:", error);
-    return { isRunning: false, error: true };
+    handleError(error);
+  }
+}
+
+export async function getTrainingLogs() {
+  try {
+    const res = await axios.get(`${BASE_URL}/training_logs`);
+    return res.data;
+  } catch (error) {
+    handleError(error);
   }
 }
 
@@ -189,10 +220,18 @@ export async function getTensorboardURL() {
   return makeApiRequest("get_tensorboard_url", "get");
 }
 
+export async function startTensorboard(logPath) {
+  const query = logPath
+    ? `?${new URLSearchParams({ logPath }).toString()}`
+    : "";
+  return makeApiRequest(`start_tensorboard${query}`, "get");
+}
+
 export async function startModelInference(
   inferenceConfig,
   outputPath,
   checkpointPath,
+  configOriginPath = "",
 ) {
   console.log("\n========== API.JS: START_MODEL_INFERENCE CALLED ==========");
   console.log("[API] Function arguments:");
@@ -212,36 +251,18 @@ export async function startModelInference(
     // Parse the YAML config and inject the outputPath
     let configToSend = inferenceConfig;
 
-    if (outputPath) {
-      console.log("[API] outputPath provided, will inject into YAML");
+    if (inferenceConfig) {
       try {
-        // Parse YAML to object
-        const yaml = require("js-yaml");
         console.log("[API] Parsing YAML config...");
-        const configObj = yaml.load(inferenceConfig);
+        const configObj = yaml.load(inferenceConfig) || {};
         console.log("[API] ✓ YAML parsed successfully");
 
-        console.log("[API] Original config structure:");
-        console.log("[API]   - Has INFERENCE section?", !!configObj.INFERENCE);
-        console.log(
-          "[API]   - Original INFERENCE.OUTPUT_PATH:",
-          configObj.INFERENCE?.OUTPUT_PATH,
-        );
-
-        // Inject the output path from UI
-        if (!configObj.INFERENCE) {
-          console.log("[API] INFERENCE section missing, creating it");
-          configObj.INFERENCE = {};
+        if (outputPath) {
+          setInferenceOutputPath(configObj, outputPath);
+          console.log("[API] ✓ Injected inference output path:", outputPath);
         }
-        configObj.INFERENCE.OUTPUT_PATH = outputPath;
-        // Ensure SYSTEM section exists and set NUM_GPUS to 1 for CPU inference
-        if (!configObj.SYSTEM) {
-          console.log("[API] SYSTEM section missing, creating it");
-          configObj.SYSTEM = {};
-        }
-        configObj.SYSTEM.NUM_GPUS = 1;
-        console.log("[API] ✓ Set SYSTEM.NUM_GPUS = 1");
-        console.log("[API] ✓ Injected INFERENCE.OUTPUT_PATH:", outputPath);
+        setInferenceExecutionDefaults(configObj);
+        console.log("[API] ✓ Applied inference runtime defaults");
 
         // Convert back to YAML
         console.log("[API] Converting back to YAML...");
@@ -260,7 +281,7 @@ export async function startModelInference(
       }
     } else {
       console.warn(
-        "[API] ⚠ No outputPath provided, config will use its original OUTPUT_PATH",
+        "[API] ⚠ No inferenceConfig provided, request will use raw payload value",
       );
     }
 
@@ -271,6 +292,7 @@ export async function startModelInference(
       },
       outputPath,
       inferenceConfig: configToSend,
+      configOriginPath,
     };
 
     console.log("[API] Payload structure:");
@@ -318,8 +340,16 @@ export async function getInferenceStatus() {
     const res = await axios.get(`${BASE_URL}/inference_status`);
     return res.data;
   } catch (error) {
-    console.error("Failed to get inference status:", error);
-    return { isRunning: false, error: true };
+    handleError(error);
+  }
+}
+
+export async function getInferenceLogs() {
+  try {
+    const res = await axios.get(`${BASE_URL}/inference_logs`);
+    return res.data;
+  } catch (error) {
+    handleError(error);
   }
 }
 
