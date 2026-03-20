@@ -15,6 +15,7 @@ import { AppContext } from "../contexts/GlobalContext";
 
 function ModelTraining() {
   const context = useContext(AppContext);
+  const training = context.trainingState;
   const [isTraining, setIsTraining] = useState(false);
   const [trainingStatus, setTrainingStatus] = useState("");
   const [trainingRuntime, setTrainingRuntime] = useState(null);
@@ -28,9 +29,9 @@ function ModelTraining() {
 
   const getConfigOriginPath = () => {
     return (
-      context.trainingConfigOriginPath ||
-      context.selectedYamlPreset ||
-      getPath(context.uploadedYamlFile)
+      training.configOriginPath ||
+      training.selectedYamlPreset ||
+      getPath(training.uploadedYamlFile)
     );
   };
 
@@ -83,10 +84,10 @@ function ModelTraining() {
 
       applyInputPaths(yamlData, {
         mode: "training",
-        inputImagePath: getPath(context.inputImage),
-        inputLabelPath: getPath(context.inputLabel),
+        inputImagePath: getPath(training.inputImage),
+        inputLabelPath: getPath(training.inputLabel),
         inputPath: "",
-        outputPath: getPath(context.outputPath),
+        outputPath: getPath(training.outputPath),
       });
       return yaml.dump(yamlData, { indent: 2 }).replace(/^\s*\n/gm, "");
     } catch (error) {
@@ -128,8 +129,7 @@ function ModelTraining() {
 
   const handleStartButton = async () => {
     try {
-      const trainingConfig =
-        localStorage.getItem("trainingConfig") || context.trainingConfig;
+      const trainingConfig = context.trainingConfig;
 
       // Accept either uploaded YAML or preset-backed config text.
       if (!trainingConfig) {
@@ -139,12 +139,12 @@ function ModelTraining() {
         return;
       }
 
-      if (!context.outputPath) {
+      if (!training.outputPath) {
         setTrainingStatus("Error: Please set output path first in Step 1.");
         return;
       }
 
-      console.log(context.uploadedYamlFile);
+      console.log(training.uploadedYamlFile);
       console.log(trainingConfig);
 
       setIsTraining(true);
@@ -158,8 +158,8 @@ function ModelTraining() {
       // Real training status should be polled separately
       const res = await startModelTraining(
         preparedTrainingConfig,
-        getPath(context.logPath) || getPath(context.outputPath),
-        getPath(context.outputPath),
+        getPath(training.logPath) || getPath(training.outputPath),
+        getPath(training.outputPath),
         getConfigOriginPath(),
       );
       console.log(res);

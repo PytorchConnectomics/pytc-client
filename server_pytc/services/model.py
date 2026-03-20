@@ -13,7 +13,10 @@ import psutil
 # Track spawned processes so we can stop/poll cleanly.
 _training_process = None
 _inference_process = None
-_temp_files: list[str] = []
+_temp_files = {
+    "training": [],
+    "inference": [],
+}
 tensorboard_url = None
 _RUNTIME_LOG_LIMIT = 2000
 _runtime_lock = threading.Lock()
@@ -189,7 +192,7 @@ def _write_temp_config(
             tmp.write(config_text)
             path = tmp.name
 
-    _temp_files.append(path)
+    _temp_files[label].append(path)
     return path
 
 
@@ -395,40 +398,74 @@ def start_training(payload: dict):
         print("========== MODEL.PY: END OF START_TRAINING ==========\n")
         return result
     except Exception as exc:
-        if temp_filepath and temp_filepath in _temp_files:
-            cleanup_temp_files()
+        if temp_filepath and temp_filepath in _temp_files["training"]:
+            cleanup_temp_files("training")
         _update_runtime_state("training", phase="failed", endedAt=_utc_now())
         _set_runtime_error("training", str(exc))
         print(f"[MODEL.PY] ✗ ERROR starting training process: {exc}")
         raise
 
 
-def stop_process_by_name(process_name):
-    """Stop processes by command substring using psutil."""
+def _stop_processes(matcher, description: str):
     try:
         for proc in psutil.process_iter(["pid", "name", "cmdline"]):
             try:
-                if process_name in " ".join(proc.info["cmdline"] or []):
-                    print(
-                        f"Terminating process {proc.info['pid']}: {' '.join(proc.info['cmdline'])}"
-                    )
-                    proc.terminate()
-                    proc.wait(timeout=10)
+                cmdline = proc.info["cmdline"] or []
+                if not matcher(cmdline):
+                    continue
+                print(
+                    f"Terminating process {proc.info['pid']}: {' '.join(cmdline)}"
+                )
+                proc.terminate()
+                proc.wait(timeout=10)
             except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.TimeoutExpired):
                 continue
     except Exception as exc:
-        print(f"Error stopping processes by name '{process_name}': {exc}")
+        print(f"Error stopping processes for '{description}': {exc}")
 
 
-def cleanup_temp_files():
+def _matches_pytc_mode_process(cmdline: list[str], mode: str) -> bool:
+    try:
+        script_path = str(_pytc_script_path())
+    except FileNotFoundError:
+        return False
+
+    normalized = [str(part) for part in cmdline]
+    if script_path not in normalized:
+        return False
+
+    try:
+        mode_index = normalized.index("--mode")
+    except ValueError:
+        return False
+
+    return mode_index + 1 < len(normalized) and normalized[mode_index + 1] == mode
+
+
+def stop_pytc_processes(mode: str):
+    _stop_processes(
+        lambda cmdline: _matches_pytc_mode_process(cmdline, mode),
+        f"pytorch_connectomics mode={mode}",
+    )
+
+
+def stop_process_by_name(process_name):
+    _stop_processes(
+        lambda cmdline: process_name in " ".join(cmdline),
+        process_name,
+    )
+
+
+def cleanup_temp_files(kind: str | None = None):
     """Clean up temporary files created during training/inference."""
-    global _temp_files
-    for temp_file in _temp_files[:]:
-        try:
-            pathlib.Path(temp_file).unlink(missing_ok=True)
-            _temp_files.remove(temp_file)
-        except Exception as exc:
-            print(f"Error cleaning up temp file {temp_file}: {exc}")
+    kinds = [kind] if kind else list(_temp_files.keys())
+    for state_kind in kinds:
+        for temp_file in _temp_files[state_kind][:]:
+            try:
+                pathlib.Path(temp_file).unlink(missing_ok=True)
+                _temp_files[state_kind].remove(temp_file)
+            except Exception as exc:
+                print(f"Error cleaning up temp file {temp_file}: {exc}")
 
 
 def stop_training():
@@ -453,9 +490,9 @@ def stop_training():
         finally:
             _training_process = None
 
-    stop_process_by_name("pytorch_connectomics/scripts/main.py --mode train")
+    stop_pytc_processes("train")
     stop_tensorboard()
-    cleanup_temp_files()
+    cleanup_temp_files("training")
     _update_runtime_state("training", phase="stopped", endedAt=_utc_now())
     _append_runtime_event("training", "Training stop requested")
     return {"status": "stopped"}
@@ -484,6 +521,8 @@ def get_tensorboard():
 
 
 def stop_tensorboard():
+    global tensorboard_url
+    tensorboard_url = None
     stop_process_by_name("tensorboard")
 
 
@@ -504,7 +543,8 @@ def start_inference(payload: dict):
         metadata={
             "label": "inference",
             "outputPath": payload.get("outputPath"),
-            "checkpointPath": payload.get("checkpointPath"),
+            "checkpointPath": payload.get("checkpointPath")
+            or (payload.get("arguments") or {}).get("checkpoint"),
         },
     )
 
@@ -558,8 +598,8 @@ def start_inference(payload: dict):
         print("========== MODEL.PY: END OF START_INFERENCE ==========\n")
         return result
     except Exception as exc:
-        if temp_filepath and temp_filepath in _temp_files:
-            cleanup_temp_files()
+        if temp_filepath and temp_filepath in _temp_files["inference"]:
+            cleanup_temp_files("inference")
         _update_runtime_state("inference", phase="failed", endedAt=_utc_now())
         _set_runtime_error("inference", str(exc))
         print(f"[MODEL.PY] ✗ ERROR starting inference process: {exc}")
@@ -618,9 +658,8 @@ def stop_inference():
         finally:
             _inference_process = None
 
-    stop_process_by_name("pytorch_connectomics/scripts/main.py --mode test")
-    stop_tensorboard()
-    cleanup_temp_files()
+    stop_pytc_processes("test")
+    cleanup_temp_files("inference")
     _update_runtime_state("inference", phase="stopped", endedAt=_utc_now())
     _append_runtime_event("inference", "Inference stop requested")
     return {"status": "stopped"}

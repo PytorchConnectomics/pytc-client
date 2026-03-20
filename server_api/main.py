@@ -10,6 +10,7 @@ import uvicorn
 from fastapi import Depends, FastAPI, HTTPException, Request, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.orm import Session
+from runtime_settings import get_allowed_origins
 from server_api.utils.io import readVol
 from server_api.utils.utils import process_path
 from server_api.auth import models, database, router as auth_router
@@ -77,7 +78,7 @@ app.include_router(ehtool_router.router, prefix="/eh", tags=["ehtool"])
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=get_allowed_origins(),
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],

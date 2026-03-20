@@ -76,6 +76,19 @@ export function setPathValue(data, path, value) {
   });
 }
 
+export function deletePathValue(data, path) {
+  if (!isObject(data) || !Array.isArray(path) || path.length === 0) return;
+  let cursor = data;
+  for (let index = 0; index < path.length - 1; index += 1) {
+    const key = path[index];
+    if (!isObject(cursor[key])) {
+      return;
+    }
+    cursor = cursor[key];
+  }
+  delete cursor[path[path.length - 1]];
+}
+
 export function pickFirstExistingPath(data, candidates) {
   if (!Array.isArray(candidates)) return null;
   for (const candidate of candidates) {
@@ -146,7 +159,9 @@ export function setInferenceExecutionDefaults(configObj) {
   if (!isObject(configObj)) return;
   const schema = detectConfigSchema(configObj);
   if (schema === "legacy") {
-    setPathValue(configObj, ["SYSTEM", "NUM_GPUS"], 1);
+    if (!hasPath(configObj, ["SYSTEM", "NUM_GPUS"])) {
+      setPathValue(configObj, ["SYSTEM", "NUM_GPUS"], 1);
+    }
     return;
   }
   const existingPath = pickFirstExistingPath(configObj, [
@@ -155,7 +170,6 @@ export function setInferenceExecutionDefaults(configObj) {
     ["default", "system", "num_gpus"],
   ]);
   if (existingPath) {
-    setPathValue(configObj, existingPath, 1);
     return;
   }
   setPathValue(configObj, ["system", "num_gpus"], 1);
@@ -165,7 +179,10 @@ export function applyInputPaths(
   configObj,
   { mode, inputImagePath, inputLabelPath, inputPath, outputPath },
 ) {
-  if (!isObject(configObj) || !inputImagePath || !inputLabelPath) return;
+  if (!isObject(configObj) || !inputImagePath) return;
+  if (mode === "training" && !inputLabelPath) return;
+
+  const hasLabelPath = Boolean(inputLabelPath);
   const schema = detectConfigSchema(configObj);
 
   if (schema === "legacy") {
@@ -175,11 +192,15 @@ export function applyInputPaths(
       ["DATASET", "IMAGE_NAME"],
       inputImagePath.replace(inputPath, ""),
     );
-    setPathValue(
-      configObj,
-      ["DATASET", "LABEL_NAME"],
-      inputLabelPath.replace(inputPath, ""),
-    );
+    if (hasLabelPath) {
+      setPathValue(
+        configObj,
+        ["DATASET", "LABEL_NAME"],
+        inputLabelPath.replace(inputPath, ""),
+      );
+    } else {
+      deletePathValue(configObj, ["DATASET", "LABEL_NAME"]);
+    }
     if (outputPath) {
       if (mode === "training") {
         setTrainingOutputPath(configObj, outputPath);
@@ -220,7 +241,11 @@ export function applyInputPaths(
       ["data", "test", "label"],
     ]) || ["test", "data", "test", "label"];
   setPathValue(configObj, imagePath, inputImagePath);
-  setPathValue(configObj, labelPath, inputLabelPath);
+  if (hasLabelPath) {
+    setPathValue(configObj, labelPath, inputLabelPath);
+  } else {
+    deletePathValue(configObj, labelPath);
+  }
   if (outputPath) {
     setInferenceOutputPath(configObj, outputPath);
   }

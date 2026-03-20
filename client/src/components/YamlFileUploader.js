@@ -41,6 +41,8 @@ const YamlFileUploader = (props) => {
   const context = useContext(AppContext);
   const YAMLContext = useContext(YamlContext);
   const { type } = props;
+  const workflow =
+    type === "training" ? context.trainingState : context.inferenceState;
 
   const [yamlContent, setYamlContent] = useState("");
   const [presetOptions, setPresetOptions] = useState([]);
@@ -115,11 +117,7 @@ const YamlFileUploader = (props) => {
     type === "training" ? context.trainingConfig : context.inferenceConfig;
 
   const setCurrentOriginPath = (nextOriginPath) => {
-    if (type === "training") {
-      context.setTrainingConfigOriginPath(nextOriginPath || "");
-    } else {
-      context.setInferenceConfigOriginPath(nextOriginPath || "");
-    }
+    workflow.setConfigOriginPath(nextOriginPath || "");
   };
 
   const setCurrentConfig = (nextContent) => {
@@ -144,10 +142,10 @@ const YamlFileUploader = (props) => {
   };
 
   const updateInputSelectorInformation = (yamlData) => {
-    const inputImagePath = getPathValue(context.inputImage);
-    const inputLabelPath = getPathValue(context.inputLabel);
+    const inputImagePath = getPathValue(workflow.inputImage);
+    const inputLabelPath = getPathValue(workflow.inputLabel);
     const inputPath = findCommonPartOfString(inputImagePath, inputLabelPath);
-    const outputPath = getPathValue(context.outputPath);
+    const outputPath = getPathValue(workflow.outputPath);
     applyInputPaths(yamlData, {
       mode: type,
       inputImagePath,
@@ -231,8 +229,8 @@ const YamlFileUploader = (props) => {
   };
 
   const handleFileUpload = (file) => {
-    context.setUploadedYamlFile(file);
-    context.setSelectedYamlPreset(null);
+    workflow.setUploadedYamlFile(file);
+    workflow.setSelectedYamlPreset("");
     setPresetYamlText(null);
     setCurrentOriginPath(getPathValue(file));
     const reader = new FileReader();
@@ -252,8 +250,8 @@ const YamlFileUploader = (props) => {
       setPresetYamlText(res.content || null);
       const yamlData = parseYaml(res.content);
       if (!yamlData) return;
-      context.setSelectedYamlPreset(value);
-      context.setUploadedYamlFile("");
+      workflow.setSelectedYamlPreset(value);
+      workflow.setUploadedYamlFile("");
       setCurrentOriginPath(value);
       applyYamlData(yamlData, "Preset config");
     } catch (error) {
@@ -361,9 +359,9 @@ const YamlFileUploader = (props) => {
       setCurrentConfig(nextSerialized);
     }
   }, [
-    context.inputImage,
-    context.inputLabel,
-    context.outputPath,
+    workflow.inputImage,
+    workflow.inputLabel,
+    workflow.outputPath,
     context.trainingConfig,
     context.inferenceConfig,
     type,
@@ -397,13 +395,13 @@ const YamlFileUploader = (props) => {
           loading={isLoadingPresets}
           options={presetOptions}
           onChange={handlePresetSelect}
-          value={context.selectedYamlPreset || undefined}
+          value={workflow.selectedYamlPreset || undefined}
           allowClear
-          onClear={() => context.setSelectedYamlPreset(null)}
+          onClear={() => workflow.setSelectedYamlPreset("")}
         />
       </Space>
 
-      {(context.uploadedYamlFile || context.selectedYamlPreset) && (
+      {(workflow.uploadedYamlFile || workflow.selectedYamlPreset) && (
         <div
           style={{
             marginBottom: 12,
@@ -413,8 +411,8 @@ const YamlFileUploader = (props) => {
           }}
         >
           <strong>Loaded:</strong>{" "}
-          {context.uploadedYamlFile?.name || context.selectedYamlPreset}
-          {context.selectedYamlPreset && presetYamlText && (
+          {workflow.uploadedYamlFile?.name || workflow.selectedYamlPreset}
+          {workflow.selectedYamlPreset && presetYamlText && (
             <>
               <span style={{ color: "#fa8c16", fontSize: 12 }}>
                 {normalizeYamlText(getCurrentConfig()) !==
@@ -450,21 +448,21 @@ const YamlFileUploader = (props) => {
           <div>
             {/* Common folder mirrors DATASET.INPUT_PATH = shared parent dir */}
             Common folder:{" "}
-            {getPathValue(context.inputImage) &&
-            getPathValue(context.inputLabel)
+            {getPathValue(workflow.inputImage) &&
+            getPathValue(workflow.inputLabel)
               ? findCommonPartOfString(
-                  getPathValue(context.inputImage),
-                  getPathValue(context.inputLabel),
+                  getPathValue(workflow.inputImage),
+                  getPathValue(workflow.inputLabel),
                 )
               : "—"}
           </div>
           <div>
-            Image name: {getFileName(getPathValue(context.inputImage)) || "—"}
+            Image name: {getFileName(getPathValue(workflow.inputImage)) || "—"}
           </div>
           <div>
-            Label name: {getFileName(getPathValue(context.inputLabel)) || "—"}
+            Label name: {getFileName(getPathValue(workflow.inputLabel)) || "—"}
           </div>
-          <div>Output path: {getPathValue(context.outputPath) || "—"}</div>
+          <div>Output path: {getPathValue(workflow.outputPath) || "—"}</div>
         </div>
       </div>
 

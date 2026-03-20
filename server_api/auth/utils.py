@@ -1,10 +1,12 @@
-from passlib.context import CryptContext
 from datetime import datetime, timedelta
 from typing import Optional
+
+from passlib.context import CryptContext
 from jose import JWTError, jwt
+from runtime_settings import get_auth_secret
 
 # Constants
-SECRET_KEY = "your-secret-key-keep-it-secret"  # TODO: Move to env var
+SECRET_KEY = get_auth_secret()
 ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_MINUTES = 30
 

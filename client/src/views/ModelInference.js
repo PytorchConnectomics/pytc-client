@@ -14,6 +14,7 @@ import { AppContext } from "../contexts/GlobalContext";
 
 function ModelInference({ isInferring, setIsInferring }) {
   const context = useContext(AppContext);
+  const inference = context.inferenceState;
   const [inferenceStatus, setInferenceStatus] = useState("");
   const [inferenceRuntime, setInferenceRuntime] = useState(null);
   const pollingIntervalRef = useRef(null);
@@ -26,9 +27,9 @@ function ModelInference({ isInferring, setIsInferring }) {
 
   const getConfigOriginPath = () => {
     return (
-      context.inferenceConfigOriginPath ||
-      context.selectedYamlPreset ||
-      getPath(context.uploadedYamlFile)
+      inference.configOriginPath ||
+      inference.selectedYamlPreset ||
+      getPath(inference.uploadedYamlFile)
     );
   };
 
@@ -52,10 +53,10 @@ function ModelInference({ isInferring, setIsInferring }) {
 
       applyInputPaths(yamlData, {
         mode: "inference",
-        inputImagePath: getPath(context.inputImage),
-        inputLabelPath: getPath(context.inputLabel),
+        inputImagePath: getPath(inference.inputImage),
+        inputLabelPath: getPath(inference.inputLabel),
         inputPath: "",
-        outputPath: getPath(context.outputPath),
+        outputPath: getPath(inference.outputPath),
       });
       return yaml.dump(yamlData, { indent: 2 }).replace(/^\s*\n/gm, "");
     } catch (error) {
@@ -112,8 +113,7 @@ function ModelInference({ isInferring, setIsInferring }) {
 
   const handleStartButton = async () => {
     try {
-      const inferenceConfig =
-        localStorage.getItem("inferenceConfig") || context.inferenceConfig;
+      const inferenceConfig = context.inferenceConfig;
       if (!inferenceConfig) {
         setInferenceStatus(
           "Error: Please load or upload an inference configuration first.",
@@ -121,7 +121,7 @@ function ModelInference({ isInferring, setIsInferring }) {
         return;
       }
 
-      const checkpointPath = getPath(context.checkpointPath);
+      const checkpointPath = getPath(inference.checkpointPath);
       if (!checkpointPath) {
         setInferenceStatus("Error: Please set checkpoint path first.");
         return;
@@ -134,7 +134,7 @@ function ModelInference({ isInferring, setIsInferring }) {
 
       const res = await startModelInference(
         preparedInferenceConfig,
-        getPath(context.outputPath),
+        getPath(inference.outputPath),
         checkpointPath,
         getConfigOriginPath(),
       );

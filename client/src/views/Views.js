@@ -19,6 +19,11 @@ import ProofReading from "./ProofReading";
 import MaskProofreading from "./MaskProofreading";
 import WorkflowSelector from "../components/WorkflowSelector";
 import Chatbot from "../components/Chatbot";
+import {
+  isElectronAvailable,
+  onChangeViews,
+  onToggleTab,
+} from "../electronApi";
 
 const { Content } = Layout;
 
@@ -92,14 +97,11 @@ function Views() {
 
   // IPC Listener
   useEffect(() => {
-    let ipcRenderer;
-    try {
-      ipcRenderer = window.require("electron").ipcRenderer;
-    } catch (e) {
+    if (!isElectronAvailable()) {
       return;
     }
 
-    const handleToggleTab = (_event, key, checked) => {
+    const handleToggleTab = (key, checked) => {
       setVisibleTabs((prev) => {
         const newSet = new Set(prev);
         if (checked) {
@@ -117,12 +119,12 @@ function Views() {
       setWorkflowModalVisible(true);
     };
 
-    ipcRenderer.on("toggle-tab", handleToggleTab);
-    ipcRenderer.on("change-views", handleChangeViews);
+    const removeToggleTabListener = onToggleTab(handleToggleTab);
+    const removeChangeViewsListener = onChangeViews(handleChangeViews);
 
     return () => {
-      ipcRenderer.removeListener("toggle-tab", handleToggleTab);
-      ipcRenderer.removeListener("change-views", handleChangeViews);
+      removeToggleTabListener();
+      removeChangeViewsListener();
     };
   }, [current]);
 

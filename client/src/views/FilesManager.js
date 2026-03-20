@@ -24,6 +24,7 @@ import {
 } from "@ant-design/icons";
 import { apiClient } from "../api";
 import FileTreeSidebar from "../components/FileTreeSidebar";
+import { openLocalFile, revealInFinder } from "../electronApi";
 
 const HIDDEN_SYSTEM_FILES = new Set([
   "workflow_preference.json",
@@ -1174,8 +1175,7 @@ function FilesManager() {
 
   const handleMountProjectDirectory = async () => {
     try {
-      const { ipcRenderer } = window.require("electron");
-      const selectedDirectory = await ipcRenderer.invoke("open-local-file", {
+      const selectedDirectory = await openLocalFile({
         properties: ["openDirectory"],
       });
       if (!selectedDirectory) return;
@@ -1230,7 +1230,7 @@ function FilesManager() {
     });
   };
 
-  const handleRevealInFinder = (key) => {
+  const handleRevealInFinder = async (key) => {
     const item =
       folders.find((f) => f.key === key) ||
       Object.values(files)
@@ -1241,8 +1241,7 @@ function FilesManager() {
       return;
     }
     try {
-      const { ipcRenderer } = window.require("electron");
-      ipcRenderer.invoke("reveal-in-finder", item.physical_path);
+      await revealInFinder(item.physical_path);
     } catch (err) {
       console.error("Reveal in Finder error", err);
       message.error("Failed to open in Finder");

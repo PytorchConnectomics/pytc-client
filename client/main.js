@@ -19,10 +19,12 @@ function createWindow() {
     height,
     icon: path.join(__dirname, "public", "favicon.ico"),
     webPreferences: {
-      nodeIntegration: true,
-      contextIsolation: false,
-      webSecurity: false,
-      allowRunningInsecureContent: true,
+      preload: path.join(__dirname, "preload.js"),
+      nodeIntegration: false,
+      contextIsolation: true,
+      sandbox: true,
+      webSecurity: true,
+      allowRunningInsecureContent: false,
     },
   });
 

@@ -275,6 +275,8 @@ const CONTROL_SECTIONS = {
 
 const YamlFileEditor = (props) => {
   const context = useContext(AppContext);
+  const workflow =
+    props.type === "training" ? context.trainingState : context.inferenceState;
   const [yamlContent, setYamlContent] = useState("");
   const [showRaw, setShowRaw] = useState(false);
 
@@ -333,14 +335,15 @@ const YamlFileEditor = (props) => {
       setYamlContent(context.inferenceConfig || "");
     }
   }, [
-    context.uploadedYamlFile,
+    workflow.uploadedYamlFile,
+    workflow.selectedYamlPreset,
     context.trainingConfig,
     context.inferenceConfig,
     type,
   ]);
 
   const displayName =
-    context.uploadedYamlFile?.name || context.selectedYamlPreset;
+    workflow.uploadedYamlFile?.name || workflow.selectedYamlPreset;
 
   const renderControl = (control) => {
     const value = getYamlValue(yamlData, control.path);
