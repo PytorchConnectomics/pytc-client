@@ -7,7 +7,7 @@
         "Hippocampus_CA3",
         "Motor_Cortex_M1"
       ],
-      "mon": 51,
+      "mon": 3000,
       "tue": 30,
       "wed": 300,
       "thu": 30,
