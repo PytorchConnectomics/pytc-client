@@ -45,9 +45,7 @@ class ServerPytcRouteTests(unittest.TestCase):
 
     def test_training_logs_route_returns_worker_payload(self):
         payload = {"phase": "running", "text": "hello", "lines": ["hello"]}
-        with patch(
-            "server_pytc.main.get_training_process_logs", return_value=payload
-        ):
+        with patch("server_pytc.main.get_training_process_logs", return_value=payload):
             response = self.client.get("/training_logs")
 
         self.assertEqual(response.status_code, 200)

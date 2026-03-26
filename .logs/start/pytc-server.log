@@ -1,0 +1,21 @@
+INFO:     Started server process [1773188]
+INFO:     Waiting for application startup.
+INFO:     Application startup complete.
+INFO:     Uvicorn running on http://0.0.0.0:4243 (Press CTRL+C to quit)
+
+================================================================================
+SERVER_PYTC STARTING UP
+Python executable: /home/sam/Workshop/pytc-client/.venv/bin/python3
+Working directory: /home/sam/Workshop/pytc-client
+================================================================================
+
+
+================================================================================
+SERVER_PYTC: Starting Uvicorn server on port 4243...
+================================================================================
+
+INFO:     127.0.0.1:52514 - "GET /hello HTTP/1.1" 200 OK
+INFO:     Shutting down
+INFO:     Waiting for application shutdown.
+INFO:     Application shutdown complete.
+INFO:     Finished server process [1773188]
