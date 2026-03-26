@@ -484,9 +484,7 @@ function FilesManager() {
     }
     try {
       const payload = { name: tempName, path: currentFolder };
-      const res = await apiClient.post(`/files/folder`, payload, {
-        withCredentials: true,
-      });
+      const res = await apiClient.post(`/files/folder`, payload);
       const newFolder = res.data;
       setFolders([
         ...folders,
@@ -547,7 +545,6 @@ function FilesManager() {
       await apiClient.put(
         `/files/${key}`,
         { name: tempName, path: isFolder ? undefined : currentFolder },
-        { withCredentials: true },
       );
       if (isFolder) {
         setFolders(
@@ -573,11 +570,7 @@ function FilesManager() {
   const handleDelete = async (keys = selectedItems) => {
     if (keys.length === 0) return;
     try {
-      await Promise.all(
-        keys.map((id) =>
-          apiClient.delete(`/files/${id}`, { withCredentials: true }),
-        ),
-      );
+      await Promise.all(keys.map((id) => apiClient.delete(`/files/${id}`)));
       const folderIds = keys.filter((k) => folders.some((f) => f.key === k));
       const fileIds = keys.filter((k) => !folderIds.includes(k));
       const removedFolderIds = collectDescendantFolderIds(
@@ -648,7 +641,6 @@ function FilesManager() {
               source_id: parseInt(id),
               destination_path: currentFolder,
             },
-            { withCredentials: true },
           );
 
           const newFile = res.data;
@@ -696,7 +688,6 @@ function FilesManager() {
               name: item.title || item.name,
               path: currentFolder,
             },
-            { withCredentials: true },
           );
 
           if (isFolder) {
@@ -890,7 +881,6 @@ function FilesManager() {
             name: item.title || item.name,
             path: targetFolderKey,
           },
-          { withCredentials: true },
         );
 
         if (isFolder) {
@@ -940,7 +930,6 @@ function FilesManager() {
       try {
         const res = await apiClient.post(`/files/upload`, form, {
           headers: { "Content-Type": "multipart/form-data" },
-          withCredentials: true,
         });
         const newFile = res.data;
         setFiles((prev) => ({
@@ -1431,7 +1420,6 @@ function FilesManager() {
           directory_path: selectedDirectory,
           destination_path: "root",
         },
-        { withCredentials: true },
       );
 
       await fetchFolderContents("root", { force: true });
@@ -1491,9 +1479,7 @@ function FilesManager() {
             }
 
             try {
-              const res = await apiClient.delete("/files/workspace", {
-                withCredentials: true,
-              });
+              const res = await apiClient.delete("/files/workspace");
               await context.resetFileState();
               resetLocalFileCache();
               await fetchFolderContents("root", { force: true });
@@ -1536,9 +1522,7 @@ function FilesManager() {
           const shouldReturnToRoot =
             currentFolder === folderKey ||
             isFolderWithinSubtree(foldersRef.current, folderKey, currentFolder);
-          await apiClient.delete(`/files/unmount/${folderKey}`, {
-            withCredentials: true,
-          });
+          await apiClient.delete(`/files/unmount/${folderKey}`);
           removeFolderSubtrees([folderKey]);
           await fetchFolderContents("root", { force: true });
           if (shouldReturnToRoot) {
@@ -1620,7 +1604,6 @@ function FilesManager() {
                         name: item.title || item.name,
                         path: targetFolderId,
                       },
-                      { withCredentials: true },
                     );
 
                     if (isSourceFolder) {

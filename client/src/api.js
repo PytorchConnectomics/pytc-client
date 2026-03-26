@@ -9,10 +9,10 @@ import {
 
 const BASE_URL = `${process.env.REACT_APP_SERVER_PROTOCOL || "http"}://${process.env.REACT_APP_SERVER_URL || "localhost:4242"}`;
 
-// Create axios instance without auth headers—app runs as guest by default.
+// Guest-mode requests do not rely on cookies, so keep CORS requests non-credentialed.
 export const apiClient = axios.create({
   baseURL: BASE_URL,
-  withCredentials: true,
+  withCredentials: false,
 });
 
 const buildFilePath = (file) => {
