@@ -1,11 +1,10 @@
-import React, { useState, useContext, useEffect } from "react";
+import React, { useState } from "react";
 import { Button, Tabs, Input, Space, Typography, message } from "antd";
 import {
   ArrowRightOutlined,
   InboxOutlined,
   ReloadOutlined,
 } from "@ant-design/icons";
-import { AppContext } from "../contexts/GlobalContext";
 import { getNeuroglancerViewer } from "../api";
 import UnifiedFileInput from "../components/UnifiedFileInput";
 
@@ -13,7 +12,6 @@ const { Title } = Typography;
 
 function Visualization(props) {
   const { viewers, setViewers } = props;
-  const context = useContext(AppContext);
   const [activeKey, setActiveKey] = useState(
     viewers.length > 0 ? viewers[0].key : null,
   );
@@ -23,9 +21,6 @@ function Visualization(props) {
   const [currentLabel, setCurrentLabel] = useState(null);
   const [scales, setScales] = useState("30,6,6");
   const [isLoading, setIsLoading] = useState(false);
-
-  // Update file list options - No longer needed for UnifiedFileInput but keeping context access
-  const { files } = context;
 
   const handleImageChange = (value) => {
     console.log(`selected image:`, value);
@@ -84,8 +79,7 @@ function Visualization(props) {
         scalesArray,
       );
 
-      const newUrl = res.replace(/\/\/[^:/]+/, "//localhost");
-      console.log("Current Viewer at ", newUrl);
+      console.log("Current Viewer at ", res);
 
       // Extract name from path for title
       const getImageName = (val) => {
@@ -102,7 +96,7 @@ function Visualization(props) {
           title:
             getImageName(currentImage) +
             (currentLabel ? " & " + getImageName(currentLabel) : ""),
-          viewer: newUrl,
+          viewer: res,
         },
       ];
 

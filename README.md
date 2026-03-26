@@ -34,6 +34,7 @@ Optional runtime environment variables:
 ```
 PYTC_AUTH_SECRET=replace-me
 PYTC_ALLOWED_ORIGINS=http://localhost:3000,http://127.0.0.1:3000,null
+PYTC_NEUROGLANCER_PUBLIC_BASE=http://localhost:4244
 ```
 
 If restarting after a crash or interrupted session, kill any lingering processes first:

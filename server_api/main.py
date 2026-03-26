@@ -4,13 +4,17 @@ import re
 import shutil
 import tempfile
 from typing import List, Optional
+from urllib.parse import urlsplit, urlunsplit
 
 import requests
 import uvicorn
 from fastapi import Depends, FastAPI, HTTPException, Request, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.orm import Session
-from runtime_settings import get_allowed_origins
+from runtime_settings import (
+    get_allowed_origins,
+    get_neuroglancer_public_base,
+)
 from server_api.utils.io import readVol
 from server_api.utils.utils import process_path
 from server_api.auth import models, database, router as auth_router
@@ -92,6 +96,42 @@ def health():
 
 def _worker_url(path: str) -> str:
     return f"{REACT_APP_SERVER_PROTOCOL}://{REACT_APP_SERVER_URL}{path}"
+
+
+def _derive_neuroglancer_public_base(request: Request) -> str:
+    configured_base = get_neuroglancer_public_base()
+    if configured_base:
+        return configured_base
+
+    forwarded_proto = request.headers.get("x-forwarded-proto")
+    scheme = (forwarded_proto.split(",")[0].strip() if forwarded_proto else "") or (
+        request.url.scheme or "http"
+    )
+
+    forwarded_host = request.headers.get("x-forwarded-host")
+    request_host = (
+        forwarded_host.split(",")[0].strip() if forwarded_host else request.url.netloc
+    )
+    hostname = request_host.split(":")[0] or "localhost"
+    return f"{scheme}://{hostname}:4244"
+
+
+def _build_neuroglancer_public_url(viewer_url: str, request: Request) -> str:
+    viewer_parts = urlsplit(viewer_url)
+    base_parts = urlsplit(_derive_neuroglancer_public_base(request))
+    base_path = base_parts.path.rstrip("/")
+    viewer_path = viewer_parts.path or ""
+    combined_path = f"{base_path}{viewer_path}" if base_path else viewer_path
+
+    return urlunsplit(
+        (
+            base_parts.scheme or "http",
+            base_parts.netloc,
+            combined_path,
+            viewer_parts.query,
+            viewer_parts.fragment,
+        )
+    )
 
 
 def _extract_upstream_payload(response: requests.Response):
@@ -394,8 +434,9 @@ async def neuroglancer(req: Request):
             if gt is not None:
                 s.layers.append(name="gt", layer=ngLayer(gt, res, tt="segmentation"))
 
-        print(viewer)
-        return str(viewer)
+        public_url = _build_neuroglancer_public_url(str(viewer), req)
+        print(public_url)
+        return public_url
     finally:
         for path in cleanup_paths:
             try:
