@@ -185,11 +185,18 @@ def read_users_me(current_user: models.User = Depends(get_current_user)):
 
 @router.get("/files", response_model=List[models.FileResponse])
 def get_files(
+    parent: Optional[str] = None,
     current_user: models.User = Depends(get_current_user),
     db: Session = Depends(database.get_db),
 ):
+    query = db.query(models.File).filter(models.File.user_id == current_user.id)
+    if parent is not None:
+        query = query.filter(models.File.path == parent)
+
     return [
-        file for file in current_user.files if not _is_ignored_system_file(file.name)
+        file
+        for file in query.order_by(models.File.is_folder.desc(), models.File.name.asc()).all()
+        if not _is_ignored_system_file(file.name)
     ]
 
 

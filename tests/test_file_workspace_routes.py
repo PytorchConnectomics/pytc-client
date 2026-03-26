@@ -98,6 +98,7 @@ class FileWorkspaceRouteTests(unittest.TestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.json()["mounted_files"], 1)
+        mounted_root_id = response.json()["mounted_root_id"]
 
         files_response = self.client.get("/files")
         self.assertEqual(files_response.status_code, 200)
@@ -105,6 +106,19 @@ class FileWorkspaceRouteTests(unittest.TestCase):
         self.assertIn("project", names)
         self.assertIn("volume.tif", names)
         self.assertNotIn(".DS_Store", names)
+
+        root_response = self.client.get("/files", params={"parent": "root"})
+        self.assertEqual(root_response.status_code, 200)
+        root_names = [item["name"] for item in root_response.json()]
+        self.assertEqual(root_names, ["project"])
+
+        child_response = self.client.get(
+            "/files",
+            params={"parent": str(mounted_root_id)},
+        )
+        self.assertEqual(child_response.status_code, 200)
+        child_names = [item["name"] for item in child_response.json()]
+        self.assertEqual(child_names, ["volume.tif"])
 
     def test_reset_workspace_preserves_mounted_sources_and_clears_uploads(self):
         mount_root = pathlib.Path(self.temp_dir.name) / "mounted-project"

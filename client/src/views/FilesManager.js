@@ -47,6 +47,42 @@ const IMAGE_EXTENSIONS = new Set([
   ".webp",
 ]);
 
+const collectDescendantFolderIds = (folderList, rootIds) => {
+  const removed = new Set();
+  const queue = [...rootIds];
+
+  while (queue.length > 0) {
+    const currentId = queue.shift();
+    if (removed.has(currentId)) {
+      continue;
+    }
+    removed.add(currentId);
+    folderList
+      .filter((folder) => folder.parent === currentId)
+      .forEach((folder) => queue.push(folder.key));
+  }
+
+  return removed;
+};
+
+const isFolderWithinSubtree = (folderList, rootId, targetId) => {
+  if (!rootId || !targetId || rootId === "root" || targetId === "root") {
+    return false;
+  }
+
+  let current = folderList.find((folder) => folder.key === targetId);
+  while (current) {
+    if (current.key === rootId) {
+      return true;
+    }
+    if (!current.parent || current.parent === "root") {
+      break;
+    }
+    current = folderList.find((folder) => folder.key === current.parent);
+  }
+  return false;
+};
+
 // Transform backend file list into UI state
 const transformFiles = (fileList) => {
   const folders = [];
@@ -84,7 +120,14 @@ function FilesManager() {
   const context = useContext(AppContext);
   const [folders, setFolders] = useState([]);
   const [files, setFiles] = useState({});
+  const foldersRef = useRef([]);
+  const filesRef = useRef({});
   const [currentFolder, setCurrentFolder] = useState("root");
+  const [loadedParents, setLoadedParents] = useState([]);
+  const [loadingParents, setLoadingParents] = useState([]);
+  const loadedParentsRef = useRef(new Set());
+  const loadingParentsRef = useRef(new Set());
+  const [expandedFolders, setExpandedFolders] = useState([]);
   const [viewMode, setViewMode] = useState("grid"); // 'grid' or 'list'
   const [selectedItems, setSelectedItems] = useState([]);
   const [clipboard, setClipboard] = useState({ items: [], action: null }); // copy / move
@@ -141,16 +184,167 @@ function FilesManager() {
     }
   }, [editingItem]);
 
-  const fetchFiles = React.useCallback(
-    async (options = {}) => {
-      const { silentNetworkError = false } = options;
+  useEffect(() => {
+    foldersRef.current = folders;
+  }, [folders]);
+
+  useEffect(() => {
+    filesRef.current = files;
+  }, [files]);
+
+  const syncLoadedParents = React.useCallback((nextParents) => {
+    loadedParentsRef.current = new Set(nextParents);
+    setLoadedParents(nextParents);
+  }, []);
+
+  const syncLoadingParents = React.useCallback((nextParents) => {
+    loadingParentsRef.current = new Set(nextParents);
+    setLoadingParents(nextParents);
+  }, []);
+
+  const markParentLoaded = React.useCallback(
+    (parentKey) => {
+      if (loadedParentsRef.current.has(parentKey)) {
+        return;
+      }
+      syncLoadedParents([...loadedParentsRef.current, parentKey]);
+    },
+    [syncLoadedParents],
+  );
+
+  const setParentLoadingState = React.useCallback(
+    (parentKey, isLoading) => {
+      const nextParents = new Set(loadingParentsRef.current);
+      if (isLoading) {
+        nextParents.add(parentKey);
+      } else {
+        nextParents.delete(parentKey);
+      }
+      syncLoadingParents(Array.from(nextParents));
+    },
+    [syncLoadingParents],
+  );
+
+  const resetLocalFileCache = React.useCallback(() => {
+    foldersRef.current = [];
+    filesRef.current = {};
+    setFolders([]);
+    setFiles({});
+    syncLoadedParents([]);
+    syncLoadingParents([]);
+    setExpandedFolders([]);
+  }, [syncLoadedParents, syncLoadingParents]);
+
+  const replaceFolderChildren = React.useCallback(
+    (parentKey, fileList) => {
+      const normalizedParent = String(parentKey || "root");
+      const previousFolders = foldersRef.current;
+      const previousFiles = filesRef.current;
+      const { folders: nextFolders, files: nextFiles } = transformFiles(fileList);
+      const existingDirectChildIds = previousFolders
+        .filter((folder) => folder.parent === normalizedParent)
+        .map((folder) => folder.key);
+      const nextDirectChildIds = new Set(nextFolders.map((folder) => folder.key));
+      const removedFolderIds = collectDescendantFolderIds(
+        previousFolders,
+        existingDirectChildIds.filter((id) => !nextDirectChildIds.has(id)),
+      );
+
+      const mergedFolders = [
+        ...previousFolders.filter(
+          (folder) =>
+            folder.parent !== normalizedParent && !removedFolderIds.has(folder.key),
+        ),
+        ...nextFolders,
+      ].sort((left, right) => {
+        if (left.parent === right.parent) {
+          return String(left.title || "").localeCompare(String(right.title || ""));
+        }
+        return String(left.parent || "").localeCompare(String(right.parent || ""));
+      });
+
+      const mergedFiles = { ...previousFiles };
+      delete mergedFiles[normalizedParent];
+      removedFolderIds.forEach((folderId) => {
+        delete mergedFiles[folderId];
+      });
+      Object.entries(nextFiles).forEach(([key, value]) => {
+        mergedFiles[key] = value;
+      });
+
+      foldersRef.current = mergedFolders;
+      filesRef.current = mergedFiles;
+      setFolders(mergedFolders);
+      setFiles(mergedFiles);
+      markParentLoaded(normalizedParent);
+    },
+    [markParentLoaded],
+  );
+
+  const removeFolderSubtrees = React.useCallback(
+    (folderIds) => {
+      if (!folderIds.length) {
+        return;
+      }
+
+      const removedFolderIds = collectDescendantFolderIds(
+        foldersRef.current,
+        folderIds,
+      );
+      const nextFolders = foldersRef.current.filter(
+        (folder) => !removedFolderIds.has(folder.key),
+      );
+      const nextFiles = { ...filesRef.current };
+      removedFolderIds.forEach((folderId) => {
+        delete nextFiles[folderId];
+      });
+
+      foldersRef.current = nextFolders;
+      filesRef.current = nextFiles;
+      setFolders(nextFolders);
+      setFiles(nextFiles);
+      syncLoadedParents(
+        Array.from(loadedParentsRef.current).filter(
+          (parentKey) => !removedFolderIds.has(parentKey),
+        ),
+      );
+      setExpandedFolders((prev) =>
+        prev.filter((key) => !removedFolderIds.has(key.replace("folder-", ""))),
+      );
+    },
+    [syncLoadedParents],
+  );
+
+  const fetchFolderContents = React.useCallback(
+    async (parentKey, options = {}) => {
+      const normalizedParent = String(parentKey || "root");
+      const { force = false, silentNetworkError = false } = options;
+
+      if (
+        !force &&
+        loadedParentsRef.current.has(normalizedParent) &&
+        !loadingParentsRef.current.has(normalizedParent)
+      ) {
+        return {
+          folders: foldersRef.current.filter(
+            (folder) => folder.parent === normalizedParent,
+          ),
+          files: filesRef.current[normalizedParent] || [],
+        };
+      }
+
+      if (loadingParentsRef.current.has(normalizedParent)) {
+        return null;
+      }
+
+      setParentLoadingState(normalizedParent, true);
       try {
-        const res = await apiClient.get("/files");
-        const { folders: flds, files: fls } = transformFiles(res.data);
-        setFolders(flds);
-        setFiles(fls);
+        const res = await apiClient.get("/files", {
+          params: { parent: normalizedParent },
+        });
+        replaceFolderChildren(normalizedParent, res.data);
         setServerUnavailable(false);
-        return { folders: flds, files: fls };
+        return res.data;
       } catch (err) {
         const isNetworkError = !err.response;
         if (isNetworkError) {
@@ -164,24 +358,42 @@ function FilesManager() {
           message.error("Could not load files");
         }
         return null;
+      } finally {
+        setParentLoadingState(normalizedParent, false);
       }
     },
-    [hasShownServerWarning],
+    [
+      hasShownServerWarning,
+      replaceFolderChildren,
+      setParentLoadingState,
+    ],
   );
 
   // Load initial data with proper cleanup and 401 handling
   useEffect(() => {
     let isMounted = true; // Prevent state updates after unmount
 
-    const loadFiles = async () => {
+    const loadVisibleFolders = async () => {
       if (!isMounted) return;
-      await fetchFiles();
+      await fetchFolderContents("root");
+      if (currentFolder !== "root") {
+        await fetchFolderContents(currentFolder);
+      }
     };
 
-    loadFiles();
+    loadVisibleFolders();
     const retryId = setInterval(() => {
       if (isMounted && serverUnavailable) {
-        fetchFiles({ silentNetworkError: true });
+        fetchFolderContents("root", {
+          force: true,
+          silentNetworkError: true,
+        });
+        if (currentFolder !== "root") {
+          fetchFolderContents(currentFolder, {
+            force: true,
+            silentNetworkError: true,
+          });
+        }
       }
     }, 2000);
 
@@ -190,7 +402,7 @@ function FilesManager() {
       isMounted = false;
       clearInterval(retryId);
     };
-  }, [fetchFiles, serverUnavailable]); // Retry when server unavailable
+  }, [currentFolder, fetchFolderContents, serverUnavailable]); // Retry when server unavailable
 
   const getCurrentFolderObj = () =>
     folders.find((f) => f.key === currentFolder);
@@ -211,6 +423,12 @@ function FilesManager() {
   };
 
   const handleNavigate = (key) => {
+    if (key !== "root") {
+      fetchFolderContents(key);
+      setExpandedFolders((prev) =>
+        prev.includes(`folder-${key}`) ? prev : [...prev, `folder-${key}`],
+      );
+    }
     setCurrentFolder(key);
     setSelectedItems([]);
     setEditingItem(null);
@@ -362,14 +580,34 @@ function FilesManager() {
       );
       const folderIds = keys.filter((k) => folders.some((f) => f.key === k));
       const fileIds = keys.filter((k) => !folderIds.includes(k));
-      setFolders(folders.filter((f) => !folderIds.includes(f.key)));
-      setFiles((prev) => {
-        const newFiles = { ...prev };
-        Object.keys(newFiles).forEach((fk) => {
-          newFiles[fk] = newFiles[fk].filter((f) => !fileIds.includes(f.key));
-        });
-        return newFiles;
+      const removedFolderIds = collectDescendantFolderIds(
+        foldersRef.current,
+        folderIds,
+      );
+      const nextFolders = foldersRef.current.filter(
+        (folder) => !removedFolderIds.has(folder.key),
+      );
+      const nextFiles = { ...filesRef.current };
+      Object.keys(nextFiles).forEach((folderKey) => {
+        nextFiles[folderKey] = nextFiles[folderKey].filter(
+          (file) => !fileIds.includes(file.key),
+        );
       });
+      removedFolderIds.forEach((folderId) => {
+        delete nextFiles[folderId];
+      });
+      foldersRef.current = nextFolders;
+      filesRef.current = nextFiles;
+      setFolders(nextFolders);
+      setFiles(nextFiles);
+      syncLoadedParents(
+        Array.from(loadedParentsRef.current).filter(
+          (parentKey) => !removedFolderIds.has(parentKey),
+        ),
+      );
+      setExpandedFolders((prev) =>
+        prev.filter((key) => !removedFolderIds.has(key.replace("folder-", ""))),
+      );
       setSelectedItems([]);
       message.success(`Deleted ${keys.length} items`);
     } catch (err) {
@@ -1196,9 +1434,11 @@ function FilesManager() {
         { withCredentials: true },
       );
 
-      await fetchFiles();
+      await fetchFolderContents("root", { force: true });
       if (res?.data?.mounted_root_id) {
-        handleNavigate(String(res.data.mounted_root_id));
+        const mountedRootId = String(res.data.mounted_root_id);
+        await fetchFolderContents(mountedRootId, { force: true });
+        handleNavigate(mountedRootId);
       }
       message.success(res?.data?.message || "Project directory mounted.");
     } catch (err) {
@@ -1255,7 +1495,8 @@ function FilesManager() {
                 withCredentials: true,
               });
               await context.resetFileState();
-              await fetchFiles();
+              resetLocalFileCache();
+              await fetchFolderContents("root", { force: true });
               handleNavigate("root");
               setSelectedItems([]);
               message.success(
@@ -1292,11 +1533,15 @@ function FilesManager() {
       cancelText: "Cancel",
       onOk: async () => {
         try {
+          const shouldReturnToRoot =
+            currentFolder === folderKey ||
+            isFolderWithinSubtree(foldersRef.current, folderKey, currentFolder);
           await apiClient.delete(`/files/unmount/${folderKey}`, {
             withCredentials: true,
           });
-          await fetchFiles();
-          if (currentFolder === folderKey) {
+          removeFolderSubtrees([folderKey]);
+          await fetchFolderContents("root", { force: true });
+          if (shouldReturnToRoot) {
             handleNavigate("root");
           }
           message.success("Project unmounted.");
@@ -1342,6 +1587,7 @@ function FilesManager() {
             files={files}
             currentFolder={currentFolder}
             onSelect={handleNavigate}
+            onLoadFolder={fetchFolderContents}
             onDrop={(info) => {
               const dropKey = info.node.key;
               const dragKey = info.dragNode.key;
@@ -1436,6 +1682,10 @@ function FilesManager() {
                 key: id,
               });
             }}
+            loadedParents={loadedParents}
+            loadingParents={loadingParents}
+            expandedKeys={expandedFolders}
+            onExpand={setExpandedFolders}
             width={sidebarWidth}
           />
           <div
@@ -1551,15 +1801,28 @@ function FilesManager() {
           onDragOver={handleDragOver}
           onDrop={(e) => handleDrop(e, currentFolder)}
         >
-          {currentFolders.length === 0 &&
+          {loadingParents.includes(currentFolder) && (
+            <div
+              style={{
+                width: "100%",
+                marginTop: 64,
+                display: "flex",
+                justifyContent: "center",
+              }}
+            >
+              <Spin size="large" />
+            </div>
+          )}
+          {!loadingParents.includes(currentFolder) &&
+            currentFolders.length === 0 &&
             currentFiles.length === 0 &&
             !newItemType && (
-              <div
-                style={{ width: "100%", marginTop: 64, pointerEvents: "none" }}
-              >
-                <Empty description="Empty Folder" />
-              </div>
-            )}
+            <div
+              style={{ width: "100%", marginTop: 64, pointerEvents: "none" }}
+            >
+              <Empty description="Empty Folder" />
+            </div>
+          )}
           {currentFolders.map((f) => renderItem(f, "folder"))}
           {renderNewFolderPlaceholder()}
           {currentFiles.map((f) => renderItem(f, "file"))}
