@@ -7,7 +7,6 @@ import {
   ThunderboltOutlined,
   DashboardOutlined,
   BugOutlined,
-  ApartmentOutlined,
   MessageOutlined,
 } from "@ant-design/icons";
 import FilesManager from "./FilesManager";
@@ -15,118 +14,42 @@ import Visualization from "./Visualization";
 import ModelTraining from "./ModelTraining";
 import ModelInference from "./ModelInference";
 import Monitoring from "./Monitoring";
-import ProofReading from "./ProofReading";
 import MaskProofreading from "./MaskProofreading";
-import WorkflowSelector from "../components/WorkflowSelector";
 import Chatbot from "../components/Chatbot";
-import {
-  isElectronAvailable,
-  onChangeViews,
-  onToggleTab,
-} from "../electronApi";
 
 const { Content } = Layout;
 
+const MODULE_ITEMS = [
+  { label: "File Management", key: "files", icon: <FolderOpenOutlined /> },
+  { label: "Visualization", key: "visualization", icon: <EyeOutlined /> },
+  { label: "Model Training", key: "training", icon: <ExperimentOutlined /> },
+  {
+    label: "Model Inference",
+    key: "inference",
+    icon: <ThunderboltOutlined />,
+  },
+  { label: "Tensorboard", key: "monitoring", icon: <DashboardOutlined /> },
+  {
+    label: "Mask Proofreading",
+    key: "mask-proofreading",
+    icon: <BugOutlined />,
+  },
+];
+
 function Views() {
-  // State
   const [current, setCurrent] = useState("files");
-  const [visibleTabs, setVisibleTabs] = useState(new Set(["files"]));
   const [visitedTabs, setVisitedTabs] = useState(new Set(["files"]));
-  const [workflowModalVisible, setWorkflowModalVisible] = useState(true);
   const [isChatOpen, setIsChatOpen] = useState(false);
   const [chatWidth, setChatWidth] = useState(560);
   const isResizing = useRef(false);
 
-  // Lifted state from Workspace
   const [viewers, setViewers] = useState([]);
   const [isInferring, setIsInferring] = useState(false);
-
-  const allItems = [
-    { label: "File Management", key: "files", icon: <FolderOpenOutlined /> },
-    { label: "Visualization", key: "visualization", icon: <EyeOutlined /> },
-    { label: "Model Training", key: "training", icon: <ExperimentOutlined /> },
-    {
-      label: "Model Inference",
-      key: "inference",
-      icon: <ThunderboltOutlined />,
-    },
-    { label: "Tensorboard", key: "monitoring", icon: <DashboardOutlined /> },
-    { label: "SynAnno", key: "synanno", icon: <ApartmentOutlined /> },
-    {
-      label: "Mask Proofreading",
-      key: "mask-proofreading",
-      icon: <BugOutlined />,
-    },
-  ];
-
-  const items = allItems.filter((item) => visibleTabs.has(item.key));
 
   const onClick = (e) => {
     setCurrent(e.key);
     setVisitedTabs((prev) => new Set(prev).add(e.key));
   };
-
-  // Helper to activate tabs and set valid current
-  const applyModes = (modes) => {
-    const modeList = Array.isArray(modes) ? modes : [modes];
-    if (modeList.length === 0) return;
-
-    setVisitedTabs((prev) => {
-      const next = new Set(prev);
-      modeList.forEach((m) => next.add(m));
-      return next;
-    });
-    setVisibleTabs((prev) => {
-      const next = new Set(prev);
-      modeList.forEach((m) => next.add(m));
-      return next;
-    });
-
-    // Switch to first selected tab, or 'files' if included, or keep current if valid
-    if (modeList.includes("files")) {
-      setCurrent("files");
-    } else {
-      setCurrent(modeList[0]);
-    }
-  };
-
-  const handleWorkflowSelect = (modes) => {
-    setWorkflowModalVisible(false);
-    applyModes(modes);
-  };
-
-  // IPC Listener
-  useEffect(() => {
-    if (!isElectronAvailable()) {
-      return;
-    }
-
-    const handleToggleTab = (key, checked) => {
-      setVisibleTabs((prev) => {
-        const newSet = new Set(prev);
-        if (checked) {
-          newSet.add(key);
-        } else {
-          newSet.delete(key);
-          if (current === key) setCurrent("files");
-        }
-        return newSet;
-      });
-    };
-
-    const handleChangeViews = () => {
-      // User clicked "Change Views"
-      setWorkflowModalVisible(true);
-    };
-
-    const removeToggleTabListener = onToggleTab(handleToggleTab);
-    const removeChangeViewsListener = onChangeViews(handleChangeViews);
-
-    return () => {
-      removeToggleTabListener();
-      removeChangeViewsListener();
-    };
-  }, [current]);
 
   const startResizing = useCallback((e) => {
     isResizing.current = true;
@@ -168,14 +91,6 @@ function Views() {
 
   return (
     <Layout style={{ minHeight: "100vh" }}>
-      <WorkflowSelector
-        visible={workflowModalVisible}
-        onSelect={handleWorkflowSelect}
-        onCancel={() => {
-          setWorkflowModalVisible(false);
-        }}
-      />
-
       <div
         style={{
           display: "flex",
@@ -189,7 +104,7 @@ function Views() {
           onClick={onClick}
           selectedKeys={[current]}
           mode="horizontal"
-          items={items}
+          items={MODULE_ITEMS}
           style={{
             lineHeight: "64px",
             paddingLeft: "16px",
@@ -225,7 +140,6 @@ function Views() {
             setIsInferring={setIsInferring}
           />,
         )}
-        {renderTabContent("synanno", <ProofReading />)}
         {renderTabContent("mask-proofreading", <MaskProofreading />)}
       </Content>
       <Drawer

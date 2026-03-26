@@ -20,7 +20,6 @@ from server_api.utils.utils import process_path
 from server_api.auth import models, database, router as auth_router
 from server_api.auth.database import get_db
 from server_api.auth.router import get_current_user
-from server_api.synanno import router as synanno_router
 from server_api.ehtool import router as ehtool_router
 
 from fastapi.staticfiles import StaticFiles
@@ -77,7 +76,6 @@ os.makedirs("uploads", exist_ok=True)
 app.mount("/uploads", StaticFiles(directory="uploads"), name="uploads")
 
 app.include_router(auth_router.router)
-app.include_router(synanno_router.router, tags=["synanno"])
 app.include_router(ehtool_router.router, prefix="/eh", tags=["ehtool"])
 
 app.add_middleware(

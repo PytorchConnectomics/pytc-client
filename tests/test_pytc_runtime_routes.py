@@ -66,6 +66,11 @@ class ServerApiProxyTests(unittest.TestCase):
     def setUp(self):
         self.client = TestClient(server_api_app)
 
+    def test_synanno_route_is_not_mounted(self):
+        response = self.client.get("/api/synanno/ng-url/1")
+
+        self.assertEqual(response.status_code, 404)
+
     def test_inference_status_proxy_returns_worker_payload(self):
         payload = {"isRunning": False, "pid": None, "exitCode": 0}
         with patch(
