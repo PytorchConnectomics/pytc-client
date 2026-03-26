@@ -13,12 +13,20 @@ const FileTreeSidebar = ({
   files,
   currentFolder,
   onSelect,
+  onLoadFolder,
   onDrop,
   onContextMenu,
+  loadedParents = [],
+  loadingParents = [],
+  expandedKeys,
+  onExpand,
   width = 250,
 }) => {
   // Convert flat folders list to tree data
   const treeData = useMemo(() => {
+    const loadedParentSet = new Set(loadedParents);
+    const loadingParentSet = new Set(loadingParents);
+
     const buildTree = (parentId) => {
       const children = folders
         .filter((f) => f.parent === parentId)
@@ -26,13 +34,14 @@ const FileTreeSidebar = ({
           title: f.title,
           key: `folder-${f.key}`,
           isLeaf: false,
+          loading: loadingParentSet.has(f.key),
           icon: ({ expanded }) =>
             expanded ? <FolderOpenFilled /> : <FolderFilled />,
-          children: buildTree(f.key),
+          children: loadedParentSet.has(f.key) ? buildTree(f.key) : undefined,
         }));
 
       // Add files to tree
-      if (files && files[parentId]) {
+      if (loadedParentSet.has(parentId) && files && files[parentId]) {
         children.push(
           ...files[parentId].map((f) => ({
             title: f.name,
@@ -53,6 +62,7 @@ const FileTreeSidebar = ({
         title: f.title,
         key: `folder-${f.key}`,
         isLeaf: false,
+        loading: loadingParentSet.has(f.key),
         icon: ({ expanded }) =>
           expanded ? <FolderOpenFilled /> : <FolderFilled />,
         children: buildTree(f.key),
@@ -64,7 +74,7 @@ const FileTreeSidebar = ({
     }
 
     return rootNodes;
-  }, [folders, files]);
+  }, [files, folders, loadedParents, loadingParents]);
 
   const onSelectHandler = (keys, info) => {
     if (keys.length > 0) {
@@ -74,6 +84,15 @@ const FileTreeSidebar = ({
         onSelect(key.replace("folder-", ""));
       }
     }
+  };
+
+  const handleLoadData = async (node) => {
+    const key = String(node?.key || "");
+    if (!key.startsWith("folder-") || !onLoadFolder) {
+      return;
+    }
+
+    await onLoadFolder(key.replace("folder-", ""));
   };
 
   const handleDrop = (info) => {
@@ -110,11 +129,14 @@ const FileTreeSidebar = ({
       </div>
       <DirectoryTree
         multiple={false}
-        defaultExpandAll
         selectedKeys={[`folder-${currentFolder}`]}
         onSelect={onSelectHandler}
         treeData={treeData}
         expandAction="click"
+        expandedKeys={expandedKeys}
+        onExpand={onExpand}
+        loadData={handleLoadData}
+        loadedKeys={loadedParents.map((key) => `folder-${key}`)}
         style={{ backgroundColor: "transparent", fontSize: 13 }}
         titleRender={(nodeData) => (
           <span
@@ -130,6 +152,7 @@ const FileTreeSidebar = ({
             title={String(nodeData.title)}
           >
             {nodeData.title}
+            {nodeData.loading ? " ..." : ""}
           </span>
         )}
         draggable

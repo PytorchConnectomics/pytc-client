@@ -54,7 +54,7 @@ function ModelInference({ isInferring, setIsInferring }) {
       applyInputPaths(yamlData, {
         mode: "inference",
         inputImagePath: getPath(inference.inputImage),
-        inputLabelPath: getPath(inference.inputLabel),
+        inputLabelPath: "",
         inputPath: "",
         outputPath: getPath(inference.outputPath),
       });

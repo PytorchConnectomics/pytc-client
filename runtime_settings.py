@@ -1,5 +1,6 @@
 import os
 import secrets
+from typing import Optional
 
 DEFAULT_ALLOWED_ORIGINS = (
     "http://localhost:3000",
@@ -23,3 +24,10 @@ def get_allowed_origins() -> list[str]:
 
 def get_auth_secret() -> str:
     return _AUTH_SECRET
+
+
+def get_neuroglancer_public_base() -> Optional[str]:
+    raw_base = os.getenv("PYTC_NEUROGLANCER_PUBLIC_BASE", "").strip()
+    if not raw_base:
+        return None
+    return raw_base.rstrip("/")

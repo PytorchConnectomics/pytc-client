@@ -38,6 +38,18 @@ class RuntimeSettingsTests(unittest.TestCase):
 
         self.assertEqual(module.get_auth_secret(), "test-secret")
 
+    def test_neuroglancer_public_base_uses_env_when_present(self):
+        with patch.dict(
+            os.environ,
+            {"PYTC_NEUROGLANCER_PUBLIC_BASE": "https://viewer.example.com/ng/"},
+            clear=True,
+        ):
+            module = importlib.reload(runtime_settings)
+            self.assertEqual(
+                module.get_neuroglancer_public_base(),
+                "https://viewer.example.com/ng",
+            )
+
 
 if __name__ == "__main__":
     unittest.main()
