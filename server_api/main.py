@@ -295,6 +295,35 @@ def save_upload_to_tempfile(upload: UploadFile) -> pathlib.Path:
     return temp_path
 
 
+def _is_probable_label_volume(image_array) -> bool:
+    import numpy as np
+
+    if not np.issubdtype(image_array.dtype, np.integer):
+        return False
+
+    unique_values = np.unique(image_array)
+    num_unique = len(unique_values)
+    if num_unique == 0:
+        return False
+
+    if num_unique == 2 and np.array_equal(unique_values, np.array([0, 1])):
+        return True
+    if num_unique == 2 and np.array_equal(unique_values, np.array([0, 255])):
+        return True
+    if num_unique < 50:
+        return True
+
+    max_value = int(unique_values[-1])
+    if max_value > 255 and num_unique <= 4096:
+        return True
+
+    dtype_info = np.iinfo(image_array.dtype)
+    if dtype_info.max > 255 and num_unique <= 1024:
+        return True
+
+    return False
+
+
 @app.post("/neuroglancer")
 async def neuroglancer(req: Request):
     import neuroglancer
@@ -491,23 +520,9 @@ async def check_files(req: Request):
             print(f"Failed to read file: {e}")
             return {"error": f"Failed to open image: {str(e)}"}
 
-        # Heuristic for label detection:
-        # 1. Must be integer type
-        # 2. Low number of unique values (e.g. < 50) relative to size
-        # 3. Or explicit binary (0, 255) or (0, 1)
-
         unique_values = np.unique(image_array)
         num_unique = len(unique_values)
-        is_integer = np.issubdtype(image_array.dtype, np.integer)
-
-        is_label = False
-        if is_integer:
-            if num_unique < 50:
-                is_label = True
-            elif np.array_equal(unique_values, np.array([0, 255])) or np.array_equal(
-                unique_values, np.array([0, 1])
-            ):
-                is_label = True
+        is_label = _is_probable_label_volume(image_array)
 
         if is_label:
             print(
