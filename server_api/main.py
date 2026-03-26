@@ -412,7 +412,7 @@ async def neuroglancer(req: Request):
         port = 4244
         neuroglancer.set_server_bind_address(ip, port)
         viewer = neuroglancer.Viewer()
-        # SNEMI (# 3d vol dim: z,y,x)
+        # Neuroglancer expects the EM volume axes in z, y, x order.
         res = neuroglancer.CoordinateSpace(
             names=["z", "y", "x"], units=["nm", "nm", "nm"], scales=scales
         )

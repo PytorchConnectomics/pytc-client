@@ -1,3 +1,4 @@
+import os
 import pathlib
 import unittest
 
@@ -6,7 +7,13 @@ from fastapi.testclient import TestClient
 from server_api.main import app as server_api_app
 
 
-SNEMI_ROOT = pathlib.Path("/Users/adamg/seg.bio/testing_data/snemi")
+REPO_ROOT = pathlib.Path(__file__).resolve().parents[1]
+SNEMI_ROOT = pathlib.Path(
+    os.getenv(
+        "PYTC_TEST_SNEMI_ROOT",
+        REPO_ROOT.parent / "testing_data" / "snemi",
+    )
+)
 TEST_INPUT_PATH = SNEMI_ROOT / "image" / "test-input.tif"
 TRAIN_LABELS_PATH = SNEMI_ROOT / "seg" / "train-labels.tif"
 
