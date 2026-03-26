@@ -1,6 +1,7 @@
-import React, { useState, useEffect, useRef } from "react";
+import React, { useState, useEffect, useRef, useContext } from "react";
 import {
   Button,
+  Dropdown,
   Input,
   Modal,
   message,
@@ -21,10 +22,13 @@ import {
   UploadOutlined,
   EyeOutlined,
   LayoutOutlined,
+  MoreOutlined,
+  DeleteOutlined,
 } from "@ant-design/icons";
 import { apiClient } from "../api";
 import FileTreeSidebar from "../components/FileTreeSidebar";
 import { openLocalFile, revealInFinder } from "../electronApi";
+import { AppContext } from "../contexts/GlobalContext";
 
 const HIDDEN_SYSTEM_FILES = new Set([
   "workflow_preference.json",
@@ -77,6 +81,7 @@ const transformFiles = (fileList) => {
 };
 
 function FilesManager() {
+  const context = useContext(AppContext);
   const [folders, setFolders] = useState([]);
   const [files, setFiles] = useState({});
   const [currentFolder, setCurrentFolder] = useState("root");
@@ -1202,6 +1207,79 @@ function FilesManager() {
     }
   };
 
+  const handleResetWorkspace = () => {
+    Modal.confirm({
+      title: "Reset workspace?",
+      content:
+        "This clears indexed mounted projects and uploaded app files for the current workspace. Source project directories on disk are preserved.",
+      okText: "Continue",
+      okButtonProps: { danger: true },
+      cancelText: "Cancel",
+      onOk: async () => {
+        let confirmText = "";
+        let finalConfirmModal = null;
+
+        finalConfirmModal = Modal.confirm({
+          title: "Final confirmation required",
+          content: (
+            <div>
+              <div style={{ marginBottom: 8 }}>
+                Type <strong>RESET</strong> to clear this workspace.
+              </div>
+              <Input
+                placeholder='Type "RESET"'
+                onChange={(e) => {
+                  confirmText = e.target.value;
+                  if (finalConfirmModal) {
+                    finalConfirmModal.update({
+                      okButtonProps: {
+                        danger: true,
+                        disabled: confirmText.trim() !== "RESET",
+                      },
+                    });
+                  }
+                }}
+              />
+            </div>
+          ),
+          okText: "Reset Workspace",
+          okButtonProps: { danger: true, disabled: true },
+          cancelText: "Cancel",
+          onOk: async () => {
+            if (confirmText.trim() !== "RESET") {
+              return;
+            }
+
+            try {
+              const res = await apiClient.delete("/files/workspace", {
+                withCredentials: true,
+              });
+              await context.resetFileState();
+              await fetchFiles();
+              handleNavigate("root");
+              setSelectedItems([]);
+              message.success(
+                `Workspace reset. Removed ${res?.data?.deleted_count ?? 0} indexed item(s).`,
+              );
+            } catch (err) {
+              console.error("Workspace reset error", err);
+              message.error("Failed to reset workspace");
+            }
+          },
+        });
+      },
+    });
+  };
+
+  const workspaceMenuItems = [
+    {
+      key: "reset_workspace",
+      label: "Reset Workspace",
+      icon: <DeleteOutlined />,
+      danger: true,
+    },
+  ];
+
   const handleUnmountProject = async (folderKey) => {
     const mountedFolder = folders.find((f) => f.key === folderKey);
     if (!mountedFolder) return;
@@ -1438,6 +1516,19 @@ function FilesManager() {
           >
             Mount Project
           </Button>
+          <Dropdown
+            menu={{
+              items: workspaceMenuItems,
+              onClick: ({ key }) => {
+                if (key === "reset_workspace") {
+                  handleResetWorkspace();
+                }
+              },
+            }}
+            trigger={["click"]}
+          >
+            <Button icon={<MoreOutlined />} title="More file actions" />
+          </Dropdown>
         </div>
 
         {/* Content Area */}
