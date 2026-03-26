@@ -81,34 +81,30 @@ function InputSelector(props) {
             }
           />
         </Form.Item>
-        <Form.Item
-          label={
-            <Space align="center">
-              <span>
-                {type === "training" ? "Input Label" : "Input Label (Optional)"}
-              </span>
-              <InlineHelpChat
-                taskKey={type}
-                label="Input Label"
-                yamlKey="DATASET.LABEL_NAME"
-                value={workflow.inputLabel}
-                projectContext={projectContext}
-                taskContext={taskContext}
-              />
-            </Space>
-          }
-        >
-          <UnifiedFileInput
-            placeholder="Please select or input label path"
-            onChange={handleLabelChange}
-            value={getValue(workflow.inputLabel)}
-            selectionType={
-              type === "training" || type === "inference"
-                ? "fileOrDirectory"
-                : "file"
+        {type === "training" && (
+          <Form.Item
+            label={
+              <Space align="center">
+                <span>Input Label</span>
+                <InlineHelpChat
+                  taskKey={type}
+                  label="Input Label"
+                  yamlKey="DATASET.LABEL_NAME"
+                  value={workflow.inputLabel}
+                  projectContext={projectContext}
+                  taskContext={taskContext}
+                />
+              </Space>
             }
-          />
-        </Form.Item>
+          >
+            <UnifiedFileInput
+              placeholder="Please select or input label path"
+              onChange={handleLabelChange}
+              value={getValue(workflow.inputLabel)}
+              selectionType="fileOrDirectory"
+            />
+          </Form.Item>
+        )}
         {type === "training" ? (
           <Form.Item
             label={
