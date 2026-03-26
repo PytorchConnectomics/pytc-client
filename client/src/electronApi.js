@@ -6,10 +6,6 @@ function getElectronAPI() {
   return window.electronAPI || null;
 }
 
-export function isElectronAvailable() {
-  return Boolean(getElectronAPI()?.isElectron);
-}
-
 export function openLocalFile(options = {}) {
   const api = getElectronAPI();
   if (!api) {
@@ -24,20 +20,4 @@ export function revealInFinder(targetPath) {
     return Promise.resolve(null);
   }
   return api.revealInFinder(targetPath);
-}
-
-export function onToggleTab(listener) {
-  const api = getElectronAPI();
-  if (!api) {
-    return () => {};
-  }
-  return api.onToggleTab(listener);
-}
-
-export function onChangeViews(listener) {
-  const api = getElectronAPI();
-  if (!api) {
-    return () => {};
-  }
-  return api.onChangeViews(listener);
 }
