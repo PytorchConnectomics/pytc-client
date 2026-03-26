@@ -1,5 +1,5 @@
 import React, { useState } from "react";
-import EHTool from "./EHTool";
+// import EHTool from "./EHTool";
 
 function MaskProofreading() {
   const [ehToolSession, setEhToolSession] = useState(null);
@@ -7,7 +7,7 @@ function MaskProofreading() {
 
   return (
     <div style={{ height: "100%", overflow: "hidden" }}>
-      <EHTool
+      {/* <EHTool
         refreshTrigger={refreshTrigger}
         savedSessionId={ehToolSession}
         onSessionChange={setEhToolSession}
@@ -15,7 +15,8 @@ function MaskProofreading() {
           // This prop is now nominally used to trigger internal modal
           setRefreshTrigger((prev) => prev + 1);
         }}
-      />
+      /> */}
+      <div style={{ padding: 20 }}>Mask Proofreading Component (EHTool is currently disabled)</div>
     </div>
   );
 }

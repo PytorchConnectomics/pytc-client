@@ -16,9 +16,7 @@ import Visualization from "./Visualization";
 import ModelTraining from "./ModelTraining";
 import ModelInference from "./ModelInference";
 import Monitoring from "./Monitoring";
-import MaskProofreading from "./MaskProofreading";
-import ProofReading from "./ProofReading";
-import WormErrorHandling from "./WormErrorHandling";
+import MaskProofreading from "./mask-proofreading/MaskProofreading";
 import ProjectManager from "./project-manager/ProjectManager";
 import Chatbot from "../components/Chatbot";
 
@@ -39,11 +37,18 @@ const MODULE_ITEMS = [
     key: "mask-proofreading",
     icon: <BugOutlined />,
   },
+  {
+    label: "Project Manager",
+    key: "project-manager",
+    icon: <ProjectOutlined />,
+  },
 ];
 
 function Views() {
-  const [current, setCurrent] = useState("files");
-  const [visitedTabs, setVisitedTabs] = useState(new Set(["files"]));
+  const [current, setCurrent] = useState("project-manager");
+  const [visitedTabs, setVisitedTabs] = useState(
+    new Set(["project-manager", "files"]),
+  );
   const [isChatOpen, setIsChatOpen] = useState(false);
   const [chatWidth, setChatWidth] = useState(560);
   const isResizing = useRef(false);
@@ -51,8 +56,7 @@ function Views() {
   const [viewers, setViewers] = useState([]);
   const [isInferring, setIsInferring] = useState(false);
 
-<<<<<<< HEAD
-=======
+/*
   const allItems = [
     { label: "File Management", key: "files", icon: <FolderOpenOutlined /> },
     { label: "Visualization", key: "visualization", icon: <EyeOutlined /> },
@@ -77,8 +81,8 @@ function Views() {
   ];
 
   const items = allItems.filter((item) => visibleTabs.has(item.key));
+*/
 
->>>>>>> c648179 (feat:  annotation management system)
   const onClick = (e) => {
     setCurrent(e.key);
     setVisitedTabs((prev) => new Set(prev).add(e.key));
@@ -173,46 +177,43 @@ function Views() {
             setIsInferring={setIsInferring}
           />,
         )}
-<<<<<<< HEAD
-  { renderTabContent("mask-proofreading", <MaskProofreading />) }
-=======
-        {renderTabContent("synanno", <ProofReading />)}
-        {renderTabContent("worm-error-handling", <WormErrorHandling />)}
+        {renderTabContent("mask-proofreading", <MaskProofreading />)}
+        {/* {renderTabContent("synanno", <ProofReading />)} */}
+        {/* {renderTabContent("worm-error-handling", <WormErrorHandling />)} */}
         {renderTabContent("project-manager", <ProjectManager />)}
->>>>>>> c648179 (feat:  annotation management system)
       </Content >
-    <Drawer
-      placement="right"
-      open={isChatOpen}
-      onClose={() => setIsChatOpen(false)}
-      width={chatWidth}
-      mask={false}
-      closable={false}
-      destroyOnClose
-      styles={{ header: { display: "none" }, body: { padding: 0 } }}
-    >
-      <div
-        onMouseDown={startResizing}
-        style={{
-          position: "absolute",
-          left: 0,
-          top: 0,
-          bottom: 0,
-          width: "4px",
-          cursor: "ew-resize",
-          backgroundColor: "transparent",
-          zIndex: 10,
-        }}
-        onMouseEnter={(e) =>
-          (e.currentTarget.style.backgroundColor = "#1890ff")
-        }
-        onMouseLeave={(e) =>
-          !isResizing.current &&
-          (e.currentTarget.style.backgroundColor = "transparent")
-        }
-      />
-      <Chatbot onClose={() => setIsChatOpen(false)} />
-    </Drawer>
+      <Drawer
+        placement="right"
+        open={isChatOpen}
+        onClose={() => setIsChatOpen(false)}
+        width={chatWidth}
+        mask={false}
+        closable={false}
+        destroyOnClose
+        styles={{ header: { display: "none" }, body: { padding: 0 } }}
+      >
+        <div
+          onMouseDown={startResizing}
+          style={{
+            position: "absolute",
+            left: 0,
+            top: 0,
+            bottom: 0,
+            width: "4px",
+            cursor: "ew-resize",
+            backgroundColor: "transparent",
+            zIndex: 10,
+          }}
+          onMouseEnter={(e) =>
+            (e.currentTarget.style.backgroundColor = "#1890ff")
+          }
+          onMouseLeave={(e) =>
+            !isResizing.current &&
+            (e.currentTarget.style.backgroundColor = "transparent")
+          }
+        />
+        <Chatbot onClose={() => setIsChatOpen(false)} />
+      </Drawer>
     </Layout >
   );
 }

@@ -1,20 +1,17 @@
-INFO:     Started server process [1773135]
+INFO:     Started server process [1802573]
 INFO:     Waiting for application startup.
 INFO:     Application startup complete.
 INFO:     Uvicorn running on http://0.0.0.0:4242 (Press CTRL+C to quit)
 ================================================================================
 EHTOOL ROUTER MODULE LOADED - VERSION: DEBUG v2
 ================================================================================
-INFO:     127.0.0.1:45152 - "GET /health HTTP/1.1" 200 OK
-INFO:     127.0.0.1:35264 - "GET /files HTTP/1.1" 200 OK
-INFO:     127.0.0.1:35264 - "GET /files HTTP/1.1" 200 OK
-INFO:     127.0.0.1:35264 - "GET /files/preview/1 HTTP/1.1" 200 OK
-INFO:     127.0.0.1:35266 - "GET /files/preview/2 HTTP/1.1" 200 OK
-INFO:     127.0.0.1:35326 - "GET /api/pm/data HTTP/1.1" 200 OK
-INFO:     127.0.0.1:35326 - "GET /api/pm/data HTTP/1.1" 200 OK
-INFO:     127.0.0.1:55482 - "POST /api/pm/login HTTP/1.1" 200 OK
-INFO:     127.0.0.1:60408 - "POST /api/pm/login HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52216 - "GET /health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:39000 - "GET /api/pm/data HTTP/1.1" 200 OK
+INFO:     127.0.0.1:38992 - "GET /files?parent=root HTTP/1.1" 200 OK
+INFO:     127.0.0.1:39000 - "GET /api/pm/data HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55914 - "OPTIONS /api/pm/login HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55930 - "POST /api/pm/login HTTP/1.1" 200 OK
 INFO:     Shutting down
 INFO:     Waiting for application shutdown.
 INFO:     Application shutdown complete.
-INFO:     Finished server process [1773135]
+INFO:     Finished server process [1802573]
