@@ -7,6 +7,8 @@ import InlineHelpChat from "./InlineHelpChat";
 function InputSelector(props) {
   const context = useContext(AppContext);
   const { type } = props;
+  const workflow =
+    type === "training" ? context.trainingState : context.inferenceState;
 
   const projectContext =
     "Biomedical image segmentation using PyTorch Connectomics.";
@@ -16,25 +18,25 @@ function InputSelector(props) {
       : "Model inference configuration — Step 1: Set Inputs.";
 
   const handleLogPathChange = (value) => {
-    context.setLogPath(value);
+    workflow.setLogPath(value);
   };
 
   const handleOutputPathChange = (value) => {
-    context.setOutputPath(value);
+    workflow.setOutputPath(value);
   };
 
   const handleCheckpointPathChange = (value) => {
-    context.setCheckpointPath(value);
+    workflow.setCheckpointPath(value);
   };
 
   const handleImageChange = (value) => {
     console.log(`selected image:`, value);
-    context.setInputImage(value);
+    workflow.setInputImage(value);
   };
 
   const handleLabelChange = (value) => {
     console.log(`selected label:`, value);
-    context.setInputLabel(value);
+    workflow.setInputLabel(value);
   };
 
   // Helper to get value for UnifiedFileInput (can be object or string)
@@ -61,7 +63,7 @@ function InputSelector(props) {
                 taskKey={type}
                 label="Input Image"
                 yamlKey="DATASET.INPUT_PATH"
-                value={context.inputImage}
+                value={workflow.inputImage}
                 projectContext={projectContext}
                 taskContext={taskContext}
               />
@@ -71,7 +73,7 @@ function InputSelector(props) {
           <UnifiedFileInput
             placeholder="Please select or input image path"
             onChange={handleImageChange}
-            value={getValue(context.inputImage)}
+            value={getValue(workflow.inputImage)}
             selectionType={
               type === "training" || type === "inference"
                 ? "fileOrDirectory"
@@ -79,32 +81,30 @@ function InputSelector(props) {
             }
           />
         </Form.Item>
-        <Form.Item
-          label={
-            <Space align="center">
-              <span>Input Label</span>
-              <InlineHelpChat
-                taskKey={type}
-                label="Input Label"
-                yamlKey="DATASET.LABEL_NAME"
-                value={context.inputLabel}
-                projectContext={projectContext}
-                taskContext={taskContext}
-              />
-            </Space>
-          }
-        >
-          <UnifiedFileInput
-            placeholder="Please select or input label path"
-            onChange={handleLabelChange}
-            value={getValue(context.inputLabel)}
-            selectionType={
-              type === "training" || type === "inference"
-                ? "fileOrDirectory"
-                : "file"
+        {type === "training" && (
+          <Form.Item
+            label={
+              <Space align="center">
+                <span>Input Label</span>
+                <InlineHelpChat
+                  taskKey={type}
+                  label="Input Label"
+                  yamlKey="DATASET.LABEL_NAME"
+                  value={workflow.inputLabel}
+                  projectContext={projectContext}
+                  taskContext={taskContext}
+                />
+              </Space>
             }
-          />
-        </Form.Item>
+          >
+            <UnifiedFileInput
+              placeholder="Please select or input label path"
+              onChange={handleLabelChange}
+              value={getValue(workflow.inputLabel)}
+              selectionType="fileOrDirectory"
+            />
+          </Form.Item>
+        )}
         {type === "training" ? (
           <Form.Item
             label={
@@ -114,7 +114,7 @@ function InputSelector(props) {
                   taskKey={type}
                   label="Output Path"
                   yamlKey="DATASET.OUTPUT_PATH"
-                  value={context.outputPath}
+                  value={workflow.outputPath}
                   projectContext={projectContext}
                   taskContext={taskContext}
                 />
@@ -123,7 +123,7 @@ function InputSelector(props) {
           >
             <UnifiedFileInput
               placeholder="Directory for outputs (e.g., /path/to/outputs/)"
-              value={context.outputPath || ""}
+              value={workflow.outputPath || ""}
               onChange={handleOutputPathChange}
               selectionType="directory"
             />
@@ -137,7 +137,7 @@ function InputSelector(props) {
                   taskKey={type}
                   label="Output Path"
                   yamlKey="INFERENCE.OUTPUT_PATH"
-                  value={context.outputPath}
+                  value={workflow.outputPath}
                   projectContext={projectContext}
                   taskContext={taskContext}
                 />
@@ -147,7 +147,7 @@ function InputSelector(props) {
           >
             <UnifiedFileInput
               placeholder="Directory for results (e.g., /path/to/inference_output/)"
-              value={context.outputPath || ""}
+              value={workflow.outputPath || ""}
               onChange={handleOutputPathChange}
               selectionType="directory"
             />
@@ -162,7 +162,7 @@ function InputSelector(props) {
                   taskKey={type}
                   label="Log Path"
                   yamlKey="SOLVER.LOG_DIR"
-                  value={context.logPath}
+                  value={workflow.logPath}
                   projectContext={projectContext}
                   taskContext={taskContext}
                 />
@@ -171,7 +171,7 @@ function InputSelector(props) {
           >
             <UnifiedFileInput
               placeholder="Please type training log path"
-              value={context.logPath || ""}
+              value={workflow.logPath || ""}
               onChange={handleLogPathChange}
               selectionType="directory"
             />
@@ -185,7 +185,7 @@ function InputSelector(props) {
                   taskKey={type}
                   label="Checkpoint Path"
                   yamlKey="MODEL.PRE_MODEL"
-                  value={context.checkpointPath}
+                  value={workflow.checkpointPath}
                   projectContext={projectContext}
                   taskContext={taskContext}
                 />
@@ -195,9 +195,9 @@ function InputSelector(props) {
           >
             <UnifiedFileInput
               placeholder="Model checkpoint file (e.g., /path/to/checkpoint_00010.pth.tar)"
-              value={context.checkpointPath || ""}
+              value={workflow.checkpointPath || ""}
               onChange={handleCheckpointPathChange}
-              selectionType="directory"
+              selectionType="file"
             />
           </Form.Item>
         )}

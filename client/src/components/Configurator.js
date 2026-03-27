@@ -9,6 +9,8 @@ import { AppContext } from "../contexts/GlobalContext";
 function Configurator(props) {
   const { fileList, type } = props;
   const context = useContext(AppContext);
+  const workflow =
+    type === "training" ? context.trainingState : context.inferenceState;
   const [current, setCurrent] = useState(0);
   const [hasAttemptedAdvance, setHasAttemptedAdvance] = useState(false);
   const storageKey = `configStep:${type}`;
@@ -33,11 +35,6 @@ function Configurator(props) {
     }
     const label = type === "training" ? "Training" : "Inference";
     message.success(`${label} configuration saved.`);
-    if (type === "training") {
-      localStorage.setItem("trainingConfig", context.trainingConfig);
-    } else {
-      localStorage.setItem("inferenceConfig", context.inferenceConfig);
-    }
   };
 
   const getPathValue = (val) => {
@@ -48,22 +45,20 @@ function Configurator(props) {
 
   const missingInputs = useMemo(() => {
     const missing = [];
-    if (!getPathValue(context.inputImage)) missing.push("input image");
-    if (!getPathValue(context.inputLabel)) missing.push("input label");
-    if (!getPathValue(context.outputPath)) missing.push("output path");
-    if (type === "training" && !getPathValue(context.logPath)) {
-      missing.push("log path");
+    if (!getPathValue(workflow.inputImage)) missing.push("input image");
+    if (type === "training" && !getPathValue(workflow.inputLabel)) {
+      missing.push("input label");
     }
-    if (type === "inference" && !getPathValue(context.checkpointPath)) {
+    if (!getPathValue(workflow.outputPath)) missing.push("output path");
+    if (type === "inference" && !getPathValue(workflow.checkpointPath)) {
       missing.push("checkpoint path");
     }
     return missing;
   }, [
-    context.inputImage,
-    context.inputLabel,
-    context.outputPath,
-    context.logPath,
-    context.checkpointPath,
+    workflow.inputImage,
+    workflow.inputLabel,
+    workflow.outputPath,
+    workflow.checkpointPath,
     type,
   ]);
 
@@ -72,9 +67,10 @@ function Configurator(props) {
       ? Boolean(context.trainingConfig)
       : Boolean(context.inferenceConfig);
 
-  const missingBase = hasConfig
-    ? []
-    : ["base configuration (preset or upload)"];
+  const missingBase = useMemo(
+    () => (hasConfig ? [] : ["base configuration (preset or upload)"]),
+    [hasConfig],
+  );
 
   const missingByStep = useMemo(() => {
     if (current === 0) return missingInputs;

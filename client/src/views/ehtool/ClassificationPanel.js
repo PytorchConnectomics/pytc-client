@@ -1,5 +1,5 @@
 import React from "react";
-import { Card, Button, Space, Divider, Tag } from "antd";
+import { Card, Button, Space, Divider, Tag, Typography } from "antd";
 import {
   CheckCircleOutlined,
   CloseCircleOutlined,
@@ -10,7 +10,7 @@ import {
 
 /**
  * Classification Panel Component
- * Controls for classifying selected layers
+ * Controls for classifying selected slices
  */
 function ClassificationPanel({
   selectedCount,
@@ -18,16 +18,22 @@ function ClassificationPanel({
   onSelectAll,
   onClearSelection,
 }) {
+  const { Text } = Typography;
+
   return (
     <div style={{ padding: "16px" }}>
       <Card
         title="Classification"
         size="small"
-        style={{ marginBottom: "16px" }}
+        style={{
+          marginBottom: "12px",
+          background: "#fff",
+          boxShadow: "0 6px 20px rgba(15, 23, 42, 0.06)",
+        }}
       >
         <div style={{ marginBottom: "16px" }}>
           <Tag color={selectedCount > 0 ? "blue" : "default"}>
-            {selectedCount} layer{selectedCount !== 1 ? "s" : ""} selected
+            {selectedCount} slice{selectedCount !== 1 ? "s" : ""} selected
           </Tag>
         </div>
 
@@ -38,7 +44,7 @@ function ClassificationPanel({
             onClick={() => onClassify("correct")}
             disabled={selectedCount === 0}
             block
-            style={{ background: "#52c41a", borderColor: "#52c41a" }}
+            style={{ background: "#22c55e", borderColor: "#22c55e" }}
           >
             Correct (C)
           </Button>
@@ -59,9 +65,9 @@ function ClassificationPanel({
             disabled={selectedCount === 0}
             block
             style={{
-              background: "#faad14",
-              borderColor: "#faad14",
-              color: "#fff",
+              background: "#f59e0b",
+              borderColor: "#f59e0b",
+              color: "#1f2937",
             }}
           >
             Unsure (U)
@@ -69,7 +75,14 @@ function ClassificationPanel({
         </Space>
       </Card>
 
-      <Card title="Selection" size="small">
+      <Card
+        title="Selection"
+        size="small"
+        style={{
+          background: "#fff",
+          boxShadow: "0 6px 20px rgba(15, 23, 42, 0.06)",
+        }}
+      >
         <Space direction="vertical" style={{ width: "100%" }} size="small">
           <Button icon={<SelectOutlined />} onClick={onSelectAll} block>
             Select All (Ctrl+A)
@@ -91,12 +104,14 @@ function ClassificationPanel({
       <div
         style={{
           padding: "12px",
-          background: "#f5f5f5",
+          background: "#f8fafc",
           borderRadius: "4px",
           fontSize: "12px",
         }}
       >
-        <h4 style={{ marginTop: 0, fontSize: "13px" }}>Keyboard Shortcuts:</h4>
+        <Text strong style={{ fontSize: 12 }}>
+          Keyboard shortcuts
+        </Text>
         <ul style={{ marginBottom: 0, paddingLeft: "20px" }}>
           <li>
             <kbd>C</kbd> - Mark as Correct

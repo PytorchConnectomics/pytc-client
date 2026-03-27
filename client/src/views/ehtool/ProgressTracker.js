@@ -1,13 +1,13 @@
 import React from "react";
-import { Card, Progress, Statistic, Row, Col, Button, Divider } from "antd";
+import { Progress, Button, Divider, Space, Typography } from "antd";
 import {
   CheckCircleOutlined,
   CloseCircleOutlined,
   QuestionCircleOutlined,
   ExclamationCircleOutlined,
   FolderOpenOutlined,
-  EditOutlined,
 } from "@ant-design/icons";
+const { Text } = Typography;
 
 /**
  * Progress Tracker Component
@@ -17,17 +17,23 @@ function ProgressTracker({
   stats,
   projectName,
   totalLayers,
+  unitLabel = "slices",
   onNewSession,
   onStartProofreading,
+  onJumpToNext,
+  compact = false,
 }) {
   if (!stats) {
     return (
-      <div style={{ padding: "16px" }}>
-        <Card>
-          <div style={{ textAlign: "center", padding: "24px" }}>
-            <p style={{ color: "#999" }}>No session loaded</p>
-          </div>
-        </Card>
+      <div style={{ padding: compact ? "0" : "16px" }}>
+        <div
+          style={{
+            textAlign: "center",
+            padding: compact ? "8px 4px" : "16px 8px",
+          }}
+        >
+          <Text type="secondary">No session loaded yet.</Text>
+        </div>
       </div>
     );
   }
@@ -35,97 +41,63 @@ function ProgressTracker({
   const progressPercent = stats.progress_percent || 0;
 
   return (
-    <div style={{ padding: "16px" }}>
-      <Card title="Project Info" size="small" style={{ marginBottom: "16px" }}>
-        <div style={{ marginBottom: "8px" }}>
-          <strong>{projectName}</strong>
-        </div>
-        <div style={{ fontSize: "12px", color: "#666" }}>
-          {totalLayers} layers total
-        </div>
-      </Card>
-
-      <Card title="Progress" size="small" style={{ marginBottom: "16px" }}>
+    <div style={{ padding: "0" }}>
+      <Space
+        direction="vertical"
+        size={compact ? 4 : 6}
+        style={{ width: "100%" }}
+      >
+        <Text strong style={{ fontSize: 13 }}>
+          {totalLayers} {unitLabel}
+        </Text>
         <Progress
           percent={progressPercent}
           status={progressPercent === 100 ? "success" : "active"}
-          strokeColor={{
-            "0%": "#108ee9",
-            "100%": "#87d068",
-          }}
+          size="small"
+          strokeColor="#3b82f6"
         />
+        <Text type="secondary" style={{ fontSize: 12 }}>
+          {stats.reviewed} / {stats.total} reviewed
+        </Text>
+
         <div
           style={{
-            textAlign: "center",
-            marginTop: "8px",
-            fontSize: "12px",
-            color: "#666",
+            display: "grid",
+            gridTemplateColumns: "1fr 1fr",
+            gap: compact ? 6 : 8,
+            fontSize: 12,
           }}
         >
-          {stats.reviewed} / {stats.total} layers reviewed
+          <div>
+            <CheckCircleOutlined style={{ color: "#22c55e" }} /> {stats.correct}
+          </div>
+          <div>
+            <CloseCircleOutlined style={{ color: "#ef4444" }} />{" "}
+            {stats.incorrect}
+          </div>
+          <div>
+            <QuestionCircleOutlined style={{ color: "#f59e0b" }} />{" "}
+            {stats.unsure}
+          </div>
+          <div>
+            <ExclamationCircleOutlined style={{ color: "#cbd5f5" }} />{" "}
+            {stats.error}
+          </div>
         </div>
-      </Card>
 
-      <Card
-        title="Classification Summary"
-        size="small"
-        style={{ marginBottom: "16px" }}
-      >
-        <Row gutter={[8, 8]}>
-          <Col span={12}>
-            <Statistic
-              title="Correct"
-              value={stats.correct}
-              prefix={<CheckCircleOutlined style={{ color: "#52c41a" }} />}
-              valueStyle={{ fontSize: "20px" }}
-            />
-          </Col>
-          <Col span={12}>
-            <Statistic
-              title="Incorrect"
-              value={stats.incorrect}
-              prefix={<CloseCircleOutlined style={{ color: "#ff4d4f" }} />}
-              valueStyle={{ fontSize: "20px" }}
-            />
-          </Col>
-          <Col span={12}>
-            <Statistic
-              title="Unsure"
-              value={stats.unsure}
-              prefix={<QuestionCircleOutlined style={{ color: "#faad14" }} />}
-              valueStyle={{ fontSize: "20px" }}
-            />
-          </Col>
-          <Col span={12}>
-            <Statistic
-              title="Unreviewed"
-              value={stats.error}
-              prefix={
-                <ExclamationCircleOutlined style={{ color: "#d9d9d9" }} />
-              }
-              valueStyle={{ fontSize: "20px" }}
-            />
-          </Col>
-        </Row>
-      </Card>
+        <Divider style={{ margin: compact ? "4px 0" : "8px 0" }} />
 
-      <Divider />
-
-      {stats && stats.incorrect > 0 && (
-        <Button
-          type="primary"
-          icon={<EditOutlined />}
-          onClick={onStartProofreading}
-          block
-          style={{ marginBottom: "12px" }}
-        >
-          Proofread Incorrect Layers ({stats.incorrect})
-        </Button>
-      )}
-
-      <Button icon={<FolderOpenOutlined />} onClick={onNewSession} block>
-        Load New Dataset
-      </Button>
+        <Space direction="vertical" style={{ width: "100%" }} size="small">
+          <Button
+            icon={<FolderOpenOutlined />}
+            onClick={onNewSession}
+            block
+            size="small"
+          >
+            Load dataset
+          </Button>
+        </Space>
+      </Space>
     </div>
   );
 }

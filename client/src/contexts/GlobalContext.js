@@ -10,14 +10,18 @@ const FILE_STATE_DEFAULTS = {
   labelFileList: [],
   currentImage: null,
   currentLabel: null,
-  inputImage: null,
-  inputLabel: null,
+  trainingInputImage: null,
+  trainingInputLabel: null,
+  inferenceInputImage: null,
+  inferenceInputLabel: null,
 };
 
 const FILE_CACHE_KEYS = Object.keys(FILE_STATE_DEFAULTS);
-const FILE_OBJECT_STATE_KEYS = FILE_CACHE_KEYS.filter(
-  (key) => key !== "fileList",
-);
+const FILE_OBJECT_STATE_KEYS = [
+  ...FILE_CACHE_KEYS.filter((key) => key !== "fileList"),
+  "trainingUploadedYamlFile",
+  "inferenceUploadedYamlFile",
+];
 
 const sanitizeFileEntry = (file) => {
   if (!file || typeof file !== "object") return file;
@@ -141,11 +145,18 @@ export const ContextWrapper = (props) => {
     "inferenceConfig",
     null,
   );
-  const [uploadedYamlFile, setUploadedYamlFile] = usePersistedState(
-    "uploadedYamlFile",
-    "",
-  );
-  const [selectedYamlPreset, setSelectedYamlPreset] = useState(null);
+  const [trainingConfigOriginPath, setTrainingConfigOriginPath] =
+    usePersistedState("trainingConfigOriginPath", "");
+  const [inferenceConfigOriginPath, setInferenceConfigOriginPath] =
+    usePersistedState("inferenceConfigOriginPath", "");
+  const [trainingUploadedYamlFile, setTrainingUploadedYamlFile] =
+    usePersistedState("trainingUploadedYamlFile", "");
+  const [inferenceUploadedYamlFile, setInferenceUploadedYamlFile] =
+    usePersistedState("inferenceUploadedYamlFile", "");
+  const [trainingSelectedYamlPreset, setTrainingSelectedYamlPreset] =
+    usePersistedState("trainingSelectedYamlPreset", "");
+  const [inferenceSelectedYamlPreset, setInferenceSelectedYamlPreset] =
+    usePersistedState("inferenceSelectedYamlPreset", "");
   const [imageFileList, setImageFileList] = usePersistedState(
     "imageFileList",
     [],
@@ -154,12 +165,20 @@ export const ContextWrapper = (props) => {
     "labelFileList",
     [],
   );
-  const [outputPath, setOutputPath] = usePersistedState("outputPath", null);
-  const [logPath, setLogPath] = usePersistedState("logPath", null);
-  const [checkpointPath, setCheckpointPath] = usePersistedState(
-    "checkpointPath",
+  const [trainingOutputPath, setTrainingOutputPath] = usePersistedState(
+    "trainingOutputPath",
     null,
   );
+  const [inferenceOutputPath, setInferenceOutputPath] = usePersistedState(
+    "inferenceOutputPath",
+    null,
+  );
+  const [trainingLogPath, setTrainingLogPath] = usePersistedState(
+    "trainingLogPath",
+    null,
+  );
+  const [inferenceCheckpointPath, setInferenceCheckpointPath] =
+    usePersistedState("inferenceCheckpointPath", null);
   const [currentImage, setCurrentImage] = usePersistedState(
     "currentImage",
     null,
@@ -168,8 +187,22 @@ export const ContextWrapper = (props) => {
     "currentLabel",
     null,
   );
-  const [inputImage, setInputImage] = usePersistedState("inputImage", null);
-  const [inputLabel, setInputLabel] = usePersistedState("inputLabel", null);
+  const [trainingInputImage, setTrainingInputImage] = usePersistedState(
+    "trainingInputImage",
+    null,
+  );
+  const [trainingInputLabel, setTrainingInputLabel] = usePersistedState(
+    "trainingInputLabel",
+    null,
+  );
+  const [inferenceInputImage, setInferenceInputImage] = usePersistedState(
+    "inferenceInputImage",
+    null,
+  );
+  const [inferenceInputLabel, setInferenceInputLabel] = usePersistedState(
+    "inferenceInputLabel",
+    null,
+  );
   const [viewer, setViewer] = usePersistedState("viewer", null);
   const [tensorBoardURL, setTensorBoardURL] = usePersistedState(
     "tensorBoardURL",
@@ -190,8 +223,10 @@ export const ContextWrapper = (props) => {
       setLabelFileList(FILE_STATE_DEFAULTS.labelFileList);
       setCurrentImage(FILE_STATE_DEFAULTS.currentImage);
       setCurrentLabel(FILE_STATE_DEFAULTS.currentLabel);
-      setInputImage(FILE_STATE_DEFAULTS.inputImage);
-      setInputLabel(FILE_STATE_DEFAULTS.inputLabel);
+      setTrainingInputImage(FILE_STATE_DEFAULTS.trainingInputImage);
+      setTrainingInputLabel(FILE_STATE_DEFAULTS.trainingInputLabel);
+      setInferenceInputImage(FILE_STATE_DEFAULTS.inferenceInputImage);
+      setInferenceInputLabel(FILE_STATE_DEFAULTS.inferenceInputLabel);
     }
   }, [
     setFiles,
@@ -200,9 +235,45 @@ export const ContextWrapper = (props) => {
     setLabelFileList,
     setCurrentImage,
     setCurrentLabel,
-    setInputImage,
-    setInputLabel,
+    setTrainingInputImage,
+    setTrainingInputLabel,
+    setInferenceInputImage,
+    setInferenceInputLabel,
   ]);
+
+  const trainingState = {
+    configOriginPath: trainingConfigOriginPath,
+    setConfigOriginPath: setTrainingConfigOriginPath,
+    uploadedYamlFile: trainingUploadedYamlFile,
+    setUploadedYamlFile: setTrainingUploadedYamlFile,
+    selectedYamlPreset: trainingSelectedYamlPreset,
+    setSelectedYamlPreset: setTrainingSelectedYamlPreset,
+    inputImage: trainingInputImage,
+    setInputImage: setTrainingInputImage,
+    inputLabel: trainingInputLabel,
+    setInputLabel: setTrainingInputLabel,
+    outputPath: trainingOutputPath,
+    setOutputPath: setTrainingOutputPath,
+    logPath: trainingLogPath,
+    setLogPath: setTrainingLogPath,
+  };
+
+  const inferenceState = {
+    configOriginPath: inferenceConfigOriginPath,
+    setConfigOriginPath: setInferenceConfigOriginPath,
+    uploadedYamlFile: inferenceUploadedYamlFile,
+    setUploadedYamlFile: setInferenceUploadedYamlFile,
+    selectedYamlPreset: inferenceSelectedYamlPreset,
+    setSelectedYamlPreset: setInferenceSelectedYamlPreset,
+    inputImage: inferenceInputImage,
+    setInputImage: setInferenceInputImage,
+    inputLabel: inferenceInputLabel,
+    setInputLabel: setInferenceInputLabel,
+    outputPath: inferenceOutputPath,
+    setOutputPath: setInferenceOutputPath,
+    checkpointPath: inferenceCheckpointPath,
+    setCheckpointPath: setInferenceCheckpointPath,
+  };
 
   return (
     <AppContext.Provider
@@ -215,10 +286,6 @@ export const ContextWrapper = (props) => {
         setCurrentImage,
         currentLabel,
         setCurrentLabel,
-        inputImage,
-        setInputImage,
-        inputLabel,
-        setInputLabel,
         viewer,
         setViewer,
         trainingConfig,
@@ -229,16 +296,8 @@ export const ContextWrapper = (props) => {
         setLabelFileList,
         inferenceConfig,
         setInferenceConfig,
-        uploadedYamlFile,
-        setUploadedYamlFile,
-        selectedYamlPreset,
-        setSelectedYamlPreset,
-        outputPath,
-        setOutputPath,
-        logPath,
-        setLogPath,
-        checkpointPath,
-        setCheckpointPath,
+        trainingState,
+        inferenceState,
         tensorBoardURL,
         setTensorBoardURL,
         resetFileState,

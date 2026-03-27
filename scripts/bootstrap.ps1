@@ -20,15 +20,15 @@ if (Test-Path (Join-Path $pytcDir '.git')) {
     Push-Location $pytcDir
     git fetch origin *> $null
     $currentCommit = (git rev-parse HEAD) -replace '\s', ''
-    $targetCommit = '20ccfde'
+    $targetCommit = '0a0dceb'
     if ($currentCommit -ne $targetCommit) {
         git checkout $targetCommit
     }
     Pop-Location
 } else {
-    git clone 'https://github.com/zudi-lin/pytorch_connectomics.git' $pytcDir
+    git clone 'https://github.com/PytorchConnectomics/pytorch_connectomics.git' $pytcDir
     Push-Location $pytcDir
-    git checkout '20ccfde'
+    git checkout '0a0dceb'
     Pop-Location
 }
 

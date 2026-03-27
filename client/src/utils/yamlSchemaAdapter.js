@@ -30,13 +30,25 @@ const PYTC_KEYS = ["pytc_version", "workflow"];
  * Pattern A: uppercase (YACS-style) pytorch_connectomics core keys.
  * A YAML must contain at least STANDARD_MIN_MATCH of these to be "standard".
  */
-const STANDARD_KEYS_UPPER = ["MODEL", "DATASET", "SOLVER", "INFERENCE", "SYSTEM"];
+const STANDARD_KEYS_UPPER = [
+  "MODEL",
+  "DATASET",
+  "SOLVER",
+  "INFERENCE",
+  "SYSTEM",
+];
 
 /**
  * Pattern B: lowercase (Hydra/general-style) pytorch_connectomics core keys.
  * A YAML must contain at least STANDARD_MIN_MATCH of these to be "standard".
  */
-const STANDARD_KEYS_LOWER = ["model", "data", "optimization", "train", "monitor"];
+const STANDARD_KEYS_LOWER = [
+  "model",
+  "data",
+  "optimization",
+  "train",
+  "monitor",
+];
 
 /** Minimum number of matching keys required to classify a config as "standard". */
 const STANDARD_MIN_MATCH = 2;
@@ -271,9 +283,15 @@ export function adaptToPytcSchema(yamlData) {
 
   if (schema === "standard") {
     // Check whether this is already uppercase (Pattern A) — if so, pass through.
-    const upperMatches = STANDARD_KEYS_UPPER.filter((k) => k in yamlData).length;
+    const upperMatches = STANDARD_KEYS_UPPER.filter(
+      (k) => k in yamlData,
+    ).length;
     if (upperMatches >= STANDARD_MIN_MATCH) {
-      return { adapted: yamlData, originalSchema: "standard", wasAdapted: false };
+      return {
+        adapted: yamlData,
+        originalSchema: "standard",
+        wasAdapted: false,
+      };
     }
     // Pattern B: lowercase — translate to uppercase.
     const adapted = adaptStandardLower(yamlData);

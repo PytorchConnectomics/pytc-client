@@ -10,6 +10,7 @@ import { apiClient } from "../api";
 
 const HIDDEN_SYSTEM_FILES = new Set([
   "workflow_preference.json",
+  ".pytc_proofreading.json",
   ".ds_store",
   "thumbs.db",
 ]);

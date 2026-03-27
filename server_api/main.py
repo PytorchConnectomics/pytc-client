@@ -4,18 +4,22 @@ import re
 import shutil
 import tempfile
 from typing import List, Optional
+from urllib.parse import urlsplit, urlunsplit
 
 import requests
 import uvicorn
 from fastapi import Depends, FastAPI, HTTPException, Request, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.orm import Session
+from runtime_settings import (
+    get_allowed_origins,
+    get_neuroglancer_public_base,
+)
 from server_api.utils.io import readVol
 from server_api.utils.utils import process_path
 from server_api.auth import models, database, router as auth_router
 from server_api.auth.database import get_db
 from server_api.auth.router import get_current_user
-from server_api.synanno import router as synanno_router
 from server_api.ehtool import router as ehtool_router
 
 from fastapi.staticfiles import StaticFiles
@@ -72,12 +76,11 @@ os.makedirs("uploads", exist_ok=True)
 app.mount("/uploads", StaticFiles(directory="uploads"), name="uploads")
 
 app.include_router(auth_router.router)
-app.include_router(synanno_router.router, tags=["synanno"])
 app.include_router(ehtool_router.router, prefix="/eh", tags=["ehtool"])
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=get_allowed_origins(),
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -89,34 +92,208 @@ def health():
     return {"status": "ok"}
 
 
-BASE_DIR = pathlib.Path(__file__).resolve().parent.parent
-PYTC_CONFIG_ROOT = BASE_DIR / "pytorch_connectomics" / "configs"
-PYTC_BUILD_FILE = (
-    BASE_DIR / "pytorch_connectomics" / "connectomics" / "model" / "build.py"
-)
+def _worker_url(path: str) -> str:
+    return f"{REACT_APP_SERVER_PROTOCOL}://{REACT_APP_SERVER_URL}{path}"
 
 
-def _list_pytc_configs() -> List[str]:
-    if not PYTC_CONFIG_ROOT.exists():
-        return []
-    return sorted(
-        [
-            str(path.relative_to(PYTC_CONFIG_ROOT)).replace("\\", "/")
-            for path in PYTC_CONFIG_ROOT.rglob("*.yaml")
-        ]
+def _derive_neuroglancer_public_base(request: Request) -> str:
+    configured_base = get_neuroglancer_public_base()
+    if configured_base:
+        return configured_base
+
+    forwarded_proto = request.headers.get("x-forwarded-proto")
+    scheme = (forwarded_proto.split(",")[0].strip() if forwarded_proto else "") or (
+        request.url.scheme or "http"
+    )
+
+    forwarded_host = request.headers.get("x-forwarded-host")
+    request_host = (
+        forwarded_host.split(",")[0].strip() if forwarded_host else request.url.netloc
+    )
+    hostname = request_host.split(":")[0] or "localhost"
+    return f"{scheme}://{hostname}:4244"
+
+
+def _build_neuroglancer_public_url(viewer_url: str, request: Request) -> str:
+    viewer_parts = urlsplit(viewer_url)
+    base_parts = urlsplit(_derive_neuroglancer_public_base(request))
+    base_path = base_parts.path.rstrip("/")
+    viewer_path = viewer_parts.path or ""
+    combined_path = f"{base_path}{viewer_path}" if base_path else viewer_path
+
+    return urlunsplit(
+        (
+            base_parts.scheme or "http",
+            base_parts.netloc,
+            combined_path,
+            viewer_parts.query,
+            viewer_parts.fragment,
+        )
     )
 
 
+def _extract_upstream_payload(response: requests.Response):
+    try:
+        return response.json()
+    except ValueError:
+        text = (response.text or "").strip()
+        return text or None
+
+
+def _proxy_to_worker(
+    method: str,
+    path: str,
+    *,
+    json_body: Optional[dict] = None,
+    params: Optional[dict] = None,
+    timeout: int = 30,
+):
+    target_url = _worker_url(path)
+    try:
+        response = requests.request(
+            method=method,
+            url=target_url,
+            json=json_body,
+            params=params,
+            timeout=timeout,
+        )
+    except requests.exceptions.ConnectionError as exc:
+        raise HTTPException(
+            status_code=503,
+            detail={
+                "message": "Failed to connect to PyTC worker. Is server_pytc running?",
+                "worker_url": target_url,
+                "error": "ConnectionError",
+                "reason": str(exc),
+            },
+        ) from exc
+    except requests.exceptions.Timeout as exc:
+        raise HTTPException(
+            status_code=504,
+            detail={
+                "message": "PyTC worker request timed out.",
+                "worker_url": target_url,
+                "error": "Timeout",
+            },
+        ) from exc
+    except requests.RequestException as exc:
+        raise HTTPException(
+            status_code=502,
+            detail={
+                "message": "Unexpected error while calling PyTC worker.",
+                "worker_url": target_url,
+                "error": type(exc).__name__,
+                "reason": str(exc),
+            },
+        ) from exc
+    except Exception as exc:
+        raise HTTPException(
+            status_code=502,
+            detail={
+                "message": "Unhandled error while calling PyTC worker.",
+                "worker_url": target_url,
+                "error": type(exc).__name__,
+                "reason": str(exc),
+            },
+        ) from exc
+
+    payload = _extract_upstream_payload(response)
+    if response.status_code >= 400:
+        raise HTTPException(
+            status_code=response.status_code,
+            detail={
+                "message": "PyTC worker returned an error.",
+                "worker_url": target_url,
+                "upstream_status": response.status_code,
+                "upstream_body": payload,
+            },
+        )
+    return payload
+
+
+BASE_DIR = pathlib.Path(__file__).resolve().parent.parent
+PYTC_ROOT = BASE_DIR / "pytorch_connectomics"
+PYTC_CONFIG_ROOTS = (
+    PYTC_ROOT / "tutorials",
+    PYTC_ROOT / "configs",
+)
+PYTC_CONFIG_SUFFIXES = (".yaml", ".yml")
+
+
+def _iter_existing_config_roots():
+    for root in PYTC_CONFIG_ROOTS:
+        if root.exists() and root.is_dir():
+            yield root
+
+
+def _list_pytc_configs() -> List[str]:
+    configs = []
+    for root in _iter_existing_config_roots():
+        for suffix in PYTC_CONFIG_SUFFIXES:
+            for path in root.rglob(f"*{suffix}"):
+                configs.append(str(path.relative_to(PYTC_ROOT)).replace("\\", "/"))
+    return sorted(set(configs))
+
+
+def _is_relative_to(path: pathlib.Path, root: pathlib.Path) -> bool:
+    try:
+        path.relative_to(root)
+        return True
+    except ValueError:
+        return False
+
+
+def _is_valid_config_path(path: pathlib.Path) -> bool:
+    if not path.is_file():
+        return False
+    if path.suffix.lower() not in PYTC_CONFIG_SUFFIXES:
+        return False
+    if not _is_relative_to(path, PYTC_ROOT.resolve()):
+        return False
+    return any(
+        _is_relative_to(path, root.resolve()) for root in _iter_existing_config_roots()
+    )
+
+
+def _resolve_requested_config(path: str) -> Optional[pathlib.Path]:
+    if not path:
+        return None
+
+    normalized = path.replace("\\", "/").strip()
+    if not normalized or normalized.startswith("/"):
+        return None
+    if ".." in pathlib.PurePosixPath(normalized).parts:
+        return None
+
+    candidates = [(PYTC_ROOT / normalized).resolve()]
+    for root in _iter_existing_config_roots():
+        candidates.append((root / normalized).resolve())
+
+    for candidate in candidates:
+        if _is_valid_config_path(candidate):
+            return candidate
+    return None
+
+
 def _read_model_architectures() -> List[str]:
-    if not PYTC_BUILD_FILE.exists():
-        return []
-    text = PYTC_BUILD_FILE.read_text(encoding="utf-8", errors="ignore")
-    match = re.search(r"MODEL_MAP\s*=\s*{(.*?)}", text, re.S)
-    if not match:
-        return []
-    block = match.group(1)
-    keys = re.findall(r"'([^']+)'\s*:", block)
-    return sorted(set(keys))
+    # Prefer runtime registry from the installed connectomics package.
+    try:
+        from connectomics.models.arch import list_architectures
+
+        architectures = list_architectures()
+        if architectures:
+            return sorted(set(architectures))
+    except Exception:
+        pass
+
+    # Fallback: parse decorator registrations from source files.
+    pattern = re.compile(r"""@register_architecture\(\s*['"]([^'"]+)['"]\s*\)""")
+    architectures = []
+    arch_root = PYTC_ROOT / "connectomics" / "models" / "arch"
+    for py_file in arch_root.rglob("*.py"):
+        text = py_file.read_text(encoding="utf-8", errors="ignore")
+        architectures.extend(pattern.findall(text))
+    return sorted(set(architectures))
 
 
 @app.get("/pytc/configs")
@@ -131,17 +308,12 @@ def list_pytc_configs():
 def get_pytc_config(path: str):
     if not path:
         raise HTTPException(status_code=400, detail="Config path is required.")
-    if ".." in path or path.startswith("/"):
-        raise HTTPException(status_code=400, detail="Invalid config path.")
-    requested = (PYTC_CONFIG_ROOT / path).resolve()
-    if not str(requested).startswith(str(PYTC_CONFIG_ROOT.resolve())):
-        raise HTTPException(status_code=400, detail="Invalid config path.")
-    if not requested.is_file():
+    requested = _resolve_requested_config(path)
+    if requested is None:
         raise HTTPException(status_code=404, detail="Config not found.")
-    if requested.suffix.lower() != ".yaml":
-        raise HTTPException(status_code=400, detail="Config must be a YAML file.")
     content = requested.read_text(encoding="utf-8", errors="ignore")
-    return {"path": path, "content": content}
+    canonical_path = str(requested.relative_to(PYTC_ROOT)).replace("\\", "/")
+    return {"path": canonical_path, "content": content}
 
 
 @app.get("/pytc/architectures")
@@ -159,6 +331,35 @@ def save_upload_to_tempfile(upload: UploadFile) -> pathlib.Path:
         shutil.copyfileobj(upload.file, tmp)
         temp_path = pathlib.Path(tmp.name)
     return temp_path
+
+
+def _is_probable_label_volume(image_array) -> bool:
+    import numpy as np
+
+    if not np.issubdtype(image_array.dtype, np.integer):
+        return False
+
+    unique_values = np.unique(image_array)
+    num_unique = len(unique_values)
+    if num_unique == 0:
+        return False
+
+    if num_unique == 2 and np.array_equal(unique_values, np.array([0, 1])):
+        return True
+    if num_unique == 2 and np.array_equal(unique_values, np.array([0, 255])):
+        return True
+    if num_unique < 50:
+        return True
+
+    max_value = int(unique_values[-1])
+    if max_value > 255 and num_unique <= 4096:
+        return True
+
+    dtype_info = np.iinfo(image_array.dtype)
+    if dtype_info.max > 255 and num_unique <= 1024:
+        return True
+
+    return False
 
 
 @app.post("/neuroglancer")
@@ -209,7 +410,7 @@ async def neuroglancer(req: Request):
         port = 4244
         neuroglancer.set_server_bind_address(ip, port)
         viewer = neuroglancer.Viewer()
-        # SNEMI (# 3d vol dim: z,y,x)
+        # Neuroglancer expects the EM volume axes in z, y, x order.
         res = neuroglancer.CoordinateSpace(
             names=["z", "y", "x"], units=["nm", "nm", "nm"], scales=scales
         )
@@ -231,8 +432,9 @@ async def neuroglancer(req: Request):
             if gt is not None:
                 s.layers.append(name="gt", layer=ngLayer(gt, res, tt="segmentation"))
 
-        print(viewer)
-        return str(viewer)
+        public_url = _build_neuroglancer_public_url(str(viewer), req)
+        print(public_url)
+        return public_url
     finally:
         for path in cleanup_paths:
             try:
@@ -245,215 +447,86 @@ async def neuroglancer(req: Request):
 
 @app.post("/start_model_training")
 async def start_model_training(req: Request):
-    print("\n========== SERVER_API: START_MODEL_TRAINING ENDPOINT CALLED ==========")
-    req = await req.json()
-    print(f"[SERVER_API] Received request payload keys: {list(req.keys())}")
-    print(f"[SERVER_API] Arguments: {req.get('arguments', {})}")
-    print(f"[SERVER_API] Log path: {req.get('logPath', 'NOT PROVIDED')}")
-    print(f"[SERVER_API] Output path: {req.get('outputPath', 'NOT PROVIDED')}")
-    print(
-        f"[SERVER_API] Training config length: {len(req.get('trainingConfig', '')) if req.get('trainingConfig') else 0} chars"
+    body = await req.json()
+    worker_data = _proxy_to_worker(
+        "post",
+        "/start_model_training",
+        json_body=body,
+        timeout=30,
     )
-    print(
-        f"[SERVER_API] NOTE: TensorBoard will monitor outputPath where PyTorch Connectomics writes logs"
-    )
-
-    try:
-        target_url = (
-            REACT_APP_SERVER_PROTOCOL
-            + "://"
-            + REACT_APP_SERVER_URL
-            + "/start_model_training"
-        )
-        print(f"[SERVER_API] Proxying to PyTC server at: {target_url}")
-
-        response = requests.post(
-            target_url, json=req, timeout=30  # TODO: Add timeout to prevent hanging
-        )
-
-        print(f"[SERVER_API] PyTC server response status: {response.status_code}")
-        print(
-            f"[SERVER_API] PyTC server response: {response.text[:500]}"
-        )  # First 500 chars
-
-        if response.status_code == 200:
-            print("[SERVER_API] ✓ Training request proxied successfully")
-            return {
-                "message": "Model training started successfully",
-                "data": response.json(),
-            }
-        else:
-            print(
-                f"[SERVER_API] ✗ PyTC server returned error status: {response.status_code}"
-            )
-            return {
-                "message": f"Failed to start model training: {response.status_code}",
-                "error": response.text,
-            }
-    except requests.exceptions.ConnectionError as e:
-        print(
-            f"[SERVER_API] ✗ CONNECTION ERROR: Cannot reach PyTC server at {REACT_APP_SERVER_URL}"
-        )
-        print(f"[SERVER_API] Error details: {e}")
-        return {
-            "message": "Failed to connect to PyTC server. Is server_pytc running?",
-            "error": "ConnectionError",
-        }
-    except requests.exceptions.Timeout:
-        print("[SERVER_API] ✗ TIMEOUT: PyTC server did not respond within 30 seconds")
-        return {
-            "message": "Request timed out. PyTC server may be overloaded.",
-            "error": "Timeout",
-        }
-    except Exception as e:
-        print(f"[SERVER_API] ✗ UNEXPECTED ERROR: {type(e).__name__}: {str(e)}")
-        import traceback
-
-        print(traceback.format_exc())
-        return {"message": f"Failed to start model training: {str(e)}", "error": str(e)}
-    finally:
-        print("========== SERVER_API: END OF START_MODEL_TRAINING ==========\n")
+    return {
+        "message": "Model training started successfully",
+        "data": worker_data,
+    }
 
 
 @app.post("/stop_model_training")
 async def stop_model_training():
-    try:
-        response = requests.post(
-            REACT_APP_SERVER_PROTOCOL
-            + "://"
-            + REACT_APP_SERVER_URL
-            + "/stop_model_training",
-            timeout=30,
-        )
-
-        if response.status_code == 200:
-            return {
-                "message": "Model training stopped successfully",
-                "data": response.json(),
-            }
-        else:
-            return {
-                "message": f"Failed to stop model training: {response.status_code}",
-                "error": response.text,
-            }
-    except requests.exceptions.ConnectionError:
-        return {
-            "message": "Failed to connect to PyTC server. Is server_pytc running?",
-            "error": "ConnectionError",
-        }
-    except requests.exceptions.Timeout:
-        return {"message": "Request timed out.", "error": "Timeout"}
-    except Exception as e:
-        return {"message": f"Failed to stop model training: {str(e)}", "error": str(e)}
+    worker_data = _proxy_to_worker("post", "/stop_model_training", timeout=30)
+    return {
+        "message": "Model training stopped successfully",
+        "data": worker_data,
+    }
 
 
 @app.get("/training_status")
 async def get_training_status():
     """Proxy training status check to PyTC server"""
-    try:
-        response = requests.get(
-            REACT_APP_SERVER_PROTOCOL
-            + "://"
-            + REACT_APP_SERVER_URL
-            + "/training_status",
-            timeout=5,
-        )
-        return response.json()
-    except requests.exceptions.ConnectionError:
-        return {"isRunning": False, "error": "Cannot connect to PyTC server"}
-    except Exception as e:
-        return {"isRunning": False, "error": str(e)}
+    return _proxy_to_worker("get", "/training_status", timeout=5)
+
+
+@app.get("/training_logs")
+async def get_training_logs():
+    return _proxy_to_worker("get", "/training_logs", timeout=5)
 
 
 @app.post("/start_model_inference")
 async def start_model_inference(req: Request):
-    req = await req.json()
-    try:
-        response = requests.post(
-            REACT_APP_SERVER_PROTOCOL
-            + "://"
-            + REACT_APP_SERVER_URL
-            + "/start_model_inference",
-            json=req,
-            timeout=30,
-        )
-
-        if response.status_code == 200:
-            return {
-                "message": "Model inference started successfully",
-                "data": response.json(),
-            }
-        else:
-            return {
-                "message": f"Failed to start model inference: {response.status_code}",
-                "error": response.text,
-            }
-    except requests.exceptions.ConnectionError:
-        return {
-            "message": "Failed to connect to PyTC server. Is server_pytc running?",
-            "error": "ConnectionError",
-        }
-    except requests.exceptions.Timeout:
-        return {
-            "message": "Request timed out. PyTC server may be overloaded.",
-            "error": "Timeout",
-        }
-    except Exception as e:
-        return {
-            "message": f"Failed to start model inference: {str(e)}",
-            "error": str(e),
-        }
+    body = await req.json()
+    worker_data = _proxy_to_worker(
+        "post",
+        "/start_model_inference",
+        json_body=body,
+        timeout=30,
+    )
+    return {
+        "message": "Model inference started successfully",
+        "data": worker_data,
+    }
 
 
 @app.post("/stop_model_inference")
 async def stop_model_inference():
-    try:
-        response = requests.post(
-            REACT_APP_SERVER_PROTOCOL
-            + "://"
-            + REACT_APP_SERVER_URL
-            + "/stop_model_inference",
-            timeout=30,
-        )
+    worker_data = _proxy_to_worker("post", "/stop_model_inference", timeout=30)
+    return {
+        "message": "Model inference stopped successfully",
+        "data": worker_data,
+    }
 
-        if response.status_code == 200:
-            return {
-                "message": "Model inference stopped successfully",
-                "data": response.json(),
-            }
-        else:
-            return {
-                "message": f"Failed to stop model inference: {response.status_code}",
-                "error": response.text,
-            }
-    except requests.exceptions.ConnectionError:
-        return {
-            "message": "Failed to connect to PyTC server. Is server_pytc running?",
-            "error": "ConnectionError",
-        }
-    except requests.exceptions.Timeout:
-        return {"message": "Request timed out.", "error": "Timeout"}
-    except Exception as e:
-        return {"message": f"Failed to stop model inference: {str(e)}", "error": str(e)}
+
+@app.get("/inference_status")
+async def get_inference_status():
+    return _proxy_to_worker("get", "/inference_status", timeout=5)
+
+
+@app.get("/inference_logs")
+async def get_inference_logs():
+    return _proxy_to_worker("get", "/inference_logs", timeout=5)
+
+
+@app.get("/start_tensorboard")
+async def start_tensorboard(logPath: Optional[str] = None):
+    return _proxy_to_worker(
+        "get",
+        "/start_tensorboard",
+        params={"logPath": logPath} if logPath else None,
+        timeout=30,
+    )
 
 
 @app.get("/get_tensorboard_url")
 async def get_tensorboard_url():
-    return "http://localhost:6006/"
-    # response = requests.get(
-    #     REACT_APP_SERVER_PROTOCOL +
-    #     "://" +
-    #     REACT_APP_SERVER_URL +
-    #     "/get_tensorboard_url"
-    #   )
-    #
-    # if response.status_code == 200:
-    #     # {"message": "Get tensorboard URL successfully"}
-    #     print(response.json())
-    #     return response.json()
-    # else:
-    #     # {"message": "Failed to get tensorboard URL"}
-    #     return None
+    return _proxy_to_worker("get", "/get_tensorboard_url", timeout=5)
 
 
 # TODO: Improve on this: basic idea: labels are binary -- black or white?
@@ -486,23 +559,9 @@ async def check_files(req: Request):
             print(f"Failed to read file: {e}")
             return {"error": f"Failed to open image: {str(e)}"}
 
-        # Heuristic for label detection:
-        # 1. Must be integer type
-        # 2. Low number of unique values (e.g. < 50) relative to size
-        # 3. Or explicit binary (0, 255) or (0, 1)
-
         unique_values = np.unique(image_array)
         num_unique = len(unique_values)
-        is_integer = np.issubdtype(image_array.dtype, np.integer)
-
-        is_label = False
-        if is_integer:
-            if num_unique < 50:
-                is_label = True
-            elif np.array_equal(unique_values, np.array([0, 255])) or np.array_equal(
-                unique_values, np.array([0, 1])
-            ):
-                is_label = True
+        is_label = _is_probable_label_volume(image_array)
 
         if is_label:
             print(

@@ -1,26 +1,23 @@
 # Getting Started with PyTC Client
 
-PyTC Client (PyTorch Connectomics Client) is a desktop application for biomedical image segmentation. It provides tools for managing files, visualizing data in Neuroglancer, training and running inference with deep learning models, proofreading synapse annotations, and detecting errors in image stacks.
+PyTC Client (PyTorch Connectomics Client) is a desktop application for biomedical image segmentation. It provides tools for managing files, visualizing data in Neuroglancer, training and running inference with deep learning models, monitoring experiments, and reviewing image masks.
 
 ## Launching the Application
 
-When you first open PyTC Client, a **Change Views** dialog appears. This lets you choose which workflow tabs to enable. The available workflows are:
+When you first open PyTC Client, the main workflows are available immediately in the top navigation bar:
 
 - **File Management** — Browse, upload, and organize files on the server
 - **Visualization** — View image and label data in Neuroglancer
 - **Model Training** — Configure and launch training jobs
 - **Model Inference** — Run inference with trained models
 - **Tensorboard** — Monitor training metrics in real time
-- **SynAnno** — Proofread synapse annotations
-- **Worm Error Handling** — Detect and classify errors in worm image stacks
-
-Check the workflows you want, then click **Launch Selected**. You can change your selection later by clicking **Change Views** in the top navigation bar.
+- **Mask Proofreading** — Review and edit mask layers in image stacks
 
 ## Application Layout
 
 The application has three main areas:
 
-1. **Top Navigation Bar** — Displays the PyTC logo, application title, and a row of tabs for each enabled workflow. Click a tab to switch between pages. The bar also includes a **Change Views** button and an **AI Chat** toggle button.
+1. **Top Navigation Bar** — Displays the PyTC logo, application title, and a row of tabs for each workflow. Click a tab to switch between pages. The bar also includes an **AI Chat** toggle button.
 
 2. **Main Content Area** — Shows the currently selected workflow page (e.g., File Manager, Visualization, Model Training).
 

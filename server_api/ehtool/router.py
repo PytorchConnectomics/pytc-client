@@ -3,9 +3,9 @@ FastAPI router for EHTool detection workflow
 Handles error detection endpoints
 """
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, status, Response
 from sqlalchemy.orm import Session
-from typing import List
+from typing import List, Optional
 import math
 import logging
 
@@ -24,9 +24,18 @@ from .models import (
     LayerInfo,
     DetectionStatsResponse,
     MaskSaveRequest,
+    InstanceMaskSaveRequest,
+    InstanceClassifyRequest,
+    InstancesResponse,
+    InstanceInfo,
+    InstanceViewResponse,
+    PersistenceStatusResponse,
+    ExportMasksRequest,
+    ExportMasksResponse,
 )
 from .db_models import EHToolSession, EHToolLayer
 from .data_manager import DataManager
+from .utils import array_to_base64, glasbey_color
 
 router = APIRouter()
 
@@ -58,6 +67,7 @@ def get_data_manager(session_id: int, db: Session) -> DataManager:
             data_manager.load_dataset(
                 dataset_path=db_session.dataset_path, mask_path=db_session.mask_path
             )
+            data_manager.project_name = db_session.project_name
             # Cache it
             _data_managers[session_id] = data_manager
         except Exception as e:
@@ -81,6 +91,7 @@ async def load_detection_dataset(
         dataset_info = data_manager.load_dataset(
             dataset_path=request.dataset_path, mask_path=request.mask_path
         )
+        data_manager.project_name = request.project_name
 
         # Create session in database
         db_session = EHToolSession(
@@ -259,6 +270,356 @@ async def classify_layers(
     )
 
 
+@router.get("/detection/instances", response_model=InstancesResponse)
+async def list_instances(
+    session_id: int,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    db_session = (
+        db.query(EHToolSession)
+        .filter(
+            EHToolSession.id == session_id, EHToolSession.user_id == current_user.id
+        )
+        .first()
+    )
+    if not db_session:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Session not found"
+        )
+
+    data_manager = get_data_manager(session_id, db)
+    data_manager.ensure_instances()
+
+    instances = data_manager.instances or []
+    instance_mode = data_manager.instance_mode or "none"
+
+    response_instances = [
+        InstanceInfo(
+            id=inst["id"],
+            voxel_count=inst["voxel_count"],
+            com_z=inst["com_z"],
+            com_y=inst["com_y"],
+            com_x=inst["com_x"],
+            classification=data_manager.instance_classification.get(
+                inst["id"], "error"
+            ),
+        )
+        for inst in instances
+    ]
+
+    return InstancesResponse(
+        instances=response_instances,
+        instance_mode=instance_mode,
+        total_instances=len(response_instances),
+        total_layers=data_manager.total_layers,
+        ui_state=data_manager.ui_state or None,
+        persistence=data_manager.get_persistence_status(),
+    )
+
+
+@router.get("/detection/persistence-status", response_model=PersistenceStatusResponse)
+async def get_persistence_status(
+    session_id: int,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    db_session = (
+        db.query(EHToolSession)
+        .filter(
+            EHToolSession.id == session_id, EHToolSession.user_id == current_user.id
+        )
+        .first()
+    )
+    if not db_session:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Session not found"
+        )
+
+    data_manager = get_data_manager(session_id, db)
+    data_manager.ensure_instances()
+    return PersistenceStatusResponse(persistence=data_manager.get_persistence_status())
+
+
+@router.get("/detection/instance-view", response_model=InstanceViewResponse)
+async def get_instance_view(
+    session_id: int,
+    instance_id: int,
+    z_index: Optional[int] = None,
+    include_raw_mask: bool = False,
+    axis: str = "xy",
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    db_session = (
+        db.query(EHToolSession)
+        .filter(
+            EHToolSession.id == session_id, EHToolSession.user_id == current_user.id
+        )
+        .first()
+    )
+    if not db_session:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Session not found"
+        )
+
+    data_manager = get_data_manager(session_id, db)
+    data_manager.ensure_instances()
+
+    if data_manager.instance_volume is None:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="No instance data available for this session",
+        )
+
+    view_data = data_manager.get_instance_view_data(
+        instance_id=instance_id,
+        z_index=z_index,
+        include_raw_mask=include_raw_mask,
+        axis=axis,
+    )
+
+    return InstanceViewResponse(
+        instance_id=instance_id,
+        axis=view_data["axis"],
+        z_index=view_data["z_index"],
+        total_layers=view_data["total"],
+        image_base64=view_data["image_base64"],
+        mask_raw_base64=view_data["mask_raw_base64"],
+        mask_all_base64=view_data["mask_all_base64"],
+        mask_active_base64=view_data["mask_active_base64"],
+    )
+
+
+@router.get("/detection/instance-image")
+async def get_instance_image(
+    session_id: int,
+    instance_id: int,
+    kind: str,
+    z_index: Optional[int] = None,
+    axis: str = "xy",
+    max_dim: Optional[int] = None,
+    quality: str = "full",
+    format: str = "png",
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    db_session = (
+        db.query(EHToolSession)
+        .filter(
+            EHToolSession.id == session_id, EHToolSession.user_id == current_user.id
+        )
+        .first()
+    )
+    if not db_session:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Session not found"
+        )
+
+    data_manager = get_data_manager(session_id, db)
+    data_manager.ensure_instances()
+
+    if data_manager.instance_volume is None:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="No instance data available for this session",
+        )
+
+    try:
+        (
+            image_bytes,
+            resolved_index,
+            total,
+            resolved_axis,
+            media_type,
+            perf_meta,
+        ) = data_manager.get_instance_image_bytes(
+            instance_id=instance_id,
+            z_index=z_index,
+            axis=axis,
+            kind=kind,
+            max_dim=max_dim,
+            quality=quality,
+            format=format,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    headers = {
+        "X-Z-Index": str(resolved_index),
+        "X-Total-Layers": str(total),
+        "X-Axis": resolved_axis,
+        "X-Cache-Hit": "1" if perf_meta.get("cache_hit") else "0",
+        "X-Decode-MS": f"{float(perf_meta.get('decode_ms', 0.0)):.2f}",
+        "X-Resize-MS": f"{float(perf_meta.get('resize_ms', 0.0)):.2f}",
+    }
+    return Response(content=image_bytes, media_type=media_type, headers=headers)
+
+
+@router.get("/detection/instance-filmstrip")
+async def get_instance_filmstrip(
+    session_id: int,
+    instance_id: int,
+    kind: str,
+    z_start: int = 0,
+    z_count: int = 16,
+    axis: str = "xy",
+    max_dim: Optional[int] = None,
+    quality: str = "preview",
+    format: str = "png",
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    db_session = (
+        db.query(EHToolSession)
+        .filter(
+            EHToolSession.id == session_id, EHToolSession.user_id == current_user.id
+        )
+        .first()
+    )
+    if not db_session:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Session not found"
+        )
+
+    data_manager = get_data_manager(session_id, db)
+    data_manager.ensure_instances()
+
+    if data_manager.instance_volume is None:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="No instance data available for this session",
+        )
+
+    try:
+        (
+            image_bytes,
+            resolved_start,
+            resolved_count,
+            total,
+            resolved_axis,
+            frame_height,
+            media_type,
+            perf_meta,
+        ) = data_manager.get_instance_filmstrip_bytes(
+            instance_id=instance_id,
+            axis=axis,
+            z_start=z_start,
+            z_count=z_count,
+            kind=kind,
+            max_dim=max_dim,
+            quality=quality,
+            format=format,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    headers = {
+        "X-Z-Start": str(resolved_start),
+        "X-Z-Count": str(resolved_count),
+        "X-Total-Layers": str(total),
+        "X-Axis": resolved_axis,
+        "X-Frame-Height": str(frame_height),
+        "X-Cache-Hit": "1" if perf_meta.get("cache_hit") else "0",
+        "X-Decode-MS": f"{float(perf_meta.get('decode_ms', 0.0)):.2f}",
+        "X-Resize-MS": f"{float(perf_meta.get('resize_ms', 0.0)):.2f}",
+    }
+    return Response(content=image_bytes, media_type=media_type, headers=headers)
+
+
+@router.get("/detection/instance-mask-sparse")
+async def get_instance_mask_sparse(
+    session_id: int,
+    instance_id: int,
+    z_index: Optional[int] = None,
+    axis: str = "xy",
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    db_session = (
+        db.query(EHToolSession)
+        .filter(
+            EHToolSession.id == session_id, EHToolSession.user_id == current_user.id
+        )
+        .first()
+    )
+    if not db_session:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Session not found"
+        )
+
+    data_manager = get_data_manager(session_id, db)
+    data_manager.ensure_instances()
+
+    if data_manager.instance_volume is None:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="No instance data available for this session",
+        )
+
+    sparse = data_manager.get_sparse_active_mask(
+        instance_id=instance_id, z_index=z_index, axis=axis
+    )
+    color = glasbey_color(instance_id)
+    mask_base64 = array_to_base64(sparse["mask_crop"], format="PNG")
+
+    return {
+        "bbox": sparse["bbox"],
+        "mask_base64": mask_base64,
+        "color": list(color),
+        "width": sparse["width"],
+        "height": sparse["height"],
+        "z_index": sparse["z_index"],
+        "total_layers": sparse["total"],
+        "axis": sparse["axis"],
+    }
+
+
+@router.post("/detection/instance-classify", response_model=ClassifyResponse)
+async def classify_instances(
+    request: InstanceClassifyRequest,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    db_session = (
+        db.query(EHToolSession)
+        .filter(
+            EHToolSession.id == request.session_id,
+            EHToolSession.user_id == current_user.id,
+        )
+        .first()
+    )
+
+    if not db_session:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Session not found"
+        )
+
+    valid_classifications = ["correct", "incorrect", "unsure", "error"]
+    if request.classification not in valid_classifications:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Invalid classification. Must be one of: {', '.join(valid_classifications)}",
+        )
+
+    data_manager = get_data_manager(request.session_id, db)
+    data_manager.ensure_instances()
+
+    updated = 0
+    for instance_id in request.instance_ids:
+        if instance_id in data_manager.instance_classification:
+            data_manager.instance_classification[instance_id] = request.classification
+            updated += 1
+
+    ui_state = request.ui_state.dict() if request.ui_state else None
+    data_manager.save_progress(ui_state=ui_state)
+
+    return ClassifyResponse(
+        updated_count=updated,
+        message=f"Updated {updated} instance(s)",
+    )
+
+
 @router.get("/detection/stats", response_model=DetectionStatsResponse)
 async def get_detection_stats(
     session_id: int,
@@ -360,3 +721,90 @@ async def save_mask(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to save mask: {str(e)}",
         )
+
+
+@router.post("/detection/instance-mask")
+async def save_instance_mask(
+    request: InstanceMaskSaveRequest,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Save updated mask for an instance on a slice."""
+    db_session = (
+        db.query(EHToolSession)
+        .filter(
+            EHToolSession.id == request.session_id,
+            EHToolSession.user_id == current_user.id,
+        )
+        .first()
+    )
+
+    if not db_session:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Session not found"
+        )
+
+    try:
+        data_manager = get_data_manager(request.session_id, db)
+        data_manager.save_instance_mask_slice(
+            instance_id=request.instance_id,
+            axis=request.axis,
+            index=request.z_index,
+            mask_base64=request.mask_base64,
+        )
+        if request.ui_state:
+            data_manager.save_progress(ui_state=request.ui_state.dict())
+        return {"message": "Instance mask saved successfully"}
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except Exception as e:
+        import traceback
+
+        traceback.print_exc()
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to save instance mask: {str(e)}",
+        )
+
+
+@router.post("/detection/export-masks", response_model=ExportMasksResponse)
+async def export_masks(
+    request: ExportMasksRequest,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    db_session = (
+        db.query(EHToolSession)
+        .filter(
+            EHToolSession.id == request.session_id,
+            EHToolSession.user_id == current_user.id,
+        )
+        .first()
+    )
+    if not db_session:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Session not found"
+        )
+
+    try:
+        data_manager = get_data_manager(request.session_id, db)
+        data_manager.ensure_instances()
+        result = data_manager.export_masks(
+            mode=request.mode,
+            output_path=request.output_path,
+            create_backup=request.create_backup,
+        )
+        return ExportMasksResponse(
+            message=result["message"],
+            written_path=result["written_path"],
+            backup_path=result.get("backup_path"),
+            timestamp=result["timestamp"],
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except Exception as exc:
+        logger.exception("Failed to export masks")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to export masks: {exc}",
+        ) from exc

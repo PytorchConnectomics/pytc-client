@@ -1,9 +1,14 @@
 import uvicorn
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
+from runtime_settings import get_allowed_origins
 from server_pytc.services.model import (
+    get_inference_status,
+    get_inference_logs,
     get_tensorboard,
     initialize_tensorboard,
+    get_training_logs as get_training_process_logs,
+    get_training_status as get_training_process_status,
     start_inference,
     start_training,
     stop_inference,
@@ -20,7 +25,7 @@ app = FastAPI()
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=get_allowed_origins(),
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -68,25 +73,23 @@ async def stop_model_training():
 
 @app.get("/training_status")
 async def get_training_status():
-    """Check if training process is still running"""
-    from server_pytc.services.model import _training_process
+    return get_training_process_status()
 
-    if _training_process is None:
-        return {"isRunning": False, "message": "No training process"}
 
-    poll_result = _training_process.poll()
-    is_running = poll_result is None
-
-    return {
-        "isRunning": is_running,
-        "pid": _training_process.pid if is_running else None,
-        "exitCode": poll_result if not is_running else None,
-    }
+@app.get("/training_logs")
+async def training_logs():
+    return get_training_process_logs()
 
 
 @app.get("/start_tensorboard")
-async def start_tensorboard():
-    return initialize_tensorboard()
+async def start_tensorboard(logPath: str | None = None):
+    if not logPath:
+        raise HTTPException(
+            status_code=400,
+            detail="Missing required query parameter: logPath",
+        )
+    initialize_tensorboard(logPath)
+    return {"status": "started", "url": get_tensorboard()}
 
 
 @app.get("/get_tensorboard_url")
@@ -98,14 +101,23 @@ async def get_tensorboard_url():
 async def start_model_inference(req: Request):
     req = await req.json()
     print("start model inference")
-    # log_dir = req["log_dir"]
-    start_inference(req)
+    return start_inference(req)
 
 
 @app.post("/stop_model_inference")
 async def stop_model_inference():
     print("Stop model inference")
     return stop_inference()
+
+
+@app.get("/inference_status")
+async def inference_status():
+    return get_inference_status()
+
+
+@app.get("/inference_logs")
+async def inference_logs():
+    return get_inference_logs()
 
 
 def run():

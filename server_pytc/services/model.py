@@ -1,260 +1,523 @@
-import os
-import signal
-import subprocess
-import tempfile
-import psutil
 import atexit
-import sys
 import pathlib
+import subprocess
+import sys
+import tempfile
+import threading
+from collections import deque
+from datetime import datetime, timezone
+from typing import Any
 
-# TODO: Global process tracking for proper cleanup
+import psutil
+
+# Track spawned processes so we can stop/poll cleanly.
 _training_process = None
 _inference_process = None
-_temp_files = []
+_temp_files = {
+    "training": [],
+    "inference": [],
+}
+tensorboard_url = None
+_RUNTIME_LOG_LIMIT = 2000
+_runtime_lock = threading.Lock()
 
 
-import sys
-import pathlib
+def _new_runtime_state():
+    return {
+        "lines": deque(maxlen=_RUNTIME_LOG_LIMIT),
+        "lineCount": 0,
+        "phase": "idle",
+        "pid": None,
+        "exitCode": None,
+        "command": None,
+        "cwd": None,
+        "configPath": None,
+        "configOriginPath": None,
+        "startedAt": None,
+        "endedAt": None,
+        "lastUpdatedAt": None,
+        "lastError": None,
+        "metadata": {},
+    }
 
-# ... (imports)
+
+_runtime_state = {
+    "training": _new_runtime_state(),
+    "inference": _new_runtime_state(),
+}
 
 
-def start_training(dict: dict):
+def _project_root() -> pathlib.Path:
+    return pathlib.Path(__file__).resolve().parent.parent.parent
+
+
+def _utc_now() -> str:
+    return datetime.now(timezone.utc).isoformat()
+
+
+def _get_runtime_process(kind: str):
+    if kind == "training":
+        return _training_process
+    return _inference_process
+
+
+def _clear_runtime_process(kind: str, process=None):
+    global _training_process, _inference_process
+
+    if kind == "training":
+        if process is None or _training_process is process:
+            _training_process = None
+        return
+
+    if process is None or _inference_process is process:
+        _inference_process = None
+
+
+def _reset_runtime_state(
+    kind: str, *, phase: str = "idle", metadata: dict | None = None
+):
+    state = _new_runtime_state()
+    timestamp = _utc_now()
+    state["phase"] = phase
+    state["startedAt"] = timestamp if phase != "idle" else None
+    state["lastUpdatedAt"] = timestamp
+    state["metadata"] = metadata or {}
+    with _runtime_lock:
+        _runtime_state[kind] = state
+
+
+def _update_runtime_state(kind: str, **updates):
+    with _runtime_lock:
+        state = _runtime_state[kind]
+        for key, value in updates.items():
+            if key == "metadata" and isinstance(value, dict):
+                state["metadata"] = value
+            else:
+                state[key] = value
+        state["lastUpdatedAt"] = _utc_now()
+
+
+def _append_runtime_log(kind: str, line: str):
+    timestamp = _utc_now()
+    text = "" if line is None else str(line).rstrip("\n")
+    entry = f"[{timestamp}] {text}" if text else f"[{timestamp}]"
+    with _runtime_lock:
+        state = _runtime_state[kind]
+        state["lines"].append(entry)
+        state["lineCount"] += 1
+        state["lastUpdatedAt"] = timestamp
+
+
+def _append_runtime_event(kind: str, message: str):
+    _append_runtime_log(kind, f"[MODEL.PY] {message}")
+
+
+def _set_runtime_error(kind: str, message: str):
+    _update_runtime_state(kind, lastError=message)
+    _append_runtime_event(kind, f"ERROR: {message}")
+
+
+def _get_runtime_snapshot(kind: str) -> dict[str, Any]:
+    process = _get_runtime_process(kind)
+    is_running = bool(process and process.poll() is None)
+    with _runtime_lock:
+        state = _runtime_state[kind]
+        lines = list(state["lines"])
+        snapshot = {
+            "isRunning": is_running,
+            "phase": state["phase"],
+            "pid": process.pid if is_running else state["pid"],
+            "exitCode": state["exitCode"],
+            "command": state["command"],
+            "cwd": state["cwd"],
+            "configPath": state["configPath"],
+            "configOriginPath": state["configOriginPath"],
+            "startedAt": state["startedAt"],
+            "endedAt": state["endedAt"],
+            "lastUpdatedAt": state["lastUpdatedAt"],
+            "lineCount": state["lineCount"],
+            "lastError": state["lastError"],
+            "metadata": dict(state["metadata"]),
+            "lines": lines,
+            "text": "\n".join(lines),
+        }
+    return snapshot
+
+
+def _pytc_script_path() -> pathlib.Path:
+    script_path = _project_root() / "pytorch_connectomics" / "scripts" / "main.py"
+    if not script_path.exists():
+        raise FileNotFoundError(f"PyTC script not found at {script_path}")
+    return script_path
+
+
+def _resolve_config_origin_path(config_origin_path: str | None) -> pathlib.Path | None:
+    if not config_origin_path:
+        return None
+
+    candidate = pathlib.Path(str(config_origin_path).strip())
+    if not str(candidate):
+        return None
+
+    if candidate.is_absolute():
+        resolved = candidate.resolve()
+        return resolved if resolved.exists() else None
+
+    pytc_root = _project_root() / "pytorch_connectomics"
+    resolved = (pytc_root / candidate).resolve()
+    try:
+        resolved.relative_to(pytc_root.resolve())
+    except ValueError:
+        return None
+    return resolved if resolved.exists() else None
+
+
+def _write_temp_config(
+    config_text: str, label: str, config_origin_path: str | None = None
+) -> str:
+    if not config_text or not str(config_text).strip():
+        raise ValueError(f"{label} config is required")
+
+    origin = _resolve_config_origin_path(config_origin_path)
+    suffix = origin.suffix if origin and origin.suffix else ".yaml"
+    temp_kwargs = {"delete": False, "mode": "w", "suffix": suffix}
+    if origin is not None:
+        temp_kwargs["dir"] = str(origin.parent)
+        temp_kwargs["prefix"] = f".__pytc_runtime_{label}_"
+
+    try:
+        with tempfile.NamedTemporaryFile(**temp_kwargs) as tmp:
+            tmp.write(config_text)
+            path = tmp.name
+    except OSError:
+        with tempfile.NamedTemporaryFile(delete=False, mode="w", suffix=suffix) as tmp:
+            tmp.write(config_text)
+            path = tmp.name
+
+    _temp_files[label].append(path)
+    return path
+
+
+def _build_cli_arguments(
+    arguments: dict[str, Any], blocked_flags: set[str] | None = None
+) -> list[str]:
+    blocked = {flag.lower().replace("_", "-") for flag in (blocked_flags or set())}
+    cli_args: list[str] = []
+
+    for key, value in (arguments or {}).items():
+        if value is None or value == "":
+            continue
+
+        flag_name = str(key).strip().replace("_", "-").lower()
+        if not flag_name or flag_name in blocked:
+            continue
+        flag = f"--{flag_name}"
+
+        if isinstance(value, bool):
+            if value:
+                cli_args.append(flag)
+            continue
+
+        if isinstance(value, (list, tuple)):
+            for item in value:
+                cli_args.extend([flag, str(item)])
+            continue
+
+        cli_args.extend([flag, str(value)])
+
+    return cli_args
+
+
+def _start_logged_process(command: list[str], cwd: pathlib.Path, label: str, kind: str):
+    process = subprocess.Popen(
+        command,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        text=True,
+        bufsize=1,
+        cwd=str(cwd),
+    )
+    _update_runtime_state(
+        kind,
+        phase="running",
+        pid=process.pid,
+        command=" ".join(command),
+        cwd=str(cwd),
+        exitCode=None,
+        endedAt=None,
+        lastError=None,
+    )
+    _append_runtime_event(kind, f"Spawned {label.lower()} process PID {process.pid}")
+
+    def _log_subprocess_output():
+        print(f"[MODEL.PY] === {label} subprocess output (PID {process.pid}) ===")
+        try:
+            if process.stdout is not None:
+                for line in process.stdout:
+                    _append_runtime_log(kind, line.rstrip())
+                    print(f"[{label}:{process.pid}] {line.rstrip()}")
+            process.wait()
+            exit_code = process.returncode
+            _update_runtime_state(
+                kind,
+                phase="finished" if exit_code == 0 else "failed",
+                exitCode=exit_code,
+                endedAt=_utc_now(),
+            )
+            _append_runtime_event(
+                kind,
+                f"{label} subprocess finished with exit code: {exit_code}",
+            )
+            _clear_runtime_process(kind, process)
+            print(
+                f"[MODEL.PY] === {label} subprocess finished with exit code: {process.returncode} ==="
+            )
+        except Exception as exc:
+            _set_runtime_error(kind, f"Error reading {label} subprocess output: {exc}")
+            print(f"[MODEL.PY] Error reading {label} subprocess output: {exc}")
+
+    threading.Thread(target=_log_subprocess_output, daemon=True).start()
+    return process
+
+
+def _extract_output_path_from_yaml(config_text: str, mode: str) -> str | None:
+    try:
+        import yaml
+    except Exception:
+        return None
+
+    try:
+        config_obj = yaml.safe_load(config_text) or {}
+    except Exception:
+        return None
+
+    if not isinstance(config_obj, dict):
+        return None
+
+    if mode == "train":
+        legacy = config_obj.get("DATASET", {}).get("OUTPUT_PATH")
+        if legacy:
+            return str(legacy)
+
+        modern_dir = config_obj.get("monitor", {}).get("checkpoint", {}).get("dirpath")
+        if modern_dir:
+            return str(pathlib.Path(str(modern_dir)).parent)
+
+    if mode == "test":
+        legacy = config_obj.get("INFERENCE", {}).get("OUTPUT_PATH")
+        if legacy:
+            return str(legacy)
+
+        modern_dir = (
+            config_obj.get("inference", {})
+            .get("save_prediction", {})
+            .get("output_path")
+        )
+        if modern_dir:
+            return str(modern_dir)
+
+    return None
+
+
+def _launch_tensorboard(log_dir: str | None, config_text: str, mode: str):
+    resolved = log_dir or _extract_output_path_from_yaml(config_text, mode)
+    if resolved:
+        initialize_tensorboard(resolved)
+    return resolved
+
+
+def start_training(payload: dict):
     print("\n========== MODEL.PY: START_TRAINING FUNCTION CALLED ==========")
     global _training_process
 
-    print(f"[MODEL.PY] Input dict keys: {list(dict.keys())}")
-    print(f"[MODEL.PY] Arguments: {dict.get('arguments', {})}")
-    print(
-        f"[MODEL.PY] *** Log path from request: {dict.get('logPath', 'NOT PROVIDED')}"
-    )
-    print(
-        f"[MODEL.PY] Training config length: {len(dict.get('trainingConfig', ''))} chars"
-    )
+    print(f"[MODEL.PY] Input dict keys: {list(payload.keys())}")
+    print(f"[MODEL.PY] Arguments: {payload.get('arguments', {})}")
 
-    # Parse YAML to show what OUTPUT_PATH is being used
-    try:
-        import yaml
-
-        config_obj = yaml.safe_load(dict.get("trainingConfig", ""))
-        dataset_output_path = config_obj.get("DATASET", {}).get(
-            "OUTPUT_PATH", "NOT SET"
-        )
-        print(f"[MODEL.PY] *** YAML DATASET.OUTPUT_PATH: {dataset_output_path}")
-        print(
-            f"[MODEL.PY] NOTE: PyTorch Connectomics will write checkpoints to OUTPUT_PATH"
-        )
-        print(f"[MODEL.PY] NOTE: TensorBoard logs should go to logPath")
-    except Exception as e:
-        print(f"[MODEL.PY] Could not parse YAML to check OUTPUT_PATH: {e}")
-
-    # TODO: Stop existing training process if running
     if _training_process and _training_process.poll() is None:
         print("[MODEL.PY] Existing training process detected, stopping it first...")
         stop_training()
 
-    # Use absolute path relative to this file
-    # server_pytc/services/model.py -> server_pytc/ -> pytc-client/ -> pytorch_connectomics/scripts/main.py
-    print("[MODEL.PY] Resolving script path...")
-    current_dir = pathlib.Path(__file__).parent.parent.parent
-    print(f"[MODEL.PY] Current dir (project root): {current_dir}")
-    script_path = current_dir / "pytorch_connectomics" / "scripts" / "main.py"
-    print(f"[MODEL.PY] Script path: {script_path}")
+    config_text = payload.get("trainingConfig", "")
+    temp_filepath = None
+    config_origin_path = payload.get("configOriginPath")
+    _reset_runtime_state(
+        "training",
+        phase="starting",
+        metadata={
+            "label": "training",
+            "outputPath": payload.get("outputPath"),
+            "logPath": payload.get("logPath"),
+        },
+    )
 
-    if not script_path.exists():
-        print(f"[MODEL.PY] ✗ ERROR: Training script not found at {script_path}")
-        raise FileNotFoundError(f"Training script not found at {script_path}")
-    else:
-        print(f"[MODEL.PY] ✓ Training script found")
-
-    print(f"[MODEL.PY] Python executable: {sys.executable}")
-    command = [sys.executable, str(script_path)]
-
-    print(f"[MODEL.PY] Processing command-line arguments...")
-    for key, value in dict.get("arguments", {}).items():
-        if value is not None:
-            print(f"[MODEL.PY]   Adding --{key} {value}")
-            command.extend([f"--{key}", str(value)])
-
-    # TODO: Write the value to a temporary file and track it for cleanup
-    print("[MODEL.PY] Creating temporary YAML config file...")
-    temp_file = tempfile.NamedTemporaryFile(delete=False, mode="w", suffix=".yaml")
-    config_content = dict["trainingConfig"]
-    print(f"[MODEL.PY] Writing config ({len(config_content)} chars) to temp file...")
-    temp_file.write(config_content)
-    temp_filepath = temp_file.name
-    temp_file.close()
-    _temp_files.append(temp_filepath)
-    print(f"[MODEL.PY] ✓ Temp config file created at: {temp_filepath}")
-
-    # Show first few lines of the temp file for debugging
-    with open(temp_filepath, "r") as f:
-        first_lines = "".join(f.readlines()[:20])
-        print(f"[MODEL.PY] Temp file preview (first 20 lines):\n{first_lines}\n")
-
-    command.extend(["--config-file", str(temp_filepath)])
-
-    # TODO: Execute the command using subprocess.Popen for proper async handling
-    print(f"[MODEL.PY] Final command: {' '.join(command)}")
-    print("[MODEL.PY] Starting subprocess...")
     try:
-        _training_process = subprocess.Popen(
+        current_dir = _project_root()
+        script_path = _pytc_script_path()
+        temp_filepath = _write_temp_config(
+            config_text,
+            "training",
+            config_origin_path=config_origin_path,
+        )
+        _update_runtime_state(
+            "training",
+            configPath=temp_filepath,
+            configOriginPath=config_origin_path,
+        )
+        _append_runtime_event(
+            "training", f"Config origin: {config_origin_path or 'none'}"
+        )
+        _append_runtime_event("training", f"Staged config path: {temp_filepath}")
+
+        command = [
+            sys.executable,
+            str(script_path),
+            "--config",
+            temp_filepath,
+            "--mode",
+            "train",
+        ]
+        command.extend(
+            _build_cli_arguments(
+                payload.get("arguments", {}),
+                blocked_flags={"config", "config-file", "mode", "inference"},
+            )
+        )
+
+        print(f"[MODEL.PY] Final training command: {' '.join(command)}")
+        _append_runtime_event(
+            "training", f"Final training command: {' '.join(command)}"
+        )
+        _training_process = _start_logged_process(
             command,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.STDOUT,  # Merge stderr into stdout
-            text=True,
-            bufsize=1,  # Line buffered
-            cwd=str(current_dir),  # Set working directory
-        )
-        print(
-            f"[MODEL.PY] ✓ Training process started with PID: {_training_process.pid}"
+            current_dir,
+            "TRAINING",
+            "training",
         )
 
-        # Start a thread to read and log subprocess output
-        import threading
-
-        def log_subprocess_output():
-            print(
-                f"[MODEL.PY] === Training subprocess output (PID {_training_process.pid}) ==="
-            )
-            try:
-                for line in _training_process.stdout:
-                    print(f"[TRAINING:{_training_process.pid}] {line.rstrip()}")
-
-                # Get exit code
-                _training_process.wait()
-                print(
-                    f"[MODEL.PY] === Training subprocess finished with exit code: {_training_process.returncode} ==="
-                )
-            except Exception as e:
-                print(f"[MODEL.PY] Error reading subprocess output: {e}")
-
-        output_thread = threading.Thread(target=log_subprocess_output, daemon=True)
-        output_thread.start()
-
-        # Initialize TensorBoard to monitor the OUTPUT_PATH where PyTorch Connectomics writes logs
-        # PyTorch Connectomics writes logs to {OUTPUT_PATH}/log{timestamp}/
-        output_path = dict.get("outputPath")
-        log_path = dict.get("logPath")
-
-        print(f"[MODEL.PY] *** Output path from request: {output_path}")
-        print(
-            f"[MODEL.PY] *** Log path from request: {log_path} (for compatibility only)"
-        )
-
-        if output_path:
-            print(f"[MODEL.PY] *** Initializing TensorBoard to monitor: {output_path}")
-            print(
-                f"[MODEL.PY] NOTE: PyTorch Connectomics writes logs to {{OUTPUT_PATH}}/log{{timestamp}}/"
-            )
-            print(
-                f"[MODEL.PY] NOTE: TensorBoard will automatically find event files in subdirectories"
-            )
-            initialize_tensorboard(output_path)
-            print(f"[MODEL.PY] ✓ TensorBoard initialized for directory: {output_path}")
-        else:
-            print(
-                f"[MODEL.PY] ⚠ WARNING: No outputPath provided, TensorBoard not initialized"
-            )
+        log_dir = _launch_tensorboard(payload.get("outputPath"), config_text, "train")
+        if log_dir:
+            _append_runtime_event("training", f"TensorBoard log dir: {log_dir}")
+            print(f"[MODEL.PY] TensorBoard monitoring directory: {log_dir}")
 
         result = {"status": "started", "pid": _training_process.pid}
         print(f"[MODEL.PY] Returning: {result}")
         print("========== MODEL.PY: END OF START_TRAINING ==========\n")
         return result
-    except Exception as e:
-        print(
-            f"[MODEL.PY] ✗ ERROR starting training process: {type(e).__name__}: {str(e)}"
-        )
-        import traceback
-
-        print(traceback.format_exc())
-        # Cleanup temp file if process failed to start
-        if os.path.exists(temp_filepath):
-            print(f"[MODEL.PY] Cleaning up temp file: {temp_filepath}")
-            os.unlink(temp_filepath)
-            _temp_files.remove(temp_filepath)
-        print("========== MODEL.PY: END OF START_TRAINING (WITH ERROR) ==========\n")
+    except Exception as exc:
+        if temp_filepath and temp_filepath in _temp_files["training"]:
+            cleanup_temp_files("training")
+        _update_runtime_state("training", phase="failed", endedAt=_utc_now())
+        _set_runtime_error("training", str(exc))
+        print(f"[MODEL.PY] ✗ ERROR starting training process: {exc}")
         raise
 
 
-def stop_process_by_name(process_name):
-    """Stop processes by name using psutil for better reliability"""
+def _stop_processes(matcher, description: str):
     try:
         for proc in psutil.process_iter(["pid", "name", "cmdline"]):
             try:
-                if process_name in " ".join(proc.info["cmdline"] or []):
-                    print(
-                        f"Terminating process {proc.info['pid']}: {' '.join(proc.info['cmdline'])}"
-                    )
-                    proc.terminate()
-                    proc.wait(
-                        timeout=10
-                    )  # Wait up to 10 seconds for graceful termination
+                cmdline = proc.info["cmdline"] or []
+                if not matcher(cmdline):
+                    continue
+                print(f"Terminating process {proc.info['pid']}: {' '.join(cmdline)}")
+                proc.terminate()
+                proc.wait(timeout=10)
             except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.TimeoutExpired):
-                # Process already terminated or we don't have permission
                 continue
-    except Exception as e:
-        print(f"Error stopping processes by name '{process_name}': {e}")
+    except Exception as exc:
+        print(f"Error stopping processes for '{description}': {exc}")
 
 
-def cleanup_temp_files():
-    """Clean up temporary files created during training/inference"""
-    global _temp_files
-    for temp_file in _temp_files[:]:  # Create a copy to iterate over
-        try:
-            if os.path.exists(temp_file):
-                os.unlink(temp_file)
-                print(f"Cleaned up temp file: {temp_file}")
-            _temp_files.remove(temp_file)
-        except Exception as e:
-            print(f"Error cleaning up temp file {temp_file}: {e}")
+def _matches_pytc_mode_process(cmdline: list[str], mode: str) -> bool:
+    try:
+        script_path = str(_pytc_script_path())
+    except FileNotFoundError:
+        return False
+
+    normalized = [str(part) for part in cmdline]
+    if script_path not in normalized:
+        return False
+
+    try:
+        mode_index = normalized.index("--mode")
+    except ValueError:
+        return False
+
+    return mode_index + 1 < len(normalized) and normalized[mode_index + 1] == mode
+
+
+def stop_pytc_processes(mode: str):
+    _stop_processes(
+        lambda cmdline: _matches_pytc_mode_process(cmdline, mode),
+        f"pytorch_connectomics mode={mode}",
+    )
+
+
+def stop_process_by_name(process_name):
+    _stop_processes(
+        lambda cmdline: process_name in " ".join(cmdline),
+        process_name,
+    )
+
+
+def cleanup_temp_files(kind: str | None = None):
+    """Clean up temporary files created during training/inference."""
+    kinds = [kind] if kind else list(_temp_files.keys())
+    for state_kind in kinds:
+        for temp_file in _temp_files[state_kind][:]:
+            try:
+                pathlib.Path(temp_file).unlink(missing_ok=True)
+                _temp_files[state_kind].remove(temp_file)
+            except Exception as exc:
+                print(f"Error cleaning up temp file {temp_file}: {exc}")
 
 
 def stop_training():
     global _training_process
 
-    # TODO: Stop the tracked training process first
     if _training_process and _training_process.poll() is None:
         try:
+            _append_runtime_event(
+                "training", f"Terminating training process PID: {_training_process.pid}"
+            )
             print(f"Terminating training process PID: {_training_process.pid}")
             _training_process.terminate()
             _training_process.wait(timeout=10)
         except subprocess.TimeoutExpired:
+            _append_runtime_event("training", "Force killing training process")
             print("Force killing training process...")
             _training_process.kill()
             _training_process.wait()
-        except Exception as e:
-            print(f"Error stopping training process: {e}")
+        except Exception as exc:
+            _set_runtime_error("training", f"Error stopping training process: {exc}")
+            print(f"Error stopping training process: {exc}")
         finally:
             _training_process = None
 
-    # Stop any remaining processes by name as fallback
-    stop_process_by_name("python pytorch_connectomics/scripts/main.py")
+    stop_pytc_processes("train")
     stop_tensorboard()
-    cleanup_temp_files()
+    cleanup_temp_files("training")
+    _update_runtime_state("training", phase="stopped", endedAt=_utc_now())
+    _append_runtime_event("training", "Training stop requested")
     return {"status": "stopped"}
 
 
-tensorboard_url = None
-
-
 def initialize_tensorboard(logPath):
+    global tensorboard_url
+
     print(f"[MODEL.PY] initialize_tensorboard called with logPath: {logPath}")
     from tensorboard import program
 
     tb = program.TensorBoard()
-    # tb.configure(argv=[None, "--logdir", "./logs"])
     try:
-        print(f"[MODEL.PY] Configuring TensorBoard with logdir: {logPath}")
         tb.configure(argv=[None, "--logdir", logPath, "--host", "0.0.0.0"])
         tensorboard_url = tb.launch()
         print(f"[MODEL.PY] ✓ TensorBoard is running at {tensorboard_url}")
-    except Exception as e:
+    except Exception as exc:
         tensorboard_url = "http://localhost:6006/"
         print(
-            f"[MODEL.PY] ⚠ TensorBoard fallback to {tensorboard_url} due to error: {e}"
+            f"[MODEL.PY] ⚠ TensorBoard fallback to {tensorboard_url} due to error: {exc}"
         )
-        # return str(url)
 
 
 def get_tensorboard():
@@ -262,42 +525,151 @@ def get_tensorboard():
 
 
 def stop_tensorboard():
+    global tensorboard_url
+    tensorboard_url = None
     stop_process_by_name("tensorboard")
 
 
-def start_inference(dict: dict):
-    # Use absolute path relative to this file
-    current_dir = pathlib.Path(__file__).parent.parent.parent
-    script_path = current_dir / "pytorch_connectomics" / "scripts" / "main.py"
+def start_inference(payload: dict):
+    print("\n========== MODEL.PY: START_INFERENCE FUNCTION CALLED ==========")
+    global _inference_process
 
-    if not script_path.exists():
-        print(f"Error: Inference script not found at {script_path}")
-        raise FileNotFoundError(f"Inference script not found at {script_path}")
+    if _inference_process and _inference_process.poll() is None:
+        print("[MODEL.PY] Existing inference process detected, stopping it first...")
+        stop_inference()
 
-    command = [sys.executable, str(script_path), "--inference"]
+    config_text = payload.get("inferenceConfig", "")
+    temp_filepath = None
+    config_origin_path = payload.get("configOriginPath")
+    _reset_runtime_state(
+        "inference",
+        phase="starting",
+        metadata={
+            "label": "inference",
+            "outputPath": payload.get("outputPath"),
+            "checkpointPath": payload.get("checkpointPath")
+            or (payload.get("arguments") or {}).get("checkpoint"),
+        },
+    )
 
-    # Write the value to a temporary file
-    with tempfile.NamedTemporaryFile(
-        delete=False, mode="w", suffix=".yaml"
-    ) as temp_file:
-        temp_file.write(dict["inferenceConfig"])
-        temp_filepath = temp_file.name
-        command.extend(["--config-file", str(temp_filepath)])
-
-    for key, value in dict["arguments"].items():
-        if value is not None:
-            command.extend([f"--{key}", str(value)])
-    # Execute the command using subprocess.call
-    print(command)
     try:
-        subprocess.call(command)
-    except subprocess.CalledProcessError as e:
-        print(f"Error occurred: {e}")
+        current_dir = _project_root()
+        script_path = _pytc_script_path()
+        temp_filepath = _write_temp_config(
+            config_text,
+            "inference",
+            config_origin_path=config_origin_path,
+        )
+        _update_runtime_state(
+            "inference",
+            configPath=temp_filepath,
+            configOriginPath=config_origin_path,
+        )
+        _append_runtime_event(
+            "inference", f"Config origin: {config_origin_path or 'none'}"
+        )
+        _append_runtime_event("inference", f"Staged config path: {temp_filepath}")
 
-    print("start_inference")
+        arguments = dict(payload.get("arguments") or {})
+        if payload.get("checkpointPath") and not arguments.get("checkpoint"):
+            arguments["checkpoint"] = payload["checkpointPath"]
+
+        command = [
+            sys.executable,
+            str(script_path),
+            "--config",
+            temp_filepath,
+            "--mode",
+            "test",
+        ]
+        command.extend(
+            _build_cli_arguments(
+                arguments,
+                blocked_flags={"config", "config-file", "mode", "inference"},
+            )
+        )
+
+        print(f"[MODEL.PY] Final inference command: {' '.join(command)}")
+        _append_runtime_event(
+            "inference", f"Final inference command: {' '.join(command)}"
+        )
+        _inference_process = _start_logged_process(
+            command,
+            current_dir,
+            "INFERENCE",
+            "inference",
+        )
+        result = {"status": "started", "pid": _inference_process.pid}
+        print(f"[MODEL.PY] Returning: {result}")
+        print("========== MODEL.PY: END OF START_INFERENCE ==========\n")
+        return result
+    except Exception as exc:
+        if temp_filepath and temp_filepath in _temp_files["inference"]:
+            cleanup_temp_files("inference")
+        _update_runtime_state("inference", phase="failed", endedAt=_utc_now())
+        _set_runtime_error("inference", str(exc))
+        print(f"[MODEL.PY] ✗ ERROR starting inference process: {exc}")
+        raise
+
+
+def get_training_status():
+    snapshot = _get_runtime_snapshot("training")
+    return {
+        "isRunning": snapshot["isRunning"],
+        "pid": snapshot["pid"],
+        "exitCode": snapshot["exitCode"],
+        "phase": snapshot["phase"],
+        "lastError": snapshot["lastError"],
+    }
+
+
+def get_inference_status():
+    snapshot = _get_runtime_snapshot("inference")
+    return {
+        "isRunning": snapshot["isRunning"],
+        "pid": snapshot["pid"],
+        "exitCode": snapshot["exitCode"],
+        "phase": snapshot["phase"],
+        "lastError": snapshot["lastError"],
+    }
+
+
+def get_training_logs():
+    return _get_runtime_snapshot("training")
+
+
+def get_inference_logs():
+    return _get_runtime_snapshot("inference")
 
 
 def stop_inference():
-    process_name = "python pytorch_connectomics/scripts/main.py"
-    stop_process(process_name)
-    stop_tensorboard()
+    global _inference_process
+
+    if _inference_process and _inference_process.poll() is None:
+        try:
+            _append_runtime_event(
+                "inference",
+                f"Terminating inference process PID: {_inference_process.pid}",
+            )
+            print(f"Terminating inference process PID: {_inference_process.pid}")
+            _inference_process.terminate()
+            _inference_process.wait(timeout=10)
+        except subprocess.TimeoutExpired:
+            _append_runtime_event("inference", "Force killing inference process")
+            print("Force killing inference process...")
+            _inference_process.kill()
+            _inference_process.wait()
+        except Exception as exc:
+            _set_runtime_error("inference", f"Error stopping inference process: {exc}")
+            print(f"Error stopping inference process: {exc}")
+        finally:
+            _inference_process = None
+
+    stop_pytc_processes("test")
+    cleanup_temp_files("inference")
+    _update_runtime_state("inference", phase="stopped", endedAt=_utc_now())
+    _append_runtime_event("inference", "Inference stop requested")
+    return {"status": "stopped"}
+
+
+atexit.register(cleanup_temp_files)

@@ -19,10 +19,12 @@ function createWindow() {
     height,
     icon: path.join(__dirname, "public", "favicon.ico"),
     webPreferences: {
-      nodeIntegration: true,
-      contextIsolation: false,
-      webSecurity: false,
-      allowRunningInsecureContent: true,
+      preload: path.join(__dirname, "preload.js"),
+      nodeIntegration: false,
+      contextIsolation: true,
+      sandbox: true,
+      webSecurity: true,
+      allowRunningInsecureContent: false,
     },
   });
 
@@ -54,6 +56,7 @@ function createMenu() {
       label: "Electron",
       submenu: [{ role: "toggleDevTools" }, { role: "quit" }],
     },
+    { role: "editMenu" },
     {
       label: "Edit",
       submenu: [
@@ -67,90 +70,8 @@ function createMenu() {
       ],
     },
     {
-      label: "Views",
-      submenu: [
-        {
-          label: "Change Views",
-          click: () => {
-            if (mainWindow) {
-              mainWindow.webContents.send("change-views");
-            }
-          },
-        },
-        { type: "separator" },
-        {
-          label: "File Management",
-          type: "checkbox",
-          checked: true,
-          enabled: false, // Always on
-        },
-        {
-          label: "Visualization",
-          type: "checkbox",
-          checked: false,
-          click: (menuItem) =>
-            mainWindow.webContents.send(
-              "toggle-tab",
-              "visualization",
-              menuItem.checked,
-            ),
-        },
-        {
-          label: "Model Training",
-          type: "checkbox",
-          checked: false,
-          click: (menuItem) =>
-            mainWindow.webContents.send(
-              "toggle-tab",
-              "training",
-              menuItem.checked,
-            ),
-        },
-        {
-          label: "Model Inference",
-          type: "checkbox",
-          checked: false,
-          click: (menuItem) =>
-            mainWindow.webContents.send(
-              "toggle-tab",
-              "inference",
-              menuItem.checked,
-            ),
-        },
-        {
-          label: "Tensorboard",
-          type: "checkbox",
-          checked: false,
-          click: (menuItem) =>
-            mainWindow.webContents.send(
-              "toggle-tab",
-              "monitoring",
-              menuItem.checked,
-            ),
-        },
-        {
-          label: "SynAnno",
-          type: "checkbox",
-          checked: false,
-          click: (menuItem) =>
-            mainWindow.webContents.send(
-              "toggle-tab",
-              "synanno",
-              menuItem.checked,
-            ),
-        },
-        {
-          label: "Worm Error Handling",
-          type: "checkbox",
-          checked: false,
-          click: (menuItem) =>
-            mainWindow.webContents.send(
-              "toggle-tab",
-              "worm-error-handling",
-              menuItem.checked,
-            ),
-        },
-      ],
+      label: "Window",
+      submenu: [{ role: "minimize" }, { role: "close" }],
     },
   ];
 

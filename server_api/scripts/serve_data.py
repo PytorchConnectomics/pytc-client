@@ -1,6 +1,6 @@
 import http.server
-import socketserver
 import os
+import socketserver
 import sys
 
 PORT = 8000
@@ -21,6 +21,10 @@ class CORSRequestHandler(http.server.SimpleHTTPRequestHandler):
         return super().translate_path(path)
 
 
+class ReusableTCPServer(socketserver.TCPServer):
+    allow_reuse_address = True
+
+
 if __name__ == "__main__":
     # Change to the directory we want to serve
     target_dir = os.path.join(os.getcwd(), DIRECTORY)
@@ -32,8 +36,17 @@ if __name__ == "__main__":
 
     print(f"Serving directory {target_dir} at http://localhost:{PORT}")
 
-    with socketserver.TCPServer(("", PORT), CORSRequestHandler) as httpd:
-        try:
-            httpd.serve_forever()
-        except KeyboardInterrupt:
-            pass
+    try:
+        with ReusableTCPServer(("", PORT), CORSRequestHandler) as httpd:
+            try:
+                httpd.serve_forever()
+            except KeyboardInterrupt:
+                pass
+    except OSError as exc:
+        if exc.errno in (48, 98):
+            print(
+                f"Data server could not start: port {PORT} is already in use.",
+                file=sys.stderr,
+            )
+            sys.exit(1)
+        raise

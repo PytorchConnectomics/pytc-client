@@ -22,6 +22,7 @@ except Exception:  # pragma: no cover - preview is best-effort
 router = APIRouter()
 
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="token", auto_error=False)
+IGNORED_SYSTEM_FILENAMES = {".ds_store", "thumbs.db"}
 
 
 def _format_size(size_bytes: int) -> str:
@@ -32,6 +33,10 @@ def _format_size(size_bytes: int) -> str:
     if size_bytes < 1024 * 1024 * 1024:
         return f"{size_bytes / (1024 * 1024):.1f}MB"
     return f"{size_bytes / (1024 * 1024 * 1024):.1f}GB"
+
+
+def _is_ignored_system_file(name: Optional[str]) -> bool:
+    return str(name or "").strip().lower() in IGNORED_SYSTEM_FILENAMES
 
 
 def _ensure_unique_name(
@@ -180,10 +185,21 @@ def read_users_me(current_user: models.User = Depends(get_current_user)):
 
 @router.get("/files", response_model=List[models.FileResponse])
 def get_files(
+    parent: Optional[str] = None,
     current_user: models.User = Depends(get_current_user),
     db: Session = Depends(database.get_db),
 ):
-    return current_user.files
+    query = db.query(models.File).filter(models.File.user_id == current_user.id)
+    if parent is not None:
+        query = query.filter(models.File.path == parent)
+
+    return [
+        file
+        for file in query.order_by(
+            models.File.is_folder.desc(), models.File.name.asc()
+        ).all()
+        if not _is_ignored_system_file(file.name)
+    ]
 
 
 @router.get("/files/preview/{file_id}")
@@ -272,6 +288,9 @@ def upload_file(
     current_user: models.User = Depends(get_current_user),
     db: Session = Depends(database.get_db),
 ):
+    if _is_ignored_system_file(file.filename):
+        raise HTTPException(status_code=400, detail="System metadata files are ignored")
+
     # Create uploads directory if not exists
     upload_dir = f"uploads/{current_user.id}"
     os.makedirs(upload_dir, exist_ok=True)
@@ -461,6 +480,8 @@ def mount_directory(
             mounted_folders += 1
 
         for filename in filenames:
+            if _is_ignored_system_file(filename):
+                continue
             abs_file = os.path.join(current_dir, filename)
             if not os.path.isfile(abs_file):
                 continue
@@ -547,6 +568,49 @@ def unmount_project(
     _delete_file_tree(db, current_user.id, folder, delete_disk_files=False)
     db.commit()
     return {"message": "Project unmounted"}
+
+
+@router.delete("/files/workspace")
+def reset_workspace(
+    current_user: models.User = Depends(get_current_user),
+    db: Session = Depends(database.get_db),
+):
+    root_nodes = (
+        db.query(models.File)
+        .filter(models.File.user_id == current_user.id, models.File.path == "root")
+        .all()
+    )
+    total_rows = (
+        db.query(models.File).filter(models.File.user_id == current_user.id).count()
+    )
+    mounted_root_count = 0
+
+    for node in root_nodes:
+        delete_disk_files = True
+        if node.physical_path and not _is_managed_upload_path(
+            current_user.id, node.physical_path
+        ):
+            mounted_root_count += 1
+            delete_disk_files = False
+
+        _delete_file_tree(
+            db,
+            current_user.id,
+            node,
+            delete_disk_files=delete_disk_files,
+        )
+
+    uploads_root = os.path.abspath(os.path.join("uploads", str(current_user.id)))
+    if os.path.isdir(uploads_root):
+        shutil.rmtree(uploads_root, ignore_errors=True)
+    os.makedirs(uploads_root, exist_ok=True)
+
+    db.commit()
+    return {
+        "message": "Workspace reset",
+        "deleted_count": total_rows,
+        "mounted_root_count": mounted_root_count,
+    }
 
 
 @router.delete("/files/{file_id}")
