@@ -10,12 +10,14 @@ The configuration wizard (stepper) walks you through three steps. You must compl
 
 Specify the file paths for your training data:
 
-- **Input Image** — Path to your training image data (file or directory on the server). Click the folder icon to browse, type a path, or drag and drop.
+- **Input Image** — Path to your training image data (file or directory on the server). Click the folder icon to browse, type a path, or drag and drop. Each field also has a **?** button that opens an AI-powered help panel with explanations and recommended values.
 - **Input Label** — Path to the corresponding ground-truth labels.
 - **Output Path** — Directory where training outputs (checkpoints, logs) will be saved.
 - **Log Path** — Directory for training logs (used by TensorBoard for monitoring).
 
 All four fields are required before you can proceed. The application will show a warning listing any missing fields if you try to advance without filling them in.
+
+**Inline AI help:** Every input field on the training configuration page has a small **?** button. Clicking it opens a floating chat panel that explains the setting, suggests a recommended value, and accepts follow-up questions.
 
 ### Step 2: Base Configuration
 

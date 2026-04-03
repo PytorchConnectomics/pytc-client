@@ -8,12 +8,11 @@ The Model Inference page lets you run inference (prediction) using a trained seg
 
 Specify the file paths for your inference data:
 
-- **Input Image** — Path to the image data you want to run inference on (file or directory on the server). Click the folder icon to browse, type a path, or drag and drop.
-- **Input Label** — Path to ground-truth labels (optional, used if you want to evaluate accuracy).
+- **Input Image** — Path to the image data you want to run inference on (file or directory on the server). Click the folder icon to browse, type a path, or drag and drop. You can also click the **?** button next to the field for AI-powered help.
 - **Output Path** — Directory where inference results will be saved.
 - **Checkpoint Path** — Path to the trained model checkpoint file (e.g., `/path/to/checkpoint_100000.pth.tar`). This is the model that will be used for prediction.
 
-All fields except Input Label are required before you can proceed.
+All three fields are required before you can proceed.
 
 ### Step 2: Base Configuration
 

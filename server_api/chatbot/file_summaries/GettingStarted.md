@@ -27,12 +27,32 @@ The application has three main areas:
 
 The chat panel appears as a sliding drawer on the right. To use it:
 
-1. Click the **AI Chat** button in the top navigation bar to open the drawer.
+1. Click the **AI Chat** button (message icon) in the top navigation bar to open the drawer.
 2. Type your question in the text input at the bottom and press **Enter** or click **Send**.
 3. The assistant will respond with guidance based on the application's documentation.
-4. Click **Clear Chat** to start a new conversation.
 
 The chat supports markdown formatting, including tables, code blocks, and lists.
+
+### Conversation History
+
+The chat drawer includes a **sidebar** on the left that lists your saved conversations:
+
+- **New chat (+)** — Click the **+** button at the top to start a fresh conversation.
+- **Switch conversations** — Click any conversation in the sidebar to load it.
+- **Delete a conversation** — Click the trash icon next to a conversation and confirm.
+- **Collapse/expand sidebar** — Use the fold/unfold button to hide or show the conversation list.
+
+Conversations are saved automatically as you chat. When you reopen the drawer, your past chats are still available.
+
+### Inline Help ("?" Buttons)
+
+Throughout the training and inference configuration forms, you will see small **?** buttons next to input fields. Clicking a **?** button opens a floating chat panel that:
+
+1. Automatically asks the AI to explain that specific setting and recommend a value.
+2. Lets you ask follow-up questions about the setting.
+3. Can be dragged around the screen and resized.
+
+This provides context-aware help without leaving the configuration page.
 
 ## Keyboard Shortcuts (Global)
 

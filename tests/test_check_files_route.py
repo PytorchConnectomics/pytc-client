@@ -6,7 +6,6 @@ from fastapi.testclient import TestClient
 
 from server_api.main import app as server_api_app
 
-
 REPO_ROOT = pathlib.Path(__file__).resolve().parents[1]
 SNEMI_ROOT = pathlib.Path(
     os.getenv(

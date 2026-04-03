@@ -31,13 +31,15 @@ def main():
     parser.add_argument(
         "--base-url",
         default=None,
-        help="Ollama base URL (default: from OLLAMA_BASE_URL env or 'http://localhost:11434')",
+        help="Ollama base URL (default: from OLLAMA_BASE_URL env or 'http://cscigpu08.bc.edu:4443')",
     )
     args = parser.parse_args()
 
     # Use same defaults as build_chain() in chatbot.py
     embed_model = args.model or os.getenv("OLLAMA_EMBED_MODEL", "qwen3-embedding:8b")
-    base_url = args.base_url or os.getenv("OLLAMA_BASE_URL", "http://localhost:11434")
+    base_url = args.base_url or os.getenv(
+        "OLLAMA_BASE_URL", "http://cscigpu08.bc.edu:4443"
+    )
 
     print(f"Using embeddings model: {embed_model}")
     print(f"Using Ollama base URL: {base_url}")

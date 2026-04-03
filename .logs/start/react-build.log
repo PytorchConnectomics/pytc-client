@@ -1,0 +1,67 @@
+npm warn Unknown user config "always-auth". This will stop working in the next major version of npm.
+npm warn Unknown user config "always-auth" (//firelayers.jfrog.io/artifactory/api/npm/itc-npm-virtual/:always-auth). This will stop working in the next major version of npm.
+
+> PyTC Client@0.1.0 build
+> cross-env CI=false react-scripts build
+
+[baseline-browser-mapping] The data in this module is over two months old.  To ensure accurate Baseline data, please update: `npm i baseline-browser-mapping@latest -D`
+Creating an optimized production build...
+[baseline-browser-mapping] The data in this module is over two months old.  To ensure accurate Baseline data, please update: `npm i baseline-browser-mapping@latest -D`
+Compiled with warnings.
+
+[eslint] 
+src/components/FilePickerModal.js
+  Line 102:35:  Function declared in a loop contains unsafe references to variable(s) 'curr'                                                                                                                                                                                                                                                                                              no-loop-func
+  Line 124:35:  Function declared in a loop contains unsafe references to variable(s) 'currParentId'                                                                                                                                                                                                                                                                                      no-loop-func
+  Line 243:15:  The href attribute is required for an anchor to be keyboard accessible. Provide a valid, navigable address as the href value. If you cannot provide an href, but still need the element to resemble a link, use a button and change it with appropriate styles. Learn more: https://github.com/jsx-eslint/eslint-plugin-jsx-a11y/blob/HEAD/docs/rules/anchor-is-valid.md  jsx-a11y/anchor-is-valid
+
+src/components/YamlFileUploader.js
+  Line 347:6:  React Hook useEffect has missing dependencies: 'getCurrentConfig' and 'syncYamlContext'. Either include them or remove the dependency array                                      react-hooks/exhaustive-deps
+  Line 361:6:  React Hook useEffect has missing dependencies: 'getCurrentConfig', 'setCurrentConfig', and 'updateInputSelectorInformation'. Either include them or remove the dependency array  react-hooks/exhaustive-deps
+  Line 374:6:  React Hook useMemo has a missing dependency: 'getCurrentConfig'. Either include it or remove the dependency array                                                                react-hooks/exhaustive-deps
+
+src/views/EHTool.js
+  Line 25:6:  React Hook useEffect has a missing dependency: 'sessionId'. Either include it or remove the dependency array  react-hooks/exhaustive-deps
+
+src/views/FilesManager.js
+  Line 81:31:   Function declared in a loop contains unsafe references to variable(s) 'current'                                                                                                                        no-loop-func
+  Line 424:27:  Function declared in a loop contains unsafe references to variable(s) 'curr'                                                                                                                           no-loop-func
+  Line 776:32:  Function declared in a loop contains unsafe references to variable(s) 'descendantSizeKb', 'descendantSizeKb', 'descendantSizeKb', 'descendantSizeKb'                                                   no-loop-func
+  Line 1073:6:  React Hook useEffect has missing dependencies: 'finishCreateFolder', 'finishRename', 'handleCopy', 'handleCut', 'handleDelete', and 'handlePaste'. Either include them or remove the dependency array  react-hooks/exhaustive-deps
+
+src/views/ehtool/DetectionWorkflow.js
+  Line 225:6:   React Hook useEffect has a missing dependency: 'loadInstances'. Either include it or remove the dependency array                                                                                                                                                         react-hooks/exhaustive-deps
+  Line 274:20:  The ref value 'schedulerRef.current' will likely have changed by the time this effect cleanup function runs. If this ref points to a node rendered by React, copy 'schedulerRef.current' to a variable inside the effect, and use that variable in the cleanup function  react-hooks/exhaustive-deps
+  Line 314:6:   React Hook useEffect has a missing dependency: 'loadInstanceView'. Either include it or remove the dependency array                                                                                                                                                      react-hooks/exhaustive-deps
+  Line 355:6:   React Hook useEffect has a missing dependency: 'loadInstanceView'. Either include it or remove the dependency array                                                                                                                                                      react-hooks/exhaustive-deps
+  Line 416:6:   React Hook useEffect has missing dependencies: 'goToNextInstance', 'goToPreviousInstance', 'handleAxisChange', and 'handleInstanceClassify'. Either include them or remove the dependency array                                                                          react-hooks/exhaustive-deps
+  Line 524:6:   React Hook useEffect has a missing dependency: 'clearFrameCaches'. Either include it or remove the dependency array                                                                                                                                                      react-hooks/exhaustive-deps
+
+src/views/ehtool/ProofreadingEditor.js
+  Line 140:8:  React Hook useEffect has a missing dependency: 'loadImages'. Either include it or remove the dependency array                                    react-hooks/exhaustive-deps
+  Line 148:8:  React Hook useEffect has missing dependencies: 'drawCanvas' and 'drawMinimap'. Either include them or remove the dependency array                react-hooks/exhaustive-deps
+  Line 163:8:  React Hook useEffect has missing dependencies: 'drawCanvas' and 'drawMinimap'. Either include them or remove the dependency array                react-hooks/exhaustive-deps
+  Line 403:8:  React Hook useEffect has a missing dependency: 'loadOverlayImage'. Either include it or remove the dependency array                              react-hooks/exhaustive-deps
+  Line 407:8:  React Hook useEffect has a missing dependency: 'loadOverlayImage'. Either include it or remove the dependency array                              react-hooks/exhaustive-deps
+  Line 653:7:  React Hook useMemo has a missing dependency: 'glasbeyColor'. Either include it or remove the dependency array                                    react-hooks/exhaustive-deps
+  Line 662:8:  React Hook useEffect has missing dependencies: 'drawCanvas' and 'drawMinimap'. Either include them or remove the dependency array                react-hooks/exhaustive-deps
+  Line 899:9:  Expected a default case                                                                                                                          default-case
+  Line 940:8:  React Hook useEffect has missing dependencies: 'handleRedo', 'handleSave', and 'handleUndo'. Either include them or remove the dependency array  react-hooks/exhaustive-deps
+
+Search for the keywords to learn more about each warning.
+To ignore, add // eslint-disable-next-line to the line before.
+
+File sizes after gzip:
+
+  481.63 kB  build/static/js/main.ea9ff1f9.js
+  465 B      build/static/css/main.40821645.css
+
+The project was built assuming it is hosted at ./.
+You can control this with the homepage field in your package.json.
+
+The build folder is ready to be deployed.
+
+Find out more about deployment here:
+
+  https://cra.link/deployment
+
