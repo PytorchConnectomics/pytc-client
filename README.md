@@ -37,6 +37,23 @@ PYTC_ALLOWED_ORIGINS=http://localhost:3000,http://127.0.0.1:3000,null
 PYTC_NEUROGLANCER_PUBLIC_BASE=http://localhost:4244
 ```
 
+## Chatbot Docs Index
+
+The chatbot's FAISS index is generated locally from the markdown files in
+`server_api/chatbot/file_summaries/` and should not be committed to git.
+
+When you update those markdown docs, rebuild the generated index with:
+
+```
+uv run python server_api/chatbot/update_faiss.py
+```
+
+You can override the embeddings endpoint if needed:
+
+```
+OLLAMA_BASE_URL=http://localhost:11434 uv run python server_api/chatbot/update_faiss.py
+```
+
 If restarting after a crash or interrupted session, kill any lingering processes first:
 
 ```

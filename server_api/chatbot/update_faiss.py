@@ -1,54 +1,49 @@
-# How to update faiss_index:
-#     1. Edit the markdown files in server_api/chatbot/file_summaries/ as needed.
-#        These are end-user-focused guides (one per application page/feature) that
-#        serve as the knowledge base for the RAG chatbot.
-#     2. Run this script:
-#         python server_api/chatbot/update_faiss.py
-#
-#     You can override the embeddings model and Ollama base URL via:
-#     - Environment variables: OLLAMA_EMBED_MODEL, OLLAMA_BASE_URL
-#     - CLI arguments: --model, --base-url
-
-import os
 import argparse
+import os
 from pathlib import Path
-from langchain_core.documents import Document
-from langchain_text_splitters import RecursiveCharacterTextSplitter
-from langchain_community.vectorstores import FAISS
-from langchain_ollama import OllamaEmbeddings
+from typing import Optional, Tuple
+
+DEFAULT_OLLAMA_BASE_URL = "http://cscigpu08.bc.edu:4443"
+DEFAULT_OLLAMA_EMBED_MODEL = "qwen3-embedding:8b"
+INDEX_FILENAMES = ("index.faiss", "index.pkl")
 
 
-def main():
-    # Parse CLI arguments
-    parser = argparse.ArgumentParser(
-        description="Update FAISS index for RAG chatbot documentation search"
-    )
-    parser.add_argument(
-        "--model",
-        default=None,
-        help="Ollama embeddings model (default: from OLLAMA_EMBED_MODEL env or 'qwen3-embedding:8b')",
-    )
-    parser.add_argument(
-        "--base-url",
-        default=None,
-        help="Ollama base URL (default: from OLLAMA_BASE_URL env or 'http://cscigpu08.bc.edu:4443')",
-    )
-    args = parser.parse_args()
+def get_chatbot_paths(base_dir: Optional[Path] = None) -> Tuple[Path, Path]:
+    root = (base_dir or Path(__file__).parent).resolve()
+    return root / "file_summaries", root / "faiss_index"
 
-    # Use same defaults as build_chain() in chatbot.py
-    embed_model = args.model or os.getenv("OLLAMA_EMBED_MODEL", "qwen3-embedding:8b")
-    base_url = args.base_url or os.getenv(
-        "OLLAMA_BASE_URL", "http://cscigpu08.bc.edu:4443"
+
+def resolve_ollama_settings(
+    model: Optional[str] = None, base_url: Optional[str] = None
+) -> Tuple[str, str]:
+    embed_model = model or os.getenv("OLLAMA_EMBED_MODEL", DEFAULT_OLLAMA_EMBED_MODEL)
+    resolved_base_url = base_url or os.getenv(
+        "OLLAMA_BASE_URL", DEFAULT_OLLAMA_BASE_URL
     )
+    return embed_model, resolved_base_url
+
+
+def faiss_index_exists(faiss_directory: Path) -> bool:
+    return all((faiss_directory / name).is_file() for name in INDEX_FILENAMES)
+
+
+def build_faiss_index(
+    summaries_directory: Path,
+    faiss_directory: Path,
+    *,
+    model: Optional[str] = None,
+    base_url: Optional[str] = None,
+):
+    from langchain_core.documents import Document
+    from langchain_text_splitters import RecursiveCharacterTextSplitter
+    from langchain_community.vectorstores import FAISS
+    from langchain_ollama import OllamaEmbeddings
+
+    embed_model, resolved_base_url = resolve_ollama_settings(model, base_url)
 
     print(f"Using embeddings model: {embed_model}")
-    print(f"Using Ollama base URL: {base_url}")
+    print(f"Using Ollama base URL: {resolved_base_url}")
 
-    script_directory = Path(__file__).parent.resolve()
-    summaries_directory = script_directory / "file_summaries"
-    faiss_directory = script_directory / "faiss_index"
-
-    # Load full documents
     documents = []
     for md_file in summaries_directory.rglob("*.md"):
         summary = md_file.read_text(encoding="utf-8")
@@ -60,7 +55,6 @@ def main():
             )
         )
 
-    # Split into chunks for better embedding quality
     text_splitter = RecursiveCharacterTextSplitter(
         chunk_size=1000,
         chunk_overlap=200,
@@ -73,11 +67,65 @@ def main():
             f"  - {c.metadata['source']} (start={c.metadata.get('start_index', '?')}, {len(c.page_content)} chars)"
         )
 
-    embeddings = OllamaEmbeddings(model=embed_model, base_url=base_url)
+    embeddings = OllamaEmbeddings(model=embed_model, base_url=resolved_base_url)
     vectorstore = FAISS.from_documents(chunks, embeddings)
     faiss_directory.mkdir(parents=True, exist_ok=True)
     vectorstore.save_local(str(faiss_directory))
     print(f"FAISS index saved with {vectorstore.index.ntotal} vectors")
+
+
+def ensure_faiss_index(
+    *,
+    summaries_directory: Optional[Path] = None,
+    faiss_directory: Optional[Path] = None,
+    model: Optional[str] = None,
+    base_url: Optional[str] = None,
+) -> bool:
+    default_summaries_directory, default_faiss_directory = get_chatbot_paths()
+    summaries_directory = summaries_directory or default_summaries_directory
+    faiss_directory = faiss_directory or default_faiss_directory
+
+    if faiss_index_exists(faiss_directory):
+        return False
+
+    build_faiss_index(
+        summaries_directory,
+        faiss_directory,
+        model=model,
+        base_url=base_url,
+    )
+    return True
+
+
+def main():
+    parser = argparse.ArgumentParser(
+        description="Rebuild the generated FAISS index for chatbot documentation search"
+    )
+    parser.add_argument(
+        "--model",
+        default=None,
+        help=(
+            "Ollama embeddings model "
+            f"(default: OLLAMA_EMBED_MODEL or '{DEFAULT_OLLAMA_EMBED_MODEL}')"
+        ),
+    )
+    parser.add_argument(
+        "--base-url",
+        default=None,
+        help=(
+            "Ollama base URL "
+            f"(default: OLLAMA_BASE_URL or '{DEFAULT_OLLAMA_BASE_URL}')"
+        ),
+    )
+    args = parser.parse_args()
+
+    summaries_directory, faiss_directory = get_chatbot_paths()
+    build_faiss_index(
+        summaries_directory,
+        faiss_directory,
+        model=args.model,
+        base_url=args.base_url,
+    )
 
 
 if __name__ == "__main__":

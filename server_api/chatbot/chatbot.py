@@ -14,6 +14,7 @@ from langchain_community.vectorstores import FAISS
 from langchain_core.tools import tool
 from langchain.agents import create_agent
 from server_api.utils.utils import process_path
+from server_api.chatbot.update_faiss import ensure_faiss_index
 from server_api.chatbot.tools import (
     list_training_configs,
     read_config,
@@ -124,6 +125,11 @@ def build_chain():
     llm = ChatOllama(model=ollama_model, base_url=ollama_base_url, temperature=0)
     embeddings = OllamaEmbeddings(model=ollama_embed_model, base_url=ollama_base_url)
     faiss_path = process_path("server_api/chatbot/faiss_index")
+    if ensure_faiss_index(
+        model=ollama_embed_model,
+        base_url=ollama_base_url,
+    ):
+        print(f"[SEARCH] Generated chatbot FAISS index at {faiss_path}")
     vectorstore = FAISS.load_local(
         faiss_path,
         embeddings,
@@ -301,6 +307,11 @@ def build_helper_chain():
     llm = ChatOllama(model=ollama_model, base_url=ollama_base_url, temperature=0)
     embeddings = OllamaEmbeddings(model=ollama_embed_model, base_url=ollama_base_url)
     faiss_path = process_path("server_api/chatbot/faiss_index")
+    if ensure_faiss_index(
+        model=ollama_embed_model,
+        base_url=ollama_base_url,
+    ):
+        print(f"[SEARCH] Generated chatbot FAISS index at {faiss_path}")
     vectorstore = FAISS.load_local(
         faiss_path,
         embeddings,
