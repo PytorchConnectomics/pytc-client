@@ -51,7 +51,7 @@ uv run python server_api/chatbot/update_faiss.py
 You can override the embeddings endpoint if needed:
 
 ```
-OLLAMA_BASE_URL=http://localhost:11434 uv run python server_api/chatbot/update_faiss.py
+OLLAMA_BASE_URL=http://cscigpu08.bc.edu:4443 uv run python server_api/chatbot/update_faiss.py
 ```
 
 If restarting after a crash or interrupted session, kill any lingering processes first:

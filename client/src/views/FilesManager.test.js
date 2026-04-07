@@ -43,13 +43,9 @@ jest.mock("@ant-design/icons", () => {
 jest.mock("antd", () => {
   const React = require("react");
 
-  const Button = ({ children, ...props }) => (
-    <button {...props}>{children}</button>
-  );
+  const Button = ({ children, ...props }) => <button {...props}>{children}</button>;
   const Dropdown = ({ children }) => <div>{children}</div>;
-  const Input = React.forwardRef((props, ref) => (
-    <input ref={ref} {...props} />
-  ));
+  const Input = React.forwardRef((props, ref) => <input ref={ref} {...props} />);
   const Menu = ({ items = [], onClick }) => (
     <div>
       {items.map((item) =>

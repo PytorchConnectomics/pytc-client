@@ -240,14 +240,11 @@ function FilesManager() {
       const normalizedParent = String(parentKey || "root");
       const previousFolders = foldersRef.current;
       const previousFiles = filesRef.current;
-      const { folders: nextFolders, files: nextFiles } =
-        transformFiles(fileList);
+      const { folders: nextFolders, files: nextFiles } = transformFiles(fileList);
       const existingDirectChildIds = previousFolders
         .filter((folder) => folder.parent === normalizedParent)
         .map((folder) => folder.key);
-      const nextDirectChildIds = new Set(
-        nextFolders.map((folder) => folder.key),
-      );
+      const nextDirectChildIds = new Set(nextFolders.map((folder) => folder.key));
       const removedFolderIds = collectDescendantFolderIds(
         previousFolders,
         existingDirectChildIds.filter((id) => !nextDirectChildIds.has(id)),
@@ -256,19 +253,14 @@ function FilesManager() {
       const mergedFolders = [
         ...previousFolders.filter(
           (folder) =>
-            folder.parent !== normalizedParent &&
-            !removedFolderIds.has(folder.key),
+            folder.parent !== normalizedParent && !removedFolderIds.has(folder.key),
         ),
         ...nextFolders,
       ].sort((left, right) => {
         if (left.parent === right.parent) {
-          return String(left.title || "").localeCompare(
-            String(right.title || ""),
-          );
+          return String(left.title || "").localeCompare(String(right.title || ""));
         }
-        return String(left.parent || "").localeCompare(
-          String(right.parent || ""),
-        );
+        return String(left.parent || "").localeCompare(String(right.parent || ""));
       });
 
       const mergedFiles = { ...previousFiles };
@@ -370,7 +362,11 @@ function FilesManager() {
         setParentLoadingState(normalizedParent, false);
       }
     },
-    [hasShownServerWarning, replaceFolderChildren, setParentLoadingState],
+    [
+      hasShownServerWarning,
+      replaceFolderChildren,
+      setParentLoadingState,
+    ],
   );
 
   // Load initial data with proper cleanup and 401 handling
@@ -1821,12 +1817,12 @@ function FilesManager() {
             currentFolders.length === 0 &&
             currentFiles.length === 0 &&
             !newItemType && (
-              <div
-                style={{ width: "100%", marginTop: 64, pointerEvents: "none" }}
-              >
-                <Empty description="Empty Folder" />
-              </div>
-            )}
+            <div
+              style={{ width: "100%", marginTop: 64, pointerEvents: "none" }}
+            >
+              <Empty description="Empty Folder" />
+            </div>
+          )}
           {currentFolders.map((f) => renderItem(f, "folder"))}
           {renderNewFolderPlaceholder()}
           {currentFiles.map((f) => renderItem(f, "file"))}

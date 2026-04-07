@@ -117,7 +117,7 @@ function RuntimeLogPanel({ title, runtime, onRefresh }) {
               background: "#fff",
               border: "1px solid #f0f0f0",
               fontFamily:
-                "ui-monospace, SFMono-Regular, SF Mono, Menlo, Consolas, monospace",
+                'ui-monospace, SFMono-Regular, SF Mono, Menlo, Consolas, monospace',
               fontSize: 12,
               color: "#262626",
               wordBreak: "break-word",
@@ -142,7 +142,7 @@ function RuntimeLogPanel({ title, runtime, onRefresh }) {
             whiteSpace: "pre-wrap",
             wordBreak: "break-word",
             fontFamily:
-              "ui-monospace, SFMono-Regular, SF Mono, Menlo, Consolas, monospace",
+              'ui-monospace, SFMono-Regular, SF Mono, Menlo, Consolas, monospace',
           }}
         >
           {text || "No runtime logs captured yet."}

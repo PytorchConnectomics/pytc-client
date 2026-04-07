@@ -490,11 +490,7 @@ const YamlFileUploader = (props) => {
       {yamlContent ? (
         <Row>
           {sliderData.map((param, index) => {
-            const sliderValue = getSliderValue(
-              currentYamlData,
-              type,
-              param.key,
-            );
+            const sliderValue = getSliderValue(currentYamlData, type, param.key);
             const sliderSupported = isSliderSupported(
               currentYamlData,
               type,
@@ -511,11 +507,7 @@ const YamlFileUploader = (props) => {
                       min={param.min}
                       max={param.max}
                       marks={param.marks}
-                      value={
-                        typeof sliderValue === "number"
-                          ? sliderValue
-                          : param.value
-                      }
+                      value={typeof sliderValue === "number" ? sliderValue : param.value}
                       disabled={!sliderSupported}
                       onChange={(newValue) =>
                         handleSliderChange(param.key, newValue)

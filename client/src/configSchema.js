@@ -135,26 +135,14 @@ export function setTrainingOutputPath(configObj, outputPath) {
   }
   const checkpointsPath = joinPath(outputPath, "checkpoints");
   if (hasPath(configObj, ["train", "monitor", "checkpoint", "dirpath"])) {
-    setPathValue(
-      configObj,
-      ["train", "monitor", "checkpoint", "dirpath"],
-      checkpointsPath,
-    );
+    setPathValue(configObj, ["train", "monitor", "checkpoint", "dirpath"], checkpointsPath);
     return;
   }
   if (hasPath(configObj, ["monitor", "checkpoint", "dirpath"])) {
-    setPathValue(
-      configObj,
-      ["monitor", "checkpoint", "dirpath"],
-      checkpointsPath,
-    );
+    setPathValue(configObj, ["monitor", "checkpoint", "dirpath"], checkpointsPath);
     return;
   }
-  setPathValue(
-    configObj,
-    ["monitor", "checkpoint", "dirpath"],
-    checkpointsPath,
-  );
+  setPathValue(configObj, ["monitor", "checkpoint", "dirpath"], checkpointsPath);
 }
 
 export function setInferenceOutputPath(configObj, outputPath) {
@@ -164,11 +152,7 @@ export function setInferenceOutputPath(configObj, outputPath) {
     setPathValue(configObj, ["INFERENCE", "OUTPUT_PATH"], outputPath);
     return;
   }
-  setPathValue(
-    configObj,
-    ["inference", "save_prediction", "output_path"],
-    outputPath,
-  );
+  setPathValue(configObj, ["inference", "save_prediction", "output_path"], outputPath);
 }
 
 export function setInferenceExecutionDefaults(configObj) {
@@ -228,14 +212,16 @@ export function applyInputPaths(
   }
 
   if (mode === "training") {
-    const imagePath = pickFirstExistingPath(configObj, [
-      ["train", "data", "train", "image"],
-      ["data", "train", "image"],
-    ]) || ["train", "data", "train", "image"];
-    const labelPath = pickFirstExistingPath(configObj, [
-      ["train", "data", "train", "label"],
-      ["data", "train", "label"],
-    ]) || ["train", "data", "train", "label"];
+    const imagePath =
+      pickFirstExistingPath(configObj, [
+        ["train", "data", "train", "image"],
+        ["data", "train", "image"],
+      ]) || ["train", "data", "train", "image"];
+    const labelPath =
+      pickFirstExistingPath(configObj, [
+        ["train", "data", "train", "label"],
+        ["data", "train", "label"],
+      ]) || ["train", "data", "train", "label"];
     setPathValue(configObj, imagePath, inputImagePath);
     setPathValue(configObj, labelPath, inputLabelPath);
     if (outputPath) {
@@ -244,14 +230,16 @@ export function applyInputPaths(
     return;
   }
 
-  const imagePath = pickFirstExistingPath(configObj, [
-    ["test", "data", "test", "image"],
-    ["data", "test", "image"],
-  ]) || ["test", "data", "test", "image"];
-  const labelPath = pickFirstExistingPath(configObj, [
-    ["test", "data", "test", "label"],
-    ["data", "test", "label"],
-  ]) || ["test", "data", "test", "label"];
+  const imagePath =
+    pickFirstExistingPath(configObj, [
+      ["test", "data", "test", "image"],
+      ["data", "test", "image"],
+    ]) || ["test", "data", "test", "image"];
+  const labelPath =
+    pickFirstExistingPath(configObj, [
+      ["test", "data", "test", "label"],
+      ["data", "test", "label"],
+    ]) || ["test", "data", "test", "label"];
   setPathValue(configObj, imagePath, inputImagePath);
   if (hasLabelPath) {
     setPathValue(configObj, labelPath, inputLabelPath);

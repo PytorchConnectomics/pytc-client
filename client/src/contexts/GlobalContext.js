@@ -130,13 +130,25 @@ export const ContextWrapper = (props) => {
   const [inferenceConfigOriginPath, setInferenceConfigOriginPath] =
     usePersistedState("inferenceConfigOriginPath", "");
   const [trainingUploadedYamlFile, setTrainingUploadedYamlFile] =
-    usePersistedState("trainingUploadedYamlFile", "");
+    usePersistedState(
+      "trainingUploadedYamlFile",
+      "",
+    );
   const [inferenceUploadedYamlFile, setInferenceUploadedYamlFile] =
-    usePersistedState("inferenceUploadedYamlFile", "");
+    usePersistedState(
+      "inferenceUploadedYamlFile",
+      "",
+    );
   const [trainingSelectedYamlPreset, setTrainingSelectedYamlPreset] =
-    usePersistedState("trainingSelectedYamlPreset", "");
+    usePersistedState(
+      "trainingSelectedYamlPreset",
+      "",
+    );
   const [inferenceSelectedYamlPreset, setInferenceSelectedYamlPreset] =
-    usePersistedState("inferenceSelectedYamlPreset", "");
+    usePersistedState(
+      "inferenceSelectedYamlPreset",
+      "",
+    );
   const [imageFileList, setImageFileList] = usePersistedState(
     "imageFileList",
     [],
@@ -158,7 +170,10 @@ export const ContextWrapper = (props) => {
     null,
   );
   const [inferenceCheckpointPath, setInferenceCheckpointPath] =
-    usePersistedState("inferenceCheckpointPath", null);
+    usePersistedState(
+      "inferenceCheckpointPath",
+      null,
+    );
   const [currentImage, setCurrentImage] = usePersistedState(
     "currentImage",
     null,

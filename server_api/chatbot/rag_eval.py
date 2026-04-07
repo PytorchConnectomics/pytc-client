@@ -2,6 +2,8 @@
 RAG Retrieval Evaluation Script
 Tests whether FAISS retrieval returns the correct source document for each question.
 Updated for the current 7-doc set (MaskProofreading replaces ErrorHandlingTool + WormErrorHandling).
+
+This is a standalone utility script, not a pytest test module.
 """
 
 import os
