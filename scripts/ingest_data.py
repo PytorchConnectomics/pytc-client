@@ -3,6 +3,7 @@ import os
 import pathlib
 import sys
 
+
 def ingest(data_root: str, json_path: str):
     root = pathlib.Path(data_root).expanduser().resolve()
     path = pathlib.Path(json_path).resolve()
@@ -10,7 +11,7 @@ def ingest(data_root: str, json_path: str):
     if not root.exists():
         print(f"Error: Data root not found at {root}")
         return
-    
+
     # Load existing data
     if path.exists():
         try:
@@ -31,15 +32,18 @@ def ingest(data_root: str, json_path: str):
 
     new_volumes = []
     print(f"Crawling {root} for .h5 files...")
-    
+
     count = 0
     for file in root.rglob("*.h5"):
         # Skip internal or hidden directories
-        if any(part.startswith(".") or part == "__pycache__" for part in file.relative_to(root).parts):
+        if any(
+            part.startswith(".") or part == "__pycache__"
+            for part in file.relative_to(root).parts
+        ):
             continue
-            
+
         rel_path = str(file.relative_to(root))
-        
+
         # Check if we already have this volume
         if rel_path in vol_map:
             vol = vol_map[rel_path]
@@ -50,30 +54,35 @@ def ingest(data_root: str, json_path: str):
             new_volumes.append(vol)
         else:
             # Create new volume record
-            new_volumes.append({
-                "id": rel_path,
-                "filename": file.name,
-                "rel_path": rel_path,
-                "assignee": None,
-                "status": "todo"
-            })
+            new_volumes.append(
+                {
+                    "id": rel_path,
+                    "filename": file.name,
+                    "rel_path": rel_path,
+                    "assignee": None,
+                    "status": "todo",
+                }
+            )
         count += 1
 
     data["volumes"] = new_volumes
-    
+
     # Optional: Update project_info if it's a new file
     if "project_info" not in data:
         data["project_info"] = {
             "name": root.name,
             "description": f"Imported from {root}",
-            "version": "1.0.0"
+            "version": "1.0.0",
         }
 
     try:
-        path.write_text(json.dumps(data, indent=2, ensure_ascii=False), encoding="utf-8")
+        path.write_text(
+            json.dumps(data, indent=2, ensure_ascii=False), encoding="utf-8"
+        )
         print(f"Successfully ingested {len(new_volumes)} volumes into {path}")
     except Exception as e:
         print(f"Error writing JSON: {e}")
+
 
 if __name__ == "__main__":
     DATA_ROOT = os.environ.get("DATA_ROOT_EM")

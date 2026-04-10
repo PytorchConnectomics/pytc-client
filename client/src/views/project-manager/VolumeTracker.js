@@ -89,7 +89,7 @@ function VolumeTracker() {
       const params = { page, page_size: pageSize };
       if (workerFilter) params.assignee = workerFilter;
       if (statusFilter) params.status = statusFilter;
-      
+
       const data = await getVolumes(params);
       setVolumes(data.items ?? []);
       setTotal(data.total ?? 0);

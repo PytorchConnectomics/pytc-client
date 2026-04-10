@@ -419,9 +419,7 @@ def _stop_processes(matcher, description: str):
                 cmdline = proc.info["cmdline"] or []
                 if not matcher(cmdline):
                     continue
-                print(
-                    f"Terminating process {proc.info['pid']}: {' '.join(cmdline)}"
-                )
+                print(f"Terminating process {proc.info['pid']}: {' '.join(cmdline)}")
                 proc.terminate()
                 proc.wait(timeout=10)
             except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.TimeoutExpired):

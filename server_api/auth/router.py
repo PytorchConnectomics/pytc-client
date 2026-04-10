@@ -195,7 +195,9 @@ def get_files(
 
     return [
         file
-        for file in query.order_by(models.File.is_folder.desc(), models.File.name.asc()).all()
+        for file in query.order_by(
+            models.File.is_folder.desc(), models.File.name.asc()
+        ).all()
         if not _is_ignored_system_file(file.name)
     ]
 
@@ -287,9 +289,7 @@ def upload_file(
     db: Session = Depends(database.get_db),
 ):
     if _is_ignored_system_file(file.filename):
-        raise HTTPException(
-            status_code=400, detail="System metadata files are ignored"
-        )
+        raise HTTPException(status_code=400, detail="System metadata files are ignored")
 
     # Create uploads directory if not exists
     upload_dir = f"uploads/{current_user.id}"

@@ -56,7 +56,7 @@ function Views() {
   const [viewers, setViewers] = useState([]);
   const [isInferring, setIsInferring] = useState(false);
 
-/*
+  /*
   const allItems = [
     { label: "File Management", key: "files", icon: <FolderOpenOutlined /> },
     { label: "Visualization", key: "visualization", icon: <EyeOutlined /> },
@@ -181,7 +181,7 @@ function Views() {
         {/* {renderTabContent("synanno", <ProofReading />)} */}
         {/* {renderTabContent("worm-error-handling", <WormErrorHandling />)} */}
         {renderTabContent("project-manager", <ProjectManager />)}
-      </Content >
+      </Content>
       <Drawer
         placement="right"
         open={isChatOpen}
@@ -214,7 +214,7 @@ function Views() {
         />
         <Chatbot onClose={() => setIsChatOpen(false)} />
       </Drawer>
-    </Layout >
+    </Layout>
   );
 }
 

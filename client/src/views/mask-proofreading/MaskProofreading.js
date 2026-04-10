@@ -16,7 +16,9 @@ function MaskProofreading() {
           setRefreshTrigger((prev) => prev + 1);
         }}
       /> */}
-      <div style={{ padding: 20 }}>Mask Proofreading Component (EHTool is currently disabled)</div>
+      <div style={{ padding: 20 }}>
+        Mask Proofreading Component (EHTool is currently disabled)
+      </div>
     </div>
   );
 }

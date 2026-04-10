@@ -1,7 +1,4 @@
-import {
-  applyInputPaths,
-  setInferenceExecutionDefaults,
-} from "./configSchema";
+import { applyInputPaths, setInferenceExecutionDefaults } from "./configSchema";
 
 describe("setInferenceExecutionDefaults", () => {
   it("preserves existing legacy GPU values", () => {

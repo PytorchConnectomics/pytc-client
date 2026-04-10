@@ -47,6 +47,7 @@ def get_data_root() -> pathlib.Path:
         return _API_DIR.parent
     return pathlib.Path(root_str).expanduser()
 
+
 # ── Worker definitions (single source of truth) ───────────────────────────────
 _WORKERS = [
     {"key": "alex", "name": "Alex Rivera", "avatarColor": "#1890ff"},
@@ -452,9 +453,12 @@ def _read_data() -> Dict[str, Any]:
             # For external files, start with an EMPTY state rather than SEED
             # to avoid generating mock data (1000 volumes etc)
             empty_state = {
-                "project_info": {"name": "New Project", "description": "Externalized metadata"},
+                "project_info": {
+                    "name": "New Project",
+                    "description": "Externalized metadata",
+                },
                 "volumes": [],
-                "users": _SEED["users"] # Preserve users for login
+                "users": _SEED["users"],  # Preserve users for login
             }
             # Add other mandatory keys
             for k, v in _SEED.items():
@@ -599,27 +603,28 @@ async def ingest_data():
     json_path = get_data_file_path()
 
     import subprocess
+
     script_path = _API_DIR.parent / "scripts" / "ingest_data.py"
-    
+
     env = os.environ.copy()
     env["DATA_ROOT_EM"] = str(data_root)
     env["PROJECT_METADATA_JSON"] = str(json_path)
-    
+
     try:
         result = subprocess.run(
             [sys.executable, str(script_path)],
             env=env,
             capture_output=True,
             text=True,
-            check=True
+            check=True,
         )
         # Reload and return the updated data
         updated_data = _read_data()
         return {
-            "ok": True, 
-            "message": "Ingestion successful", 
+            "ok": True,
+            "message": "Ingestion successful",
             "output": result.stdout,
-            "data": updated_data
+            "data": updated_data,
         }
     except subprocess.CalledProcessError as e:
         raise HTTPException(status_code=500, detail=f"Ingestion failed: {e.stderr}")
