@@ -9,6 +9,7 @@ import React, {
 import { message, Spin } from "antd";
 import { getPMData, savePMData, resetPMData } from "../api";
 import { apiClient } from "../api";
+import { dataReader } from "../services/data_reader";
 
 // ── Context ───────────────────────────────────────────────────────────────────
 
@@ -148,11 +149,30 @@ export function ProjectManagerProvider({ children }) {
     }
   }, []);
 
+  const ingestData = useCallback(async () => {
+    setLoading(true);
+    try {
+      const res = await apiClient.post("/api/pm/data/ingest");
+      if (res.data.ok) {
+        setPmState(res.data.data);
+        message.success(
+          `Ingested ${res.data.data.volumes?.length || 0} volumes.`,
+        );
+      }
+    } catch (err) {
+      console.error("[PM] Ingestion failed:", err);
+      message.error(
+        err.response?.data?.detail || "Failed to ingest data from storage.",
+      );
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
   // ── Volume helpers ───────────────────────────────────────────────────────
   const getVolumes = useCallback(async (params = {}) => {
     try {
-      const res = await apiClient.get("/api/pm/volumes", { params });
-      return res.data;
+      return await dataReader.getPooledVolumes(params);
     } catch (err) {
       message.error("Failed to load volumes from server.");
       throw err;
@@ -161,15 +181,13 @@ export function ProjectManagerProvider({ children }) {
 
   const updateVolumeStatus = useCallback(async (volumeId, status) => {
     try {
-      const res = await apiClient.patch(`/api/pm/volumes/${volumeId}`, {
-        status,
-      });
-      if (res.data?.global_progress) {
+      const res = await dataReader.updateStatus(volumeId, status);
+      if (res?.global_progress) {
         setPmState((prev) =>
-          prev ? { ...prev, global_progress: res.data.global_progress } : prev,
+          prev ? { ...prev, global_progress: res.global_progress } : prev,
         );
       }
-      return res.data;
+      return res;
     } catch (err) {
       message.error("Failed to update volume status.");
       throw err;
@@ -277,6 +295,7 @@ export function ProjectManagerProvider({ children }) {
 
         // Actions
         resetData,
+        ingestData,
         getVolumes,
         updateVolumeStatus,
       }}

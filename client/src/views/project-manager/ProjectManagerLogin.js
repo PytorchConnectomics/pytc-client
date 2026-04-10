@@ -107,7 +107,7 @@ export default function ProjectManagerLogin() {
 
         <Divider plain>
           <Text type="secondary" style={{ fontSize: 12 }}>
-            Credentials Template
+            Login Credentials
           </Text>
         </Divider>
 
@@ -121,10 +121,10 @@ export default function ProjectManagerLogin() {
         >
           <Space direction="vertical" size={2}>
             <Text type="secondary">
-              Admin: <Text code>admin / admin123</Text>
+              Admin Access: <Text code>admin / admin123</Text>
             </Text>
             <Text type="secondary">
-              Worker: <Text code>alex / alex123</Text>
+              Annotator Access: <Text code>alex / alex123</Text>
             </Text>
           </Space>
         </div>

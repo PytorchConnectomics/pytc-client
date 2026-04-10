@@ -59,7 +59,10 @@ function VolumeTracker() {
     isWorker,
     activeWorker,
     globalProgress,
+    getVolumes,
     updateVolumeStatus,
+    ingestData,
+    loading: pmLoading,
   } = useProjectManager();
 
   const [volumes, setVolumes] = useState([]);
@@ -86,12 +89,8 @@ function VolumeTracker() {
       const params = { page, page_size: pageSize };
       if (workerFilter) params.assignee = workerFilter;
       if (statusFilter) params.status = statusFilter;
-      const res = await fetch(
-        `http://localhost:4242/api/pm/volumes?${new URLSearchParams(params)}`,
-        { credentials: "include" },
-      );
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      const data = await res.json();
+      
+      const data = await getVolumes(params);
       setVolumes(data.items ?? []);
       setTotal(data.total ?? 0);
     } catch (err) {
@@ -99,7 +98,7 @@ function VolumeTracker() {
     } finally {
       setLoadingVols(false);
     }
-  }, [page, pageSize, workerFilter, statusFilter]);
+  }, [page, pageSize, workerFilter, statusFilter, getVolumes]);
 
   useEffect(() => {
     fetchVolumes();
@@ -323,6 +322,29 @@ function VolumeTracker() {
         }
         extra={
           <Space>
+            {/* Sync button — admin only */}
+            {isAdmin && (
+              <Popconfirm
+                title="Refresh volume list?"
+                description="This will scan the physical storage for new .h5 files."
+                onConfirm={async () => {
+                  await ingestData();
+                  fetchVolumes();
+                }}
+                okText="Scan"
+                cancelText="Cancel"
+              >
+                <Button
+                  size="small"
+                  type="primary"
+                  icon={<SyncOutlined />}
+                  loading={pmLoading}
+                >
+                  Sync with Storage
+                </Button>
+              </Popconfirm>
+            )}
+
             {/* Assignee filter — admin only */}
             {isAdmin && (
               <Select

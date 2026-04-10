@@ -10,8 +10,8 @@ GET  /api/pm/volumes                  Paginated volume list with optional filter
 PATCH /api/pm/volumes/{volume_id}     Update a single volume's status
 """
 
-from __future__ import annotations
-
+import os
+import sys
 import json
 import math
 import pathlib
@@ -26,7 +26,26 @@ router = APIRouter()
 _HERE = pathlib.Path(__file__).resolve().parent
 _API_DIR = _HERE.parent
 _DATA_DIR = _API_DIR / "data_store"
-_DATA_FILE = _DATA_DIR / "project_manager_data.json"
+
+# Dynamic config via environment variables
+DEFAULT_DATA_FILE = str(_DATA_DIR / "project_manager_data.json")
+_DATA_FILE_OVERRIDE: Optional[str] = None
+
+
+def get_data_file_path() -> pathlib.Path:
+    global _DATA_FILE_OVERRIDE
+    if _DATA_FILE_OVERRIDE:
+        return pathlib.Path(_DATA_FILE_OVERRIDE)
+    path_str = os.environ.get("PROJECT_METADATA_JSON", DEFAULT_DATA_FILE)
+    return pathlib.Path(path_str)
+
+
+def get_data_root() -> pathlib.Path:
+    root_str = os.environ.get("DATA_ROOT_EM", "")
+    if not root_str:
+        # Fallback to a relative directory if not set
+        return _API_DIR.parent
+    return pathlib.Path(root_str).expanduser()
 
 # ── Worker definitions (single source of truth) ───────────────────────────────
 _WORKERS = [
@@ -45,10 +64,12 @@ def _generate_volumes() -> List[Dict[str, Any]]:
     vols: List[Dict[str, Any]] = []
     for idx in range(1, TOTAL_VOLUMES + 1):
         worker_key = _WORKER_KEYS[(idx - 1) // VOLUMES_PER_WORKER]
+        filename = f"vol_{idx:03d}_em.h5"
         vols.append(
             {
-                "id": f"vol_{idx:03d}_em.h5",
-                "filename": f"vol_{idx:03d}_em.h5",
+                "id": filename,
+                "filename": filename,
+                "rel_path": filename,  # Default rel_path matching filename
                 "assignee": worker_key,
                 "status": "todo",  # todo | in_progress | done
             }
@@ -418,12 +439,31 @@ def _ensure_data_dir() -> None:
 
 
 def _read_data() -> Dict[str, Any]:
-    _ensure_data_dir()
-    if not _DATA_FILE.exists():
-        _write_data(_SEED)
-        return _SEED
+    file_path = get_data_file_path()
+    # Ensure parent directory exists for the default file
+    if file_path == pathlib.Path(DEFAULT_DATA_FILE):
+        _ensure_data_dir()
+
+    if not file_path.exists():
+        if file_path == pathlib.Path(DEFAULT_DATA_FILE):
+            _write_data(_SEED)
+            return _SEED
+        else:
+            # For external files, start with an EMPTY state rather than SEED
+            # to avoid generating mock data (1000 volumes etc)
+            empty_state = {
+                "project_info": {"name": "New Project", "description": "Externalized metadata"},
+                "volumes": [],
+                "users": _SEED["users"] # Preserve users for login
+            }
+            # Add other mandatory keys
+            for k, v in _SEED.items():
+                if k not in empty_state:
+                    empty_state[k] = v
+            _write_data(empty_state)
+            return empty_state
     try:
-        return json.loads(_DATA_FILE.read_text(encoding="utf-8"))
+        return json.loads(file_path.read_text(encoding="utf-8"))
     except (json.JSONDecodeError, OSError) as exc:
         raise HTTPException(
             status_code=500, detail=f"Failed to read data store: {exc}"
@@ -431,13 +471,16 @@ def _read_data() -> Dict[str, Any]:
 
 
 def _write_data(payload: Dict[str, Any]) -> None:
-    _ensure_data_dir()
-    tmp = _DATA_FILE.with_suffix(".tmp")
+    file_path = get_data_file_path()
+    if file_path == pathlib.Path(DEFAULT_DATA_FILE):
+        _ensure_data_dir()
+
+    tmp = file_path.with_suffix(".tmp")
     try:
         tmp.write_text(
             json.dumps(payload, indent=2, ensure_ascii=False), encoding="utf-8"
         )
-        tmp.replace(_DATA_FILE)
+        tmp.replace(file_path)
     except OSError as exc:
         raise HTTPException(
             status_code=500, detail=f"Failed to write data store: {exc}"
@@ -483,6 +526,10 @@ class VolumeStatusUpdate(BaseModel):
 class LoginRequest(BaseModel):
     username: str
     password: str
+
+
+class LinkMetadataRequest(BaseModel):
+    path: str
 
 
 # ── Endpoints ─────────────────────────────────────────────────────────────────
@@ -540,12 +587,66 @@ async def save_pm_data(req: Request):
 
 
 @router.post("/data/reset")
+async def reset_data():
+    _write_data(_SEED)
+    return _SEED
+
+
+@router.post("/data/ingest")
+async def ingest_data():
+    """Trigger the real-world data ingestion script."""
+    data_root = get_data_root()
+    json_path = get_data_file_path()
+
+    import subprocess
+    script_path = _API_DIR.parent / "scripts" / "ingest_data.py"
+    
+    env = os.environ.copy()
+    env["DATA_ROOT_EM"] = str(data_root)
+    env["PROJECT_METADATA_JSON"] = str(json_path)
+    
+    try:
+        result = subprocess.run(
+            [sys.executable, str(script_path)],
+            env=env,
+            capture_output=True,
+            text=True,
+            check=True
+        )
+        # Reload and return the updated data
+        updated_data = _read_data()
+        return {
+            "ok": True, 
+            "message": "Ingestion successful", 
+            "output": result.stdout,
+            "data": updated_data
+        }
+    except subprocess.CalledProcessError as e:
+        raise HTTPException(status_code=500, detail=f"Ingestion failed: {e.stderr}")
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Unexpected error: {str(e)}")
+
+
+@router.post("/data/reset")
 def reset_pm_data():
     """Revert the data file to original seed and return state (without volumes)."""
     _write_data(_SEED)
     result = {k: v for k, v in _SEED.items() if k != "volumes"}
     result["global_progress"] = _compute_global_progress(_SEED["volumes"])
     return result
+
+
+@router.post("/data/link")
+async def link_metadata(body: LinkMetadataRequest):
+    """Dynamically link to an external metadata JSON file for the current session."""
+    global _DATA_FILE_OVERRIDE
+    path = pathlib.Path(body.path).expanduser()
+    if not path.exists():
+        raise HTTPException(
+            status_code=404, detail=f"Target metadata file does not exist: {path}"
+        )
+    _DATA_FILE_OVERRIDE = str(path)
+    return {"ok": True, "active_path": _DATA_FILE_OVERRIDE}
 
 
 # ── Volume endpoints ──────────────────────────────────────────────────────────
@@ -557,6 +658,7 @@ def get_volumes(
     status: Optional[str] = Query(
         None, description="Filter by status: todo|in_progress|done"
     ),
+    id: Optional[str] = Query(None, description="Exact filename/task ID match"),
     page: int = Query(1, ge=1),
     page_size: int = Query(50, ge=1, le=200),
 ):
@@ -565,6 +667,8 @@ def get_volumes(
     volumes: List[Dict[str, Any]] = data.get("volumes", [])
 
     # Apply filters
+    if id:
+        volumes = [v for v in volumes if v["id"] == id]
     if assignee:
         volumes = [v for v in volumes if v["assignee"] == assignee]
     if status:
