@@ -11,6 +11,8 @@ import {
   approveAgentAction as approveAgentActionApi,
   createAgentAction,
   getCurrentWorkflow,
+  getWorkflowHotspots,
+  getWorkflowImpactPreview,
   listWorkflowEvents,
   queryWorkflowAgent,
   rejectAgentAction as rejectAgentActionApi,
@@ -28,6 +30,8 @@ export function WorkflowProvider({ children }) {
   const appContext = useContext(AppContext);
   const [workflow, setWorkflow] = useState(null);
   const [events, setEvents] = useState([]);
+  const [hotspots, setHotspots] = useState([]);
+  const [impactPreview, setImpactPreview] = useState(null);
   const [loading, setLoading] = useState(true);
   const [lastClientEffects, setLastClientEffects] = useState(null);
 
@@ -53,9 +57,46 @@ export function WorkflowProvider({ children }) {
     return nextEvents || [];
   }, [workflow?.id]);
 
+  const refreshInsights = useCallback(async () => {
+    if (!workflow?.id) {
+      setHotspots([]);
+      setImpactPreview(null);
+      return null;
+    }
+    try {
+      const [hotspotData, impactData] = await Promise.all([
+        getWorkflowHotspots(workflow.id),
+        getWorkflowImpactPreview(workflow.id),
+      ]);
+      setHotspots(hotspotData?.hotspots || []);
+      setImpactPreview(impactData || null);
+      return {
+        hotspots: hotspotData?.hotspots || [],
+        impactPreview: impactData || null,
+      };
+    } catch (_error) {
+      return null;
+    }
+  }, [workflow?.id]);
+
   useEffect(() => {
     refreshWorkflow();
   }, [refreshWorkflow]);
+
+  useEffect(() => {
+    if (!workflow?.id) {
+      setHotspots([]);
+      setImpactPreview(null);
+      return;
+    }
+    refreshInsights();
+  }, [
+    workflow?.id,
+    workflow?.stage,
+    workflow?.corrected_mask_path,
+    events.length,
+    refreshInsights,
+  ]);
 
   const updateWorkflow = useCallback(
     async (patch) => {
@@ -147,10 +188,13 @@ export function WorkflowProvider({ children }) {
       value={{
         workflow,
         events,
+        hotspots,
+        impactPreview,
         loading,
         lastClientEffects,
         refreshWorkflow,
         refreshEvents,
+        refreshInsights,
         updateWorkflow,
         appendEvent,
         proposeAgentAction,

@@ -1,7 +1,13 @@
-import React from "react";
-import { Button, Empty, List, Space, Tag, Typography } from "antd";
-import { CheckOutlined, CloseOutlined } from "@ant-design/icons";
+import React, { useMemo, useState } from "react";
+import { Button, Empty, Input, List, Select, Space, Tag, Typography } from "antd";
 import { useWorkflow } from "../contexts/WorkflowContext";
+import AgentProposalCard from "./chat/AgentProposalCard";
+import {
+  DEFAULT_TIMELINE_FILTERS,
+  filterTimelineEvents,
+  normalizeTimelineFilters,
+  TIMELINE_ACTOR_OPTIONS,
+} from "../contexts/workflow/timelineFilters";
 
 const { Text } = Typography;
 
@@ -14,6 +20,12 @@ const STAGE_LABELS = {
   evaluation: "Evaluation",
 };
 
+const SEVERITY_COLORS = {
+  low: "default",
+  medium: "orange",
+  high: "red",
+};
+
 function formatEventTime(value) {
   if (!value) return "";
   const date = new Date(value);
@@ -24,14 +36,22 @@ function formatEventTime(value) {
 function WorkflowTimeline({ limit = 8 }) {
   const workflowContext = useWorkflow();
   const workflow = workflowContext?.workflow;
-  const events = workflowContext?.events || [];
+  const events = workflowContext?.events;
+  const hotspots = workflowContext?.hotspots || [];
+  const impactPreview = workflowContext?.impactPreview;
+  const refreshInsights = workflowContext?.refreshInsights;
   const approveAgentAction = workflowContext?.approveAgentAction;
   const rejectAgentAction = workflowContext?.rejectAgentAction;
+  const [filters, setFilters] = useState(DEFAULT_TIMELINE_FILTERS);
+
+  const reversedEvents = useMemo(() => [...(events || [])].reverse(), [events]);
+  const visibleEvents = useMemo(() => {
+    return filterTimelineEvents(reversedEvents, filters).slice(0, limit);
+  }, [reversedEvents, filters, limit]);
+  const stageLabel = STAGE_LABELS[workflow?.stage] || workflow?.stage || "Loading";
+  const topHotspot = hotspots[0] || null;
 
   if (!workflowContext) return null;
-
-  const visibleEvents = events.slice(-limit).reverse();
-  const stageLabel = STAGE_LABELS[workflow?.stage] || workflow?.stage || "Loading";
 
   return (
     <div
@@ -55,9 +75,87 @@ function WorkflowTimeline({ limit = 8 }) {
             {stageLabel}
           </Tag>
         </Space>
-        <Text type="secondary" style={{ fontSize: 12 }}>
-          {workflow?.title || "Segmentation Workflow"}
-        </Text>
+        <Space size="small">
+          <Text type="secondary" style={{ fontSize: 12 }}>
+            {workflow?.title || "Segmentation Workflow"}
+          </Text>
+          <Button
+            size="small"
+            type="text"
+            onClick={() => refreshInsights?.()}
+            style={{ paddingInline: 4 }}
+          >
+            Refresh Insights
+          </Button>
+        </Space>
+      </Space>
+
+      {(topHotspot || impactPreview) && (
+        <div
+          style={{
+            marginTop: 8,
+            padding: "6px 8px",
+            background: "#fff",
+            border: "1px solid #f0f0f0",
+            borderRadius: 6,
+          }}
+        >
+          {topHotspot && (
+            <Space size="small" wrap>
+              <Text style={{ fontSize: 12 }} strong>
+                Hotspot
+              </Text>
+              <Tag color={SEVERITY_COLORS[topHotspot.severity] || "default"}>
+                {topHotspot.severity}
+              </Tag>
+              <Text style={{ fontSize: 12 }}>{topHotspot.summary}</Text>
+            </Space>
+          )}
+          {impactPreview && (
+            <div style={{ marginTop: topHotspot ? 4 : 0 }}>
+              <Text style={{ fontSize: 12 }} strong>
+                Impact
+              </Text>
+              <Text style={{ fontSize: 12 }}>
+                {` ${impactPreview.summary} (confidence: ${impactPreview.confidence})`}
+              </Text>
+            </div>
+          )}
+        </div>
+      )}
+
+      <Space size="small" style={{ marginTop: 8, display: "flex" }} wrap>
+        <Select
+          aria-label="Actor filter"
+          size="small"
+          value={filters.actor}
+          style={{ minWidth: 124 }}
+          options={TIMELINE_ACTOR_OPTIONS.map((value) => ({
+            value,
+            label: value === "all" ? "All actors" : value,
+          }))}
+          onChange={(value) =>
+            setFilters((prev) => normalizeTimelineFilters({ ...prev, actor: value }))
+          }
+        />
+        <Input
+          aria-label="Event type filter"
+          size="small"
+          value={filters.eventType}
+          placeholder="Filter event type"
+          style={{ maxWidth: 180 }}
+          onChange={(event) =>
+            setFilters((prev) =>
+              normalizeTimelineFilters({ ...prev, eventType: event.target.value }),
+            )
+          }
+        />
+        <Button
+          size="small"
+          onClick={() => setFilters(DEFAULT_TIMELINE_FILTERS)}
+        >
+          Clear
+        </Button>
       </Space>
 
       {visibleEvents.length === 0 ? (
@@ -85,22 +183,9 @@ function WorkflowTimeline({ limit = 8 }) {
                 actions={
                   isPendingProposal
                     ? [
-                        <Button
-                          key="approve"
-                          size="small"
-                          icon={<CheckOutlined />}
-                          onClick={() => approveAgentAction?.(event.id)}
-                        >
-                          Approve
-                        </Button>,
-                        <Button
-                          key="reject"
-                          size="small"
-                          icon={<CloseOutlined />}
-                          onClick={() => rejectAgentAction?.(event.id)}
-                        >
-                          Reject
-                        </Button>,
+                        <Tag key="pending" color="gold">
+                          Needs review
+                        </Tag>,
                       ]
                     : []
                 }
@@ -117,17 +202,31 @@ function WorkflowTimeline({ limit = 8 }) {
                     </Space>
                   }
                   description={
-                    <Space size="small" wrap>
-                      <Text type="secondary" style={{ fontSize: 11 }}>
-                        {event.actor}
-                      </Text>
-                      <Text type="secondary" style={{ fontSize: 11 }}>
-                        {event.event_type}
-                      </Text>
-                      <Text type="secondary" style={{ fontSize: 11 }}>
-                        {formatEventTime(event.created_at)}
-                      </Text>
-                    </Space>
+                    <div>
+                      <Space size="small" wrap>
+                        <Text type="secondary" style={{ fontSize: 11 }}>
+                          {event.actor}
+                        </Text>
+                        <Text type="secondary" style={{ fontSize: 11 }}>
+                          {event.event_type}
+                        </Text>
+                        <Text type="secondary" style={{ fontSize: 11 }}>
+                          {formatEventTime(event.created_at)}
+                        </Text>
+                      </Space>
+                      {isPendingProposal && (
+                        <AgentProposalCard
+                          proposal={{
+                            ...(event.payload || {}),
+                            type: event.payload?.action || "agent_proposal",
+                            rationale: event.summary,
+                            ...(event.payload?.params || {}),
+                          }}
+                          onApprove={() => approveAgentAction?.(event.id)}
+                          onReject={() => rejectAgentAction?.(event.id)}
+                        />
+                      )}
+                    </div>
                   }
                 />
               </List.Item>
