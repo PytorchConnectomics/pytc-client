@@ -10,6 +10,7 @@ import requests
 import uvicorn
 from fastapi import Depends, FastAPI, HTTPException, Request, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
+from sqlalchemy import inspect, text
 from sqlalchemy.orm import Session
 from runtime_settings import (
     get_allowed_origins,
@@ -22,6 +23,12 @@ from server_api.auth.database import get_db
 from server_api.auth.router import get_current_user
 from server_api.ehtool import router as ehtool_router
 from server_api.project_manager import router as pm_router
+from server_api.workflows import router as workflow_router
+from server_api.workflows.service import (
+    append_event_for_workflow_if_present,
+    get_user_workflow_or_404,
+    update_workflow_fields,
+)
 
 from fastapi.staticfiles import StaticFiles
 import os
@@ -70,6 +77,22 @@ REACT_APP_SERVER_URL = "localhost:4243"
 
 models.Base.metadata.create_all(bind=database.engine)
 
+
+def _ensure_sqlite_column(table_name: str, column_name: str, ddl: str) -> None:
+    if database.engine.dialect.name != "sqlite":
+        return
+    inspector = inspect(database.engine)
+    if table_name not in inspector.get_table_names():
+        return
+    existing = {column["name"] for column in inspector.get_columns(table_name)}
+    if column_name in existing:
+        return
+    with database.engine.begin() as connection:
+        connection.execute(text(f"ALTER TABLE {table_name} ADD COLUMN {ddl}"))
+
+
+_ensure_sqlite_column("ehtool_sessions", "workflow_id", "workflow_id INTEGER")
+
 app = FastAPI()
 
 # Ensure uploads directory exists
@@ -79,6 +102,7 @@ app.mount("/uploads", StaticFiles(directory="uploads"), name="uploads")
 app.include_router(auth_router.router)
 app.include_router(ehtool_router.router, prefix="/eh", tags=["ehtool"])
 app.include_router(pm_router.router, prefix="/api/pm", tags=["project-manager"])
+app.include_router(workflow_router.router, prefix="/api/workflows", tags=["workflows"])
 
 app.add_middleware(
     CORSMiddleware,
@@ -365,7 +389,11 @@ def _is_probable_label_volume(image_array) -> bool:
 
 
 @app.post("/neuroglancer")
-async def neuroglancer(req: Request):
+async def neuroglancer(
+    req: Request,
+    current_user: models.User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
     import neuroglancer
 
     cleanup_paths: List[pathlib.Path] = []
@@ -385,6 +413,8 @@ async def neuroglancer(req: Request):
                 raise HTTPException(
                     status_code=400, detail="Scales payload is invalid."
                 )
+            workflow_id_raw = form.get("workflow_id")
+            workflow_id = int(workflow_id_raw) if workflow_id_raw else None
 
             image = save_upload_to_tempfile(image_upload)
             cleanup_paths.append(image)
@@ -399,6 +429,7 @@ async def neuroglancer(req: Request):
             image = process_path(payload["image"])
             label = process_path(payload.get("label"))
             scales = payload["scales"]
+            workflow_id = payload.get("workflow_id") or payload.get("workflowId")
 
         print(image, label, scales)
 
@@ -435,6 +466,35 @@ async def neuroglancer(req: Request):
                 s.layers.append(name="gt", layer=ngLayer(gt, res, tt="segmentation"))
 
         public_url = _build_neuroglancer_public_url(str(viewer), req)
+        if workflow_id:
+            workflow = get_user_workflow_or_404(
+                db, workflow_id=int(workflow_id), user_id=current_user.id
+            )
+            update_workflow_fields(
+                db,
+                workflow,
+                {
+                    "stage": "visualization",
+                    "image_path": str(image),
+                    "label_path": str(label) if label else None,
+                    "neuroglancer_url": public_url,
+                },
+                commit=True,
+            )
+            append_event_for_workflow_if_present(
+                db,
+                workflow_id=workflow.id,
+                actor="user",
+                event_type="viewer.created",
+                stage="visualization",
+                summary="Created Neuroglancer viewer.",
+                payload={
+                    "image_path": str(image),
+                    "label_path": str(label) if label else None,
+                    "scales": scales,
+                    "neuroglancer_url": public_url,
+                },
+            )
         print(public_url)
         return public_url
     finally:
@@ -448,8 +508,39 @@ async def neuroglancer(req: Request):
 
 
 @app.post("/start_model_training")
-async def start_model_training(req: Request):
+async def start_model_training(
+    req: Request,
+    current_user: models.User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
     body = await req.json()
+    workflow_id = body.get("workflow_id") or body.get("workflowId")
+    if workflow_id:
+        workflow = get_user_workflow_or_404(
+            db, workflow_id=int(workflow_id), user_id=current_user.id
+        )
+        update_workflow_fields(
+            db,
+            workflow,
+            {
+                "stage": "retraining_staged",
+                "training_output_path": body.get("outputPath"),
+            },
+            commit=True,
+        )
+        append_event_for_workflow_if_present(
+            db,
+            workflow_id=workflow.id,
+            actor="user",
+            event_type="training.started",
+            stage=workflow.stage,
+            summary="Started model training from the workflow.",
+            payload={
+                "outputPath": body.get("outputPath"),
+                "logPath": body.get("logPath"),
+                "configOriginPath": body.get("configOriginPath"),
+            },
+        )
     worker_data = _proxy_to_worker(
         "post",
         "/start_model_training",
@@ -483,8 +574,42 @@ async def get_training_logs():
 
 
 @app.post("/start_model_inference")
-async def start_model_inference(req: Request):
+async def start_model_inference(
+    req: Request,
+    current_user: models.User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
     body = await req.json()
+    workflow_id = body.get("workflow_id") or body.get("workflowId")
+    if workflow_id:
+        workflow = get_user_workflow_or_404(
+            db, workflow_id=int(workflow_id), user_id=current_user.id
+        )
+        update_workflow_fields(
+            db,
+            workflow,
+            {
+                "stage": "inference",
+                "inference_output_path": body.get("outputPath"),
+                "checkpoint_path": (body.get("arguments") or {}).get("checkpoint")
+                or body.get("checkpointPath"),
+            },
+            commit=True,
+        )
+        append_event_for_workflow_if_present(
+            db,
+            workflow_id=workflow.id,
+            actor="user",
+            event_type="inference.started",
+            stage="inference",
+            summary="Started model inference from the workflow.",
+            payload={
+                "outputPath": body.get("outputPath"),
+                "checkpointPath": (body.get("arguments") or {}).get("checkpoint")
+                or body.get("checkpointPath"),
+                "configOriginPath": body.get("configOriginPath"),
+            },
+        )
     worker_data = _proxy_to_worker(
         "post",
         "/start_model_inference",
