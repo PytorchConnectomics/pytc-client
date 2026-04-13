@@ -73,7 +73,9 @@ def _clear_runtime_process(kind: str, process=None):
         _inference_process = None
 
 
-def _reset_runtime_state(kind: str, *, phase: str = "idle", metadata: dict | None = None):
+def _reset_runtime_state(
+    kind: str, *, phase: str = "idle", metadata: dict | None = None
+):
     state = _new_runtime_state()
     timestamp = _utc_now()
     state["phase"] = phase
@@ -361,7 +363,9 @@ def start_training(payload: dict):
             configPath=temp_filepath,
             configOriginPath=config_origin_path,
         )
-        _append_runtime_event("training", f"Config origin: {config_origin_path or 'none'}")
+        _append_runtime_event(
+            "training", f"Config origin: {config_origin_path or 'none'}"
+        )
         _append_runtime_event("training", f"Staged config path: {temp_filepath}")
 
         command = [
@@ -380,7 +384,9 @@ def start_training(payload: dict):
         )
 
         print(f"[MODEL.PY] Final training command: {' '.join(command)}")
-        _append_runtime_event("training", f"Final training command: {' '.join(command)}")
+        _append_runtime_event(
+            "training", f"Final training command: {' '.join(command)}"
+        )
         _training_process = _start_logged_process(
             command,
             current_dir,
@@ -586,7 +592,9 @@ def start_inference(payload: dict):
         )
 
         print(f"[MODEL.PY] Final inference command: {' '.join(command)}")
-        _append_runtime_event("inference", f"Final inference command: {' '.join(command)}")
+        _append_runtime_event(
+            "inference", f"Final inference command: {' '.join(command)}"
+        )
         _inference_process = _start_logged_process(
             command,
             current_dir,
@@ -642,7 +650,8 @@ def stop_inference():
     if _inference_process and _inference_process.poll() is None:
         try:
             _append_runtime_event(
-                "inference", f"Terminating inference process PID: {_inference_process.pid}"
+                "inference",
+                f"Terminating inference process PID: {_inference_process.pid}",
             )
             print(f"Terminating inference process PID: {_inference_process.pid}")
             _inference_process.terminate()

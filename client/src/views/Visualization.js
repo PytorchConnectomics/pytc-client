@@ -7,11 +7,13 @@ import {
 } from "@ant-design/icons";
 import { getNeuroglancerViewer } from "../api";
 import UnifiedFileInput from "../components/UnifiedFileInput";
+import { useWorkflow } from "../contexts/WorkflowContext";
 
 const { Title } = Typography;
 
 function Visualization(props) {
   const { viewers, setViewers } = props;
+  const workflowContext = useWorkflow();
   const [activeKey, setActiveKey] = useState(
     viewers.length > 0 ? viewers[0].key : null,
   );
@@ -77,6 +79,7 @@ function Visualization(props) {
         imagePath,
         labelPath,
         scalesArray,
+        workflowContext?.workflow?.id,
       );
 
       console.log("Current Viewer at ", res);

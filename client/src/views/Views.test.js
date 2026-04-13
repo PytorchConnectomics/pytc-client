@@ -3,6 +3,10 @@ import { fireEvent, render, screen } from "@testing-library/react";
 
 import Views from "./Views";
 
+jest.mock("../contexts/WorkflowContext", () => ({
+  useWorkflow: () => null,
+}));
+
 jest.mock("antd", () => {
   const React = require("react");
 
@@ -41,6 +45,7 @@ jest.mock("@ant-design/icons", () => {
     DashboardOutlined: Icon,
     BugOutlined: Icon,
     MessageOutlined: Icon,
+    ProjectOutlined: Icon,
   };
 });
 
@@ -49,7 +54,12 @@ jest.mock("./Visualization", () => () => <div>Visualization Content</div>);
 jest.mock("./ModelTraining", () => () => <div>Training Content</div>);
 jest.mock("./ModelInference", () => () => <div>Inference Content</div>);
 jest.mock("./Monitoring", () => () => <div>Monitoring Content</div>);
-jest.mock("./MaskProofreading", () => () => <div>Mask Proofreading Content</div>);
+jest.mock("./mask-proofreading/MaskProofreading", () => () => (
+  <div>Mask Proofreading Content</div>
+));
+jest.mock("./project-manager/ProjectManager", () => () => (
+  <div>Project Manager Content</div>
+));
 jest.mock("../components/Chatbot", () => () => <div>Chatbot</div>);
 
 describe("Views", () => {

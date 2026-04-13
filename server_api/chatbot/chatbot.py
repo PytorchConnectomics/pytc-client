@@ -7,6 +7,7 @@
 # - RAG: Documentation search via FAISS vector store
 
 import os
+from urllib.parse import urlparse
 from pathlib import Path
 
 from langchain_ollama import OllamaEmbeddings, ChatOllama
@@ -20,6 +21,62 @@ from server_api.chatbot.tools import (
     read_config,
     list_checkpoints,
 )
+
+
+class LLMConfigurationError(RuntimeError):
+    """Raised when the configured LLM endpoint is missing or malformed."""
+
+
+def _format_admin_llm_error(error: Exception) -> str:
+    return (
+        "The AI assistant could not connect to its configured language model. "
+        "Please contact your system administrator with this error: "
+        f"{str(error).strip() or error.__class__.__name__}"
+    )
+
+
+def _validate_ollama_base_url(base_url: str) -> str:
+    parsed = urlparse(base_url)
+    if not parsed.scheme or not parsed.netloc:
+        raise LLMConfigurationError(
+            "OLLAMA_BASE_URL must be a full URL, for example "
+            "http://<host>:<port>."
+        )
+    try:
+        port = parsed.port
+    except ValueError as exc:
+        raise LLMConfigurationError(
+            f"OLLAMA_BASE_URL has an invalid port: {base_url}"
+        ) from exc
+    if port is None:
+        raise LLMConfigurationError(
+            "OLLAMA_BASE_URL must include the LLM service port, for example "
+            "http://<host>:11434."
+        )
+    return base_url.rstrip("/")
+
+
+def get_ollama_config():
+    """Read required Ollama configuration from the launch environment."""
+    base_url = os.getenv("OLLAMA_BASE_URL")
+    model = os.getenv("OLLAMA_MODEL")
+    embed_model = os.getenv("OLLAMA_EMBED_MODEL")
+    missing = [
+        name
+        for name, value in {
+            "OLLAMA_BASE_URL": base_url,
+            "OLLAMA_MODEL": model,
+            "OLLAMA_EMBED_MODEL": embed_model,
+        }.items()
+        if not value
+    ]
+    if missing:
+        raise LLMConfigurationError(
+            "Missing required LLM environment variable(s): "
+            f"{', '.join(missing)}. Export them before starting PyTC Client. "
+            "Example: export OLLAMA_BASE_URL=http://<host>:<port>"
+        )
+    return _validate_ollama_base_url(base_url), model, embed_model
 
 TRAINING_AGENT_PROMPT = """You are a **Training Agent** for PyTorch Connectomics.
 
@@ -119,9 +176,7 @@ Tools:
 
 def build_chain():
     """Build the multi-agent system with supervisor, training, and inference agents."""
-    ollama_base_url = os.getenv("OLLAMA_BASE_URL", "http://cscigpu08.bc.edu:4443")
-    ollama_model = os.getenv("OLLAMA_MODEL", "gpt-oss:20b")
-    ollama_embed_model = os.getenv("OLLAMA_EMBED_MODEL", "qwen3-embedding:8b")
+    ollama_base_url, ollama_model, ollama_embed_model = get_ollama_config()
     llm = ChatOllama(model=ollama_model, base_url=ollama_base_url, temperature=0)
     embeddings = OllamaEmbeddings(model=ollama_embed_model, base_url=ollama_base_url)
     faiss_path = process_path("server_api/chatbot/faiss_index")
@@ -148,6 +203,7 @@ def build_chain():
 
     # Call counter to prevent infinite search loops (reset before each user message)
     _search_call_count = [0]
+    _rag_enabled = [True]
 
     def reset_search_counter():
         _search_call_count[0] = 0
@@ -184,12 +240,22 @@ def build_chain():
             print("[TOOL] search limit reached (max 2 per question)")
             return "Search limit reached. Please answer based on the documentation already retrieved."
 
-        # Primary: FAISS semantic search (chunked embeddings)
-        docs = retriever.invoke(query)
-        if docs:
-            sources = [d.metadata.get("source", "?") for d in docs]
-            print(f"[TOOL] RAG → {len(docs)} chunks: {sources}")
-            return "\n\n".join([doc.page_content for doc in docs])
+        # Primary: FAISS semantic search (chunked embeddings).
+        # If embeddings/index dimensions do not match (or any retrieval error occurs),
+        # disable RAG for the current process and use keyword fallback.
+        if _rag_enabled[0]:
+            try:
+                docs = retriever.invoke(query)
+                if docs:
+                    sources = [d.metadata.get("source", "?") for d in docs]
+                    print(f"[TOOL] RAG → {len(docs)} chunks: {sources}")
+                    return "\n\n".join([doc.page_content for doc in docs])
+            except Exception as exc:
+                _rag_enabled[0] = False
+                print(
+                    "[TOOL] RAG retrieval failed; disabling RAG and falling back "
+                    f"to keyword search ({exc.__class__.__name__}: {exc!r})"
+                )
 
         # Fallback: keyword scoring against full docs
         print("[TOOL] RAG returned nothing, trying keyword fallback")
@@ -301,9 +367,7 @@ def build_helper_chain():
     chatbot but has NO access to training/inference sub-agents.
     Returns ``(agent, reset_search_counter)`` — same interface as ``build_chain``.
     """
-    ollama_base_url = os.getenv("OLLAMA_BASE_URL", "http://cscigpu08.bc.edu:4443")
-    ollama_model = os.getenv("OLLAMA_MODEL", "gpt-oss:20b")
-    ollama_embed_model = os.getenv("OLLAMA_EMBED_MODEL", "qwen3-embedding:8b")
+    ollama_base_url, ollama_model, ollama_embed_model = get_ollama_config()
     llm = ChatOllama(model=ollama_model, base_url=ollama_base_url, temperature=0)
     embeddings = OllamaEmbeddings(model=ollama_embed_model, base_url=ollama_base_url)
     faiss_path = process_path("server_api/chatbot/faiss_index")
@@ -326,6 +390,7 @@ def build_helper_chain():
         _all_docs[md_file.name] = md_file.read_text(encoding="utf-8")
 
     _search_call_count = [0]
+    _rag_enabled = [True]
 
     def reset_search_counter():
         _search_call_count[0] = 0
@@ -346,9 +411,17 @@ def build_helper_chain():
                 "Search limit reached. Answer with the documentation already retrieved."
             )
 
-        docs = retriever.invoke(query)
-        if docs:
-            return "\n\n".join([doc.page_content for doc in docs])
+        if _rag_enabled[0]:
+            try:
+                docs = retriever.invoke(query)
+                if docs:
+                    return "\n\n".join([doc.page_content for doc in docs])
+            except Exception as exc:
+                _rag_enabled[0] = False
+                print(
+                    "[HELPER TOOL] RAG retrieval failed; disabling RAG and "
+                    f"falling back to keyword search ({exc.__class__.__name__}: {exc!r})"
+                )
 
         # Keyword fallback
         query_lower = query.lower()

@@ -3,6 +3,9 @@ import pathlib
 import re
 import shutil
 import tempfile
+import traceback
+import time
+from concurrent.futures import ThreadPoolExecutor, TimeoutError
 from typing import List, Optional
 from urllib.parse import urlsplit, urlunsplit
 
@@ -10,6 +13,7 @@ import requests
 import uvicorn
 from fastapi import Depends, FastAPI, HTTPException, Request, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
+from sqlalchemy import inspect, text
 from sqlalchemy.orm import Session
 from runtime_settings import (
     get_allowed_origins,
@@ -21,6 +25,17 @@ from server_api.auth import models, database, router as auth_router
 from server_api.auth.database import get_db
 from server_api.auth.router import get_current_user
 from server_api.ehtool import router as ehtool_router
+from server_api.project_manager import router as pm_router
+from server_api.chatbot.logging_utils import (
+    log_request_summary,
+    request_id_from_request,
+)
+from server_api.workflows import router as workflow_router
+from server_api.workflows.service import (
+    append_event_for_workflow_if_present,
+    get_user_workflow_or_404,
+    update_workflow_fields,
+)
 
 from fastapi.staticfiles import StaticFiles
 import os
@@ -28,11 +43,25 @@ import os
 # Chatbot is optional; keep the server running if dependencies or model endpoints
 # are unavailable. We initialize lazily on demand.
 try:
-    from server_api.chatbot.chatbot import build_chain, build_helper_chain
+    from server_api.chatbot.chatbot import (
+        build_chain,
+        build_helper_chain,
+        _format_admin_llm_error,
+    )
 except Exception as exc:  # pragma: no cover - exercised indirectly via endpoints
     build_chain = None
     build_helper_chain = None
     _chatbot_error = exc
+
+    def _format_admin_llm_error(error):
+        return (
+            "The AI assistant could not connect to its configured language model. "
+            "Please contact your system administrator with this error: "
+            f"{str(error).strip() or error.__class__.__name__}"
+        )
+
+else:
+    _chatbot_error = None
 
 chain = None
 _reset_search = None
@@ -50,24 +79,79 @@ _helper_histories = {}  # taskKey -> list of messages
 def _ensure_chatbot():
     global chain, _reset_search, _chatbot_error
     if chain is not None and _reset_search is not None:
+        print("[CHATBOT] Reusing initialized main chat chain")
         return True
     if build_chain is None:
+        print("[CHATBOT] build_chain is unavailable; chatbot backend not configured")
         return False
+    start_time = time.perf_counter()
+    print("[CHATBOT] Initializing main chat chain...")
     try:
         chain, _reset_search = build_chain()
         _chatbot_error = None
+        elapsed = time.perf_counter() - start_time
+        print(f"[CHATBOT] Main chat chain ready in {elapsed:.2f}s")
         return True
     except Exception as exc:  # pragma: no cover - runtime config issue
         chain = None
         _reset_search = None
         _chatbot_error = exc
+        print(
+            "[CHATBOT] Failed to initialize LLM backend: "
+            f"{exc.__class__.__name__}: {exc!r}"
+        )
+        traceback.print_exc()
         return False
+
+
+def _llm_unavailable_detail(error):
+    return {
+        "user_message": _format_admin_llm_error(error),
+        "error": str(error),
+        "reason": "llm_unavailable",
+    }
+
+
+def _invoke_with_progress(invoke_fn, *, label: str, request_id: str, poll_seconds=5.0):
+    start_time = time.perf_counter()
+    with ThreadPoolExecutor(max_workers=1) as executor:
+        future = executor.submit(invoke_fn)
+        while True:
+            try:
+                result = future.result(timeout=poll_seconds)
+                elapsed = time.perf_counter() - start_time
+                print(
+                    f"[CHATBOT][{request_id}] {label} completed in {elapsed:.2f}s"
+                )
+                return result
+            except TimeoutError:
+                elapsed = time.perf_counter() - start_time
+                print(
+                    f"[CHATBOT][{request_id}] {label} still running "
+                    f"after {elapsed:.2f}s..."
+                )
 
 
 REACT_APP_SERVER_PROTOCOL = "http"
 REACT_APP_SERVER_URL = "localhost:4243"
 
 models.Base.metadata.create_all(bind=database.engine)
+
+
+def _ensure_sqlite_column(table_name: str, column_name: str, ddl: str) -> None:
+    if database.engine.dialect.name != "sqlite":
+        return
+    inspector = inspect(database.engine)
+    if table_name not in inspector.get_table_names():
+        return
+    existing = {column["name"] for column in inspector.get_columns(table_name)}
+    if column_name in existing:
+        return
+    with database.engine.begin() as connection:
+        connection.execute(text(f"ALTER TABLE {table_name} ADD COLUMN {ddl}"))
+
+
+_ensure_sqlite_column("ehtool_sessions", "workflow_id", "workflow_id INTEGER")
 
 app = FastAPI()
 
@@ -77,6 +161,8 @@ app.mount("/uploads", StaticFiles(directory="uploads"), name="uploads")
 
 app.include_router(auth_router.router)
 app.include_router(ehtool_router.router, prefix="/eh", tags=["ehtool"])
+app.include_router(pm_router.router, prefix="/api/pm", tags=["project-manager"])
+app.include_router(workflow_router.router, prefix="/api/workflows", tags=["workflows"])
 
 app.add_middleware(
     CORSMiddleware,
@@ -363,7 +449,11 @@ def _is_probable_label_volume(image_array) -> bool:
 
 
 @app.post("/neuroglancer")
-async def neuroglancer(req: Request):
+async def neuroglancer(
+    req: Request,
+    current_user: models.User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
     import neuroglancer
 
     cleanup_paths: List[pathlib.Path] = []
@@ -383,6 +473,8 @@ async def neuroglancer(req: Request):
                 raise HTTPException(
                     status_code=400, detail="Scales payload is invalid."
                 )
+            workflow_id_raw = form.get("workflow_id")
+            workflow_id = int(workflow_id_raw) if workflow_id_raw else None
 
             image = save_upload_to_tempfile(image_upload)
             cleanup_paths.append(image)
@@ -397,6 +489,7 @@ async def neuroglancer(req: Request):
             image = process_path(payload["image"])
             label = process_path(payload.get("label"))
             scales = payload["scales"]
+            workflow_id = payload.get("workflow_id") or payload.get("workflowId")
 
         print(image, label, scales)
 
@@ -433,6 +526,35 @@ async def neuroglancer(req: Request):
                 s.layers.append(name="gt", layer=ngLayer(gt, res, tt="segmentation"))
 
         public_url = _build_neuroglancer_public_url(str(viewer), req)
+        if workflow_id:
+            workflow = get_user_workflow_or_404(
+                db, workflow_id=int(workflow_id), user_id=current_user.id
+            )
+            update_workflow_fields(
+                db,
+                workflow,
+                {
+                    "stage": "visualization",
+                    "image_path": str(image),
+                    "label_path": str(label) if label else None,
+                    "neuroglancer_url": public_url,
+                },
+                commit=True,
+            )
+            append_event_for_workflow_if_present(
+                db,
+                workflow_id=workflow.id,
+                actor="user",
+                event_type="viewer.created",
+                stage="visualization",
+                summary="Created Neuroglancer viewer.",
+                payload={
+                    "image_path": str(image),
+                    "label_path": str(label) if label else None,
+                    "scales": scales,
+                    "neuroglancer_url": public_url,
+                },
+            )
         print(public_url)
         return public_url
     finally:
@@ -446,8 +568,39 @@ async def neuroglancer(req: Request):
 
 
 @app.post("/start_model_training")
-async def start_model_training(req: Request):
+async def start_model_training(
+    req: Request,
+    current_user: models.User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
     body = await req.json()
+    workflow_id = body.get("workflow_id") or body.get("workflowId")
+    if workflow_id:
+        workflow = get_user_workflow_or_404(
+            db, workflow_id=int(workflow_id), user_id=current_user.id
+        )
+        update_workflow_fields(
+            db,
+            workflow,
+            {
+                "stage": "retraining_staged",
+                "training_output_path": body.get("outputPath"),
+            },
+            commit=True,
+        )
+        append_event_for_workflow_if_present(
+            db,
+            workflow_id=workflow.id,
+            actor="user",
+            event_type="training.started",
+            stage=workflow.stage,
+            summary="Started model training from the workflow.",
+            payload={
+                "outputPath": body.get("outputPath"),
+                "logPath": body.get("logPath"),
+                "configOriginPath": body.get("configOriginPath"),
+            },
+        )
     worker_data = _proxy_to_worker(
         "post",
         "/start_model_training",
@@ -481,8 +634,42 @@ async def get_training_logs():
 
 
 @app.post("/start_model_inference")
-async def start_model_inference(req: Request):
+async def start_model_inference(
+    req: Request,
+    current_user: models.User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
     body = await req.json()
+    workflow_id = body.get("workflow_id") or body.get("workflowId")
+    if workflow_id:
+        workflow = get_user_workflow_or_404(
+            db, workflow_id=int(workflow_id), user_id=current_user.id
+        )
+        update_workflow_fields(
+            db,
+            workflow,
+            {
+                "stage": "inference",
+                "inference_output_path": body.get("outputPath"),
+                "checkpoint_path": (body.get("arguments") or {}).get("checkpoint")
+                or body.get("checkpointPath"),
+            },
+            commit=True,
+        )
+        append_event_for_workflow_if_present(
+            db,
+            workflow_id=workflow.id,
+            actor="user",
+            event_type="inference.started",
+            stage="inference",
+            summary="Started model inference from the workflow.",
+            payload={
+                "outputPath": body.get("outputPath"),
+                "checkpointPath": (body.get("arguments") or {}).get("checkpoint")
+                or body.get("checkpointPath"),
+                "configOriginPath": body.get("configOriginPath"),
+            },
+        )
     worker_data = _proxy_to_worker(
         "post",
         "/start_model_inference",
@@ -709,16 +896,31 @@ async def chat_query(
     user: models.User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
+    global _chatbot_error
+    request_id = request_id_from_request(req).replace("-", "")[:8]
+    request_start = time.perf_counter()
+    print(f"[CHATBOT][{request_id}] Incoming /chat/query request from user={user.id}")
     if not _ensure_chatbot():
-        detail = "Chatbot is not configured"
-        if "_chatbot_error" in globals():
-            detail = f"{detail}: {_chatbot_error}"
-        raise HTTPException(status_code=503, detail=detail)
+        print(f"[CHATBOT][{request_id}] Main chain unavailable before request")
+        log_request_summary(
+            request_id=request_id,
+            endpoint="/chat/query",
+            start_time=request_start,
+            status="error",
+            error_type="llm_unavailable",
+        )
+        raise HTTPException(
+            status_code=503, detail=_llm_unavailable_detail(_chatbot_error)
+        )
     body = await req.json()
     query = body.get("query")
     convo_id = body.get("conversationId")
     if not isinstance(query, str) or not query.strip():
         raise HTTPException(status_code=400, detail="Query must be a non-empty string.")
+    print(
+        f"[CHATBOT][{request_id}] Parsed request: convo_id={convo_id}, "
+        f"query_len={len(query.strip())}"
+    )
 
     # Auto-create a conversation if none supplied
     if not convo_id:
@@ -741,13 +943,48 @@ async def chat_query(
 
     # Rebuild in-memory history from DB when switching conversations
     _load_history_for_convo(convo_id, db)
+    print(
+        f"[CHATBOT][{request_id}] Loaded history messages={len(_chat_history)} "
+        f"for convo_id={convo_id}"
+    )
 
     if _reset_search is not None:
         _reset_search()
+        print(f"[CHATBOT][{request_id}] Reset documentation search call counter")
     all_messages = _chat_history + [{"role": "user", "content": query}]
-    result = chain.invoke({"messages": all_messages})
+    print(
+        f"[CHATBOT][{request_id}] Invoking main chain with "
+        f"{len(all_messages)} message(s)"
+    )
+    try:
+        result = _invoke_with_progress(
+            lambda: chain.invoke({"messages": all_messages}),
+            label="main chain invoke",
+            request_id=request_id,
+        )
+    except Exception as exc:
+        _chatbot_error = exc
+        print(
+            "[CHATBOT] LLM request failed: "
+            f"{exc.__class__.__name__}: {exc!r}"
+        )
+        traceback.print_exc()
+        log_request_summary(
+            request_id=request_id,
+            endpoint="/chat/query",
+            start_time=request_start,
+            status="error",
+            error_type=exc.__class__.__name__,
+        )
+        raise HTTPException(
+            status_code=503, detail=_llm_unavailable_detail(exc)
+        ) from exc
     messages = result.get("messages", [])
     response = messages[-1].content if messages else "No response generated"
+    print(
+        f"[CHATBOT][{request_id}] Chain returned messages={len(messages)}, "
+        f"response_len={len(response) if isinstance(response, str) else 0}"
+    )
 
     # Persist to DB
     db.add(models.ChatMessage(conversation_id=convo_id, role="user", content=query))
@@ -764,6 +1001,17 @@ async def chat_query(
     # Update in-memory history
     _chat_history.append({"role": "user", "content": query})
     _chat_history.append({"role": "assistant", "content": response})
+    total_elapsed = time.perf_counter() - request_start
+    print(
+        f"[CHATBOT][{request_id}] /chat/query completed in {total_elapsed:.2f}s "
+        f"(convo_id={convo_id})"
+    )
+    log_request_summary(
+        request_id=request_id,
+        endpoint="/chat/query",
+        start_time=request_start,
+        status="ok",
+    )
 
     return {"response": response, "conversationId": convo_id}
 
@@ -775,10 +1023,9 @@ async def clear_chat(
     """Reset the in-memory LangChain context (does NOT delete DB messages)."""
     global _active_convo_id, _chat_history
     if not _ensure_chatbot():
-        detail = "Chatbot is not configured"
-        if "_chatbot_error" in globals():
-            detail = f"{detail}: {_chatbot_error}"
-        raise HTTPException(status_code=503, detail=detail)
+        raise HTTPException(
+            status_code=503, detail=_llm_unavailable_detail(_chatbot_error)
+        )
     if _reset_search is not None:
         _reset_search()
     _chat_history.clear()
@@ -804,21 +1051,36 @@ def _ensure_helper_chat(task_key: str):
     """Lazily build a helper agent for *task_key*, reusing it on subsequent calls."""
     global _chatbot_error
     if task_key in _helper_chains:
+        print(f"[CHATBOT] Reusing helper chain for task_key={task_key}")
         return True
     if build_helper_chain is None:
+        print("[CHATBOT] build_helper_chain is unavailable")
         return False
+    start_time = time.perf_counter()
+    print(f"[CHATBOT] Initializing helper chain for task_key={task_key}...")
     try:
         agent, reset_fn = build_helper_chain()
         _helper_chains[task_key] = (agent, reset_fn)
         _helper_histories[task_key] = []
+        elapsed = time.perf_counter() - start_time
+        print(
+            f"[CHATBOT] Helper chain ready for task_key={task_key} in {elapsed:.2f}s"
+        )
         return True
     except Exception as exc:
         _chatbot_error = exc
+        print(
+            "[CHATBOT] Failed to initialize helper LLM backend: "
+            f"{exc.__class__.__name__}: {exc!r}"
+        )
+        traceback.print_exc()
         return False
 
 
 @app.post("/chat/helper/query")
 async def chat_helper_query(req: Request):
+    request_id = request_id_from_request(req).replace("-", "")[:8]
+    request_start = time.perf_counter()
     body = await req.json()
     task_key = body.get("taskKey")
     query = body.get("query")
@@ -828,12 +1090,23 @@ async def chat_helper_query(req: Request):
         raise HTTPException(status_code=400, detail="taskKey is required")
     if not isinstance(query, str) or not query.strip():
         raise HTTPException(status_code=400, detail="query must be a non-empty string.")
+    print(
+        f"[CHATBOT][{request_id}] Incoming /chat/helper/query "
+        f"task_key={task_key} query_len={len(query.strip())}"
+    )
 
     if not _ensure_helper_chat(task_key):
-        detail = "Helper chatbot is not configured"
-        if "_chatbot_error" in globals():
-            detail = f"{detail}: {_chatbot_error}"
-        raise HTTPException(status_code=503, detail=detail)
+        print(f"[CHATBOT][{request_id}] Helper chain unavailable for task_key={task_key}")
+        log_request_summary(
+            request_id=request_id,
+            endpoint="/chat/helper/query",
+            start_time=request_start,
+            status="error",
+            error_type="llm_unavailable",
+        )
+        raise HTTPException(
+            status_code=503, detail=_llm_unavailable_detail(_chatbot_error)
+        )
 
     agent, reset_fn = _helper_chains[task_key]
     history = _helper_histories[task_key]
@@ -845,12 +1118,48 @@ async def chat_helper_query(req: Request):
     )
 
     reset_fn()
+    print(
+        f"[CHATBOT][{request_id}] Helper history_len={len(history)}; invoking helper "
+        f"with context_len={len(user_content)}"
+    )
     all_messages = history + [{"role": "user", "content": user_content}]
-    result = agent.invoke({"messages": all_messages})
+    try:
+        result = _invoke_with_progress(
+            lambda: agent.invoke({"messages": all_messages}),
+            label="helper chain invoke",
+            request_id=request_id,
+        )
+    except Exception as exc:
+        print(
+            "[CHATBOT] Helper LLM request failed: "
+            f"{exc.__class__.__name__}: {exc!r}"
+        )
+        traceback.print_exc()
+        log_request_summary(
+            request_id=request_id,
+            endpoint="/chat/helper/query",
+            start_time=request_start,
+            status="error",
+            error_type=exc.__class__.__name__,
+        )
+        raise HTTPException(
+            status_code=503, detail=_llm_unavailable_detail(exc)
+        ) from exc
     messages = result.get("messages", [])
     response = messages[-1].content if messages else "No response generated"
     history.append({"role": "user", "content": user_content})
     history.append({"role": "assistant", "content": response})
+    total_elapsed = time.perf_counter() - request_start
+    print(
+        f"[CHATBOT][{request_id}] /chat/helper/query completed in {total_elapsed:.2f}s "
+        f"response_len={len(response) if isinstance(response, str) else 0}"
+    )
+    log_request_summary(
+        request_id=request_id,
+        endpoint="/chat/helper/query",
+        start_time=request_start,
+        status="ok",
+    )
     return {"response": response}
 
 

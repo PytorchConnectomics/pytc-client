@@ -12,9 +12,11 @@ import Configurator from "../components/Configurator";
 import { applyInputPaths } from "../configSchema";
 import RuntimeLogPanel from "../components/RuntimeLogPanel";
 import { AppContext } from "../contexts/GlobalContext";
+import { useWorkflow } from "../contexts/WorkflowContext";
 
 function ModelTraining() {
   const context = useContext(AppContext);
+  const workflowContext = useWorkflow();
   const training = context.trainingState;
   const [isTraining, setIsTraining] = useState(false);
   const [trainingStatus, setTrainingStatus] = useState("");
@@ -61,7 +63,9 @@ function ModelTraining() {
       if (status.exitCode === 0) {
         setTrainingStatus("Training completed successfully! ✓");
       } else if (status.exitCode !== null) {
-        setTrainingStatus(`Training finished with exit code: ${status.exitCode}`);
+        setTrainingStatus(
+          `Training finished with exit code: ${status.exitCode}`,
+        );
       } else if (status.phase === "failed" && status.lastError) {
         setTrainingStatus(`Training failed: ${status.lastError}`);
       } else {
@@ -91,7 +95,10 @@ function ModelTraining() {
       });
       return yaml.dump(yamlData, { indent: 2 }).replace(/^\s*\n/gm, "");
     } catch (error) {
-      console.warn("Failed to prepare training config from current inputs:", error);
+      console.warn(
+        "Failed to prepare training config from current inputs:",
+        error,
+      );
       return trainingConfig;
     }
   };
@@ -161,6 +168,7 @@ function ModelTraining() {
         getPath(training.logPath) || getPath(training.outputPath),
         getPath(training.outputPath),
         getConfigOriginPath(),
+        workflowContext?.workflow?.id,
       );
       console.log(res);
       await refreshTrainingLogs();

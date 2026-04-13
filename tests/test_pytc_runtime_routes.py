@@ -45,9 +45,7 @@ class ServerPytcRouteTests(unittest.TestCase):
 
     def test_training_logs_route_returns_worker_payload(self):
         payload = {"phase": "running", "text": "hello", "lines": ["hello"]}
-        with patch(
-            "server_pytc.main.get_training_process_logs", return_value=payload
-        ):
+        with patch("server_pytc.main.get_training_process_logs", return_value=payload):
             response = self.client.get("/training_logs")
 
         self.assertEqual(response.status_code, 200)
@@ -129,11 +127,11 @@ class ModelServiceTests(unittest.TestCase):
         config_path = model_service._write_temp_config(
             "foo: bar\n",
             "training",
-            config_origin_path="tutorials/neuron_snemi.yaml",
+            config_origin_path="configs/Lucchi-Mitochondria.yaml",
         )
         written_path = pathlib.Path(config_path)
         expected_parent = (
-            model_service._project_root() / "pytorch_connectomics" / "tutorials"
+            model_service._project_root() / "pytorch_connectomics" / "configs"
         )
 
         self.assertTrue(written_path.exists())

@@ -8,14 +8,17 @@ import {
   DashboardOutlined,
   BugOutlined,
   MessageOutlined,
+  ProjectOutlined,
 } from "@ant-design/icons";
 import FilesManager from "./FilesManager";
 import Visualization from "./Visualization";
 import ModelTraining from "./ModelTraining";
 import ModelInference from "./ModelInference";
 import Monitoring from "./Monitoring";
-import MaskProofreading from "./MaskProofreading";
+import MaskProofreading from "./mask-proofreading/MaskProofreading";
+import ProjectManager from "./project-manager/ProjectManager";
 import Chatbot from "../components/Chatbot";
+import { useWorkflow } from "../contexts/WorkflowContext";
 
 const { Content } = Layout;
 
@@ -34,17 +37,54 @@ const MODULE_ITEMS = [
     key: "mask-proofreading",
     icon: <BugOutlined />,
   },
+  {
+    label: "Project Manager",
+    key: "project-manager",
+    icon: <ProjectOutlined />,
+  },
 ];
 
 function Views() {
-  const [current, setCurrent] = useState("files");
-  const [visitedTabs, setVisitedTabs] = useState(new Set(["files"]));
+  const workflowContext = useWorkflow();
+  const lastClientEffects = workflowContext?.lastClientEffects;
+  const consumeClientEffects = workflowContext?.consumeClientEffects;
+  const [current, setCurrent] = useState("project-manager");
+  const [visitedTabs, setVisitedTabs] = useState(
+    new Set(["project-manager", "files"]),
+  );
   const [isChatOpen, setIsChatOpen] = useState(false);
   const [chatWidth, setChatWidth] = useState(560);
   const isResizing = useRef(false);
 
   const [viewers, setViewers] = useState([]);
   const [isInferring, setIsInferring] = useState(false);
+
+/*
+  const allItems = [
+    { label: "File Management", key: "files", icon: <FolderOpenOutlined /> },
+    { label: "Visualization", key: "visualization", icon: <EyeOutlined /> },
+    { label: "Model Training", key: "training", icon: <ExperimentOutlined /> },
+    {
+      label: "Model Inference",
+      key: "inference",
+      icon: <ThunderboltOutlined />,
+    },
+    { label: "Tensorboard", key: "monitoring", icon: <DashboardOutlined /> },
+    { label: "SynAnno", key: "synanno", icon: <ApartmentOutlined /> },
+    {
+      label: "Worm Error Handling",
+      key: "worm-error-handling",
+      icon: <BugOutlined />,
+    },
+    {
+      label: "Project Manager",
+      key: "project-manager",
+      icon: <ProjectOutlined />,
+    },
+  ];
+
+  const items = allItems.filter((item) => visibleTabs.has(item.key));
+*/
 
   const onClick = (e) => {
     setCurrent(e.key);
@@ -77,6 +117,15 @@ function Views() {
       window.removeEventListener("mouseup", stopResizing);
     };
   }, [resize, stopResizing]);
+
+  useEffect(() => {
+    const target = lastClientEffects?.navigate_to;
+    if (!target) return;
+    const targetKey = target === "model-training" ? "training" : target;
+    setCurrent(targetKey);
+    setVisitedTabs((prev) => new Set(prev).add(targetKey));
+    consumeClientEffects?.();
+  }, [lastClientEffects, consumeClientEffects]);
 
   const renderTabContent = (key, component) => {
     if (!visitedTabs.has(key)) return null;
@@ -141,7 +190,10 @@ function Views() {
           />,
         )}
         {renderTabContent("mask-proofreading", <MaskProofreading />)}
-      </Content>
+        {/* {renderTabContent("synanno", <ProofReading />)} */}
+        {/* {renderTabContent("worm-error-handling", <WormErrorHandling />)} */}
+        {renderTabContent("project-manager", <ProjectManager />)}
+      </Content >
       <Drawer
         placement="right"
         open={isChatOpen}
@@ -174,7 +226,7 @@ function Views() {
         />
         <Chatbot onClose={() => setIsChatOpen(false)} />
       </Drawer>
-    </Layout>
+    </Layout >
   );
 }
 

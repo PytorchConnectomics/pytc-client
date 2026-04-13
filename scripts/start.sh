@@ -4,9 +4,6 @@ set -euo pipefail
 
 # Prefer Homebrew's Node over nvm to avoid version conflicts
 export PATH="/opt/homebrew/bin:$PATH"
-export OLLAMA_BASE_URL="http://cscigpu08.bc.edu:4443"
-export OLLAMA_MODEL="gpt-oss:20b"
-export OLLAMA_EMBED_MODEL="qwen3-embedding:8b"
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 CLIENT_DIR="${ROOT_DIR}/client"
@@ -102,6 +99,11 @@ cleanup() {
 }
 
 trap cleanup EXIT INT TERM
+
+if [[ -z "${OLLAMA_BASE_URL:-}" || -z "${OLLAMA_MODEL:-}" || -z "${OLLAMA_EMBED_MODEL:-}" ]]; then
+	echo "AI assistant LLM environment is incomplete. Export OLLAMA_BASE_URL, OLLAMA_MODEL, and OLLAMA_EMBED_MODEL before using chat."
+	echo "Example: export OLLAMA_BASE_URL=http://<host>:<port>"
+fi
 
 start_service \
 	"Data server" \

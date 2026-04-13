@@ -28,6 +28,7 @@
   },
   "scripts": {
     "start": "react-scripts start",
+    "test": "react-scripts test",
     "build": "cross-env CI=false react-scripts build",
     "electron": "electron ."
   },

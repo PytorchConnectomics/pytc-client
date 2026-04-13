@@ -13,6 +13,7 @@ function EHTool({
   onSessionChange,
   refreshTrigger,
   savedSessionId,
+  workflowId,
 }) {
   // Initialize with saved session if available
   const [sessionId, setSessionId] = useState(savedSessionId || null);
@@ -37,6 +38,7 @@ function EHTool({
         <DetectionWorkflow
           sessionId={sessionId}
           setSessionId={setSessionId}
+          workflowId={workflowId}
           onStartProofreading={onStartProofreading}
           refreshTrigger={refreshTrigger}
         />
