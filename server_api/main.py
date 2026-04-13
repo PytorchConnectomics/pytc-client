@@ -1,8 +1,11 @@
 import json
+import logging
 import pathlib
 import re
 import shutil
 import tempfile
+import time
+import uuid
 from typing import List, Optional
 from urllib.parse import urlsplit, urlunsplit
 
@@ -24,6 +27,8 @@ from server_api.ehtool import router as ehtool_router
 
 from fastapi.staticfiles import StaticFiles
 import os
+
+logger = logging.getLogger(__name__)
 
 # Chatbot is optional; keep the server running if dependencies or model endpoints
 # are unavailable. We initialize lazily on demand.
@@ -709,63 +714,92 @@ async def chat_query(
     user: models.User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    if not _ensure_chatbot():
-        detail = "Chatbot is not configured"
-        if "_chatbot_error" in globals():
-            detail = f"{detail}: {_chatbot_error}"
-        raise HTTPException(status_code=503, detail=detail)
-    body = await req.json()
-    query = body.get("query")
-    convo_id = body.get("conversationId")
-    if not isinstance(query, str) or not query.strip():
-        raise HTTPException(status_code=400, detail="Query must be a non-empty string.")
-
-    # Auto-create a conversation if none supplied
-    if not convo_id:
-        convo = models.Conversation(user_id=user.id, title="New Chat")
-        db.add(convo)
-        db.commit()
-        db.refresh(convo)
-        convo_id = convo.id
-    else:
-        convo = (
-            db.query(models.Conversation)
-            .filter(
-                models.Conversation.id == convo_id,
-                models.Conversation.user_id == user.id,
+    started_at = time.perf_counter()
+    request_id = req.headers.get("x-request-id") or str(uuid.uuid4())
+    endpoint = req.url.path
+    status = "ok"
+    error_type = None
+    try:
+        if not _ensure_chatbot():
+            detail = "Chatbot is not configured"
+            if "_chatbot_error" in globals():
+                detail = f"{detail}: {_chatbot_error}"
+            raise HTTPException(status_code=503, detail=detail)
+        body = await req.json()
+        query = body.get("query")
+        convo_id = body.get("conversationId")
+        if not isinstance(query, str) or not query.strip():
+            raise HTTPException(
+                status_code=400, detail="Query must be a non-empty string."
             )
-            .first()
+
+        # Auto-create a conversation if none supplied
+        if not convo_id:
+            convo = models.Conversation(user_id=user.id, title="New Chat")
+            db.add(convo)
+            db.commit()
+            db.refresh(convo)
+            convo_id = convo.id
+        else:
+            convo = (
+                db.query(models.Conversation)
+                .filter(
+                    models.Conversation.id == convo_id,
+                    models.Conversation.user_id == user.id,
+                )
+                .first()
+            )
+            if not convo:
+                raise HTTPException(status_code=404, detail="Conversation not found")
+
+        # Rebuild in-memory history from DB when switching conversations
+        _load_history_for_convo(convo_id, db)
+
+        if _reset_search is not None:
+            _reset_search()
+        all_messages = _chat_history + [{"role": "user", "content": query}]
+        result = chain.invoke({"messages": all_messages})
+        messages = result.get("messages", [])
+        response = messages[-1].content if messages else "No response generated"
+
+        # Persist to DB
+        db.add(models.ChatMessage(conversation_id=convo_id, role="user", content=query))
+        db.add(
+            models.ChatMessage(
+                conversation_id=convo_id, role="assistant", content=response
+            )
         )
-        if not convo:
-            raise HTTPException(status_code=404, detail="Conversation not found")
 
-    # Rebuild in-memory history from DB when switching conversations
-    _load_history_for_convo(convo_id, db)
+        # Auto-title: first user message becomes the title (truncated)
+        if convo.title == "New Chat":
+            convo.title = query[:120].strip() or "New Chat"
 
-    if _reset_search is not None:
-        _reset_search()
-    all_messages = _chat_history + [{"role": "user", "content": query}]
-    result = chain.invoke({"messages": all_messages})
-    messages = result.get("messages", [])
-    response = messages[-1].content if messages else "No response generated"
+        db.commit()
 
-    # Persist to DB
-    db.add(models.ChatMessage(conversation_id=convo_id, role="user", content=query))
-    db.add(
-        models.ChatMessage(conversation_id=convo_id, role="assistant", content=response)
-    )
+        # Update in-memory history
+        _chat_history.append({"role": "user", "content": query})
+        _chat_history.append({"role": "assistant", "content": response})
 
-    # Auto-title: first user message becomes the title (truncated)
-    if convo.title == "New Chat":
-        convo.title = query[:120].strip() or "New Chat"
-
-    db.commit()
-
-    # Update in-memory history
-    _chat_history.append({"role": "user", "content": query})
-    _chat_history.append({"role": "assistant", "content": response})
-
-    return {"response": response, "conversationId": convo_id}
+        return {"response": response, "conversationId": convo_id}
+    except Exception as exc:
+        status = "error"
+        error_type = type(exc).__name__
+        raise
+    finally:
+        latency_ms = round((time.perf_counter() - started_at) * 1000, 3)
+        logger.info(
+            "chat_request_summary %s",
+            json.dumps(
+                {
+                    "request_id": request_id,
+                    "endpoint": endpoint,
+                    "latency_ms": latency_ms,
+                    "status": status,
+                    "error_type": error_type,
+                },
+                sort_keys=True,
+            ),
+        )
 
 
 @app.post("/chat/clear")
@@ -819,39 +853,66 @@ def _ensure_helper_chat(task_key: str):
 
 @app.post("/chat/helper/query")
 async def chat_helper_query(req: Request):
-    body = await req.json()
-    task_key = body.get("taskKey")
-    query = body.get("query")
-    field_context = body.get("fieldContext", "")
+    started_at = time.perf_counter()
+    request_id = req.headers.get("x-request-id") or str(uuid.uuid4())
+    endpoint = req.url.path
+    status = "ok"
+    error_type = None
+    try:
+        body = await req.json()
+        task_key = body.get("taskKey")
+        query = body.get("query")
+        field_context = body.get("fieldContext", "")
 
-    if not task_key:
-        raise HTTPException(status_code=400, detail="taskKey is required")
-    if not isinstance(query, str) or not query.strip():
-        raise HTTPException(status_code=400, detail="query must be a non-empty string.")
+        if not task_key:
+            raise HTTPException(status_code=400, detail="taskKey is required")
+        if not isinstance(query, str) or not query.strip():
+            raise HTTPException(
+                status_code=400, detail="query must be a non-empty string."
+            )
 
-    if not _ensure_helper_chat(task_key):
-        detail = "Helper chatbot is not configured"
-        if "_chatbot_error" in globals():
-            detail = f"{detail}: {_chatbot_error}"
-        raise HTTPException(status_code=503, detail=detail)
+        if not _ensure_helper_chat(task_key):
+            detail = "Helper chatbot is not configured"
+            if "_chatbot_error" in globals():
+                detail = f"{detail}: {_chatbot_error}"
+            raise HTTPException(status_code=503, detail=detail)
 
-    agent, reset_fn = _helper_chains[task_key]
-    history = _helper_histories[task_key]
+        agent, reset_fn = _helper_chains[task_key]
+        history = _helper_histories[task_key]
 
-    # Prepend field context to the first message so the LLM knows what field
-    # the user is looking at.
-    user_content = (
-        f"[Field context: {field_context}]\n\n{query}" if field_context else query
-    )
+        # Prepend field context to the first message so the LLM knows what field
+        # the user is looking at.
+        user_content = (
+            f"[Field context: {field_context}]\n\n{query}" if field_context else query
+        )
 
-    reset_fn()
-    all_messages = history + [{"role": "user", "content": user_content}]
-    result = agent.invoke({"messages": all_messages})
-    messages = result.get("messages", [])
-    response = messages[-1].content if messages else "No response generated"
-    history.append({"role": "user", "content": user_content})
-    history.append({"role": "assistant", "content": response})
-    return {"response": response}
+        reset_fn()
+        all_messages = history + [{"role": "user", "content": user_content}]
+        result = agent.invoke({"messages": all_messages})
+        messages = result.get("messages", [])
+        response = messages[-1].content if messages else "No response generated"
+        history.append({"role": "user", "content": user_content})
+        history.append({"role": "assistant", "content": response})
+        return {"response": response}
+    except Exception as exc:
+        status = "error"
+        error_type = type(exc).__name__
+        raise
+    finally:
+        latency_ms = round((time.perf_counter() - started_at) * 1000, 3)
+        logger.info(
+            "chat_request_summary %s",
+            json.dumps(
+                {
+                    "request_id": request_id,
+                    "endpoint": endpoint,
+                    "latency_ms": latency_ms,
+                    "status": status,
+                    "error_type": error_type,
+                },
+                sort_keys=True,
+            ),
+        )
 
 
 @app.post("/chat/helper/clear")
