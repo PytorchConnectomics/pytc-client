@@ -7,6 +7,7 @@
 # - RAG: Documentation search via FAISS vector store
 
 import os
+from urllib.parse import urlparse
 from pathlib import Path
 
 from langchain_ollama import OllamaEmbeddings, ChatOllama
@@ -19,6 +20,62 @@ from server_api.chatbot.tools import (
     read_config,
     list_checkpoints,
 )
+
+
+class LLMConfigurationError(RuntimeError):
+    """Raised when the configured LLM endpoint is missing or malformed."""
+
+
+def _format_admin_llm_error(error: Exception) -> str:
+    return (
+        "The AI assistant could not connect to its configured language model. "
+        "Please contact your system administrator with this error: "
+        f"{str(error).strip() or error.__class__.__name__}"
+    )
+
+
+def _validate_ollama_base_url(base_url: str) -> str:
+    parsed = urlparse(base_url)
+    if not parsed.scheme or not parsed.netloc:
+        raise LLMConfigurationError(
+            "OLLAMA_BASE_URL must be a full URL, for example "
+            "http://<host>:<port>."
+        )
+    try:
+        port = parsed.port
+    except ValueError as exc:
+        raise LLMConfigurationError(
+            f"OLLAMA_BASE_URL has an invalid port: {base_url}"
+        ) from exc
+    if port is None:
+        raise LLMConfigurationError(
+            "OLLAMA_BASE_URL must include the LLM service port, for example "
+            "http://<host>:11434."
+        )
+    return base_url.rstrip("/")
+
+
+def get_ollama_config():
+    """Read required Ollama configuration from the launch environment."""
+    base_url = os.getenv("OLLAMA_BASE_URL")
+    model = os.getenv("OLLAMA_MODEL")
+    embed_model = os.getenv("OLLAMA_EMBED_MODEL")
+    missing = [
+        name
+        for name, value in {
+            "OLLAMA_BASE_URL": base_url,
+            "OLLAMA_MODEL": model,
+            "OLLAMA_EMBED_MODEL": embed_model,
+        }.items()
+        if not value
+    ]
+    if missing:
+        raise LLMConfigurationError(
+            "Missing required LLM environment variable(s): "
+            f"{', '.join(missing)}. Export them before starting PyTC Client. "
+            "Example: export OLLAMA_BASE_URL=http://<host>:<port>"
+        )
+    return _validate_ollama_base_url(base_url), model, embed_model
 
 TRAINING_AGENT_PROMPT = """You are a **Training Agent** for PyTorch Connectomics.
 
@@ -117,9 +174,7 @@ Tools:
 
 def build_chain():
     """Build the multi-agent system with supervisor, training, and inference agents."""
-    ollama_base_url = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434")
-    ollama_model = os.getenv("OLLAMA_MODEL", "gpt-oss:20b")
-    ollama_embed_model = os.getenv("OLLAMA_EMBED_MODEL", "qwen3-embedding:8b")
+    ollama_base_url, ollama_model, ollama_embed_model = get_ollama_config()
     llm = ChatOllama(model=ollama_model, base_url=ollama_base_url, temperature=0)
     embeddings = OllamaEmbeddings(model=ollama_embed_model, base_url=ollama_base_url)
     faiss_path = process_path("server_api/chatbot/faiss_index")
@@ -294,9 +349,7 @@ def build_helper_chain():
     chatbot but has NO access to training/inference sub-agents.
     Returns ``(agent, reset_search_counter)`` — same interface as ``build_chain``.
     """
-    ollama_base_url = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434")
-    ollama_model = os.getenv("OLLAMA_MODEL", "gpt-oss:20b")
-    ollama_embed_model = os.getenv("OLLAMA_EMBED_MODEL", "qwen3-embedding:8b")
+    ollama_base_url, ollama_model, ollama_embed_model = get_ollama_config()
     llm = ChatOllama(model=ollama_model, base_url=ollama_base_url, temperature=0)
     embeddings = OllamaEmbeddings(model=ollama_embed_model, base_url=ollama_base_url)
     faiss_path = process_path("server_api/chatbot/faiss_index")

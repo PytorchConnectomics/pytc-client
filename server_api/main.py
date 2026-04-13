@@ -36,11 +36,25 @@ import os
 # Chatbot is optional; keep the server running if dependencies or model endpoints
 # are unavailable. We initialize lazily on demand.
 try:
-    from server_api.chatbot.chatbot import build_chain, build_helper_chain
+    from server_api.chatbot.chatbot import (
+        build_chain,
+        build_helper_chain,
+        _format_admin_llm_error,
+    )
 except Exception as exc:  # pragma: no cover - exercised indirectly via endpoints
     build_chain = None
     build_helper_chain = None
     _chatbot_error = exc
+
+    def _format_admin_llm_error(error):
+        return (
+            "The AI assistant could not connect to its configured language model. "
+            "Please contact your system administrator with this error: "
+            f"{str(error).strip() or error.__class__.__name__}"
+        )
+
+else:
+    _chatbot_error = None
 
 chain = None
 _reset_search = None
@@ -69,7 +83,16 @@ def _ensure_chatbot():
         chain = None
         _reset_search = None
         _chatbot_error = exc
+        print(f"[CHATBOT] Failed to initialize LLM backend: {exc}")
         return False
+
+
+def _llm_unavailable_detail(error):
+    return {
+        "user_message": _format_admin_llm_error(error),
+        "error": str(error),
+        "reason": "llm_unavailable",
+    }
 
 
 REACT_APP_SERVER_PROTOCOL = "http"
@@ -836,11 +859,11 @@ async def chat_query(
     user: models.User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
+    global _chatbot_error
     if not _ensure_chatbot():
-        detail = "Chatbot is not configured"
-        if "_chatbot_error" in globals():
-            detail = f"{detail}: {_chatbot_error}"
-        raise HTTPException(status_code=503, detail=detail)
+        raise HTTPException(
+            status_code=503, detail=_llm_unavailable_detail(_chatbot_error)
+        )
     body = await req.json()
     query = body.get("query")
     convo_id = body.get("conversationId")
@@ -872,7 +895,14 @@ async def chat_query(
     if _reset_search is not None:
         _reset_search()
     all_messages = _chat_history + [{"role": "user", "content": query}]
-    result = chain.invoke({"messages": all_messages})
+    try:
+        result = chain.invoke({"messages": all_messages})
+    except Exception as exc:
+        _chatbot_error = exc
+        print(f"[CHATBOT] LLM request failed: {exc}")
+        raise HTTPException(
+            status_code=503, detail=_llm_unavailable_detail(exc)
+        ) from exc
     messages = result.get("messages", [])
     response = messages[-1].content if messages else "No response generated"
 
@@ -902,10 +932,9 @@ async def clear_chat(
     """Reset the in-memory LangChain context (does NOT delete DB messages)."""
     global _active_convo_id, _chat_history
     if not _ensure_chatbot():
-        detail = "Chatbot is not configured"
-        if "_chatbot_error" in globals():
-            detail = f"{detail}: {_chatbot_error}"
-        raise HTTPException(status_code=503, detail=detail)
+        raise HTTPException(
+            status_code=503, detail=_llm_unavailable_detail(_chatbot_error)
+        )
     if _reset_search is not None:
         _reset_search()
     _chat_history.clear()
@@ -941,6 +970,7 @@ def _ensure_helper_chat(task_key: str):
         return True
     except Exception as exc:
         _chatbot_error = exc
+        print(f"[CHATBOT] Failed to initialize helper LLM backend: {exc}")
         return False
 
 
@@ -957,10 +987,9 @@ async def chat_helper_query(req: Request):
         raise HTTPException(status_code=400, detail="query must be a non-empty string.")
 
     if not _ensure_helper_chat(task_key):
-        detail = "Helper chatbot is not configured"
-        if "_chatbot_error" in globals():
-            detail = f"{detail}: {_chatbot_error}"
-        raise HTTPException(status_code=503, detail=detail)
+        raise HTTPException(
+            status_code=503, detail=_llm_unavailable_detail(_chatbot_error)
+        )
 
     agent, reset_fn = _helper_chains[task_key]
     history = _helper_histories[task_key]
@@ -973,7 +1002,13 @@ async def chat_helper_query(req: Request):
 
     reset_fn()
     all_messages = history + [{"role": "user", "content": user_content}]
-    result = agent.invoke({"messages": all_messages})
+    try:
+        result = agent.invoke({"messages": all_messages})
+    except Exception as exc:
+        print(f"[CHATBOT] Helper LLM request failed: {exc}")
+        raise HTTPException(
+            status_code=503, detail=_llm_unavailable_detail(exc)
+        ) from exc
     messages = result.get("messages", [])
     response = messages[-1].content if messages else "No response generated"
     history.append({"role": "user", "content": user_content})

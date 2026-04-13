@@ -35,6 +35,7 @@ const getErrorDetailMessage = (detail) => {
     return detail.map(getErrorDetailMessage).filter(Boolean).join("; ");
   }
   if (typeof detail === "object") {
+    if (detail.user_message) return String(detail.user_message);
     const nestedUpstream =
       detail.upstream_body !== undefined
         ? getErrorDetailMessage(detail.upstream_body)
@@ -111,6 +112,9 @@ function handleError(error) {
   if (error.response) {
     const detail = error.response.data?.detail;
     const detailMessage = getErrorDetailMessage(detail);
+    if (detail?.user_message) {
+      throw new Error(detailMessage);
+    }
     throw new Error(
       `${error.response.status}: ${detailMessage || error.response.statusText}`,
     );
@@ -377,6 +381,11 @@ export async function queryChatBot(query, conversationId) {
     });
     return res.data;
   } catch (error) {
+    if (error.message === "Network Error") {
+      throw new Error(
+        "The AI assistant could not reach the PyTC API or configured language model service. Please contact your system administrator with this error: Network Error",
+      );
+    }
     handleError(error);
   }
 }
@@ -446,6 +455,11 @@ export async function queryHelperChat(taskKey, query, fieldContext) {
     });
     return res.data?.response;
   } catch (error) {
+    if (error.message === "Network Error") {
+      throw new Error(
+        "The AI helper could not reach the PyTC API or configured language model service. Please contact your system administrator with this error: Network Error",
+      );
+    }
     handleError(error);
   }
 }
