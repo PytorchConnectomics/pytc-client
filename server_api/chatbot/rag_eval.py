@@ -1,7 +1,7 @@
 """
 RAG Retrieval Evaluation Script
 Tests whether FAISS retrieval returns the correct source document for each question.
-Updated for the current 7-doc set (MaskProofreading replaces ErrorHandlingTool + WormErrorHandling).
+Covers both UI docs and PyTC library docs.
 
 This is a standalone utility script, not a pytest test module.
 """
@@ -241,6 +241,272 @@ QUESTIONS = [
         "MaskProofreading.md",
         "hard",
     ),
+    # ── PyTC-Overview.md ───────────────────────────────────────────────
+    ("What is PyTorch Connectomics?", "PyTC-Overview.md", "easy"),
+    ("What tasks does PyTC support?", "PyTC-Overview.md", "easy"),
+    ("What data formats does PyTC accept?", "PyTC-Overview.md", "easy"),
+    ("Does PyTC support object detection?", "PyTC-Overview.md", "medium"),
+    ("What is the main entry point script for PyTC?", "PyTC-Overview.md", "medium"),
+    (
+        "Can I use PyTC for image classification?",
+        "PyTC-Overview.md",
+        "hard",
+    ),
+    # ── PyTC-Training.md ───────────────────────────────────────────────
+    ("How do I run a training job with PyTC?", "PyTC-Training.md", "easy"),
+    ("What learning rate schedulers are available?", "PyTC-Training.md", "easy"),
+    ("How do I resume training from a checkpoint?", "PyTC-Training.md", "easy"),
+    ("What optimizer options does PyTC support?", "PyTC-Training.md", "medium"),
+    ("How do I enable gradient clipping?", "PyTC-Training.md", "medium"),
+    ("What is reject sampling in PyTC?", "PyTC-Training.md", "medium"),
+    (
+        "How do I run distributed multi-GPU training?",
+        "PyTC-Training.md",
+        "hard",
+    ),
+    (
+        "What does SOLVER.ITERATION_TOTAL control?",
+        "PyTC-Training.md",
+        "hard",
+    ),
+    # Real-user training questions
+    ("Can I train my model for a longer period of time?", "PyTC-Training.md", "medium"),
+    ("How do I change the batch size?", "PyTC-Training.md", "medium"),
+    ("How do I lower the learning rate?", "PyTC-Training.md", "easy"),
+    ("How often does the model save checkpoints?", "PyTC-Training.md", "medium"),
+    ("Can I use Adam instead of SGD?", "PyTC-Training.md", "medium"),
+    ("What is stochastic weight averaging in PyTC?", "PyTC-Training.md", "medium"),
+    (
+        "I want to fine-tune a pretrained model on my own data, how?",
+        "PyTC-Training.md",
+        "hard",
+    ),
+    (
+        "My training is crashing because of NaN gradients, what should I try?",
+        "PyTC-Training.md",
+        "hard",
+    ),
+    (
+        "How do I use cosine learning rate decay?",
+        "PyTC-Training.md",
+        "medium",
+    ),
+    (
+        "Can I override config values from the command line?",
+        "PyTC-Training.md",
+        "medium",
+    ),
+    (
+        "How do I set the number of GPUs for training?",
+        "PyTC-Training.md",
+        "medium",
+    ),
+    (
+        "What is mixed precision training and how do I enable it?",
+        "PyTC-Training.md",
+        "hard",
+    ),
+    (
+        "I want to train for 200K iterations instead of the default, how?",
+        "PyTC-Training.md",
+        "hard",
+    ),
+    (
+        "Where are training checkpoints saved?",
+        "PyTC-Training.md",
+        "medium",
+    ),
+    # ── PyTC-Inference.md ──────────────────────────────────────────────
+    ("How do I run inference with a trained model?", "PyTC-Inference.md", "easy"),
+    ("What is test-time augmentation in PyTC?", "PyTC-Inference.md", "easy"),
+    ("How does inference stride affect results?", "PyTC-Inference.md", "medium"),
+    ("What blending modes are available for inference?", "PyTC-Inference.md", "medium"),
+    (
+        "How do I run chunked inference on a large volume?",
+        "PyTC-Inference.md",
+        "hard",
+    ),
+    (
+        "What does DO_SINGLY do in PyTC inference?",
+        "PyTC-Inference.md",
+        "hard",
+    ),
+    # Real-user inference questions
+    ("How do I make my inference predictions smoother?", "PyTC-Inference.md", "medium"),
+    ("Can I increase the batch size for faster inference?", "PyTC-Inference.md", "medium"),
+    ("What output format does inference produce?", "PyTC-Inference.md", "medium"),
+    (
+        "I'm seeing tile boundary artifacts in my predictions, how do I fix that?",
+        "PyTC-Inference.md",
+        "hard",
+    ),
+    (
+        "My volume is too large to fit in memory for inference, what should I do?",
+        "PyTC-Inference.md",
+        "hard",
+    ),
+    (
+        "How do I run inference on multiple test volumes one at a time?",
+        "PyTC-Inference.md",
+        "hard",
+    ),
+    (
+        "Can I use test-time augmentation to improve accuracy?",
+        "PyTC-Inference.md",
+        "medium",
+    ),
+    (
+        "What does the --inference flag do?",
+        "PyTC-Inference.md",
+        "easy",
+    ),
+    (
+        "How do I specify where to save inference output?",
+        "PyTC-Inference.md",
+        "medium",
+    ),
+    (
+        "Should I use the same config file for inference as I used for training?",
+        "PyTC-Inference.md",
+        "hard",
+    ),
+    (
+        "How do I set the output activation for inference predictions?",
+        "PyTC-Inference.md",
+        "medium",
+    ),
+    (
+        "What is Gaussian blending in PyTC?",
+        "PyTC-Inference.md",
+        "medium",
+    ),
+    # ── PyTC-Models.md ─────────────────────────────────────────────────
+    ("What model architectures does PyTC support?", "PyTC-Models.md", "easy"),
+    ("What is the difference between unet_3d and unet_2d?", "PyTC-Models.md", "easy"),
+    ("What block types are available?", "PyTC-Models.md", "easy"),
+    ("What loss functions does PyTC support?", "PyTC-Models.md", "easy"),
+    ("What is residual_se block type?", "PyTC-Models.md", "medium"),
+    ("What backbones are available for FPN?", "PyTC-Models.md", "medium"),
+    ("What are the Swin UNETR specific options?", "PyTC-Models.md", "medium"),
+    ("What does TARGET_OPT control?", "PyTC-Models.md", "hard"),
+    (
+        "How do I configure a multi-class segmentation model?",
+        "PyTC-Models.md",
+        "hard",
+    ),
+    # ── PyTC-Augmentation.md ───────────────────────────────────────────
+    ("What augmentations does PyTC support?", "PyTC-Augmentation.md", "easy"),
+    ("What is CutBlur augmentation?", "PyTC-Augmentation.md", "easy"),
+    ("How do I disable elastic deformation?", "PyTC-Augmentation.md", "medium"),
+    (
+        "What augmentation settings should I use for isotropic data?",
+        "PyTC-Augmentation.md",
+        "medium",
+    ),
+    (
+        "How do I simulate missing sections in my training data?",
+        "PyTC-Augmentation.md",
+        "hard",
+    ),
+    (
+        "What does AUGMENTOR.FLIP.DO_ZTRANS do?",
+        "PyTC-Augmentation.md",
+        "hard",
+    ),
+    # ── PyTC-Configs.md ────────────────────────────────────────────────
+    ("What bundled configs does PyTC have?", "PyTC-Configs.md", "easy"),
+    ("Which config should I use for mitochondria segmentation?", "PyTC-Configs.md", "easy"),
+    ("What config is used for CREMI synapse detection?", "PyTC-Configs.md", "medium"),
+    ("Which config uses the Swin UNETR architecture?", "PyTC-Configs.md", "medium"),
+    (
+        "What is the recommended config for neuron instance segmentation?",
+        "PyTC-Configs.md",
+        "hard",
+    ),
+    (
+        "How do I choose the right config for my dataset?",
+        "PyTC-Configs.md",
+        "hard",
+    ),
+    # ── PyTC-Evaluation.md ─────────────────────────────────────────────
+    ("How do I evaluate segmentation results in PyTC?", "PyTC-Evaluation.md", "easy"),
+    ("What is adapted Rand error?", "PyTC-Evaluation.md", "easy"),
+    ("What evaluation metric should I use for instance segmentation?", "PyTC-Evaluation.md", "medium"),
+    ("How do I compute IoU for binary segmentation?", "PyTC-Evaluation.md", "medium"),
+    (
+        "What is variation of information in segmentation evaluation?",
+        "PyTC-Evaluation.md",
+        "hard",
+    ),
+    (
+        "Does PyTC automatically compute metrics after inference?",
+        "PyTC-Evaluation.md",
+        "hard",
+    ),
+    # Real-user evaluation questions
+    ("How do I know if my model is good?", "PyTC-Evaluation.md", "medium"),
+    ("What metric should I report for the SNEMI3D challenge?", "PyTC-Evaluation.md", "hard"),
+    (
+        "How do I compare my prediction against ground truth?",
+        "PyTC-Evaluation.md",
+        "medium",
+    ),
+    (
+        "Is my model over-segmenting or under-segmenting? How can I tell?",
+        "PyTC-Evaluation.md",
+        "hard",
+    ),
+    (
+        "What is panoptic quality and how do I compute it?",
+        "PyTC-Evaluation.md",
+        "hard",
+    ),
+    (
+        "I have a binary segmentation prediction, how do I get precision and recall?",
+        "PyTC-Evaluation.md",
+        "medium",
+    ),
+    (
+        "How do I evaluate my CREMI synapse detection results?",
+        "PyTC-Evaluation.md",
+        "hard",
+    ),
+    (
+        "What Python functions does PyTC provide for evaluation?",
+        "PyTC-Evaluation.md",
+        "medium",
+    ),
+    # ── Cross-doc / Models real-user questions ─────────────────────────
+    (
+        "Can I use a transformer-based model in PyTC?",
+        "PyTC-Models.md",
+        "medium",
+    ),
+    (
+        "How do I combine BCE loss with Dice loss?",
+        "PyTC-Models.md",
+        "medium",
+    ),
+    (
+        "What normalization options are available for my model?",
+        "PyTC-Models.md",
+        "medium",
+    ),
+    (
+        "I want to train an affinity model for neuron segmentation, what target option do I use?",
+        "PyTC-Models.md",
+        "hard",
+    ),
+    (
+        "How do I set up a model with 12 output classes?",
+        "PyTC-Models.md",
+        "hard",
+    ),
+    (
+        "What is the difference between DiceLoss and WeightedBCEWithLogitsLoss?",
+        "PyTC-Models.md",
+        "hard",
+    ),
 ]
 
 
@@ -256,43 +522,43 @@ def main():
     vectorstore = FAISS.load_local(
         str(FAISS_DIR), embeddings, allow_dangerous_deserialization=True
     )
-    retriever = vectorstore.as_retriever(search_kwargs={"k": 3})
+    retriever = vectorstore.as_retriever(search_kwargs={"k": 2})
 
     results_by_doc = {}
     results_by_difficulty = {}
     top1_hits = 0
-    top3_hits = 0
+    top2_hits = 0
 
     for question, expected_doc, difficulty in QUESTIONS:
         docs = retriever.invoke(question)
         sources = [d.metadata.get("source", "") for d in docs]
 
         hit_top1 = expected_doc in sources[:1]
-        hit_top3 = expected_doc in sources[:3]
+        hit_top2 = expected_doc in sources[:2]
 
         if hit_top1:
             top1_hits += 1
-        if hit_top3:
-            top3_hits += 1
+        if hit_top2:
+            top2_hits += 1
 
         # Per-doc stats
-        results_by_doc.setdefault(expected_doc, {"top1": 0, "top3": 0, "total": 0})
+        results_by_doc.setdefault(expected_doc, {"top1": 0, "top2": 0, "total": 0})
         results_by_doc[expected_doc]["total"] += 1
         if hit_top1:
             results_by_doc[expected_doc]["top1"] += 1
-        if hit_top3:
-            results_by_doc[expected_doc]["top3"] += 1
+        if hit_top2:
+            results_by_doc[expected_doc]["top2"] += 1
 
         # Per-difficulty stats
-        results_by_difficulty.setdefault(difficulty, {"top1": 0, "top3": 0, "total": 0})
+        results_by_difficulty.setdefault(difficulty, {"top1": 0, "top2": 0, "total": 0})
         results_by_difficulty[difficulty]["total"] += 1
         if hit_top1:
             results_by_difficulty[difficulty]["top1"] += 1
-        if hit_top3:
-            results_by_difficulty[difficulty]["top3"] += 1
+        if hit_top2:
+            results_by_difficulty[difficulty]["top2"] += 1
 
-        status = "✓" if hit_top1 else ("~" if hit_top3 else "✗")
-        if not hit_top3:
+        status = "✓" if hit_top1 else ("~" if hit_top2 else "✗")
+        if not hit_top2:
             print(f"  {status}  Q: {question}")
             print(f"       Expected: {expected_doc}")
             print(f"       Got:      {', '.join(sources)}")
@@ -300,13 +566,13 @@ def main():
     total = len(QUESTIONS)
     print(f"\n{'='*60}")
     print(
-        f"OVERALL:  Top-1 {top1_hits}/{total} ({100*top1_hits/total:.1f}%)  |  Top-3 {top3_hits}/{total} ({100*top3_hits/total:.1f}%)"
+        f"OVERALL:  Top-1 {top1_hits}/{total} ({100*top1_hits/total:.1f}%)  |  Top-2 {top2_hits}/{total} ({100*top2_hits/total:.1f}%)"
     )
 
     print(f"\nBY DOCUMENT:")
     for doc, stats in sorted(results_by_doc.items()):
         t = stats["total"]
-        print(f"  {doc:30s}  top1={stats['top1']}/{t}  top3={stats['top3']}/{t}")
+        print(f"  {doc:30s}  top1={stats['top1']}/{t}  top2={stats['top2']}/{t}")
 
     print(f"\nBY DIFFICULTY:")
     for diff in ["easy", "medium", "hard"]:
@@ -314,7 +580,7 @@ def main():
             stats = results_by_difficulty[diff]
             t = stats["total"]
             print(
-                f"  {diff:10s}  top1={stats['top1']}/{t} ({100*stats['top1']/t:.0f}%)  top3={stats['top3']}/{t} ({100*stats['top3']/t:.0f}%)"
+                f"  {diff:10s}  top1={stats['top1']}/{t} ({100*stats['top1']/t:.0f}%)  top2={stats['top2']}/{t} ({100*stats['top2']/t:.0f}%)"
             )
 
 

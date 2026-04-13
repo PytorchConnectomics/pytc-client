@@ -23,69 +23,62 @@ from server_api.chatbot.tools import (
 
 TRAINING_AGENT_PROMPT = """You are a **Training Agent** for PyTorch Connectomics.
 
-You help users set up and configure training jobs for biomedical image segmentation.
+RULES:
+1. Only report values that your tools return. Do NOT invent config names, paths, or settings.
+2. Never tell the user to write a YAML from scratch. Always start from an existing config.
+3. If the task is unsupported, say so. PyTC only does segmentation.
+4. Be concise. State the facts, generate the command, stop.
 
-CRITICAL RULES:
-1. **Only report values that your tools return.** Do NOT invent hyperparameter values, config names, or file paths.
-2. **Always use tools before answering.** Call list_training_configs or read_config first — never guess.
-3. **Be concise.** Report the facts, generate the command, and stop.
+WORKFLOW: The available configs are provided in your task message. Pick the best match, then:
+1. Call read_config on the chosen config path to see its YAML overrides.
+2. For common parameters (learning rate, batch size, iterations, optimizer, checkpoint interval), ALWAYS use the keys listed below. DO NOT search for these.
+3. For specialized parameters (augmentation settings, loss functions, architecture details), call search_documentation.
+4. Build the command with overrides using the SECTION.KEY=value format.
 
-Tools:
-- list_training_configs: List available config files with descriptions
-- read_config: Read a config file to see its hyperparameters
+IMPORTANT: YAML configs only show overrides — many valid keys exist in the defaults but are not shown in read_config output.
 
-Workflow:
-1. Use list_training_configs to find configs matching user's task
-2. Use read_config to examine the config's current settings
-3. Compare user requirements with config defaults
-4. Generate the training command with appropriate overrides
+Common override keys (ALWAYS use these exact keys, never search for alternatives):
+- SOLVER.BASE_LR, SOLVER.SAMPLES_PER_BATCH, SOLVER.ITERATION_TOTAL
+- SOLVER.ITERATION_SAVE (checkpoint save interval), SOLVER.ITERATION_STEP (LR decay steps)
+- SOLVER.NAME (values: SGD, Adam, AdamW)
+- SOLVER.LR_SCHEDULER_NAME (values: WarmupMultiStepLR, WarmupCosineLR)
+- SOLVER.CLIP_GRADIENTS.ENABLED (True/False), SOLVER.CLIP_GRADIENTS.CLIP_VALUE
+- MODEL.ARCHITECTURE, MODEL.BLOCK_TYPE, MODEL.FILTERS
 
-Command Format:
-```
-python scripts/main.py --config <config_path> [OVERRIDES]
-```
+NEVER invent keys like TRAIN.MAX_ITER, TRAINING.BATCH_SIZE, or CLI flags like --batch-size, --checkpoint-interval — these do not exist.
 
-Overrides use YAML key paths appended to the command: SECTION.KEY=value
-Example:
-```
-python scripts/main.py --config configs/Lucchi-Mitochondria.yaml SOLVER.BASE_LR=0.001 SOLVER.SAMPLES_PER_BATCH=16
-```
-Use read_config output to determine the correct key paths for any parameter.
-
-Always generate commands for the user to run - never execute directly."""
+Command format: `python scripts/main.py --config-file <path> [SECTION.KEY=value ...]`
+Always generate commands for the user to run — never execute directly."""
 
 
 INFERENCE_AGENT_PROMPT = """You are an **Inference Agent** for PyTorch Connectomics.
 
-You help users run inference and evaluation with trained segmentation models.
+RULES:
+1. Only report values that your tools return. Do NOT invent checkpoint paths, config names, or settings.
+2. Be concise. State the facts, generate the command, stop.
 
-CRITICAL RULES:
-1. **Only report values that your tools return.** Do NOT invent checkpoint paths, config names, or settings.
-2. **Always use tools before answering.** Call list_checkpoints or read_config first — never guess.
-3. **Be concise.** Report the facts, generate the command, and stop.
+WORKFLOW:
+1. If the user did NOT provide a checkpoint path, call list_checkpoints first to see available checkpoints.
+2. If the user DID provide a checkpoint path (e.g., outputs/model/checkpoint.pth.tar), skip list_checkpoints.
+3. Call read_config to see the INFERENCE section keys.
+4. For specialized inference parameters, call search_documentation if needed.
 
-Tools:
-- list_checkpoints: Find available trained model checkpoints
-- read_config: Read config to find default inference settings
+Here is the correct override key mapping (use these exact keys):
+- Output path → INFERENCE.OUTPUT_PATH
+- TTA augmentation count → INFERENCE.AUG_NUM
+- TTA mode → INFERENCE.AUG_MODE (values: mean, max)
+- Blending → INFERENCE.BLENDING (values: gaussian, bump)
+- Stride → INFERENCE.STRIDE
+- Process volumes one at a time → INFERENCE.DO_SINGLY
+- Batch size → INFERENCE.SAMPLES_PER_BATCH
 
-Workflow:
-1. Use list_checkpoints to find available models
-2. Use read_config to check inference settings (INFERENCE section)
-3. Generate the inference command
+Command format: `python scripts/main.py --config-file <path> --inference --checkpoint <ckpt> [SECTION.KEY=value ...]`
 
-Command Format:
-```
-python scripts/main.py --config <config_path> --checkpoint <checkpoint_path> --inference [OVERRIDES]
-```
+IMPORTANT: Overrides use SECTION.KEY=value format (NO -- prefix). Example:
+  ✅ CORRECT: INFERENCE.AUG_NUM=8
+  ❌ WRONG: --inference.AUG_NUM=8
 
-Overrides use YAML key paths appended to the command: SECTION.KEY=value
-Example:
-```
-python scripts/main.py --config configs/Lucchi-Mitochondria.yaml --checkpoint outputs/Lucchi/checkpoint_100000.pth --inference INFERENCE.OUTPUT_PATH=/path/to/output
-```
-Use read_config output to determine the correct key paths for any parameter.
-
-Always generate commands for the user to run - never execute directly."""
+Always generate commands for the user to run — never execute directly."""
 
 
 SUPERVISOR_PROMPT = """You are the **Supervisor Agent** for PyTorch Connectomics (PyTC Client).
@@ -94,6 +87,7 @@ You help end users navigate and use the PyTC Client application.
 
 ROUTING — decide which tool to use BEFORE calling anything:
 - **UI, navigation, features, shortcuts, workflows, "how do I..." questions** → search_documentation
+- **General PyTC questions** (what architectures are supported, what augmentations exist, what loss functions are available, etc.) → search_documentation
 - **Generate a specific training/inference command** → delegate_to_training_agent or delegate_to_inference_agent
 - **General/greeting/off-topic** → answer directly, no tool needed
 
@@ -103,18 +97,19 @@ CRITICAL RULES:
 3. **For application questions, ground answers in retrieved documentation.** Call search_documentation and base your answer on the returned text. Do NOT invent features, shortcuts, buttons, or workflows.
 4. **Do not fabricate specifics.** Never make up keyboard shortcuts, button labels, or step-by-step instructions unless they come from retrieved docs or a sub-agent response.
 4a. **NEVER use command-line instructions for UI questions.** The PyTC Client is a desktop GUI application. If the user asks how to do something, explain the UI workflow (buttons, tabs, forms) from the documentation. Do NOT provide Python scripts, bash commands, or CLI examples unless the sub-agent explicitly generates them.
+4b. **NEVER fabricate file paths or scripts.** Do NOT invent scripts like `scripts/evaluate.py`, `scripts/resume_training.py`, or any other files that don't exist. If evaluation requires Python code, show inline code using `connectomics.utils.evaluate`, not fake script paths.
 5. **Answer every part of the user's question.** If they ask about two things, address both.
 6. **Use retrieved content even if wording differs.** If the documentation describes relevant features or workflows, use that information to answer the question. Don't claim something isn't documented just because it uses different terminology than the user's question.
-7. **HARD LIMIT: You may call search_documentation EXACTLY 2 times per user question.** After the second call, you MUST answer with the information already retrieved. Do NOT attempt a third search. If the tool returns "Search limit reached", immediately stop and answer based on what you already have.
+7. **HARD LIMIT: You may call search_documentation at most 3 times yourself.** Sub-agents also have access to search_documentation. If the tool returns "Search limit reached", immediately stop and answer based on what you already have.
 
 Sub-agents:
 - **Training Agent**: Config selection, training job setup, hyperparameter overrides
 - **Inference Agent**: Checkpoint management, inference/evaluation commands
 
 Tools:
-- search_documentation: Search PyTC docs for UI guides and feature explanations. Use ONLY for questions about the application interface, pages, buttons, or workflows.
-- delegate_to_training_agent: Send training-related tasks to training agent
-- delegate_to_inference_agent: Send inference-related tasks to inference agent"""
+- search_documentation: Search PyTC docs for UI guides, feature explanations, training/inference config references, model architectures, augmentation options, and bundled configs.
+- delegate_to_training_agent: Send training-related tasks to training agent (config selection, command generation, hyperparameter tuning)
+- delegate_to_inference_agent: Send inference-related tasks to inference agent (checkpoint listing, inference commands, evaluation setup)"""
 
 
 def build_chain():
@@ -152,23 +147,11 @@ def build_chain():
     def reset_search_counter():
         _search_call_count[0] = 0
 
-    training_agent = create_agent(
-        model=llm,
-        tools=[list_training_configs, read_config],
-        system_prompt=TRAINING_AGENT_PROMPT,
-    )
-
-    inference_agent = create_agent(
-        model=llm,
-        tools=[list_checkpoints, read_config],
-        system_prompt=INFERENCE_AGENT_PROMPT,
-    )
-
     @tool
     def search_documentation(query: str) -> str:
         """
-        Search PyTC documentation for how-to guides, UI explanations, and feature descriptions.
-        Use this for questions about the application interface or general usage.
+        Search PyTC documentation for UI guides, feature descriptions, training/inference
+        configuration references, model architectures, augmentation options, and bundled configs.
 
         Args:
             query: The user's question
@@ -180,8 +163,8 @@ def build_chain():
         print(
             f"[TOOL] search_documentation(query={query!r}) [call {_search_call_count[0]}]"
         )
-        if _search_call_count[0] > 2:
-            print("[TOOL] search limit reached (max 2 per question)")
+        if _search_call_count[0] > 6:
+            print("[TOOL] search limit reached (max 6 per question)")
             return "Search limit reached. Please answer based on the documentation already retrieved."
 
         # Primary: FAISS semantic search (chunked embeddings)
@@ -213,6 +196,18 @@ def build_chain():
         print("[TOOL] search_documentation → no results")
         return "No relevant documentation found."
 
+    training_agent = create_agent(
+        model=llm,
+        tools=[list_training_configs, read_config, search_documentation],
+        system_prompt=TRAINING_AGENT_PROMPT,
+    )
+
+    inference_agent = create_agent(
+        model=llm,
+        tools=[list_checkpoints, read_config, search_documentation],
+        system_prompt=INFERENCE_AGENT_PROMPT,
+    )
+
     @tool
     def delegate_to_training_agent(task: str) -> str:
         """
@@ -226,8 +221,18 @@ def build_chain():
             Response from the training agent
         """
         print(f"[TOOL] delegate_to_training_agent(task={task!r})")
+        # Auto-inject available configs so the agent doesn't need to call list_training_configs
+        configs = list_training_configs.invoke({})
+        config_summary = "\n".join(
+            f"- {c['name']} ({c['model']}) → {c['path']}" for c in configs if isinstance(c, dict) and 'name' in c
+        )
+        enriched_task = (
+            f"{task}\n\n"
+            f"AVAILABLE CONFIGS (already fetched for you):\n{config_summary}\n\n"
+            f"Pick the best match and call read_config on its path to see the exact YAML keys before generating the command."
+        )
         result = training_agent.invoke(
-            {"messages": [{"role": "user", "content": task}]}
+            {"messages": [{"role": "user", "content": enriched_task}]}
         )
         messages = result.get("messages", [])
         response = (
