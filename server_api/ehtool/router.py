@@ -36,6 +36,12 @@ from .models import (
 from .db_models import EHToolSession, EHToolLayer
 from .data_manager import DataManager
 from .utils import array_to_base64, glasbey_color
+from server_api.workflows.service import (
+    append_event_for_workflow_if_present,
+    append_workflow_event,
+    get_user_workflow_or_404,
+    update_workflow_fields,
+)
 
 router = APIRouter()
 
@@ -86,6 +92,12 @@ async def load_detection_dataset(
     db: Session = Depends(get_db),
 ):
     try:
+        workflow = None
+        if request.workflow_id:
+            workflow = get_user_workflow_or_404(
+                db, workflow_id=request.workflow_id, user_id=current_user.id
+            )
+
         # Create DataManager and load dataset
         data_manager = DataManager()
         dataset_info = data_manager.load_dataset(
@@ -101,6 +113,7 @@ async def load_detection_dataset(
             dataset_path=request.dataset_path,
             mask_path=request.mask_path,
             total_layers=dataset_info["total_layers"],
+            workflow_id=request.workflow_id,
         )
         db.add(db_session)
         db.commit()
@@ -121,6 +134,47 @@ async def load_detection_dataset(
 
         # Cache DataManager
         _data_managers[db_session.id] = data_manager
+
+        if workflow:
+            update_workflow_fields(
+                db,
+                workflow,
+                {
+                    "stage": "proofreading",
+                    "title": request.project_name or workflow.title,
+                    "dataset_path": request.dataset_path,
+                    "image_path": request.dataset_path,
+                    "mask_path": request.mask_path,
+                    "proofreading_session_id": db_session.id,
+                },
+                commit=True,
+            )
+            append_workflow_event(
+                db,
+                workflow_id=workflow.id,
+                actor="user",
+                event_type="dataset.loaded",
+                stage="proofreading",
+                summary=f"Loaded dataset for proofreading: {request.project_name}",
+                payload={
+                    "dataset_path": request.dataset_path,
+                    "mask_path": request.mask_path,
+                    "total_layers": dataset_info["total_layers"],
+                    "ehtool_session_id": db_session.id,
+                },
+            )
+            append_workflow_event(
+                db,
+                workflow_id=workflow.id,
+                actor="system",
+                event_type="proofreading.session_loaded",
+                stage="proofreading",
+                summary="Mask proofreading session linked to workflow.",
+                payload={
+                    "ehtool_session_id": db_session.id,
+                    "project_name": request.project_name,
+                },
+            )
 
         return DetectionLoadResponse(
             session_id=db_session.id,
@@ -613,6 +667,20 @@ async def classify_instances(
 
     ui_state = request.ui_state.dict() if request.ui_state else None
     data_manager.save_progress(ui_state=ui_state)
+    append_event_for_workflow_if_present(
+        db,
+        workflow_id=db_session.workflow_id,
+        actor="user",
+        event_type="proofreading.instance_classified",
+        stage="proofreading",
+        summary=f"Classified {updated} instance(s) as {request.classification}.",
+        payload={
+            "ehtool_session_id": request.session_id,
+            "instance_ids": request.instance_ids,
+            "classification": request.classification,
+            "updated_count": updated,
+        },
+    )
 
     return ClassifyResponse(
         updated_count=updated,
@@ -754,6 +822,20 @@ async def save_instance_mask(
         )
         if request.ui_state:
             data_manager.save_progress(ui_state=request.ui_state.dict())
+        append_event_for_workflow_if_present(
+            db,
+            workflow_id=db_session.workflow_id,
+            actor="user",
+            event_type="proofreading.mask_saved",
+            stage="proofreading",
+            summary=f"Saved mask edit for instance {request.instance_id}.",
+            payload={
+                "ehtool_session_id": request.session_id,
+                "instance_id": request.instance_id,
+                "axis": request.axis,
+                "z_index": request.z_index,
+            },
+        )
         return {"message": "Instance mask saved successfully"}
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
@@ -793,6 +875,21 @@ async def export_masks(
             mode=request.mode,
             output_path=request.output_path,
             create_backup=request.create_backup,
+        )
+        append_event_for_workflow_if_present(
+            db,
+            workflow_id=db_session.workflow_id,
+            actor="user",
+            event_type="proofreading.masks_exported",
+            stage="proofreading",
+            summary=f"Exported edited masks to {result['written_path']}.",
+            payload={
+                "ehtool_session_id": request.session_id,
+                "mode": request.mode,
+                "written_path": result["written_path"],
+                "backup_path": result.get("backup_path"),
+                "timestamp": result["timestamp"],
+            },
         )
         return ExportMasksResponse(
             message=result["message"],

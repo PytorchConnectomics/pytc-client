@@ -15,6 +15,7 @@ class DetectionLoadRequest(BaseModel):
     dataset_path: str
     mask_path: Optional[str] = None
     project_name: str = "Untitled Project"
+    workflow_id: Optional[int] = None
 
     @field_validator("dataset_path", "mask_path")
     @classmethod
