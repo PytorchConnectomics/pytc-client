@@ -52,7 +52,7 @@ const getErrorDetailMessage = (detail) => {
   return String(detail);
 };
 
-export async function getNeuroglancerViewer(image, label, scales) {
+export async function getNeuroglancerViewer(image, label, scales, workflowId = null) {
   try {
     const url = `${BASE_URL}/neuroglancer`;
     if (hasBrowserFile(image)) {
@@ -70,6 +70,9 @@ export async function getNeuroglancerViewer(image, label, scales) {
         );
       }
       formData.append("scales", JSON.stringify(scales));
+      if (workflowId) {
+        formData.append("workflow_id", String(workflowId));
+      }
       const res = await axios.post(url, formData);
       return res.data;
     }
@@ -78,6 +81,7 @@ export async function getNeuroglancerViewer(image, label, scales) {
       image: buildFilePath(image),
       label: buildFilePath(label),
       scales,
+      workflow_id: workflowId,
     });
     const res = await axios.post(url, data);
     return res.data;
@@ -141,6 +145,7 @@ export async function startModelTraining(
   logPath,
   outputPath,
   configOriginPath = "",
+  workflowId = null,
 ) {
   try {
     console.log("[API] ===== Starting Training Configuration =====");
@@ -178,6 +183,7 @@ export async function startModelTraining(
       outputPath, // TensorBoard will use this instead
       trainingConfig: configToSend,
       configOriginPath,
+      workflow_id: workflowId,
     });
 
     console.log("[API] Request payload size:", data.length, "bytes");
@@ -232,6 +238,7 @@ export async function startModelInference(
   outputPath,
   checkpointPath,
   configOriginPath = "",
+  workflowId = null,
 ) {
   console.log("\n========== API.JS: START_MODEL_INFERENCE CALLED ==========");
   console.log("[API] Function arguments:");
@@ -293,6 +300,7 @@ export async function startModelInference(
       outputPath,
       inferenceConfig: configToSend,
       configOriginPath,
+      workflow_id: workflowId,
     };
 
     console.log("[API] Payload structure:");
@@ -461,4 +469,87 @@ export async function getConfigPresetContent(path) {
 
 export async function getModelArchitectures() {
   return makeApiRequest("pytc/architectures", "get");
+}
+
+// ── Workflow spine ───────────────────────────────────────────────────────────
+
+export async function getCurrentWorkflow() {
+  try {
+    const res = await apiClient.get("/api/workflows/current");
+    return res.data;
+  } catch (error) {
+    handleError(error);
+  }
+}
+
+export async function updateWorkflow(workflowId, patch) {
+  try {
+    const res = await apiClient.patch(`/api/workflows/${workflowId}`, patch);
+    return res.data;
+  } catch (error) {
+    handleError(error);
+  }
+}
+
+export async function listWorkflowEvents(workflowId) {
+  try {
+    const res = await apiClient.get(`/api/workflows/${workflowId}/events`);
+    return res.data;
+  } catch (error) {
+    handleError(error);
+  }
+}
+
+export async function appendWorkflowEvent(workflowId, event) {
+  try {
+    const res = await apiClient.post(`/api/workflows/${workflowId}/events`, event);
+    return res.data;
+  } catch (error) {
+    handleError(error);
+  }
+}
+
+export async function createAgentAction(workflowId, action) {
+  try {
+    const res = await apiClient.post(
+      `/api/workflows/${workflowId}/agent-actions`,
+      action,
+    );
+    return res.data;
+  } catch (error) {
+    handleError(error);
+  }
+}
+
+export async function approveAgentAction(workflowId, eventId) {
+  try {
+    const res = await apiClient.post(
+      `/api/workflows/${workflowId}/agent-actions/${eventId}/approve`,
+    );
+    return res.data;
+  } catch (error) {
+    handleError(error);
+  }
+}
+
+export async function rejectAgentAction(workflowId, eventId) {
+  try {
+    const res = await apiClient.post(
+      `/api/workflows/${workflowId}/agent-actions/${eventId}/reject`,
+    );
+    return res.data;
+  } catch (error) {
+    handleError(error);
+  }
+}
+
+export async function queryWorkflowAgent(workflowId, query) {
+  try {
+    const res = await apiClient.post(`/api/workflows/${workflowId}/agent/query`, {
+      query,
+    });
+    return res.data;
+  } catch (error) {
+    handleError(error);
+  }
 }

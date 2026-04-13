@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo, useRef } from "react";
+import React, { useContext, useState, useEffect, useMemo, useRef } from "react";
 import {
   Layout,
   message,
@@ -20,6 +20,8 @@ import InstanceNavigator from "./InstanceNavigator";
 import ProofreadingEditor from "./ProofreadingEditor";
 import SliceScheduler from "./SliceScheduler";
 import { apiClient } from "../../api";
+import { AppContext } from "../../contexts/GlobalContext";
+import { useWorkflow } from "../../contexts/WorkflowContext";
 
 const { Sider, Content } = Layout;
 const { Title, Text } = Typography;
@@ -55,7 +57,14 @@ const SCRUB_IDLE_MS = parsePositiveInt(
   120,
 );
 
-function DetectionWorkflow({ sessionId, setSessionId, refreshTrigger }) {
+function DetectionWorkflow({
+  sessionId,
+  setSessionId,
+  refreshTrigger,
+  workflowId,
+}) {
+  const appContext = useContext(AppContext);
+  const workflowContext = useWorkflow();
   const [projectName, setProjectName] = useState("");
   const [totalLayers, setTotalLayers] = useState(0);
   const [instances, setInstances] = useState([]);
@@ -108,6 +117,7 @@ function DetectionWorkflow({ sessionId, setSessionId, refreshTrigger }) {
   const [persistence, setPersistence] = useState(null);
   const [showExportModal, setShowExportModal] = useState(false);
   const [exportPath, setExportPath] = useState("");
+  const [lastExportPath, setLastExportPath] = useState("");
   const [exportingMasks, setExportingMasks] = useState(false);
   const [overwritingSource, setOverwritingSource] = useState(false);
   const lastPersistenceErrorRef = useRef(null);
@@ -448,6 +458,7 @@ function DetectionWorkflow({ sessionId, setSessionId, refreshTrigger }) {
         dataset_path: datasetPath,
         mask_path: maskPath || null,
         project_name: projectName,
+        workflow_id: workflowId || null,
       });
 
       setSessionId(response.data.session_id);
@@ -1767,6 +1778,7 @@ function DetectionWorkflow({ sessionId, setSessionId, refreshTrigger }) {
         create_backup: true,
       });
       setShowExportModal(false);
+      setLastExportPath(response.data.written_path);
       message.success(`Exported masks to ${response.data.written_path}`);
       if (response.data.backup_path) {
         message.info(`Backup created at ${response.data.backup_path}`);
@@ -1805,6 +1817,7 @@ function DetectionWorkflow({ sessionId, setSessionId, refreshTrigger }) {
           if (response.data.backup_path) {
             message.info(`Backup created at ${response.data.backup_path}`);
           }
+          setLastExportPath(response.data.written_path);
           refreshPersistenceStatus();
         } catch (error) {
           Modal.error({
@@ -1822,6 +1835,44 @@ function DetectionWorkflow({ sessionId, setSessionId, refreshTrigger }) {
     });
   };
 
+  const handleStageForRetraining = async () => {
+    const correctedMaskPath = lastExportPath || persistence?.last_export_path;
+    if (!correctedMaskPath) {
+      message.warning("Export corrected masks before staging retraining.");
+      return;
+    }
+    if (!workflowContext?.workflow?.id) {
+      message.warning("Workflow state is not available yet.");
+      return;
+    }
+
+    try {
+      await workflowContext.updateWorkflow({
+        stage: "retraining_staged",
+        corrected_mask_path: correctedMaskPath,
+      });
+      await workflowContext.appendEvent({
+        actor: "user",
+        event_type: "retraining.staged",
+        stage: "retraining_staged",
+        summary: "Staged corrected masks for retraining.",
+        payload: {
+          corrected_mask_path: correctedMaskPath,
+          ehtool_session_id: sessionId,
+          source: "proofreading_export",
+        },
+      });
+      if (appContext?.trainingState?.setInputLabel) {
+        appContext.trainingState.setInputLabel(correctedMaskPath);
+      }
+      message.success("Corrected masks staged for retraining.");
+    } catch (error) {
+      message.error(
+        getErrorMessage(error, "Failed to stage corrected masks for retraining"),
+      );
+    }
+  };
+
   if (!sessionId) {
     return (
       <div style={{ padding: "24px 0" }}>
@@ -1834,6 +1885,7 @@ function DetectionWorkflow({ sessionId, setSessionId, refreshTrigger }) {
     sliderZ ?? viewState.zIndex,
     axisTotal || totalLayers,
   );
+  const exportedMaskPath = lastExportPath || persistence?.last_export_path || "";
 
   const reviewControls =
     activeInstance && instanceMode !== "none" ? (
@@ -1929,6 +1981,15 @@ function DetectionWorkflow({ sessionId, setSessionId, refreshTrigger }) {
           <Button size="small" onClick={goToNextUnreviewed}>
             Next unreviewed
           </Button>
+          {exportedMaskPath && (
+            <Button
+              size="small"
+              type="primary"
+              onClick={handleStageForRetraining}
+            >
+              Stage for retraining
+            </Button>
+          )}
           <Dropdown
             trigger={["click"]}
             menu={{

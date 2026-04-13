@@ -16,6 +16,7 @@ import ModelInference from "./ModelInference";
 import Monitoring from "./Monitoring";
 import MaskProofreading from "./MaskProofreading";
 import Chatbot from "../components/Chatbot";
+import { useWorkflow } from "../contexts/WorkflowContext";
 
 const { Content } = Layout;
 
@@ -39,6 +40,9 @@ const MODULE_ITEMS = [
 function Views() {
   const [current, setCurrent] = useState("files");
   const [visitedTabs, setVisitedTabs] = useState(new Set(["files"]));
+  const workflowContext = useWorkflow();
+  const lastClientEffects = workflowContext?.lastClientEffects;
+  const consumeClientEffects = workflowContext?.consumeClientEffects;
   const [isChatOpen, setIsChatOpen] = useState(false);
   const [chatWidth, setChatWidth] = useState(560);
   const isResizing = useRef(false);
@@ -77,6 +81,15 @@ function Views() {
       window.removeEventListener("mouseup", stopResizing);
     };
   }, [resize, stopResizing]);
+
+  useEffect(() => {
+    const target = lastClientEffects?.navigate_to;
+    if (!target) return;
+    const targetKey = target === "model-training" ? "training" : target;
+    setCurrent(targetKey);
+    setVisitedTabs((prev) => new Set(prev).add(targetKey));
+    consumeClientEffects?.();
+  }, [lastClientEffects, consumeClientEffects]);
 
   const renderTabContent = (key, component) => {
     if (!visitedTabs.has(key)) return null;
