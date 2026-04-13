@@ -3,10 +3,14 @@ import tempfile
 import unittest
 
 import numpy as np
-import tifffile
-from fastapi.testclient import TestClient
+import pytest
+pytest.importorskip("sqlalchemy")
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
+
+pytest.importorskip("fastapi")
+tifffile = pytest.importorskip("tifffile")
+from fastapi.testclient import TestClient
 
 from server_api.auth import database as auth_database
 from server_api.auth import models
@@ -136,6 +140,83 @@ class WorkflowRouteTests(unittest.TestCase):
         self.assertIn("agent.proposal_approved", event_types)
         self.assertIn("agent.proposal_rejected", event_types)
         self.assertIn("retraining.staged", event_types)
+
+    def test_hotspots_and_impact_preview(self):
+        workflow, _ = self._current_workflow()
+        workflow_id = workflow["id"]
+        patch_response = self.client.patch(
+            f"/api/workflows/{workflow_id}",
+            json={"stage": "proofreading"},
+        )
+        self.assertEqual(patch_response.status_code, 200)
+
+        self.client.post(
+            f"/api/workflows/{workflow_id}/events",
+            json={
+                "actor": "system",
+                "event_type": "inference.failed",
+                "stage": "inference",
+                "summary": "Inference failed on z:12",
+                "payload": {"region_id": "z:12"},
+            },
+        )
+        self.client.post(
+            f"/api/workflows/{workflow_id}/events",
+            json={
+                "actor": "user",
+                "event_type": "proofreading.instance_classified",
+                "stage": "proofreading",
+                "summary": "Classified uncertain instances.",
+                "payload": {
+                    "region_id": "z:12",
+                    "classification": "incorrect",
+                    "instance_ids": [101, 202],
+                },
+            },
+        )
+        self.client.post(
+            f"/api/workflows/{workflow_id}/events",
+            json={
+                "actor": "user",
+                "event_type": "proofreading.mask_saved",
+                "stage": "proofreading",
+                "summary": "Saved corrected mask for z:12",
+                "payload": {"region_id": "z:12", "instance_id": 101},
+            },
+        )
+        self.client.post(
+            f"/api/workflows/{workflow_id}/events",
+            json={
+                "actor": "system",
+                "event_type": "proofreading.masks_exported",
+                "stage": "proofreading",
+                "summary": "Exported corrected masks.",
+                "payload": {"written_path": "/tmp/corrected-z12.tif"},
+            },
+        )
+
+        hotspot_response = self.client.get(f"/api/workflows/{workflow_id}/hotspots")
+        self.assertEqual(hotspot_response.status_code, 200)
+        hotspot_payload = hotspot_response.json()
+        self.assertEqual(hotspot_payload["workflow_id"], workflow_id)
+        self.assertGreaterEqual(len(hotspot_payload["hotspots"]), 1)
+        self.assertEqual(hotspot_payload["hotspots"][0]["region_key"], "z:12")
+        self.assertIn(
+            hotspot_payload["hotspots"][0]["severity"],
+            {"low", "medium", "high"},
+        )
+
+        impact_response = self.client.get(
+            f"/api/workflows/{workflow_id}/impact-preview"
+        )
+        self.assertEqual(impact_response.status_code, 200)
+        impact_payload = impact_response.json()
+        self.assertTrue(impact_payload["can_stage_retraining"])
+        self.assertEqual(
+            impact_payload["corrected_mask_path"], "/tmp/corrected-z12.tif"
+        )
+        self.assertIn(impact_payload["confidence"], {"low", "medium", "high"})
+        self.assertIn("proofreading_mask_saved", impact_payload["signals"])
 
     def test_ehtool_load_classify_save_and_export_append_workflow_events(self):
         workflow, _ = self._current_workflow()
