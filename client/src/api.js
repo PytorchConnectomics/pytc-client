@@ -500,6 +500,42 @@ export async function listWorkflowEvents(workflowId) {
   }
 }
 
+export async function getWorkflowHotspots(workflowId) {
+  try {
+    const res = await apiClient.get(`/api/workflows/${workflowId}/hotspots`);
+    return res.data;
+  } catch (error) {
+    handleError(error);
+  }
+}
+
+export async function getWorkflowImpactPreview(workflowId) {
+  try {
+    const res = await apiClient.get(`/api/workflows/${workflowId}/impact-preview`);
+    return res.data;
+  } catch (error) {
+    handleError(error);
+  }
+}
+
+export async function getWorkflowMetrics(workflowId) {
+  try {
+    const res = await apiClient.get(`/api/workflows/${workflowId}/metrics`);
+    return res.data;
+  } catch (error) {
+    handleError(error);
+  }
+}
+
+export async function exportWorkflowBundle(workflowId) {
+  try {
+    const res = await apiClient.post(`/api/workflows/${workflowId}/export-bundle`);
+    return res.data;
+  } catch (error) {
+    handleError(error);
+  }
+}
+
 export async function appendWorkflowEvent(workflowId, event) {
   try {
     const res = await apiClient.post(`/api/workflows/${workflowId}/events`, event);

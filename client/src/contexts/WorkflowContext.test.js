@@ -6,6 +6,8 @@ import { WorkflowProvider, useWorkflow } from "./WorkflowContext";
 import {
   approveAgentAction,
   getCurrentWorkflow,
+  getWorkflowHotspots,
+  getWorkflowImpactPreview,
   listWorkflowEvents,
 } from "../api";
 
@@ -14,6 +16,8 @@ jest.mock("../api", () => ({
   appendWorkflowEvent: jest.fn(),
   createAgentAction: jest.fn(),
   getCurrentWorkflow: jest.fn(),
+  getWorkflowHotspots: jest.fn(),
+  getWorkflowImpactPreview: jest.fn(),
   listWorkflowEvents: jest.fn(),
   queryWorkflowAgent: jest.fn(),
   rejectAgentAction: jest.fn(),
@@ -32,6 +36,8 @@ function Probe() {
     <div>
       <div>{workflowContext.workflow?.stage || "loading"}</div>
       <div>{workflowContext.events.map((event) => event.event_type).join(",")}</div>
+      <div>{workflowContext.hotspots?.[0]?.summary || "no-hotspot"}</div>
+      <div>{workflowContext.impactPreview?.confidence || "no-impact"}</div>
       <button
         type="button"
         onClick={() => workflowContext.approveAgentAction(7)}
@@ -60,6 +66,15 @@ describe("WorkflowProvider", () => {
       events: [{ id: 1, event_type: "workflow.created" }],
     });
     listWorkflowEvents.mockResolvedValue([]);
+    getWorkflowHotspots.mockResolvedValue({
+      workflow_id: 1,
+      hotspots: [{ region_key: "z:9", summary: "Top hotspot", severity: "high" }],
+    });
+    getWorkflowImpactPreview.mockResolvedValue({
+      workflow_id: 1,
+      confidence: "medium",
+      summary: "Impact summary",
+    });
   });
 
   it("loads the current workflow and events on startup", async () => {
@@ -67,6 +82,14 @@ describe("WorkflowProvider", () => {
 
     expect(await screen.findByText("setup")).toBeTruthy();
     expect(screen.getByText("workflow.created")).toBeTruthy();
+    await waitFor(() => {
+      expect(getWorkflowHotspots).toHaveBeenCalledWith(1);
+      expect(getWorkflowImpactPreview).toHaveBeenCalledWith(1);
+    });
+    await waitFor(() => {
+      expect(screen.getByText("Top hotspot")).toBeTruthy();
+      expect(screen.getByText("medium")).toBeTruthy();
+    });
     expect(getCurrentWorkflow).toHaveBeenCalledTimes(1);
   });
 
