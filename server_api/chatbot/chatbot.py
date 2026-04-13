@@ -196,6 +196,7 @@ def build_chain():
 
     # Call counter to prevent infinite search loops (reset before each user message)
     _search_call_count = [0]
+    _rag_enabled = [True]
 
     def reset_search_counter():
         _search_call_count[0] = 0
@@ -232,12 +233,22 @@ def build_chain():
             print("[TOOL] search limit reached (max 2 per question)")
             return "Search limit reached. Please answer based on the documentation already retrieved."
 
-        # Primary: FAISS semantic search (chunked embeddings)
-        docs = retriever.invoke(query)
-        if docs:
-            sources = [d.metadata.get("source", "?") for d in docs]
-            print(f"[TOOL] RAG → {len(docs)} chunks: {sources}")
-            return "\n\n".join([doc.page_content for doc in docs])
+        # Primary: FAISS semantic search (chunked embeddings).
+        # If embeddings/index dimensions do not match (or any retrieval error occurs),
+        # disable RAG for the current process and use keyword fallback.
+        if _rag_enabled[0]:
+            try:
+                docs = retriever.invoke(query)
+                if docs:
+                    sources = [d.metadata.get("source", "?") for d in docs]
+                    print(f"[TOOL] RAG → {len(docs)} chunks: {sources}")
+                    return "\n\n".join([doc.page_content for doc in docs])
+            except Exception as exc:
+                _rag_enabled[0] = False
+                print(
+                    "[TOOL] RAG retrieval failed; disabling RAG and falling back "
+                    f"to keyword search ({exc.__class__.__name__}: {exc!r})"
+                )
 
         # Fallback: keyword scoring against full docs
         print("[TOOL] RAG returned nothing, trying keyword fallback")
@@ -367,6 +378,7 @@ def build_helper_chain():
         _all_docs[md_file.name] = md_file.read_text(encoding="utf-8")
 
     _search_call_count = [0]
+    _rag_enabled = [True]
 
     def reset_search_counter():
         _search_call_count[0] = 0
@@ -387,9 +399,17 @@ def build_helper_chain():
                 "Search limit reached. Answer with the documentation already retrieved."
             )
 
-        docs = retriever.invoke(query)
-        if docs:
-            return "\n\n".join([doc.page_content for doc in docs])
+        if _rag_enabled[0]:
+            try:
+                docs = retriever.invoke(query)
+                if docs:
+                    return "\n\n".join([doc.page_content for doc in docs])
+            except Exception as exc:
+                _rag_enabled[0] = False
+                print(
+                    "[HELPER TOOL] RAG retrieval failed; disabling RAG and "
+                    f"falling back to keyword search ({exc.__class__.__name__}: {exc!r})"
+                )
 
         # Keyword fallback
         query_lower = query.lower()
