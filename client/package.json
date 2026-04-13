@@ -29,7 +29,8 @@
   "scripts": {
     "start": "react-scripts start",
     "build": "cross-env CI=false react-scripts build",
-    "electron": "electron ."
+    "electron": "electron .",
+    "test": "react-scripts test"
   },
   "eslintConfig": {
     "extends": [
