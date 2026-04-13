@@ -12,9 +12,11 @@ import Configurator from "../components/Configurator";
 import { applyInputPaths } from "../configSchema";
 import RuntimeLogPanel from "../components/RuntimeLogPanel";
 import { AppContext } from "../contexts/GlobalContext";
+import { useWorkflow } from "../contexts/WorkflowContext";
 
 function ModelTraining() {
   const context = useContext(AppContext);
+  const workflowContext = useWorkflow();
   const training = context.trainingState;
   const [isTraining, setIsTraining] = useState(false);
   const [trainingStatus, setTrainingStatus] = useState("");
@@ -166,6 +168,7 @@ function ModelTraining() {
         getPath(training.logPath) || getPath(training.outputPath),
         getPath(training.outputPath),
         getConfigOriginPath(),
+        workflowContext?.workflow?.id,
       );
       console.log(res);
       await refreshTrainingLogs();

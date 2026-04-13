@@ -3,6 +3,7 @@ import "./App.css";
 import Views from "./views/Views";
 import { AppContext, ContextWrapper } from "./contexts/GlobalContext";
 import { YamlContextWrapper } from "./contexts/YamlContext";
+import { WorkflowProvider } from "./contexts/WorkflowContext";
 
 function CacheBootstrapper({ children }) {
   const { resetFileState } = useContext(AppContext);
@@ -38,11 +39,13 @@ function App() {
   return (
     <ContextWrapper>
       <YamlContextWrapper>
-        <CacheBootstrapper>
-          <div className="App">
-            <MainContent />
-          </div>
-        </CacheBootstrapper>
+        <WorkflowProvider>
+          <CacheBootstrapper>
+            <div className="App">
+              <MainContent />
+            </div>
+          </CacheBootstrapper>
+        </WorkflowProvider>
       </YamlContextWrapper>
     </ContextWrapper>
   );

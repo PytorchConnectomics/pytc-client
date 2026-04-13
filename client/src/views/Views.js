@@ -8,7 +8,6 @@ import {
   DashboardOutlined,
   BugOutlined,
   MessageOutlined,
-  BarChartOutlined,
   ProjectOutlined,
 } from "@ant-design/icons";
 import FilesManager from "./FilesManager";
@@ -19,6 +18,7 @@ import Monitoring from "./Monitoring";
 import MaskProofreading from "./mask-proofreading/MaskProofreading";
 import ProjectManager from "./project-manager/ProjectManager";
 import Chatbot from "../components/Chatbot";
+import { useWorkflow } from "../contexts/WorkflowContext";
 
 const { Content } = Layout;
 
@@ -45,6 +45,9 @@ const MODULE_ITEMS = [
 ];
 
 function Views() {
+  const workflowContext = useWorkflow();
+  const lastClientEffects = workflowContext?.lastClientEffects;
+  const consumeClientEffects = workflowContext?.consumeClientEffects;
   const [current, setCurrent] = useState("project-manager");
   const [visitedTabs, setVisitedTabs] = useState(
     new Set(["project-manager", "files"]),
@@ -114,6 +117,15 @@ function Views() {
       window.removeEventListener("mouseup", stopResizing);
     };
   }, [resize, stopResizing]);
+
+  useEffect(() => {
+    const target = lastClientEffects?.navigate_to;
+    if (!target) return;
+    const targetKey = target === "model-training" ? "training" : target;
+    setCurrent(targetKey);
+    setVisitedTabs((prev) => new Set(prev).add(targetKey));
+    consumeClientEffects?.();
+  }, [lastClientEffects, consumeClientEffects]);
 
   const renderTabContent = (key, component) => {
     if (!visitedTabs.has(key)) return null;
