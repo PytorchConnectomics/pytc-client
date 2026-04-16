@@ -31,11 +31,11 @@ dependencies = [
     "torchvision>=0.15.0",
     "uvicorn==0.38.0",
     "zarr>=2.18",
-    "pytorch-connectomics",
+    "connectomics",
 ]
 
 [tool.uv.sources]
-"pytorch-connectomics" = { path = "pytorch_connectomics", editable = true }
+"connectomics" = { path = "pytorch_connectomics", editable = true }
 
 [dependency-groups]
 dev = [

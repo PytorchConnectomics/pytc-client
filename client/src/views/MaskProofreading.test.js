@@ -3,7 +3,7 @@ import { render, screen } from "@testing-library/react";
 
 import MaskProofreading from "./MaskProofreading";
 
-jest.mock("../EHTool", () => (props) => (
+jest.mock("./EHTool", () => (props) => (
   <div
     data-testid="eh-tool"
     data-workflow-id={String(props.workflowId)}
@@ -11,7 +11,7 @@ jest.mock("../EHTool", () => (props) => (
   />
 ));
 
-jest.mock("../../contexts/WorkflowContext", () => ({
+jest.mock("../contexts/WorkflowContext", () => ({
   useWorkflow: () => ({ workflow: { id: 42 } }),
 }));
 
