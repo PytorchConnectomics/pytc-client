@@ -129,11 +129,11 @@ class ModelServiceTests(unittest.TestCase):
         config_path = model_service._write_temp_config(
             "foo: bar\n",
             "training",
-            config_origin_path="tutorials/neuron_snemi.yaml",
+            config_origin_path="configs/SNEMI/SNEMI-Base.yaml",
         )
         written_path = pathlib.Path(config_path)
         expected_parent = (
-            model_service._project_root() / "pytorch_connectomics" / "tutorials"
+            model_service._project_root() / "pytorch_connectomics" / "configs" / "SNEMI"
         )
 
         self.assertTrue(written_path.exists())

@@ -9,7 +9,7 @@ class WorkerModelServiceTests(unittest.TestCase):
     def tearDown(self):
         model_service.cleanup_temp_files()
 
-    def test_matches_pytc_mode_process_with_config_between_script_and_mode(self):
+    def test_matches_pytc_mode_process_supports_legacy_cli(self):
         script_path = str(model_service._pytc_script_path())
         cmdline = [
             "/usr/bin/python",
@@ -22,6 +22,31 @@ class WorkerModelServiceTests(unittest.TestCase):
 
         self.assertTrue(model_service._matches_pytc_mode_process(cmdline, "train"))
         self.assertFalse(model_service._matches_pytc_mode_process(cmdline, "test"))
+
+    def test_matches_pytc_mode_process_supports_current_cli(self):
+        script_path = str(model_service._pytc_script_path())
+        train_cmdline = [
+            "/usr/bin/python",
+            script_path,
+            "--config-file",
+            "/tmp/runtime.yaml",
+        ]
+        inference_cmdline = [
+            "/usr/bin/python",
+            script_path,
+            "--config-file",
+            "/tmp/runtime.yaml",
+            "--inference",
+        ]
+
+        self.assertTrue(model_service._matches_pytc_mode_process(train_cmdline, "train"))
+        self.assertFalse(model_service._matches_pytc_mode_process(train_cmdline, "test"))
+        self.assertTrue(
+            model_service._matches_pytc_mode_process(inference_cmdline, "test")
+        )
+        self.assertFalse(
+            model_service._matches_pytc_mode_process(inference_cmdline, "train")
+        )
 
     def test_cleanup_temp_files_is_scoped_by_kind(self):
         training_file = tempfile.NamedTemporaryFile(delete=False)

@@ -4,9 +4,9 @@ Tests the multi-agent chatbot system without starting the full app.
 Shows all RAG retrievals, tool calls, and final responses.
 
 Usage:
-  python test_agent.py                     # interactive mode
-  python test_agent.py -b                  # batch: run 20-question PyTC eval
-  python test_agent.py "your question"     # single question
+  python agent_cli.py                     # interactive mode
+  python agent_cli.py -b                  # batch: run 20-question PyTC eval
+  python agent_cli.py "your question"     # single question
 """
 
 import os
@@ -69,7 +69,7 @@ def run_batch():
     print(f"{'#'*80}")
 
 
-def test_single(question: str):
+def run_single(question: str):
     """Test the agent with a single question."""
     print(f"\n{'='*80}")
     print(f"QUESTION: {question}")
@@ -127,6 +127,6 @@ if __name__ == "__main__":
     elif args.interactive:
         interactive_mode()
     elif args.question:
-        test_single(" ".join(args.question))
+        run_single(" ".join(args.question))
     else:
         interactive_mode()

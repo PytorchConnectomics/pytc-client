@@ -444,12 +444,18 @@ def _matches_pytc_mode_process(cmdline: list[str], mode: str) -> bool:
     if script_path not in normalized:
         return False
 
-    try:
+    # Support both the legacy "--mode train/test" CLI and the newer
+    # "--inference" flag that PyTC now uses to switch the entrypoint into test mode.
+    if "--mode" in normalized:
         mode_index = normalized.index("--mode")
-    except ValueError:
-        return False
+        return mode_index + 1 < len(normalized) and normalized[mode_index + 1] == mode
 
-    return mode_index + 1 < len(normalized) and normalized[mode_index + 1] == mode
+    is_inference = "--inference" in normalized
+    if mode == "test":
+        return is_inference
+    if mode == "train":
+        return not is_inference
+    return False
 
 
 def stop_pytc_processes(mode: str):
