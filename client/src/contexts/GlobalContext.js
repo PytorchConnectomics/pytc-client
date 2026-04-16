@@ -77,12 +77,32 @@ function usePersistedState(key, defaultValue) {
   const [isLoaded, setIsLoaded] = useState(false);
 
   useEffect(() => {
-    // Fetch the stored value asynchronously when the component mounts
+    // Fetch the stored value asynchronously when the component mounts.
+    // Migration guard: if localforage has no value but localStorage does,
+    // migrate the legacy value over and clear the stale localStorage entry.
     localforage
       .getItem(key)
       .then((storedValue) => {
         if (storedValue !== null) {
           setState(storedValue);
+        } else {
+          const legacy = localStorage.getItem(key);
+          if (legacy !== null) {
+            try {
+              // localforage can store raw values, but localStorage only stores
+              // strings, so attempt a JSON parse first.
+              const parsed = JSON.parse(legacy);
+              setState(parsed);
+              localforage.setItem(key, parsed).catch(() => {});
+            } catch {
+              setState(legacy);
+              localforage.setItem(key, legacy).catch(() => {});
+            }
+            localStorage.removeItem(key);
+            console.info(
+              `[GlobalContext] Migrated '${key}' from localStorage → localforage.`,
+            );
+          }
         }
         setIsLoaded(true);
       })
@@ -130,25 +150,13 @@ export const ContextWrapper = (props) => {
   const [inferenceConfigOriginPath, setInferenceConfigOriginPath] =
     usePersistedState("inferenceConfigOriginPath", "");
   const [trainingUploadedYamlFile, setTrainingUploadedYamlFile] =
-    usePersistedState(
-      "trainingUploadedYamlFile",
-      "",
-    );
+    usePersistedState("trainingUploadedYamlFile", "");
   const [inferenceUploadedYamlFile, setInferenceUploadedYamlFile] =
-    usePersistedState(
-      "inferenceUploadedYamlFile",
-      "",
-    );
+    usePersistedState("inferenceUploadedYamlFile", "");
   const [trainingSelectedYamlPreset, setTrainingSelectedYamlPreset] =
-    usePersistedState(
-      "trainingSelectedYamlPreset",
-      "",
-    );
+    usePersistedState("trainingSelectedYamlPreset", "");
   const [inferenceSelectedYamlPreset, setInferenceSelectedYamlPreset] =
-    usePersistedState(
-      "inferenceSelectedYamlPreset",
-      "",
-    );
+    usePersistedState("inferenceSelectedYamlPreset", "");
   const [imageFileList, setImageFileList] = usePersistedState(
     "imageFileList",
     [],
@@ -170,10 +178,7 @@ export const ContextWrapper = (props) => {
     null,
   );
   const [inferenceCheckpointPath, setInferenceCheckpointPath] =
-    usePersistedState(
-      "inferenceCheckpointPath",
-      null,
-    );
+    usePersistedState("inferenceCheckpointPath", null);
   const [currentImage, setCurrentImage] = usePersistedState(
     "currentImage",
     null,

@@ -27,6 +27,7 @@ import {
   getModelArchitectures,
 } from "../api";
 import { findCommonPartOfString } from "../utils";
+import { adaptToPytcSchema } from "../utils/yamlSchemaAdapter";
 import {
   applyInputPaths,
   getArchitectureValue,
@@ -142,10 +143,24 @@ const YamlFileUploader = (props) => {
   };
 
   const updateInputSelectorInformation = (yamlData) => {
+    // Phase 1: Auto-populate Step 0 path slots from YAML if UI fields are empty.
+    const ds = yamlData.DATASET || {};
+    if (!getPathValue(workflow.inputImage) && ds.INPUT_PATH && ds.IMAGE_NAME) {
+      context.setInputImage(ds.INPUT_PATH + ds.IMAGE_NAME);
+    }
+    if (!getPathValue(workflow.inputLabel) && ds.INPUT_PATH && ds.LABEL_NAME) {
+      context.setInputLabel(ds.INPUT_PATH + ds.LABEL_NAME);
+    }
+    if (!getPathValue(workflow.outputPath) && ds.OUTPUT_PATH) {
+      context.setOutputPath(ds.OUTPUT_PATH);
+    }
+
+    // Phase 2: Write current UI values back into the YAML (using configSchema).
     const inputImagePath = getPathValue(workflow.inputImage);
     const inputLabelPath = getPathValue(workflow.inputLabel);
     const inputPath = findCommonPartOfString(inputImagePath, inputLabelPath);
     const outputPath = getPathValue(workflow.outputPath);
+
     applyInputPaths(yamlData, {
       mode: type,
       inputImagePath,
@@ -184,10 +199,23 @@ const YamlFileUploader = (props) => {
     }
   };
 
-  const applyYamlData = (yamlData, sourceLabel) => {
-    if (!yamlData) {
+  const applyYamlData = (rawYamlData, sourceLabel) => {
+    if (!rawYamlData) {
       message.error("Failed to load YAML configuration.");
       return;
+    }
+
+    // Detect schema and adapt to pytorch_connectomics format if needed.
+    const {
+      adapted: yamlData,
+      originalSchema,
+      wasAdapted,
+    } = adaptToPytcSchema(rawYamlData);
+    if (wasAdapted) {
+      message.info(
+        `Detected '${originalSchema}' schema — automatically converted to pytorch_connectomics format.`,
+        5,
+      );
     }
 
     updateInputSelectorInformation(yamlData);
@@ -490,7 +518,11 @@ const YamlFileUploader = (props) => {
       {yamlContent ? (
         <Row>
           {sliderData.map((param, index) => {
-            const sliderValue = getSliderValue(currentYamlData, type, param.key);
+            const sliderValue = getSliderValue(
+              currentYamlData,
+              type,
+              param.key,
+            );
             const sliderSupported = isSliderSupported(
               currentYamlData,
               type,
@@ -507,7 +539,11 @@ const YamlFileUploader = (props) => {
                       min={param.min}
                       max={param.max}
                       marks={param.marks}
-                      value={typeof sliderValue === "number" ? sliderValue : param.value}
+                      value={
+                        typeof sliderValue === "number"
+                          ? sliderValue
+                          : param.value
+                      }
                       disabled={!sliderSupported}
                       onChange={(newValue) =>
                         handleSliderChange(param.key, newValue)

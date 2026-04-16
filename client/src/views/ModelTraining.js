@@ -61,7 +61,9 @@ function ModelTraining() {
       if (status.exitCode === 0) {
         setTrainingStatus("Training completed successfully! ✓");
       } else if (status.exitCode !== null) {
-        setTrainingStatus(`Training finished with exit code: ${status.exitCode}`);
+        setTrainingStatus(
+          `Training finished with exit code: ${status.exitCode}`,
+        );
       } else if (status.phase === "failed" && status.lastError) {
         setTrainingStatus(`Training failed: ${status.lastError}`);
       } else {
@@ -91,7 +93,10 @@ function ModelTraining() {
       });
       return yaml.dump(yamlData, { indent: 2 }).replace(/^\s*\n/gm, "");
     } catch (error) {
-      console.warn("Failed to prepare training config from current inputs:", error);
+      console.warn(
+        "Failed to prepare training config from current inputs:",
+        error,
+      );
       return trainingConfig;
     }
   };
@@ -141,6 +146,11 @@ function ModelTraining() {
 
       if (!training.outputPath) {
         setTrainingStatus("Error: Please set output path first in Step 1.");
+        return;
+      }
+
+      if (!training.logPath) {
+        setTrainingStatus("Error: Please set log path first in Step 1.");
         return;
       }
 

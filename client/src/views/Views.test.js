@@ -49,7 +49,9 @@ jest.mock("./Visualization", () => () => <div>Visualization Content</div>);
 jest.mock("./ModelTraining", () => () => <div>Training Content</div>);
 jest.mock("./ModelInference", () => () => <div>Inference Content</div>);
 jest.mock("./Monitoring", () => () => <div>Monitoring Content</div>);
-jest.mock("./MaskProofreading", () => () => <div>Mask Proofreading Content</div>);
+jest.mock("./MaskProofreading", () => () => (
+  <div>Mask Proofreading Content</div>
+));
 jest.mock("../components/Chatbot", () => () => <div>Chatbot</div>);
 
 describe("Views", () => {

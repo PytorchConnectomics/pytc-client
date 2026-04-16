@@ -60,7 +60,10 @@ function ModelInference({ isInferring, setIsInferring }) {
       });
       return yaml.dump(yamlData, { indent: 2 }).replace(/^\s*\n/gm, "");
     } catch (error) {
-      console.warn("Failed to prepare inference config from current inputs:", error);
+      console.warn(
+        "Failed to prepare inference config from current inputs:",
+        error,
+      );
       return inferenceConfig;
     }
   };
@@ -83,7 +86,10 @@ function ModelInference({ isInferring, setIsInferring }) {
             setIsInferring(false);
             if (status.exitCode === 0) {
               setInferenceStatus("Inference completed successfully! ✓");
-            } else if (status.exitCode !== null && status.exitCode !== undefined) {
+            } else if (
+              status.exitCode !== null &&
+              status.exitCode !== undefined
+            ) {
               setInferenceStatus(
                 `Inference finished with exit code: ${status.exitCode}`,
               );
@@ -130,7 +136,8 @@ function ModelInference({ isInferring, setIsInferring }) {
       setIsInferring(true);
       setInferenceStatus("Starting inference...");
 
-      const preparedInferenceConfig = getPreparedInferenceConfig(inferenceConfig);
+      const preparedInferenceConfig =
+        getPreparedInferenceConfig(inferenceConfig);
 
       const res = await startModelInference(
         preparedInferenceConfig,

@@ -1,0 +1,28 @@
+INFO:     Started server process [46899]
+INFO:     Waiting for application startup.
+INFO:     Application startup complete.
+INFO:     Uvicorn running on http://0.0.0.0:4242 (Press CTRL+C to quit)
+================================================================================
+EHTOOL ROUTER MODULE LOADED - VERSION: DEBUG v2
+================================================================================
+INFO:     127.0.0.1:56352 - "GET /health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52680 - "GET /files?parent=root HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52680 - "GET /files/preview/1 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52686 - "GET /files/preview/2 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:45030 - "GET /training_logs HTTP/1.1" 200 OK
+INFO:     127.0.0.1:45030 - "GET /training_logs HTTP/1.1" 200 OK
+INFO:     127.0.0.1:40470 - "GET /files HTTP/1.1" 200 OK
+INFO:     127.0.0.1:40856 - "GET /files HTTP/1.1" 200 OK
+INFO:     127.0.0.1:40856 - "GET /files HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50196 - "GET /pytc/configs HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50202 - "GET /pytc/architectures HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:50202 - "GET /pytc/architectures HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:50196 - "GET /pytc/configs HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51628 - "GET /pytc/architectures HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:51628 - "GET /pytc/architectures HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:51618 - "GET /pytc/configs HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51618 - "GET /pytc/configs HTTP/1.1" 200 OK
+INFO:     Shutting down
+INFO:     Waiting for application shutdown.
+INFO:     Application shutdown complete.
+INFO:     Finished server process [46899]
