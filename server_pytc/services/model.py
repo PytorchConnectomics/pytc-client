@@ -120,18 +120,30 @@ def _get_runtime_snapshot(kind: str) -> dict[str, Any]:
     is_running = bool(process and process.poll() is None)
     with _runtime_lock:
         state = _runtime_state[kind]
+        phase = state["phase"]
+        exit_code = state["exitCode"]
+        ended_at = state["endedAt"]
+
+        # Reconcile: if the process has exited but the log-reader thread
+        # hasn't updated the state yet, derive phase from the process itself.
+        if not is_running and phase == "running" and process is not None:
+            rc = process.returncode
+            phase = "finished" if rc == 0 else "failed"
+            exit_code = rc
+            ended_at = state["endedAt"] or _utc_now()
+
         lines = list(state["lines"])
         snapshot = {
             "isRunning": is_running,
-            "phase": state["phase"],
+            "phase": phase,
             "pid": process.pid if is_running else state["pid"],
-            "exitCode": state["exitCode"],
+            "exitCode": exit_code,
             "command": state["command"],
             "cwd": state["cwd"],
             "configPath": state["configPath"],
             "configOriginPath": state["configOriginPath"],
             "startedAt": state["startedAt"],
-            "endedAt": state["endedAt"],
+            "endedAt": ended_at,
             "lastUpdatedAt": state["lastUpdatedAt"],
             "lineCount": state["lineCount"],
             "lastError": state["lastError"],
@@ -367,10 +379,8 @@ def start_training(payload: dict):
         command = [
             sys.executable,
             str(script_path),
-            "--config",
+            "--config-file",
             temp_filepath,
-            "--mode",
-            "train",
         ]
         command.extend(
             _build_cli_arguments(
@@ -573,10 +583,9 @@ def start_inference(payload: dict):
         command = [
             sys.executable,
             str(script_path),
-            "--config",
+            "--config-file",
             temp_filepath,
-            "--mode",
-            "test",
+            "--inference",
         ]
         command.extend(
             _build_cli_arguments(

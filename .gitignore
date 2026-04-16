@@ -14,3 +14,4 @@ sql_app.db
 uploads
 pytorch_connectomics
 server_api/chatbot/faiss_index/
+.logs/
