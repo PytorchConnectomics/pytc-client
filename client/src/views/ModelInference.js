@@ -11,13 +11,18 @@ import Configurator from "../components/Configurator";
 import { applyInputPaths } from "../configSchema";
 import RuntimeLogPanel from "../components/RuntimeLogPanel";
 import { AppContext } from "../contexts/GlobalContext";
+import { useWorkflow } from "../contexts/WorkflowContext";
 
 function ModelInference({ isInferring, setIsInferring }) {
   const context = useContext(AppContext);
+  const workflowContext = useWorkflow();
+  const appendWorkflowEvent = workflowContext?.appendEvent;
+  const workflowId = workflowContext?.workflow?.id;
   const inference = context.inferenceState;
   const [inferenceStatus, setInferenceStatus] = useState("");
   const [inferenceRuntime, setInferenceRuntime] = useState(null);
   const pollingIntervalRef = useRef(null);
+  const terminalLoggedRef = useRef(false);
 
   const getPath = (val) => {
     if (!val) return "";
@@ -81,6 +86,26 @@ function ModelInference({ isInferring, setIsInferring }) {
 
           if (!status.isRunning) {
             setIsInferring(false);
+            if (!terminalLoggedRef.current && appendWorkflowEvent) {
+              terminalLoggedRef.current = true;
+              const succeeded = status.exitCode === 0;
+              await appendWorkflowEvent({
+                actor: "system",
+                event_type: succeeded
+                  ? "inference.completed"
+                  : "inference.failed",
+                stage: "inference",
+                summary: succeeded
+                  ? "Inference completed successfully."
+                  : "Inference finished without a successful exit.",
+                payload: {
+                  exitCode: status.exitCode,
+                  phase: status.phase,
+                  lastError: status.lastError,
+                  outputPath: getPath(inference.outputPath),
+                },
+              });
+            }
             if (status.exitCode === 0) {
               setInferenceStatus("Inference completed successfully! ✓");
             } else if (status.exitCode !== null && status.exitCode !== undefined) {
@@ -96,6 +121,19 @@ function ModelInference({ isInferring, setIsInferring }) {
         } catch (error) {
           console.error("Error polling inference status:", error);
           setIsInferring(false);
+          if (!terminalLoggedRef.current && appendWorkflowEvent) {
+            terminalLoggedRef.current = true;
+            await appendWorkflowEvent({
+              actor: "system",
+              event_type: "inference.failed",
+              stage: "inference",
+              summary: "Inference status polling failed.",
+              payload: {
+                error: error.message || "unknown error",
+                outputPath: getPath(inference.outputPath),
+              },
+            });
+          }
           setInferenceStatus(
             `Inference status polling failed: ${error.message || "unknown error"}`,
           );
@@ -109,9 +147,10 @@ function ModelInference({ isInferring, setIsInferring }) {
         pollingIntervalRef.current = null;
       }
     };
-  }, [isInferring, setIsInferring]);
+  }, [isInferring, setIsInferring, appendWorkflowEvent, inference.outputPath]);
 
   const handleStartButton = async () => {
+    let checkpointPath = "";
     try {
       const inferenceConfig = context.inferenceConfig;
       if (!inferenceConfig) {
@@ -121,7 +160,7 @@ function ModelInference({ isInferring, setIsInferring }) {
         return;
       }
 
-      const checkpointPath = getPath(inference.checkpointPath);
+      checkpointPath = getPath(inference.checkpointPath);
       if (!checkpointPath) {
         setInferenceStatus("Error: Please set checkpoint path first.");
         return;
@@ -129,6 +168,7 @@ function ModelInference({ isInferring, setIsInferring }) {
 
       setIsInferring(true);
       setInferenceStatus("Starting inference...");
+      terminalLoggedRef.current = false;
 
       const preparedInferenceConfig = getPreparedInferenceConfig(inferenceConfig);
 
@@ -137,6 +177,7 @@ function ModelInference({ isInferring, setIsInferring }) {
         getPath(inference.outputPath),
         checkpointPath,
         getConfigOriginPath(),
+        workflowId,
       );
       console.log(res);
       await refreshInferenceLogs();
@@ -144,6 +185,20 @@ function ModelInference({ isInferring, setIsInferring }) {
     } catch (e) {
       console.log(e);
       setIsInferring(false);
+      if (!terminalLoggedRef.current && appendWorkflowEvent) {
+        terminalLoggedRef.current = true;
+        await appendWorkflowEvent({
+          actor: "system",
+          event_type: "inference.failed",
+          stage: "inference",
+          summary: "Inference failed to start.",
+          payload: {
+            error: e.message || "unknown error",
+            outputPath: getPath(inference.outputPath),
+            checkpointPath,
+          },
+        });
+      }
       await refreshInferenceLogs();
       setInferenceStatus(
         `Inference error: ${e.message || "Please check console for details."}`,

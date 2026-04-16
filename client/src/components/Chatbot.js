@@ -27,6 +27,8 @@ import {
 } from "../api";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
+import WorkflowTimeline from "./WorkflowTimeline";
+import { useWorkflow } from "../contexts/WorkflowContext";
 
 const { TextArea } = Input;
 const { Text } = Typography;
@@ -41,6 +43,20 @@ const GREETING = {
 const truncate = (str, n = 50) =>
   str.length > n ? str.slice(0, n).trimEnd() + "…" : str;
 
+const WORKFLOW_QUERY_TERMS = [
+  "workflow",
+  "next",
+  "stage",
+  "retrain",
+  "training",
+  "corrected",
+  "proofread",
+  "mask",
+  "inference",
+  "visualize",
+  "evaluate",
+];
+
 /* ═══════════════════════════════════════════════════════════════════════════ */
 
 function Chatbot({ onClose }) {
@@ -54,6 +70,15 @@ function Chatbot({ onClose }) {
   const [isLoadingConvo, setIsLoadingConvo] = useState(false);
 
   const lastMessageRef = useRef(null);
+  const workflowContext = useWorkflow();
+
+  const shouldUseWorkflowAgent = (query) => {
+    if (!workflowContext?.workflow?.id || !workflowContext?.queryAgent) {
+      return false;
+    }
+    const lower = query.toLowerCase();
+    return WORKFLOW_QUERY_TERMS.some((term) => lower.includes(term));
+  };
 
   /* ── scroll ────────────────────────────────────────────────────────────── */
   const scrollToBottom = useCallback(() => {
@@ -119,6 +144,18 @@ function Chatbot({ onClose }) {
     setMessages((prev) => [...prev, { role: "user", content: query }]);
     setIsSending(true);
     try {
+      if (shouldUseWorkflowAgent(query)) {
+        const data = await workflowContext.queryAgent(query);
+        const response =
+          data?.response ||
+          "I could not inspect the workflow state for that request.";
+        setMessages((prev) => [
+          ...prev,
+          { role: "assistant", content: response },
+        ]);
+        return;
+      }
+
       const data = await queryChatBot(query, activeConvoId);
       const response =
         data?.response || "Sorry, I could not generate a response.";
@@ -417,6 +454,8 @@ function Chatbot({ onClose }) {
             />
           </Space>
         </div>
+
+        <WorkflowTimeline />
 
         {/* messages */}
         <div style={{ flex: 1, overflow: "auto", padding: "0 16px 16px" }}>

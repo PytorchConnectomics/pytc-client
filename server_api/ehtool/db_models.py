@@ -19,6 +19,7 @@ class EHToolSession(Base):
     dataset_path = Column(String)  # Path to uploaded dataset
     mask_path = Column(String, nullable=True)  # Path to mask dataset (optional)
     total_layers = Column(Integer, default=0)
+    workflow_id = Column(Integer, nullable=True, index=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), onupdate=func.now())
 
