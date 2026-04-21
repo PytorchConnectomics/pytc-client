@@ -471,6 +471,62 @@ export async function getModelArchitectures() {
   return makeApiRequest("pytc/architectures", "get");
 }
 
+// ── Project Manager persistence ───────────────────────────────────────────────
+
+export async function getPMData() {
+  try {
+    const res = await apiClient.get("/api/pm/data");
+    return res.data;
+  } catch (error) {
+    handleError(error);
+  }
+}
+
+export async function getPMConfig() {
+  try {
+    const res = await apiClient.get("/api/pm/config");
+    return res.data;
+  } catch (error) {
+    handleError(error);
+  }
+}
+
+export async function getPMSchema() {
+  try {
+    const res = await apiClient.get("/api/pm/schema");
+    return res.data;
+  } catch (error) {
+    handleError(error);
+  }
+}
+
+export async function updatePMConfig(patch) {
+  try {
+    const res = await apiClient.post("/api/pm/config", patch);
+    return res.data;
+  } catch (error) {
+    handleError(error);
+  }
+}
+
+export async function savePMData(state) {
+  try {
+    const res = await apiClient.post("/api/pm/data", state);
+    return res.data;
+  } catch (error) {
+    handleError(error);
+  }
+}
+
+export async function resetPMData() {
+  try {
+    const res = await apiClient.post("/api/pm/data/reset");
+    return res.data;
+  } catch (error) {
+    handleError(error);
+  }
+}
+
 // ── Workflow spine ───────────────────────────────────────────────────────────
 
 export async function getCurrentWorkflow() {
