@@ -35,6 +35,7 @@ from server_api.workflows.service import (
     get_user_workflow_or_404,
     update_workflow_fields,
 )
+from server_api.project_manager import router as pm_router
 
 from fastapi.staticfiles import StaticFiles
 import os
@@ -158,6 +159,7 @@ app.mount("/uploads", StaticFiles(directory="uploads"), name="uploads")
 app.include_router(auth_router.router)
 app.include_router(ehtool_router.router, prefix="/eh", tags=["ehtool"])
 app.include_router(workflow_router.router, prefix="/api/workflows", tags=["workflows"])
+app.include_router(pm_router.router, prefix="/api/pm", tags=["project-manager"])
 
 app.add_middleware(
     CORSMiddleware,

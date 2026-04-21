@@ -1,0 +1,215 @@
+{
+  "project_info": {
+    "name": "New Project",
+    "description": "No storage synced yet.",
+    "version": "0.1.0"
+  },
+  "volumes": [],
+  "quota_data": [
+    {
+      "key": "1",
+      "name": "Alex Rivera",
+      "worker_key": "alex",
+      "datasets": [],
+      "mon": 0,
+      "tue": 0,
+      "wed": 0,
+      "thu": 0,
+      "fri": 0,
+      "sat": 0,
+      "sun": 0,
+      "actualMon": 0,
+      "actualTue": 0,
+      "actualWed": 0,
+      "actualThu": 0,
+      "actualFri": 0,
+      "actualSat": 0,
+      "actualSun": 0
+    },
+    {
+      "key": "2",
+      "name": "Jordan Smith",
+      "worker_key": "jordan",
+      "datasets": [],
+      "mon": 0,
+      "tue": 0,
+      "wed": 0,
+      "thu": 0,
+      "fri": 0,
+      "sat": 0,
+      "sun": 0,
+      "actualMon": 0,
+      "actualTue": 0,
+      "actualWed": 0,
+      "actualThu": 0,
+      "actualFri": 0,
+      "actualSat": 0,
+      "actualSun": 0
+    },
+    {
+      "key": "3",
+      "name": "Sam Taylor",
+      "worker_key": "taylor",
+      "datasets": [],
+      "mon": 0,
+      "tue": 0,
+      "wed": 0,
+      "thu": 0,
+      "fri": 0,
+      "sat": 0,
+      "sun": 0,
+      "actualMon": 0,
+      "actualTue": 0,
+      "actualWed": 0,
+      "actualThu": 0,
+      "actualFri": 0,
+      "actualSat": 0,
+      "actualSun": 0
+    },
+    {
+      "key": "4",
+      "name": "Morgan Lee",
+      "worker_key": "morgan",
+      "datasets": [],
+      "mon": 0,
+      "tue": 0,
+      "wed": 0,
+      "thu": 0,
+      "fri": 0,
+      "sat": 0,
+      "sun": 0,
+      "actualMon": 0,
+      "actualTue": 0,
+      "actualWed": 0,
+      "actualThu": 0,
+      "actualFri": 0,
+      "actualSat": 0,
+      "actualSun": 0
+    }
+  ],
+  "proofreader_data": [
+    {
+      "key": "1",
+      "name": "Alex Rivera",
+      "worker_key": "alex",
+      "avatarColor": "#1890ff",
+      "role": "Proofreader",
+      "totalPoints": 0,
+      "weeklyPoints": 0,
+      "weeklyQuota": 0,
+      "accuracy": 0,
+      "lastActive": "Never",
+      "status": "offline"
+    },
+    {
+      "key": "2",
+      "name": "Jordan Smith",
+      "worker_key": "jordan",
+      "avatarColor": "#52c41a",
+      "role": "Proofreader",
+      "totalPoints": 0,
+      "weeklyPoints": 0,
+      "weeklyQuota": 0,
+      "accuracy": 0,
+      "lastActive": "Never",
+      "status": "offline"
+    },
+    {
+      "key": "3",
+      "name": "Sam Taylor",
+      "worker_key": "taylor",
+      "avatarColor": "#fadb14",
+      "role": "Proofreader",
+      "totalPoints": 0,
+      "weeklyPoints": 0,
+      "weeklyQuota": 0,
+      "accuracy": 0,
+      "lastActive": "Never",
+      "status": "offline"
+    },
+    {
+      "key": "4",
+      "name": "Morgan Lee",
+      "worker_key": "morgan",
+      "avatarColor": "#eb2f96",
+      "role": "Proofreader",
+      "totalPoints": 0,
+      "weeklyPoints": 0,
+      "weeklyQuota": 0,
+      "accuracy": 0,
+      "lastActive": "Never",
+      "status": "offline"
+    }
+  ],
+  "throughput_data": [],
+  "datasets": [],
+  "milestones": [],
+  "cumulative_data": [
+    0
+  ],
+  "cumulative_target": [
+    0
+  ],
+  "at_risk": [],
+  "upcoming_milestones": [],
+  "msg_preview": "",
+  "workers": [
+    {
+      "key": "alex",
+      "name": "Alex Rivera",
+      "avatarColor": "#1890ff"
+    },
+    {
+      "key": "jordan",
+      "name": "Jordan Smith",
+      "avatarColor": "#52c41a"
+    },
+    {
+      "key": "taylor",
+      "name": "Sam Taylor",
+      "avatarColor": "#fadb14"
+    },
+    {
+      "key": "morgan",
+      "name": "Morgan Lee",
+      "avatarColor": "#eb2f96"
+    }
+  ],
+  "users": [
+    {
+      "username": "admin",
+      "password": "admin123",
+      "name": "Project Manager",
+      "role": "admin",
+      "key": "admin"
+    },
+    {
+      "username": "alex",
+      "password": "alex123",
+      "name": "Alex Rivera",
+      "role": "worker",
+      "key": "alex"
+    },
+    {
+      "username": "jordan",
+      "password": "jordan123",
+      "name": "Jordan Smith",
+      "role": "worker",
+      "key": "jordan"
+    },
+    {
+      "username": "taylor",
+      "password": "taylor123",
+      "name": "Sam Taylor",
+      "role": "worker",
+      "key": "taylor"
+    },
+    {
+      "username": "morgan",
+      "password": "morgan123",
+      "name": "Morgan Lee",
+      "role": "worker",
+      "key": "morgan"
+    }
+  ]
+}
