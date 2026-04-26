@@ -168,6 +168,33 @@ describe("Chatbot workflow routing", () => {
     expect(queryChatBot).not.toHaveBeenCalled();
   });
 
+  it("routes non-workflow text to the general assistant instead of action cards", async () => {
+    const workflow = renderChatbot();
+    queryChatBot.mockResolvedValue({
+      response: "I did not understand that. Try a workflow job or ask status.",
+      conversationId: 44,
+    });
+
+    fireEvent.change(screen.getByPlaceholderText("Message"), {
+      target: { value: "mmajkf,ansdjs" },
+    });
+    fireEvent.keyPress(screen.getByPlaceholderText("Message"), {
+      key: "Enter",
+      code: "Enter",
+      charCode: 13,
+    });
+
+    await waitFor(() => {
+      expect(queryChatBot).toHaveBeenCalledWith("mmajkf,ansdjs", null);
+    });
+    expect(workflow.queryAgent).not.toHaveBeenCalled();
+    expect(
+      await screen.findByText(
+        "I did not understand that. Try a workflow job or ask status.",
+      ),
+    ).toBeTruthy();
+  });
+
   it("can rename saved chats from the conversation list", async () => {
     listConversations.mockResolvedValue([{ id: 7, title: "Old project chat" }]);
     renderChatbot();

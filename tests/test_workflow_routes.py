@@ -440,6 +440,29 @@ class WorkflowRouteTests(unittest.TestCase):
         self.assertEqual(payload["actions"], [])
         self.assertEqual(payload["commands"], [])
 
+    def test_agent_handles_unknown_text_without_recommendation_cards(self):
+        workflow, _ = self._current_workflow()
+        workflow_id = workflow["id"]
+        self.client.patch(
+            f"/api/workflows/{workflow_id}",
+            json={
+                "stage": "proofreading",
+                "image_path": "/tmp/image.h5",
+                "mask_path": "/tmp/mask.h5",
+            },
+        )
+
+        response = self.client.post(
+            f"/api/workflows/{workflow_id}/agent/query",
+            json={"query": "mmajkf,ansdjs"},
+        )
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertEqual(payload["intent"], "clarify_next_job")
+        self.assertIn("did not understand", payload["response"])
+        self.assertEqual(payload["actions"], [])
+        self.assertEqual(payload["commands"], [])
+
     def test_agent_answers_current_project_context_instead_of_repeating_next_step(self):
         workflow, _ = self._current_workflow()
         workflow_id = workflow["id"]

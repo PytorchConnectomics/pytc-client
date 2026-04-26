@@ -1,5 +1,5 @@
 import React, { useState } from "react";
-import { Button, Input, message, Space } from "antd";
+import { Button, Input, message, Space, Tooltip } from "antd";
 import { FolderOpenOutlined } from "@ant-design/icons";
 import FilePickerModal from "./FilePickerModal";
 
@@ -88,6 +88,12 @@ const UnifiedFileInput = ({
     onChange({ path: val, display: val });
   };
 
+  const handlePrefixBrowse = (event) => {
+    event.preventDefault();
+    event.stopPropagation();
+    handleBrowse();
+  };
+
   // Extract display value
   const getDisplayValue = () => {
     if (!value) return "";
@@ -123,13 +129,26 @@ const UnifiedFileInput = ({
                 : undefined,
             }}
             prefix={
-              <FolderOpenOutlined
-                style={{
-                  color: disabled
-                    ? "#ccc"
-                    : "var(--seg-accent-primary, #3f37c9)",
-                }}
-              />
+              <Tooltip title="Browse files">
+                <Button
+                  type="text"
+                  size="small"
+                  aria-label="Browse files"
+                  disabled={disabled}
+                  icon={<FolderOpenOutlined />}
+                  onClick={handlePrefixBrowse}
+                  style={{
+                    color: disabled
+                      ? "#ccc"
+                      : "var(--seg-accent-primary, #3f37c9)",
+                    height: 22,
+                    width: 22,
+                    minWidth: 22,
+                    padding: 0,
+                    marginInlineStart: -4,
+                  }}
+                />
+              </Tooltip>
             }
           />
           <Button onClick={handleBrowse} disabled={disabled}>

@@ -67,6 +67,12 @@ evaluation over fresh app-generated outputs.
 - Workflow-agent chat now carries typed intent, permission-mode, risk metadata,
   and a structured loop checklist. Slash-style workflow commands are supported
   for status, inference, proofreading, training, comparison, and export.
+- Assistant chat routing now distinguishes workflow intents from general chat:
+  workflow-like requests go to the deterministic orchestrator, while unrelated
+  or nonsensical text goes through the general assistant path instead of
+  producing workflow action cards.
+- The workflow-agent router now clarifies unknown requests without app action
+  cards, preventing gibberish from being interpreted as a next-step command.
 - Assistant command details are collapsed behind a route disclosure so the
   visible UI stays domain-oriented rather than command-oriented.
 - Proofreading mask exports materialize correction sets with edit and region
@@ -81,6 +87,11 @@ evaluation over fresh app-generated outputs.
 - File Management now keeps the suggested project setup card on the root
   project view only, reducing repeated clutter once the user is inside a
   mounted project.
+- File path inputs now open the mounted-project picker from the folder icon as
+  well as the Browse button, so manual path typing is a fallback rather than
+  the apparent primary flow.
+- Inline field help now returns compact, field-specific guidance for common file
+  selectors instead of raw local-doc excerpts.
 - The proofreading editor exposes a visible `Save mask` control, tracks unsaved
   edits, and caps undo history to reduce memory churn.
 - HDF5/Zarr/NumPy volume loading can select prediction channels while applying
@@ -141,8 +152,9 @@ Run the first fresh app-generated before/after loop:
    - Implemented UI hardening: direct evaluation-compute controls, closed-loop
      pipeline map, evidence bundle export, and suggested smoke-project mounting
      without adding researcher case-study protocol gates.
-   - Implemented agent continuity: the global workflow-agent strip exposes the
-     next recommended workflow action and a one-click evidence/context view.
+   - Implemented agent continuity: the assistant drawer/status entry exposes
+     the next recommended workflow action and a one-click evidence/context view
+     without requiring a persistent canvas strip.
    - Next UI hardening: expose model versions/config lineage more directly,
      make file-role assignment editable when auto-detection guesses wrong, and
      make the file/project mounting flow feel like guided biomedical dataset

@@ -79,6 +79,93 @@ const normalizeWorkflowAgentQuery = (query) => {
   };
 };
 
+const WORKFLOW_AGENT_INTENT_TERMS = [
+  "agent",
+  "assistant",
+  "help me through",
+  "what can you do",
+  "what can it do",
+  "what do you need",
+  "need from me",
+  "what project",
+  "which project",
+  "current project",
+  "what data",
+  "what dataset",
+  "what volume",
+  "where am i",
+  "what now",
+  "what's next",
+  "next step",
+  "what should i do",
+  "status",
+  "ready",
+  "missing",
+  "blocker",
+  "run model",
+  "start model",
+  "launch model",
+  "run inference",
+  "start inference",
+  "infer",
+  "segment",
+  "segmentation",
+  "predict",
+  "prediction",
+  "proofread",
+  "proofreading",
+  "review mask",
+  "fix mask",
+  "train",
+  "training",
+  "retrain",
+  "use edits",
+  "saved edits",
+  "corrected",
+  "compare",
+  "metric",
+  "metrics",
+  "evaluate",
+  "evaluation",
+  "dice",
+  "iou",
+  "export",
+  "evidence",
+  "bundle",
+  "move screens",
+  "open ",
+  "show ",
+  "go to ",
+  "take me",
+  "switch",
+  "failure",
+  "hotspot",
+];
+
+const WORKFLOW_REPAIR_TERMS = new Set([
+  "bruh",
+  "bro",
+  "dude",
+  "what",
+  "huh",
+  "no",
+  "nah",
+]);
+
+const isGreetingQuery = (query) =>
+  /^(hi|hello|hey|yo|sup|hiya)[\s!.?,]*$/i.test(query.trim());
+
+const shouldRouteToWorkflowAgent = (query) => {
+  const trimmed = query.trim();
+  if (!trimmed) return false;
+  const lowered = trimmed.toLowerCase();
+  const slashCommand = lowered.split(/\s+/)[0];
+  if (WORKFLOW_SLASH_COMMANDS[slashCommand]) return true;
+  if (isGreetingQuery(trimmed)) return true;
+  if (WORKFLOW_REPAIR_TERMS.has(lowered.replace(/[!.?]+$/g, ""))) return true;
+  return WORKFLOW_AGENT_INTENT_TERMS.some((term) => lowered.includes(term));
+};
+
 /* ─── helper: truncate a string to `n` chars ─────────────────────────────── */
 const truncate = (str, n = 50) =>
   str.length > n ? str.slice(0, n).trimEnd() + "…" : str;
@@ -135,11 +222,11 @@ function Chatbot({
   const executeAssistantItem = workflowContext?.executeAssistantItem;
   const workflow = workflowContext?.workflow;
 
-  const shouldUseWorkflowAgent = () => {
+  const shouldUseWorkflowAgent = (query) => {
     if (!workflowContext?.workflow?.id || !workflowContext?.queryAgent) {
       return false;
     }
-    return true;
+    return shouldRouteToWorkflowAgent(query);
   };
 
   /* ── scroll ────────────────────────────────────────────────────────────── */
@@ -217,8 +304,7 @@ function Chatbot({
   const handleSendMessage = async () => {
     if (!inputValue.trim() || isSending) return;
     const query = inputValue;
-    const isGreeting =
-      /^(hi|hello|hey|yo|sup|hiya)[\s!.?,]*$/i.test(query.trim());
+    const isGreeting = isGreetingQuery(query);
     setInputValue("");
     setMessages((prev) => [...prev, { role: "user", content: query }]);
     setIsSending(true);
@@ -276,6 +362,16 @@ function Chatbot({
         return;
       }
 
+      logClientEvent("llm_chat_sent", {
+        source: "chatbot",
+        message: "General assistant chat query sent",
+        data: {
+          workflowId: workflowContext?.workflow?.id || null,
+          conversationId: activeConvoId,
+          queryPreview: query.slice(0, 160),
+          queryLength: query.length,
+        },
+      });
       const data = await queryChatBot(query, activeConvoId);
       const response =
         data?.response || "Sorry, I could not generate a response.";
@@ -294,6 +390,15 @@ function Chatbot({
       // Refresh sidebar so the new / updated conversation appears
       const convos = await listConversations();
       if (convos) setConversations(convos);
+      logClientEvent("llm_chat_completed", {
+        source: "chatbot",
+        message: "General assistant chat query completed",
+        data: {
+          workflowId: workflowContext?.workflow?.id || null,
+          conversationId: returnedConvoId,
+          responseLength: response.length,
+        },
+      });
     } catch (e) {
       logClientEvent("chat_send_failed", {
         level: "ERROR",

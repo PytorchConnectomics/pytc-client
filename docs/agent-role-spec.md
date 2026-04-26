@@ -42,8 +42,8 @@ workflow evidence substrate.
 
 Implemented UI commitments:
 
-- A global workflow-agent strip should always answer "what should I do next?"
-  from current workflow evidence.
+- The assistant drawer/status entry should always answer "what should I do
+  next?" from current workflow evidence without adding persistent canvas clutter.
 - The first action must match the recommendation. For example, "start
   inference" should expose a start-inference action, not merely a navigation
   button.
@@ -83,8 +83,9 @@ Implemented UI commitments:
 ## 2026-04-25 Prompt-Boundary Hardening
 
 - The active app assistant defaults to the deterministic workflow orchestrator
-  whenever a workflow exists. The generic documentation LLM is no longer allowed
-  to own the in-app agent persona for greetings or vague workflow requests.
+  for greetings, repair phrases, slash commands, and recognizable workflow
+  intents. General/non-workflow text should still route to normal assistant/LLM
+  handling so the chat does not turn every message into a next-step card.
 - Internal system prompts, role text, routing rules, tool names, and response
   style instructions are never valid user-facing output. If the generic LLM
   leaks prompt scaffolding, the server replaces it with a compact safe fallback.
@@ -95,6 +96,18 @@ Implemented UI commitments:
 - The agent is not just a help sidebar: it is the controller that translates
   user goals into workflow-state-aware next steps while preserving human
   approval for long-running or artifact-changing operations.
+
+## 2026-04-26 Agent Routing and Help Cleanup
+
+- Unknown workflow-router text must return a compact clarification and no app
+  action cards. Gibberish should never produce "proofread/train/compare" cards.
+- The main assistant logs whether a message went through the workflow
+  orchestrator or the general assistant path.
+- Inline field help should be a compact local hint, not a docs viewer. It must
+  avoid raw headings such as "Relevant local docs" and keep file-selection help
+  focused on visible controls such as the folder icon, Browse, and Use folder.
+- File path text boxes remain editable fallback controls, but ordinary users
+  should be able to open the picker from the folder icon or Browse button.
 
 ## 2026-04-25 Claude Code Pattern Pass
 

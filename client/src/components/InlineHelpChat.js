@@ -21,7 +21,7 @@ const buildInitialPrompt = ({
   taskContext,
 }) => {
   return [
-    `Explain this setting and recommend a concrete value if possible:`,
+    `Give concise help for this setting:`,
     `- Label: ${label}`,
     yamlKey ? `- YAML key: ${yamlKey}` : null,
     value !== undefined && value !== null && value !== ""
@@ -29,7 +29,7 @@ const buildInitialPrompt = ({
       : null,
     projectContext ? `- Project context: ${projectContext}` : null,
     taskContext ? `- Task context: ${taskContext}` : null,
-    `Use plain language for non-technical users and give a recommended setting.`,
+    `Answer in at most 3 short bullets. Put the recommended action first. Do not paste documentation excerpts or headings.`,
   ]
     .filter(Boolean)
     .join("\n");
@@ -70,10 +70,9 @@ function InlineHelpChat({
   const [panelPos, setPanelPos] = useState({
     top: 0,
     left: 0,
-    width: 360,
-    height: 300,
+    width: 340,
+    height: 240,
   });
-  const [anchorPoint, setAnchorPoint] = useState({ x: 0, y: 0 });
 
   const initialPrompt = useMemo(
     () =>
@@ -142,10 +141,6 @@ function InlineHelpChat({
   const openPanel = () => {
     if (!anchorRef.current) return;
     const rect = anchorRef.current.getBoundingClientRect();
-    const anchor = {
-      x: rect.left + rect.width / 2,
-      y: rect.top + rect.height / 2,
-    };
     const viewportW = window.innerWidth;
     const viewportH = window.innerHeight;
     const width = panelPos.width || 360;
@@ -165,7 +160,6 @@ function InlineHelpChat({
     }
     if (top < 16) top = 16;
 
-    setAnchorPoint(anchor);
     setPanelPos((prev) => ({ ...prev, top, left }));
     setOpen(true);
 
@@ -233,28 +227,6 @@ function InlineHelpChat({
   // ------- Render the floating panel via portal -------
   const panel = open ? (
     <>
-      {/* SVG tether line from "?" icon to the panel */}
-      <svg
-        style={{
-          position: "fixed",
-          top: 0,
-          left: 0,
-          width: "100vw",
-          height: "100vh",
-          pointerEvents: "none",
-          zIndex: 1000,
-        }}
-      >
-        <line
-          x1={anchorPoint.x}
-          y1={anchorPoint.y}
-          x2={panelPos.left}
-          y2={panelPos.top}
-          stroke="#bfbfbf"
-          strokeDasharray="4 4"
-        />
-      </svg>
-
       {/* The floating panel */}
       <div
         ref={panelRef}
@@ -266,12 +238,12 @@ function InlineHelpChat({
           height: panelPos.height,
           zIndex: 1001,
           background: "#fff",
-          border: "1px dashed #d9d9d9",
-          borderRadius: 12,
-          boxShadow: "0 12px 28px rgba(0,0,0,0.12)",
+          border: "1px solid #e5e7eb",
+          borderRadius: 10,
+          boxShadow: "0 10px 24px rgba(15, 23, 42, 0.14)",
           display: "flex",
           flexDirection: "column",
-          resize: "both",
+          resize: "none",
           overflow: "auto",
         }}
         onMouseUp={handlePanelMouseUp}
@@ -291,7 +263,7 @@ function InlineHelpChat({
             userSelect: "none",
           }}
         >
-          <span>{label}</span>
+          <span>Help: {label}</span>
           <Button type="text" size="small" onClick={() => setOpen(false)}>
             Close
           </Button>
@@ -312,7 +284,9 @@ function InlineHelpChat({
                 marginBottom: 8,
                 padding: "8px 10px",
                 borderRadius: 10,
-                background: msg.isUser ? "#e6f7ff" : "#fafafa",
+                background: msg.isUser
+                  ? "var(--seg-accent-primary-soft, #f0efff)"
+                  : "#fafafa",
               }}
             >
               {msg.isUser ? (
@@ -460,6 +434,7 @@ function InlineHelpChat({
         size="small"
         icon={<QuestionCircleOutlined />}
         onClick={() => (open ? setOpen(false) : openPanel())}
+        aria-label={`Help for ${label}`}
         style={{ color: "#8c8c8c" }}
       />
       {open ? ReactDOM.createPortal(panel, document.body) : null}

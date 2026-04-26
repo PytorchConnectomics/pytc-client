@@ -12,9 +12,6 @@ TOCHI-facing workflow without running full PyTC training.
 ## File Management
 
 - Open File Management.
-- Confirm the workflow-agent strip is visible under the module tabs.
-- Confirm its decision text is short and its primary action matches the current
-  stage.
 - Confirm the suggested smoke project card appears.
 - Confirm it reports image, label, prediction, config, and checkpoint roles.
 - Click `Mount Test Project` or `Open Test Project`.
@@ -26,9 +23,19 @@ TOCHI-facing workflow without running full PyTC training.
   recommend inference/visualization instead of asking you to mount data.
 - Right-click the mounted root and confirm `Unmount Project` is available.
 
+## File Selection
+
+- In Train or Infer, click the folder icon inside a path field and confirm the
+  file picker opens.
+- Click a folder row/name to navigate into it.
+- Use `Use folder` or `Select Current Directory` when the folder itself is the
+  intended input/output.
+- Confirm manual path typing still works, but does not feel like the primary
+  file-selection path.
+
 ## Evidence Panel
 
-- Click `Status` in the workflow-agent strip.
+- Open the assistant drawer and click `Status`.
 - Confirm the assistant drawer opens with workflow context visible.
 - Open Tensorboard/Monitoring.
 - Confirm `Review status` is visible.
@@ -74,13 +81,15 @@ TOCHI-facing workflow without running full PyTC training.
 - Ask the assistant: `what should I do next?`
 - Confirm the reply uses a compact `Do this` / `Why` / `Ready` style rather than
   a long explanation.
-- From inference stage with no prediction output, confirm the global agent
-  primary action is `Run model`.
+- Ask the assistant gibberish such as `mmajkf,ansdjs`.
+- Confirm it does not produce workflow action cards for that gibberish.
+- From inference stage with no prediction output, ask for the next step and
+  confirm the assistant action card is `Run model`.
 - From a mounted project with an image/mask pair, click `Proofread this data`
   and confirm the app opens Proofread and starts loading that pair without
   manual path entry.
-- From proofreading after a mask export, confirm the global agent primary action
-  is `Use edits for training`.
+- From proofreading after a mask export, ask for the next step and confirm the
+  assistant action card is `Use edits for training`.
 - Click `Use edits for training` and confirm a pending agent proposal appears
   in workflow context/timeline instead of silently staging retraining.
 - Approve the proposal and confirm the workflow moves to `retraining_staged` and

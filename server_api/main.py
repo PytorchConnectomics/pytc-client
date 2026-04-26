@@ -1613,7 +1613,7 @@ def _helper_tokens(*values: Optional[str]) -> set[str]:
 
 
 def _extract_helper_snippet(
-    content: str, tokens: set[str], *, max_lines: int = 7
+    content: str, tokens: set[str], *, max_lines: int = 3
 ) -> str:
     lines = [line.strip() for line in content.splitlines() if line.strip()]
     matching = [
@@ -1628,6 +1628,34 @@ def _extract_helper_snippet(
 
 def _direct_inline_help(query: str, field_context: str) -> Optional[str]:
     normalized = f"{field_context} {query}".lower()
+    if "input image" in normalized or "dataset.input_path" in normalized:
+        return (
+            "Use the folder icon or Browse button to pick the image volume. "
+            "Select a volume file for H5/TIFF/NIfTI/Zarr-style data, or select a "
+            "folder when the dataset is stored as a directory/stack."
+        )
+    if "input label" in normalized or "dataset.label_name" in normalized:
+        return (
+            "Pick the matching label or mask volume for the image input. Use the "
+            "same file/folder pattern as the image data so training pairs line up."
+        )
+    if "checkpoint" in normalized or "model.pre_model" in normalized:
+        return (
+            "Pick the trained model checkpoint file, usually a `.pth` or `.pth.tar` "
+            "file. If you are starting from scratch, leave this unset until a model "
+            "has been trained."
+        )
+    if "output path" in normalized:
+        return (
+            "Pick a folder where this run can write results. Use an empty or "
+            "experiment-specific folder so predictions, logs, and intermediate files "
+            "do not overwrite older work."
+        )
+    if "log path" in normalized or "solver.log_dir" in normalized:
+        return (
+            "Pick a folder for training logs and checkpoints. This should be writable "
+            "and separate from raw image data."
+        )
     if "aug_num" in normalized or "augment" in normalized:
         return (
             "`INFERENCE.AUG_NUM` controls how many test-time transformed predictions are "
@@ -1658,6 +1686,9 @@ def _direct_inline_help(query: str, field_context: str) -> Optional[str]:
 
 def _docs_only_helper_response(*, task_key: str, query: str, field_context: str) -> str:
     direct = _direct_inline_help(query, field_context)
+    if direct:
+        return direct
+
     docs = _load_inline_help_docs()
     tokens = _helper_tokens(task_key, query, field_context)
     scored: list[tuple[int, str, str]] = []
@@ -1678,12 +1709,17 @@ def _docs_only_helper_response(*, task_key: str, query: str, field_context: str)
         if snippet:
             snippets.append(f"From `{filename}`:\n{snippet}")
 
-    if direct and snippets:
-        return f"{direct}\n\nRelevant local docs:\n\n" + "\n\n".join(snippets)
-    if direct:
-        return direct
     if snippets:
-        return "Relevant local docs:\n\n" + "\n\n".join(snippets)
+        joined = " ".join(
+            line
+            for snippet in snippets[:1]
+            for line in snippet.splitlines()
+            if line and not line.startswith("From `")
+        )
+        compact = re.sub(r"\s+", " ", joined).strip()
+        if len(compact) > 360:
+            compact = compact[:357].rstrip() + "..."
+        return f"Relevant guidance: {compact}"
     return (
         "I could not find a precise local-doc match for this field. Use the visible "
         "YAML key and current value as the source of truth, and prefer a small smoke "

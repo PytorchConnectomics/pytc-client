@@ -1938,6 +1938,15 @@ def _format_repair_response(
     )
 
 
+def _format_unknown_workflow_query_response() -> str:
+    return "\n".join(
+        [
+            "I did not understand that as a workflow job.",
+            "Try: run inference, proofread, train on saved edits, compare metrics, export evidence, or status.",
+        ]
+    )
+
+
 def _workflow_agent_tasks_from_readiness(
     readiness: List[WorkflowReadinessItem],
 ) -> List[AgentTaskItem]:
@@ -3699,9 +3708,9 @@ async def query_workflow_agent(
             )
         ]
     else:
-        intent = "recommendation"
-        response = _format_workflow_agent_response(agent_recommendation)
-        actions = agent_recommendation.actions
+        intent = "clarify_next_job"
+        response = _format_unknown_workflow_query_response()
+        actions = []
         commands = []
 
     _persist_workflow_agent_chat_exchange(
