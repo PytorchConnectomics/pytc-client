@@ -1406,6 +1406,25 @@ def _is_incomplete_work_intent(lower_query: str) -> bool:
     }
 
 
+def _is_repair_query(lower_query: str) -> bool:
+    stripped = lower_query.strip().lower().rstrip(".!? ")
+    return stripped in {
+        "bruh",
+        "bro",
+        "dude",
+        "what",
+        "what?",
+        "huh",
+        "no",
+        "nah",
+        "that makes no sense",
+        "this makes no sense",
+        "doesn't make sense",
+        "does not make sense",
+        "zero sense",
+    }
+
+
 def _build_navigation_action(
     tab_key: str, label: str, description: str
 ) -> AgentChatAction:
@@ -1893,6 +1912,28 @@ def _format_needed_from_user_response(
             "I need your approval before changing artifacts.",
             f"Do this: {recommendation.decision}",
             "I can run the in-app step when you approve it.",
+        ]
+    )
+
+
+def _format_capabilities_response() -> str:
+    return "\n".join(
+        [
+            "I can run approved app steps: infer, proofread, train on saved edits, compare metrics, export evidence, and move screens.",
+            "Ask for a concrete job, e.g. 'run inference', 'proofread this result', or 'compare results'.",
+            "I will ask approval before long runs or artifact changes.",
+        ]
+    )
+
+
+def _format_repair_response(
+    recommendation: WorkflowAgentRecommendationResponse,
+) -> str:
+    return "\n".join(
+        [
+            "That was too generic.",
+            "Tell me the workflow job you want, or ask 'status' for what is ready.",
+            f"Current next step: {recommendation.decision}",
         ]
     )
 
@@ -3161,6 +3202,7 @@ async def query_workflow_agent(
     intent = "recommendation"
     lower_query = query.lower()
     wants_greeting = _is_greeting_query(lower_query)
+    wants_repair = _is_repair_query(lower_query)
     wants_incomplete_intent = _is_incomplete_work_intent(lower_query)
     target_tab = _target_tab_from_query(lower_query)
     wants_capabilities = any(
@@ -3293,6 +3335,11 @@ async def query_workflow_agent(
     if wants_greeting:
         intent = "greeting"
         response = _format_greeting_response(agent_recommendation)
+        actions = []
+        commands = []
+    elif wants_repair:
+        intent = "repair"
+        response = _format_repair_response(agent_recommendation)
         actions = []
         commands = []
     elif wants_project_context:
@@ -3446,12 +3493,8 @@ async def query_workflow_agent(
         commands = []
     elif wants_capabilities:
         intent = "capabilities"
-        response = (
-            "Do this: tell me the job, then approve the app action.\n"
-            "I can run model inference, start proofreading, stage edits for training, compare metrics, export evidence, and move screens.\n"
-            "Watch out: long-running or artifact-changing steps stay approval-gated."
-        )
-        actions = agent_recommendation.actions
+        response = _format_capabilities_response()
+        actions = []
         commands = []
     elif wants_training_launch and workflow.stage == "retraining_staged":
         intent = "start_training"

@@ -408,13 +408,37 @@ class WorkflowRouteTests(unittest.TestCase):
         self.assertEqual(capabilities_response.status_code, 200)
         capabilities_payload = capabilities_response.json()
         self.assertEqual(capabilities_payload["conversationId"], conversation_id)
-        self.assertIn("run model inference", capabilities_payload["response"])
-        self.assertGreaterEqual(len(capabilities_payload["actions"]), 1)
+        self.assertEqual(capabilities_payload["intent"], "capabilities")
+        self.assertIn("run approved app steps", capabilities_payload["response"])
+        self.assertEqual(capabilities_payload["actions"], [])
         updated_conversation_response = self.client.get(
             f"/chat/conversations/{conversation_id}"
         )
         self.assertEqual(updated_conversation_response.status_code, 200)
         self.assertEqual(len(updated_conversation_response.json()["messages"]), 4)
+
+    def test_agent_handles_repair_language_without_repeating_recommendation_cards(self):
+        workflow, _ = self._current_workflow()
+        workflow_id = workflow["id"]
+        self.client.patch(
+            f"/api/workflows/{workflow_id}",
+            json={
+                "stage": "proofreading",
+                "image_path": "/tmp/image.h5",
+                "mask_path": "/tmp/mask.h5",
+            },
+        )
+
+        response = self.client.post(
+            f"/api/workflows/{workflow_id}/agent/query",
+            json={"query": "bruh"},
+        )
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertEqual(payload["intent"], "repair")
+        self.assertIn("too generic", payload["response"])
+        self.assertEqual(payload["actions"], [])
+        self.assertEqual(payload["commands"], [])
 
     def test_agent_answers_current_project_context_instead_of_repeating_next_step(self):
         workflow, _ = self._current_workflow()
