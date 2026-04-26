@@ -9,6 +9,7 @@ import shutil
 import os
 import uuid
 import mimetypes
+from server_api.utils.utils import resolve_existing_path
 
 try:  # Optional preview dependencies
     import cv2
@@ -22,7 +23,32 @@ except Exception:  # pragma: no cover - preview is best-effort
 router = APIRouter()
 
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="token", auto_error=False)
-IGNORED_SYSTEM_FILENAMES = {".ds_store", "thumbs.db"}
+IGNORED_SYSTEM_FILENAMES = {
+    ".ds_store",
+    "thumbs.db",
+    ".pytc_proofreading.json",
+    ".pytc_instance_labels.tif",
+}
+PROJECT_PROFILE_MAX_FILES = 2500
+
+VOLUME_EXTENSIONS = {
+    ".h5",
+    ".hdf5",
+    ".tif",
+    ".tiff",
+    ".ome.tif",
+    ".ome.tiff",
+    ".npy",
+    ".npz",
+    ".zarr",
+    ".n5",
+    ".nii",
+    ".nii.gz",
+    ".mrc",
+    ".mrcs",
+}
+CONFIG_EXTENSIONS = {".yaml", ".yml", ".json", ".toml"}
+CHECKPOINT_EXTENSIONS = {".pt", ".pth", ".pth.tar", ".ckpt", ".onnx"}
 
 
 def _format_size(size_bytes: int) -> str:
@@ -37,6 +63,186 @@ def _format_size(size_bytes: int) -> str:
 
 def _is_ignored_system_file(name: Optional[str]) -> bool:
     return str(name or "").strip().lower() in IGNORED_SYSTEM_FILENAMES
+
+
+def _project_suggestion_candidates() -> List[dict]:
+    repo_root = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
+    workspace_root = os.path.abspath(os.path.join(repo_root, ".."))
+    return [
+        {
+            "id": "mito25-paper-loop-smoke",
+            "name": "mito25-paper-loop-smoke",
+            "directory_path": os.path.join(
+                repo_root, "testing_projects", "mito25_paper_loop_smoke"
+            ),
+            "description": "Curated mito25 smoke project with image/seg, configs, checkpoint, and prediction artifacts.",
+            "recommended": True,
+        },
+        {
+            "id": "mito25-raw-data",
+            "name": "mito25",
+            "directory_path": os.path.join(workspace_root, "testing_data", "mito25"),
+            "description": "Raw mito25 image/seg source data.",
+            "recommended": False,
+        },
+    ]
+
+
+def _lower_path_parts(path: str) -> List[str]:
+    normalized = os.path.normpath(path).lower()
+    return [part for part in normalized.split(os.sep) if part]
+
+
+def _project_extension(name: str) -> str:
+    lower = name.lower()
+    for compound in (".ome.tiff", ".ome.tif", ".nii.gz", ".pth.tar"):
+        if lower.endswith(compound):
+            return compound
+    return os.path.splitext(lower)[1]
+
+
+def _role_for_project_file(relative_path: str) -> Optional[str]:
+    parts = _lower_path_parts(relative_path)
+    name = parts[-1] if parts else os.path.basename(relative_path).lower()
+    stem = name
+    extension = _project_extension(name)
+    if extension:
+        stem = name[: -len(extension)]
+    haystack = " ".join(parts + [stem])
+
+    if extension in CHECKPOINT_EXTENSIONS or "checkpoint" in haystack:
+        return "checkpoint"
+    if extension in CONFIG_EXTENSIONS and (
+        "config" in haystack or "mito" in haystack or "pytc" in haystack
+    ):
+        return "config"
+    if extension not in VOLUME_EXTENSIONS:
+        if extension in {".md", ".txt"} or "notes" in haystack:
+            return "notes"
+        return None
+
+    if any(
+        token in haystack
+        for token in (
+            "prediction",
+            "predictions",
+            "result",
+            "inference",
+            "candidate",
+            "baseline",
+        )
+    ):
+        return "prediction"
+    if any(
+        token in haystack
+        for token in (
+            "_seg",
+            " seg",
+            "segmentation",
+            "label",
+            "labels",
+            "mask",
+            "masks",
+            "ground",
+            "truth",
+            "consensus",
+            "gt",
+        )
+    ):
+        return "label"
+    if any(token in haystack for token in ("image", "images", "_im", "raw")):
+        return "image"
+    return "volume"
+
+
+def _looks_like_image_label_pair(image_path: str, label_path: str) -> bool:
+    image_name = os.path.basename(image_path).lower()
+    label_name = os.path.basename(label_path).lower()
+    normalized_image = (
+        image_name.replace("_image", "")
+        .replace("_images", "")
+        .replace("_im", "")
+        .replace("-image", "")
+    )
+    normalized_label = (
+        label_name.replace("_seg", "")
+        .replace("_label", "")
+        .replace("_labels", "")
+        .replace("_mask", "")
+        .replace("_consensus", "")
+        .replace("-seg", "")
+    )
+    return normalized_image.split(".")[0] == normalized_label.split(".")[0]
+
+
+def _scan_project_profile(directory_path: str) -> dict:
+    roles = {
+        "image": [],
+        "label": [],
+        "prediction": [],
+        "config": [],
+        "checkpoint": [],
+        "volume": [],
+        "notes": [],
+    }
+    counts = {role: 0 for role in roles}
+    scanned_files = 0
+    truncated = False
+
+    for current_dir, dirnames, filenames in os.walk(directory_path):
+        dirnames[:] = [
+            dirname
+            for dirname in sorted(dirnames)
+            if not _is_ignored_system_file(dirname)
+        ]
+        for filename in sorted(filenames):
+            if _is_ignored_system_file(filename):
+                continue
+            scanned_files += 1
+            if scanned_files > PROJECT_PROFILE_MAX_FILES:
+                truncated = True
+                break
+            absolute_path = os.path.join(current_dir, filename)
+            relative_path = os.path.relpath(absolute_path, directory_path)
+            role = _role_for_project_file(relative_path)
+            if role and role in roles:
+                counts[role] += 1
+                if len(roles[role]) < 8:
+                    roles[role].append(relative_path)
+        if truncated:
+            break
+
+    paired_examples = []
+    for image_path in roles["image"]:
+        for label_path in roles["label"]:
+            if _looks_like_image_label_pair(image_path, label_path):
+                paired_examples.append(
+                    {"image": image_path, "label": label_path}
+                )
+                break
+        if len(paired_examples) >= 4:
+            break
+
+    required_roles = {
+        "image": counts["image"] > 0,
+        "label": counts["label"] > 0,
+        "config": counts["config"] > 0,
+        "checkpoint": counts["checkpoint"] > 0,
+        "prediction": counts["prediction"] >= 2,
+    }
+    missing_roles = [
+        role for role, present in required_roles.items() if not present
+    ]
+
+    return {
+        "scanned_files": min(scanned_files, PROJECT_PROFILE_MAX_FILES),
+        "truncated": truncated,
+        "counts": counts,
+        "examples": roles,
+        "paired_examples": paired_examples,
+        "ready_for_smoke": not missing_roles,
+        "missing_roles": missing_roles,
+    }
 
 
 def _ensure_unique_name(
@@ -67,6 +273,74 @@ def _is_managed_upload_path(user_id: int, physical_path: Optional[str]) -> bool:
         return os.path.commonpath([uploads_root, target]) == uploads_root
     except ValueError:
         return False
+
+
+def _repair_stale_mounted_entries(db: Session, user_id: int) -> None:
+    candidates = (
+        db.query(models.File)
+        .filter(
+            models.File.user_id == user_id,
+            models.File.physical_path.isnot(None),
+            models.File.path != "root",
+        )
+        .all()
+    )
+
+    changed = False
+    for entry in candidates:
+        if not entry.physical_path:
+            continue
+        if _is_managed_upload_path(user_id, entry.physical_path):
+            continue
+        if os.path.exists(entry.physical_path):
+            continue
+
+        repaired = resolve_existing_path(entry.physical_path)
+        if repaired is None or not repaired.exists():
+            continue
+        if entry.is_folder and not repaired.is_dir():
+            continue
+        if not entry.is_folder and not repaired.is_file():
+            continue
+
+        entry.physical_path = str(repaired)
+        entry.name = repaired.name
+        if not entry.is_folder:
+            entry.type = mimetypes.guess_type(str(repaired))[0] or entry.type
+            try:
+                entry.size = _format_size(repaired.stat().st_size)
+            except OSError:
+                pass
+        changed = True
+
+    if changed:
+        db.commit()
+
+
+def _prune_missing_managed_upload_entries(db: Session, user_id: int) -> None:
+    candidates = (
+        db.query(models.File)
+        .filter(
+            models.File.user_id == user_id,
+            models.File.is_folder.is_(False),
+            models.File.physical_path.isnot(None),
+        )
+        .all()
+    )
+
+    removed = False
+    for entry in candidates:
+        if not entry.physical_path:
+            continue
+        if not _is_managed_upload_path(user_id, entry.physical_path):
+            continue
+        if os.path.exists(entry.physical_path):
+            continue
+        db.delete(entry)
+        removed = True
+
+    if removed:
+        db.commit()
 
 
 def _delete_file_tree(
@@ -189,6 +463,8 @@ def get_files(
     current_user: models.User = Depends(get_current_user),
     db: Session = Depends(database.get_db),
 ):
+    _repair_stale_mounted_entries(db, current_user.id)
+    _prune_missing_managed_upload_entries(db, current_user.id)
     query = db.query(models.File).filter(models.File.user_id == current_user.id)
     if parent is not None:
         query = query.filter(models.File.path == parent)
@@ -511,6 +787,46 @@ def mount_directory(
         "mounted_folders": mounted_folders,
         "mounted_files": mounted_files,
     }
+
+
+@router.get("/files/project-suggestions")
+def list_project_suggestions(
+    current_user: models.User = Depends(get_current_user),
+    db: Session = Depends(database.get_db),
+):
+    suggestions = []
+    mounted_roots = (
+        db.query(models.File)
+        .filter(
+            models.File.user_id == current_user.id,
+            models.File.path == "root",
+            models.File.is_folder.is_(True),
+            models.File.physical_path.isnot(None),
+        )
+        .all()
+    )
+    mounted_by_path = {
+        os.path.abspath(os.path.expanduser(root.physical_path)): root
+        for root in mounted_roots
+        if root.physical_path
+    }
+    for candidate in _project_suggestion_candidates():
+        directory_path = os.path.abspath(
+            os.path.expanduser(candidate["directory_path"])
+        )
+        if not os.path.isdir(directory_path):
+            continue
+        mounted_root = mounted_by_path.get(directory_path)
+        suggestions.append(
+            {
+                **candidate,
+                "directory_path": directory_path,
+                "already_mounted": mounted_root is not None,
+                "mounted_root_id": mounted_root.id if mounted_root else None,
+                "profile": _scan_project_profile(directory_path),
+            }
+        )
+    return suggestions
 
 
 @router.put("/files/{file_id}", response_model=models.FileResponse)

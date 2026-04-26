@@ -29,10 +29,12 @@ import { apiClient } from "../api";
 import FileTreeSidebar from "../components/FileTreeSidebar";
 import { openLocalFile, revealInFinder } from "../electronApi";
 import { AppContext } from "../contexts/GlobalContext";
+import { useWorkflow } from "../contexts/WorkflowContext";
 
 const HIDDEN_SYSTEM_FILES = new Set([
   "workflow_preference.json",
   ".pytc_proofreading.json",
+  ".pytc_instance_labels.tif",
   ".ds_store",
   "thumbs.db",
 ]);
@@ -45,7 +47,52 @@ const IMAGE_EXTENSIONS = new Set([
   ".tif",
   ".tiff",
   ".webp",
+  ".h5",
+  ".hdf5",
+  ".npy",
+  ".npz",
+  ".zarr",
+  ".n5",
+  ".nii",
+  ".nii.gz",
+  ".mrc",
+  ".mrcs",
 ]);
+const PROJECT_ROLE_LABELS = {
+  image: "image",
+  label: "label",
+  prediction: "prediction",
+  config: "config",
+  checkpoint: "checkpoint",
+  volume: "other volume",
+};
+
+const joinProjectPath = (rootPath, relativePath) => {
+  if (!rootPath || !relativePath) return "";
+  return `${String(rootPath).replace(/\/+$/, "")}/${String(relativePath).replace(/^\/+/, "")}`;
+};
+
+const buildWorkflowPatchFromProjectSuggestion = (suggestion) => {
+  const profile = suggestion?.profile || {};
+  const examples = profile.examples || {};
+  const paired = profile.paired_examples?.[0] || {};
+  const rootPath = suggestion?.directory_path;
+  const imageRelative = paired.image || examples.image?.[0];
+  const labelRelative = paired.label || examples.label?.[0];
+  const predictionRelative = examples.prediction?.[0];
+  const checkpointRelative = examples.checkpoint?.[0];
+  const patch = {
+    dataset_path: rootPath || null,
+    image_path: joinProjectPath(rootPath, imageRelative) || null,
+    label_path: joinProjectPath(rootPath, labelRelative) || null,
+    mask_path: joinProjectPath(rootPath, labelRelative) || null,
+    inference_output_path: joinProjectPath(rootPath, predictionRelative) || null,
+    checkpoint_path: joinProjectPath(rootPath, checkpointRelative) || null,
+  };
+  return Object.fromEntries(
+    Object.entries(patch).filter(([, value]) => Boolean(value)),
+  );
+};
 
 const collectDescendantFolderIds = (folderList, rootIds) => {
   const removed = new Set();
@@ -118,6 +165,7 @@ const transformFiles = (fileList) => {
 
 function FilesManager() {
   const context = useContext(AppContext);
+  const workflowContext = useWorkflow();
   const [folders, setFolders] = useState([]);
   const [files, setFiles] = useState({});
   const foldersRef = useRef([]);
@@ -142,6 +190,7 @@ function FilesManager() {
   const [serverUnavailable, setServerUnavailable] = useState(false);
   const [hasShownServerWarning, setHasShownServerWarning] = useState(false);
   const [previewStatus, setPreviewStatus] = useState({});
+  const [projectSuggestions, setProjectSuggestions] = useState([]);
   const containerRef = useRef(null);
   const itemRefs = useRef({});
   const isDragSelecting = useRef(false);
@@ -435,13 +484,29 @@ function FilesManager() {
     setNewItemType(null);
   };
 
+  const loadProjectSuggestions = React.useCallback(async () => {
+    try {
+      const response = await apiClient.get("/files/project-suggestions", {
+        withCredentials: true,
+      });
+      setProjectSuggestions(response.data || []);
+    } catch (error) {
+      // Suggestions are convenience only; normal mounting must keep working.
+      console.warn("Could not load project suggestions", error);
+      setProjectSuggestions([]);
+    }
+  }, []);
+
+  useEffect(() => {
+    loadProjectSuggestions();
+  }, [loadProjectSuggestions]);
+
   const isImageFile = (file) => {
     if (!file || file.is_folder) return false;
     if (file.type && file.type.startsWith("image/")) return true;
-    const ext = `.${String(file.name || "")
-      .split(".")
-      .pop()}`.toLowerCase();
-    return IMAGE_EXTENSIONS.has(ext);
+    const name = String(file.name || "").toLowerCase();
+    const ext = `.${name.split(".").pop()}`;
+    return IMAGE_EXTENSIONS.has(ext) || name.endsWith(".nii.gz");
   };
 
   const getPreviewUrl = (fileKey) =>
@@ -1297,6 +1362,83 @@ function FilesManager() {
 
   const currentFolders = folders.filter((f) => f.parent === currentFolder);
   const currentFiles = files[currentFolder] || [];
+  const suggestedProject =
+    projectSuggestions.find((item) => item.recommended) || projectSuggestions[0];
+
+  const renderProjectSuggestion = () => {
+    if (!suggestedProject || currentFolder !== "root") {
+      return null;
+    }
+    const profile = suggestedProject.profile || {};
+    const counts = profile.counts || {};
+    const shownRoles = Object.entries(PROJECT_ROLE_LABELS).filter(
+      ([role]) => counts[role] > 0,
+    );
+    const missingRoles = profile.missing_roles || [];
+    const pairedExample = profile.paired_examples?.[0];
+
+    return (
+      <div
+        style={{
+          margin: "10px 0 0",
+          padding: "10px 12px",
+          border: "1px solid #d6e4ff",
+          borderRadius: 10,
+          background: "#f8fbff",
+          display: "flex",
+          gap: 12,
+          alignItems: "center",
+          flexWrap: "wrap",
+        }}
+      >
+        <div style={{ minWidth: 220, flex: "1 1 260px" }}>
+          <div style={{ fontWeight: 700, fontSize: 13 }}>
+            Project setup: {suggestedProject.name}
+          </div>
+          <div style={{ color: "#5f6f89", fontSize: 12, marginTop: 2 }}>
+            {profile.ready_for_smoke
+              ? "Ready for image/label, checkpoint, prediction, and metric checks."
+              : missingRoles.length
+                ? `Missing detected ${missingRoles.join(", ")} role(s).`
+                : suggestedProject.description}
+          </div>
+          {pairedExample && (
+            <div
+              style={{
+                color: "#5f6f89",
+                fontSize: 11,
+                marginTop: 4,
+                wordBreak: "break-word",
+              }}
+            >
+              Pair: {pairedExample.image} -> {pairedExample.label}
+            </div>
+          )}
+        </div>
+        <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+          {shownRoles.map(([role, label]) => (
+            <span
+              key={role}
+              style={{
+                borderRadius: 999,
+                padding: "3px 8px",
+                background: "#fff",
+                border: "1px solid #adc6ff",
+                color: "#2f54eb",
+                fontSize: 11,
+                fontWeight: 600,
+              }}
+            >
+              {counts[role]} {label}
+            </span>
+          ))}
+        </div>
+        <Button size="small" onClick={handleSuggestedProject}>
+          {suggestedProject.already_mounted ? "Open" : "Mount"}
+        </Button>
+      </div>
+    );
+  };
 
   const getContextMenuItems = () => {
     if (contextMenu?.type === "container") {
@@ -1435,6 +1577,7 @@ function FilesManager() {
       );
 
       await fetchFolderContents("root", { force: true });
+      await loadProjectSuggestions();
       if (res?.data?.mounted_root_id) {
         const mountedRootId = String(res.data.mounted_root_id);
         await fetchFolderContents(mountedRootId, { force: true });
@@ -1444,6 +1587,72 @@ function FilesManager() {
     } catch (err) {
       console.error("Mount directory error", err);
       message.error("Failed to mount project directory");
+    }
+  };
+
+  const handleSuggestedProject = async () => {
+    const suggestion =
+      projectSuggestions.find((item) => item.recommended) || projectSuggestions[0];
+    if (!suggestion) {
+      message.info("No suggested local project is available.");
+      return;
+    }
+    if (suggestion.already_mounted && suggestion.mounted_root_id) {
+      const mountedRootId = String(suggestion.mounted_root_id);
+      await fetchFolderContents(mountedRootId, { force: true });
+      handleNavigate(mountedRootId);
+      await registerProjectWithWorkflow(suggestion);
+      message.success(`${suggestion.name} is already mounted.`);
+      return;
+    }
+    try {
+      const res = await apiClient.post(
+        "/files/mount",
+        {
+          directory_path: suggestion.directory_path,
+          destination_path: "root",
+          mount_name: suggestion.name,
+        },
+        { withCredentials: true },
+      );
+      await fetchFolderContents("root", { force: true });
+      await loadProjectSuggestions();
+      if (res?.data?.mounted_root_id) {
+        const mountedRootId = String(res.data.mounted_root_id);
+        await fetchFolderContents(mountedRootId, { force: true });
+        handleNavigate(mountedRootId);
+      }
+      await registerProjectWithWorkflow(suggestion);
+      message.success(res?.data?.message || `${suggestion.name} mounted.`);
+    } catch (error) {
+      console.error("Suggested project mount error", error);
+      message.error(`Failed to mount ${suggestion.name}`);
+    }
+  };
+
+  const registerProjectWithWorkflow = async (suggestion) => {
+    if (!workflowContext?.updateWorkflow) {
+      return;
+    }
+    const patch = buildWorkflowPatchFromProjectSuggestion(suggestion);
+    if (!Object.keys(patch).length) {
+      return;
+    }
+    try {
+      await workflowContext.updateWorkflow(patch);
+      await workflowContext.appendEvent?.({
+        actor: "user",
+        event_type: "dataset.loaded",
+        stage: workflowContext.workflow?.stage || "setup",
+        summary: `Registered project roles from ${suggestion.name}.`,
+        payload: {
+          source: "file_management_project_suggestion",
+          suggestion_id: suggestion.id,
+          ...patch,
+        },
+      });
+    } catch (error) {
+      console.warn("Failed to register mounted project with workflow", error);
     }
   };
 
@@ -1766,6 +1975,19 @@ function FilesManager() {
           >
             Mount Project
           </Button>
+          <Button
+            onClick={handleSuggestedProject}
+            disabled={projectSuggestions.length === 0}
+            title={
+              projectSuggestions.length
+                ? projectSuggestions[0].description
+                : "No suggested local projects found"
+            }
+          >
+            {projectSuggestions.some((item) => item.already_mounted)
+              ? "Open Test Project"
+              : "Mount Test Project"}
+          </Button>
           <Dropdown
             menu={{
               items: workspaceMenuItems,
@@ -1780,6 +2002,7 @@ function FilesManager() {
             <Button icon={<MoreOutlined />} title="More file actions" />
           </Dropdown>
         </div>
+        {renderProjectSuggestion()}
 
         {/* Content Area */}
         <div

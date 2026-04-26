@@ -1,5 +1,5 @@
 import React, { useState } from "react";
-import { Input, message } from "antd";
+import { Button, Input, message, Space } from "antd";
 import { FolderOpenOutlined } from "@ant-design/icons";
 import FilePickerModal from "./FilePickerModal";
 
@@ -108,27 +108,30 @@ const UnifiedFileInput = ({
           ...style,
         }}
       >
-        <Input
-          value={getDisplayValue()}
-          onChange={handleInputChange}
-          placeholder={placeholder}
-          disabled={disabled}
-          style={{
-            borderColor: isDragOver ? "#1890ff" : undefined,
-            boxShadow: isDragOver
-              ? "0 0 0 2px rgba(24, 144, 255, 0.2)"
-              : undefined,
-          }}
-          prefix={
-            <FolderOpenOutlined
-              style={{
-                cursor: disabled ? "not-allowed" : "pointer",
-                color: disabled ? "#ccc" : "#1890ff",
-              }}
-              onClick={handleBrowse}
-            />
-          }
-        />
+        <Space.Compact style={{ width: "100%" }}>
+          <Input
+            value={getDisplayValue()}
+            onChange={handleInputChange}
+            placeholder={placeholder}
+            disabled={disabled}
+            style={{
+              borderColor: isDragOver ? "#1890ff" : undefined,
+              boxShadow: isDragOver
+                ? "0 0 0 2px rgba(24, 144, 255, 0.2)"
+                : undefined,
+            }}
+            prefix={
+              <FolderOpenOutlined
+                style={{
+                  color: disabled ? "#ccc" : "#1890ff",
+                }}
+              />
+            }
+          />
+          <Button onClick={handleBrowse} disabled={disabled}>
+            Browse
+          </Button>
+        </Space.Compact>
         {isDragOver && (
           <div
             style={{

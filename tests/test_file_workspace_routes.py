@@ -9,6 +9,7 @@ from sqlalchemy.orm import sessionmaker
 
 from server_api.auth import database as auth_database
 from server_api.auth import models
+from server_api.auth.router import _scan_project_profile
 from server_api.main import app as server_api_app
 
 
@@ -156,6 +157,130 @@ class FileWorkspaceRouteTests(unittest.TestCase):
         files_response = self.client.get("/files")
         self.assertEqual(files_response.status_code, 200)
         self.assertEqual(files_response.json(), [])
+
+    def test_get_files_repairs_renamed_mounted_file_entries(self):
+        mount_root = pathlib.Path(self.temp_dir.name) / "project"
+        mount_root.mkdir()
+        original_file = mount_root / "volume.h5"
+        original_file.write_bytes(b"data")
+
+        mount_response = self.client.post(
+            "/files/mount",
+            json={
+                "directory_path": str(mount_root),
+                "destination_path": "root",
+            },
+        )
+        self.assertEqual(mount_response.status_code, 200)
+        mounted_root_id = mount_response.json()["mounted_root_id"]
+
+        renamed_file = mount_root / "volume_im.h5"
+        original_file.rename(renamed_file)
+
+        child_response = self.client.get(
+            "/files",
+            params={"parent": str(mounted_root_id)},
+        )
+        self.assertEqual(child_response.status_code, 200)
+
+        child_entries = child_response.json()
+        self.assertEqual([item["name"] for item in child_entries], ["volume_im.h5"])
+        self.assertEqual(child_entries[0]["physical_path"], str(renamed_file))
+
+    def test_get_files_prunes_missing_managed_upload_entries(self):
+        missing_upload = self.uploads_root / "ghost.h5"
+        self._create_file(
+            name="ghost.h5",
+            physical_path=str(missing_upload),
+            size="10B",
+            file_type="application/x-hdf5",
+        )
+
+        response = self.client.get("/files")
+        self.assertEqual(response.status_code, 200)
+        returned_names = [item["name"] for item in response.json()]
+        self.assertNotIn("ghost.h5", returned_names)
+
+        with self.SessionLocal() as db:
+            ghost = db.query(models.File).filter(models.File.name == "ghost.h5").first()
+            self.assertIsNone(ghost)
+
+    def test_project_suggestions_marks_existing_smoke_project_mount(self):
+        repo_root = pathlib.Path(__file__).resolve().parents[1]
+        smoke_project = repo_root / "testing_projects" / "mito25_paper_loop_smoke"
+        smoke_project.mkdir(parents=True, exist_ok=True)
+
+        response = self.client.get("/files/project-suggestions")
+        self.assertEqual(response.status_code, 200)
+        suggestions = response.json()
+        smoke_suggestion = next(
+            item for item in suggestions if item["id"] == "mito25-paper-loop-smoke"
+        )
+        self.assertFalse(smoke_suggestion["already_mounted"])
+
+        mount_response = self.client.post(
+            "/files/mount",
+            json={
+                "directory_path": str(smoke_project),
+                "destination_path": "root",
+                "mount_name": "mito25-paper-loop-smoke",
+            },
+        )
+        self.assertEqual(mount_response.status_code, 200)
+
+        mounted_response = self.client.get("/files/project-suggestions")
+        self.assertEqual(mounted_response.status_code, 200)
+        mounted_smoke = next(
+            item
+            for item in mounted_response.json()
+            if item["id"] == "mito25-paper-loop-smoke"
+        )
+        self.assertTrue(mounted_smoke["already_mounted"])
+        self.assertEqual(
+            mounted_smoke["mounted_root_id"],
+            mount_response.json()["mounted_root_id"],
+        )
+        self.assertIn("profile", mounted_smoke)
+
+    def test_project_profile_detects_smoke_project_roles(self):
+        project_root = pathlib.Path(self.temp_dir.name) / "project-profile"
+        (project_root / "data" / "image").mkdir(parents=True)
+        (project_root / "data" / "seg").mkdir(parents=True)
+        (project_root / "configs").mkdir()
+        (project_root / "checkpoints").mkdir()
+        (project_root / "predictions").mkdir()
+        (project_root / "data" / "image" / "mito25_smoke_im.h5").write_bytes(b"im")
+        (project_root / "data" / "seg" / "mito25_smoke_seg.h5").write_bytes(b"seg")
+        (project_root / "configs" / "Mito25-Local-Smoke.yaml").write_text(
+            "SYSTEM: {}\n", encoding="utf-8"
+        )
+        (project_root / "checkpoints" / "checkpoint_00001.pth.tar").write_bytes(
+            b"ckpt"
+        )
+        (project_root / "predictions" / "baseline_result_xy.h5").write_bytes(
+            b"baseline"
+        )
+        (project_root / "predictions" / "candidate_result_xy.h5").write_bytes(
+            b"candidate"
+        )
+
+        profile = _scan_project_profile(str(project_root))
+
+        self.assertTrue(profile["ready_for_smoke"])
+        self.assertEqual(profile["counts"]["image"], 1)
+        self.assertEqual(profile["counts"]["label"], 1)
+        self.assertEqual(profile["counts"]["prediction"], 2)
+        self.assertEqual(profile["counts"]["config"], 1)
+        self.assertEqual(profile["counts"]["checkpoint"], 1)
+        self.assertEqual(
+            profile["paired_examples"],
+            [
+                {
+                    "image": "data/image/mito25_smoke_im.h5",
+                    "label": "data/seg/mito25_smoke_seg.h5",
+                }
+            ],
+        )
 
 
 if __name__ == "__main__":

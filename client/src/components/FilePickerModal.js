@@ -11,6 +11,7 @@ import { apiClient } from "../api";
 const HIDDEN_SYSTEM_FILES = new Set([
   "workflow_preference.json",
   ".pytc_proofreading.json",
+  ".pytc_instance_labels.tif",
   ".ds_store",
   "thumbs.db",
 ]);
@@ -23,6 +24,16 @@ const IMAGE_EXTENSIONS = new Set([
   ".tif",
   ".tiff",
   ".webp",
+  ".h5",
+  ".hdf5",
+  ".npy",
+  ".npz",
+  ".zarr",
+  ".n5",
+  ".nii",
+  ".nii.gz",
+  ".mrc",
+  ".mrcs",
 ]);
 
 const FilePickerModal = ({
@@ -181,10 +192,9 @@ const FilePickerModal = ({
   const isImageFile = (item) => {
     if (!item || item.is_folder) return false;
     if (item.type && item.type.startsWith("image/")) return true;
-    const ext = `.${String(item.name || "")
-      .split(".")
-      .pop()}`.toLowerCase();
-    return IMAGE_EXTENSIONS.has(ext);
+    const name = String(item.name || "").toLowerCase();
+    const ext = `.${name.split(".").pop()}`;
+    return IMAGE_EXTENSIONS.has(ext) || name.endsWith(".nii.gz");
   };
 
   const getPreviewUrl = (item) => `${previewBaseUrl}/files/preview/${item.id}`;
@@ -256,7 +266,7 @@ const FilePickerModal = ({
           onClick={() => setOnlyImages((prev) => !prev)}
           style={{ marginLeft: 8 }}
         >
-          Images Only
+          Volume files
         </Button>
       </div>
 
