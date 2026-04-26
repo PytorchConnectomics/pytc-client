@@ -32,7 +32,7 @@ function InstanceNavigator({
   const listRef = useRef(null);
   const [scrollTop, setScrollTop] = useState(0);
   const [containerHeight, setContainerHeight] = useState(360);
-  const rowHeight = 76;
+  const rowHeight = 88;
   const overscan = 6;
 
   useEffect(() => {
@@ -145,12 +145,14 @@ function InstanceNavigator({
                     {statusLabel[item.classification]}
                   </Tag>
                 </Space>
-                <Text type="secondary" style={{ fontSize: 12 }}>
-                  COM: {item.com_z}, {item.com_y}, {item.com_x}
-                </Text>
-                <Text type="secondary" style={{ fontSize: 12 }}>
-                  voxels: {item.voxel_count}
-                </Text>
+                <div style={{ display: "grid", gap: 2, marginTop: 4 }}>
+                  <Text type="secondary" style={{ fontSize: 12 }}>
+                    COM: {item.com_z}, {item.com_y}, {item.com_x}
+                  </Text>
+                  <Text type="secondary" style={{ fontSize: 12 }}>
+                    voxels: {Number(item.voxel_count || 0).toLocaleString()}
+                  </Text>
+                </div>
               </div>
             </div>
           ))}

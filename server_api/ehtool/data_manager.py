@@ -8,6 +8,7 @@ import json
 import time
 import shutil
 import tempfile
+import logging
 from datetime import datetime, timezone
 import glob
 import numpy as np
@@ -17,6 +18,8 @@ from typing import List, Tuple, Optional, Dict, Any
 from pathlib import Path
 from scipy import ndimage
 from collections import OrderedDict
+from app_event_logger import append_app_event
+from server_api.workflows.volume_io import load_volume, split_dataset_ref
 
 from .utils import (
     to_uint8,
@@ -31,6 +34,8 @@ from .utils import (
     get_image_dimensions,
     base64_to_array,
 )
+
+logger = logging.getLogger(__name__)
 
 
 class DataManager:
@@ -81,6 +86,17 @@ class DataManager:
         self.last_backup_path: Optional[str] = None
         self.mask_source_kind: str = "none"
         self.mask_source_files: List[str] = []
+
+    def _append_event(self, event: str, level: str = "INFO", **fields: Any) -> None:
+        try:
+            append_app_event(
+                component="ehtool.data_manager",
+                event=event,
+                level=level,
+                **fields,
+            )
+        except Exception:
+            logger.debug("Failed to append DataManager app event", exc_info=True)
 
     def load_dataset(
         self, dataset_path: str, mask_path: Optional[str] = None
@@ -144,6 +160,17 @@ class DataManager:
             self.mask_path
         )
 
+        self._append_event(
+            "proofreading_dataset_loaded",
+            dataset_path=dataset_path,
+            mask_path=mask_path,
+            total_layers=self.total_layers,
+            image_shape=self.image_shape,
+            has_masks=mask_data is not None,
+            mask_source_kind=self.mask_source_kind,
+            mask_source_files=len(self.mask_source_files),
+        )
+
         return {
             "total_layers": self.total_layers,
             "is_3d": self.is_3d,
@@ -191,14 +218,31 @@ class DataManager:
         if self.mask_path:
             self._save_volume(self.mask_path, self.mask_volume, layer_index)
 
+    def _clear_slice_caches(self) -> None:
+        self._slice_cache.clear()
+        self._active_cache.clear()
+        self._raw_cache.clear()
+        self._resized_cache.clear()
+        self._resized_frame_cache.clear()
+        self._filmstrip_cache.clear()
+
+    def _semantic_foreground_value(self) -> int:
+        if self.mask_volume is None:
+            return 1
+        nonzero = np.asarray(self.mask_volume)[np.asarray(self.mask_volume) > 0]
+        if nonzero.size == 0:
+            return 1
+        value = int(nonzero.max())
+        return value if value > 0 else 1
+
     def save_instance_mask_slice(
         self, instance_id: int, axis: str, index: int, mask_base64: str
-    ) -> None:
+    ) -> Dict[str, Any]:
         """Apply an edited binary mask to the active instance on a slice."""
         if self.instance_volume is None:
             raise ValueError("Instance volume is not available")
-        if self.instance_mode != "instance":
-            raise ValueError("Instance editing requires labeled masks")
+        if self.instance_mode not in {"instance", "semantic"}:
+            raise ValueError("Instance editing requires mask-derived instances")
 
         axis = axis.lower()
         if axis not in {"xy", "zx", "zy"}:
@@ -264,23 +308,26 @@ class DataManager:
                 mask_slice = self.mask_volume[:, :, index]
             if mask_slice.shape == binary.shape:
                 previous_mask = np.array(mask_slice, copy=True)
-                old_mask_active = previous_mask == instance_id
-                writable_mask = (previous_mask == 0) | old_mask_active
-                add_mask = binary & writable_mask & ~old_mask_active
-                remove_mask = old_mask_active & ~binary
-                mask_slice[remove_mask] = 0
-                mask_slice[old_mask_active | add_mask] = instance_id
+                if self.instance_mode == "semantic":
+                    foreground_value = self._semantic_foreground_value()
+                    old_mask_active = old_active
+                    add_mask = add_pixels
+                    remove_mask = remove_pixels
+                    mask_slice[remove_mask] = 0
+                    mask_slice[old_mask_active | add_mask] = foreground_value
+                else:
+                    old_mask_active = previous_mask == instance_id
+                    writable_mask = (previous_mask == 0) | old_mask_active
+                    add_mask = binary & writable_mask & ~old_mask_active
+                    remove_mask = old_mask_active & ~binary
+                    mask_slice[remove_mask] = 0
+                    mask_slice[old_mask_active | add_mask] = instance_id
 
         # Update active instance stats without resetting classifications.
         self._update_instance_stats(instance_id)
 
         # Clear caches so overlays refresh
-        self._slice_cache.clear()
-        self._active_cache.clear()
-        self._raw_cache.clear()
-        self._resized_cache.clear()
-        self._resized_frame_cache.clear()
-        self._filmstrip_cache.clear()
+        self._clear_slice_caches()
 
         changed_pixels = int(
             np.count_nonzero(add_pixels) + np.count_nonzero(remove_pixels)
@@ -288,17 +335,35 @@ class DataManager:
         self.persistence_dirty = True
         self._persist_instance_artifact(force=True)
         blocked_pixels = int(np.count_nonzero(overwrite_blocked))
+        event_payload = {
+            "instance_id": int(instance_id),
+            "axis": axis,
+            "z_index": int(index),
+            "pixels_added": int(np.count_nonzero(add_pixels)),
+            "pixels_removed": int(np.count_nonzero(remove_pixels)),
+            "pixels_changed": changed_pixels,
+            "pixels_blocked": blocked_pixels,
+            "instance_mode": self.instance_mode,
+            "artifact_path": self.instance_artifact_path,
+            "artifact_exists": bool(
+                self.instance_artifact_path
+                and os.path.exists(self.instance_artifact_path)
+            ),
+            "last_saved_at": self.last_saved_at,
+        }
         self.save_progress(
             edit_event={
-                "instance_id": int(instance_id),
-                "axis": axis,
-                "z_index": int(index),
-                "pixels_added": int(np.count_nonzero(add_pixels)),
-                "pixels_removed": int(np.count_nonzero(remove_pixels)),
-                "pixels_changed": changed_pixels,
-                "pixels_blocked": blocked_pixels,
+                "instance_id": event_payload["instance_id"],
+                "axis": event_payload["axis"],
+                "z_index": event_payload["z_index"],
+                "pixels_added": event_payload["pixels_added"],
+                "pixels_removed": event_payload["pixels_removed"],
+                "pixels_changed": event_payload["pixels_changed"],
+                "pixels_blocked": event_payload["pixels_blocked"],
             }
         )
+        self._append_event("proofreading_mask_slice_saved", **event_payload)
+        return event_payload
 
     def _save_volume(self, path: str, volume: np.ndarray, layer_index: int = -1):
         """Save volume to disk"""
@@ -470,15 +535,39 @@ class DataManager:
                 return
             self.instance_volume = loaded.astype(np.int32, copy=False)
             if self.mask_volume is not None and self.mask_volume.shape == loaded.shape:
-                self.mask_volume = loaded.astype(self.mask_volume.dtype, copy=False)
+                if self.instance_mode == "semantic":
+                    foreground_value = self._semantic_foreground_value()
+                    self.mask_volume = np.where(loaded > 0, foreground_value, 0).astype(
+                        self.mask_volume.dtype, copy=False
+                    )
+                else:
+                    self.mask_volume = loaded.astype(self.mask_volume.dtype, copy=False)
             saved_at = datetime.fromtimestamp(
                 os.path.getmtime(self.instance_artifact_path), tz=timezone.utc
             )
             self.last_saved_at = saved_at.isoformat()
             self.last_persist_error = None
             self.persistence_dirty = False
+            self._append_event(
+                "proofreading_instance_artifact_loaded",
+                artifact_path=self.instance_artifact_path,
+                instance_mode=self.instance_mode,
+                shape=loaded.shape,
+            )
         except Exception as exc:
             self.last_persist_error = f"Failed to load artifact: {exc}"
+
+    def _export_volume(self) -> np.ndarray:
+        if self.instance_volume is None:
+            raise ValueError("No instance volume available for export")
+        if self.instance_mode == "semantic":
+            if self.mask_volume is not None:
+                return self.mask_volume
+            foreground_value = self._semantic_foreground_value()
+            return np.where(self.instance_volume > 0, foreground_value, 0).astype(
+                np.uint8
+            )
+        return self.instance_volume
 
     def _backup_file(self, source_path: str, timestamp: str) -> str:
         source = Path(source_path)
@@ -977,6 +1066,7 @@ class DataManager:
     ) -> Dict[str, Any]:
         if self.instance_volume is None:
             raise ValueError("No instance volume available for export")
+        export_volume = self._export_volume()
 
         mode_value = (mode or "").strip().lower()
         if mode_value not in {"new_file", "overwrite_source"}:
@@ -996,7 +1086,7 @@ class DataManager:
                 target = target.with_suffix(".tif")
             if target.exists() and create_backup:
                 backup_path = self._backup_file(str(target), timestamp)
-            self._atomic_write_tiff(str(target), self.instance_volume.astype(np.int32))
+            self._atomic_write_tiff(str(target), export_volume)
             written_path = str(target)
         else:
             if not self.mask_path:
@@ -1013,24 +1103,22 @@ class DataManager:
                 if create_backup:
                     backup_path = self._backup_file(source_file, timestamp)
                 if source_file.lower().endswith((".tif", ".tiff")):
-                    self._atomic_write_tiff(
-                        source_file, self.instance_volume.astype(np.int32)
-                    )
+                    self._atomic_write_tiff(source_file, export_volume)
                 else:
-                    if self.instance_volume.ndim == 3:
-                        if self.instance_volume.shape[0] != 1:
+                    if export_volume.ndim == 3:
+                        if export_volume.shape[0] != 1:
                             raise ValueError(
                                 "Cannot overwrite multi-slice volume into a single 2D source image"
                             )
-                        slice_data = self.instance_volume[0]
+                        slice_data = export_volume[0]
                     else:
-                        slice_data = self.instance_volume
+                        slice_data = export_volume
                     self._atomic_write_image(source_file, slice_data)
                 written_path = source_file
             else:
                 if create_backup:
                     backup_path = self._backup_file_set(source_files, timestamp)
-                self._write_volume_to_files(source_files, self.instance_volume)
+                self._write_volume_to_files(source_files, export_volume)
                 written_path = self.mask_path
 
         self.last_export_at = self._iso_now()
@@ -1039,6 +1127,15 @@ class DataManager:
         self.last_backup_path = backup_path
         self.last_persist_error = None
         self.save_progress()
+        self._append_event(
+            "proofreading_masks_exported",
+            mode=mode_value,
+            written_path=written_path,
+            backup_path=backup_path,
+            instance_mode=self.instance_mode,
+            shape=export_volume.shape,
+            dtype=str(export_volume.dtype),
+        )
 
         return {
             "message": "Masks exported successfully",
@@ -1115,7 +1212,6 @@ class DataManager:
         image_slice = ensure_grayscale_2d(image_slice)
         image_slice = enhance_contrast(image_slice)
         label_slice = ensure_grayscale_2d(label_slice)
-        label_slice = to_uint8(label_slice)
         active_mask = (label_slice == instance_id).astype(np.uint8)
         return image_slice, label_slice, active_mask, index, total
 
@@ -1530,12 +1626,37 @@ class DataManager:
 
     def _load_volume(self, path: str) -> Dict[str, Any]:
         """Load volume data from a path"""
-        path_obj = Path(path)
+        file_path, _dataset_key = split_dataset_ref(path)
+        path_obj = Path(file_path)
 
         # Single file
         if path_obj.is_file():
-            if path.lower().endswith((".tif", ".tiff")):
-                volume = tifffile.imread(path)
+            lower_name = path_obj.name.lower()
+            if lower_name.endswith((".tif", ".tiff")):
+                volume = tifffile.imread(file_path)
+            else:
+                volume = load_volume(path)
+
+            if volume.ndim == 2:
+                return {
+                    "volume": volume,
+                    "shape": volume.shape,
+                    "num_slices": 1,
+                    "is_3d": False,
+                }
+            if volume.ndim == 3:
+                return {
+                    "volume": volume,
+                    "shape": volume.shape,
+                    "num_slices": volume.shape[0],
+                    "is_3d": True,
+                }
+            raise ValueError(f"Unsupported volume dimensions: {volume.ndim}")
+
+        # Directory or glob pattern
+        elif path_obj.is_dir() or "*" in file_path or "?" in file_path:
+            if path_obj.is_dir() and path_obj.name.lower().endswith((".zarr", ".n5")):
+                volume = load_volume(path)
                 if volume.ndim == 2:
                     return {
                         "volume": volume,
@@ -1543,33 +1664,22 @@ class DataManager:
                         "num_slices": 1,
                         "is_3d": False,
                     }
-                elif volume.ndim == 3:
+                if volume.ndim == 3:
                     return {
                         "volume": volume,
                         "shape": volume.shape,
                         "num_slices": volume.shape[0],
                         "is_3d": True,
                     }
-                else:
-                    raise ValueError(f"Unsupported TIFF dimensions: {volume.ndim}")
-            else:
-                image = load_image_file(path)
-                return {
-                    "volume": image,
-                    "shape": image.shape,
-                    "num_slices": 1,
-                    "is_3d": False,
-                }
+                raise ValueError(f"Unsupported volume dimensions: {volume.ndim}")
 
-        # Directory or glob pattern
-        elif path_obj.is_dir() or "*" in path or "?" in path:
             files = []
             if path_obj.is_dir():
                 for ext in ["*.tif", "*.tiff", "*.png", "*.jpg", "*.jpeg"]:
-                    files.extend(glob.glob(os.path.join(path, ext)))
-                    files.extend(glob.glob(os.path.join(path, ext.upper())))
+                    files.extend(glob.glob(os.path.join(file_path, ext)))
+                    files.extend(glob.glob(os.path.join(file_path, ext.upper())))
             else:
-                files = glob.glob(path)
+                files = glob.glob(file_path)
 
             if not files:
                 raise ValueError(f"No image files found at: {path}")

@@ -22,6 +22,7 @@ function ProgressTracker({
   onStartProofreading,
   onJumpToNext,
   compact = false,
+  showLoadDataset = true,
 }) {
   if (!stats) {
     return (
@@ -85,18 +86,22 @@ function ProgressTracker({
           </div>
         </div>
 
-        <Divider style={{ margin: compact ? "4px 0" : "8px 0" }} />
+        {showLoadDataset && (
+          <>
+            <Divider style={{ margin: compact ? "4px 0" : "8px 0" }} />
 
-        <Space direction="vertical" style={{ width: "100%" }} size="small">
-          <Button
-            icon={<FolderOpenOutlined />}
-            onClick={onNewSession}
-            block
-            size="small"
-          >
-            Load dataset
-          </Button>
-        </Space>
+            <Space direction="vertical" style={{ width: "100%" }} size="small">
+              <Button
+                icon={<FolderOpenOutlined />}
+                onClick={onNewSession}
+                block
+                size="small"
+              >
+                Load dataset
+              </Button>
+            </Space>
+          </>
+        )}
       </Space>
     </div>
   );

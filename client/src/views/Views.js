@@ -17,21 +17,22 @@ import Monitoring from "./Monitoring";
 import MaskProofreading from "./MaskProofreading";
 import Chatbot from "../components/Chatbot";
 import { useWorkflow } from "../contexts/WorkflowContext";
+import { logClientEvent } from "../logging/appEventLog";
 
 const { Content } = Layout;
 
 const MODULE_ITEMS = [
-  { label: "File Management", key: "files", icon: <FolderOpenOutlined /> },
-  { label: "Visualization", key: "visualization", icon: <EyeOutlined /> },
-  { label: "Model Training", key: "training", icon: <ExperimentOutlined /> },
+  { label: "Files", key: "files", icon: <FolderOpenOutlined /> },
+  { label: "Visualize", key: "visualization", icon: <EyeOutlined /> },
+  { label: "Train", key: "training", icon: <ExperimentOutlined /> },
   {
-    label: "Model Inference",
+    label: "Infer",
     key: "inference",
     icon: <ThunderboltOutlined />,
   },
-  { label: "Tensorboard", key: "monitoring", icon: <DashboardOutlined /> },
+  { label: "Monitor", key: "monitoring", icon: <DashboardOutlined /> },
   {
-    label: "Mask Proofreading",
+    label: "Proofread",
     key: "mask-proofreading",
     icon: <BugOutlined />,
   },
@@ -44,7 +45,8 @@ function Views() {
   const lastClientEffects = workflowContext?.lastClientEffects;
   const consumeClientEffects = workflowContext?.consumeClientEffects;
   const [isChatOpen, setIsChatOpen] = useState(false);
-  const [chatWidth, setChatWidth] = useState(560);
+  const [assistantContextOpen, setAssistantContextOpen] = useState(false);
+  const [chatWidth, setChatWidth] = useState(460);
   const isResizing = useRef(false);
 
   const [viewers, setViewers] = useState([]);
@@ -83,13 +85,39 @@ function Views() {
   }, [resize, stopResizing]);
 
   useEffect(() => {
-    const target = lastClientEffects?.navigate_to;
-    if (!target) return;
-    const targetKey = target === "model-training" ? "training" : target;
-    setCurrent(targetKey);
-    setVisitedTabs((prev) => new Set(prev).add(targetKey));
+    if (!lastClientEffects) return;
+    const target = lastClientEffects.navigate_to;
+    if (target) {
+      const targetKey = target === "model-training" ? "training" : target;
+      setCurrent(targetKey);
+      setVisitedTabs((prev) => new Set(prev).add(targetKey));
+    }
+    if (lastClientEffects.open_assistant) {
+      setIsChatOpen(true);
+    }
+    if (lastClientEffects.show_workflow_context) {
+      setAssistantContextOpen(true);
+    }
     consumeClientEffects?.();
   }, [lastClientEffects, consumeClientEffects]);
+
+  useEffect(() => {
+    logClientEvent("view_changed", {
+      level: "INFO",
+      message: `Switched to ${current}`,
+      source: "views",
+      data: { view: current },
+    });
+  }, [current]);
+
+  useEffect(() => {
+    logClientEvent(isChatOpen ? "chat_opened" : "chat_closed", {
+      level: "INFO",
+      message: isChatOpen ? "Assistant drawer opened" : "Assistant drawer closed",
+      source: "views",
+      data: { width: chatWidth },
+    });
+  }, [chatWidth, isChatOpen]);
 
   const renderTabContent = (key, component) => {
     if (!visitedTabs.has(key)) return null;
@@ -103,13 +131,14 @@ function Views() {
   };
 
   return (
-    <Layout style={{ minHeight: "100vh" }}>
+    <Layout style={{ minHeight: "100vh", height: "100vh" }}>
       <div
+        className="pytc-top-nav"
         style={{
           display: "flex",
           alignItems: "center",
           background: "#fff",
-          paddingRight: 16,
+          paddingRight: 12,
           borderBottom: "1px solid #f0f0f0",
         }}
       >
@@ -118,9 +147,10 @@ function Views() {
           selectedKeys={[current]}
           mode="horizontal"
           items={MODULE_ITEMS}
+          className="pytc-top-menu"
           style={{
-            lineHeight: "64px",
-            paddingLeft: "16px",
+            lineHeight: "48px",
+            paddingLeft: "12px",
             flex: 1,
             borderBottom: "none",
           }}
@@ -134,8 +164,9 @@ function Views() {
       </div>
       <Content
         style={{
-          padding: "24px",
-          height: "calc(100vh - 64px)",
+          padding: "16px",
+          flex: 1,
+          minHeight: 0,
           overflow: "auto",
         }}
       >
@@ -185,7 +216,11 @@ function Views() {
             (e.currentTarget.style.backgroundColor = "transparent")
           }
         />
-        <Chatbot onClose={() => setIsChatOpen(false)} />
+        <Chatbot
+          onClose={() => setIsChatOpen(false)}
+          forceShowWorkflowInspector={assistantContextOpen}
+          onWorkflowInspectorConsumed={() => setAssistantContextOpen(false)}
+        />
       </Drawer>
     </Layout>
   );

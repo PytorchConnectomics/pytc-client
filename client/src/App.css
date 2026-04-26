@@ -2,6 +2,93 @@
   text-align: center;
 }
 
+:root {
+  --seg-bg-canvas: #f7f4ed;
+  --seg-bg-panel: #fffdfa;
+  --seg-bg-raised: #ffffff;
+  --seg-border-subtle: #e4ded2;
+  --seg-border-strong: #c9bda9;
+  --seg-text-primary: #1f2933;
+  --seg-text-muted: #667085;
+  --seg-accent-teal: #256f68;
+  --seg-accent-blue: #2b5b9f;
+  --seg-accent-amber: #b8660f;
+  --seg-accent-green: #2f7d32;
+  --seg-accent-red: #b13a2f;
+  --seg-radius-panel: 12px;
+  --seg-shadow-panel: 0 12px 32px rgba(51, 43, 31, 0.08);
+}
+
+.workflow-stage-header {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  justify-content: space-between;
+  padding: 2px 0 8px;
+  border: 0;
+  border-bottom: 1px solid var(--seg-border-subtle);
+  background: transparent;
+}
+
+.workflow-stage-title,
+.workflow-stage-copy {
+  min-width: 0;
+}
+
+.workflow-stage-copy {
+  display: flex;
+  align-items: center;
+  min-width: 0;
+}
+
+.workflow-stage-title {
+  display: inline-block;
+  padding-right: 8px;
+}
+
+.workflow-stage-eyebrow,
+.workflow-stage-description {
+  font-size: 12px;
+}
+
+.workflow-insight-card,
+.workflow-proposal-card {
+  border: 1px solid var(--seg-border-subtle);
+  border-radius: 10px;
+  background: var(--seg-bg-raised);
+}
+
+.workflow-insight-card {
+  margin-top: 8px;
+  padding: 8px 10px;
+}
+
+.workflow-proposal-card {
+  margin-top: 6px;
+  padding: 10px;
+}
+
+.workflow-proposal-card__fields {
+  display: grid;
+  grid-template-columns: minmax(92px, auto) 1fr;
+  column-gap: 10px;
+  row-gap: 4px;
+}
+
+.workflow-proposal-card__field-label {
+  font-size: 11px;
+  text-transform: capitalize;
+}
+
+.pytc-top-menu .ant-menu-item {
+  margin-inline: 4px !important;
+  padding-inline: 16px 24px !important;
+}
+
+.pytc-top-menu .ant-menu-title-content {
+  padding-right: 2px;
+}
+
 .app-logo {
   height: 40vmin;
   pointer-events: none;
@@ -16,6 +103,19 @@
   justify-content: center;
   font-size: calc(10px + 2vmin);
   color: white;
+}
+
+.visualization-viewer-tabs > .ant-tabs-nav {
+  margin: 8px 0 0;
+}
+
+.visualization-viewer-tabs > .ant-tabs-content-holder,
+.visualization-viewer-tabs > .ant-tabs-content-holder > .ant-tabs-content,
+.visualization-viewer-tabs
+  > .ant-tabs-content-holder
+  > .ant-tabs-content
+  > .ant-tabs-tabpane {
+  height: 100%;
 }
 
 @media (prefers-reduced-motion: no-preference) {

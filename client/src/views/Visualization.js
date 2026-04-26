@@ -5,8 +5,9 @@ import {
   InboxOutlined,
   ReloadOutlined,
 } from "@ant-design/icons";
-import { getNeuroglancerViewer } from "../api";
+import { apiClient, getNeuroglancerViewer } from "../api";
 import UnifiedFileInput from "../components/UnifiedFileInput";
+import StageHeader from "../components/workflow/StageHeader";
 import { useWorkflow } from "../contexts/WorkflowContext";
 
 const { Title } = Typography;
@@ -52,9 +53,48 @@ function Visualization(props) {
     return val.display || val.path || "";
   };
 
-  const fetchNeuroglancerViewer = async () => {
-    const imagePath = getPath(currentImage);
-    const labelPath = getPath(currentLabel);
+  const getViewerTitle = (imageValue, labelValue) => {
+    const getImageName = (val) => {
+      const display = getDisplay(val);
+      if (!display) return "";
+      const parts = display.split(/[/\\]/);
+      return parts[parts.length - 1];
+    };
+
+    return (
+      getImageName(imageValue) +
+      (labelValue ? " & " + getImageName(labelValue) : "")
+    );
+  };
+
+  const validateManagedUploadSelection = async (value, role) => {
+    const selectedPath = getPath(value);
+    if (!selectedPath || !selectedPath.startsWith("uploads/")) {
+      return true;
+    }
+
+    const response = await apiClient.get("/files");
+    const exists = (response.data || []).some(
+      (item) => !item.is_folder && item.physical_path === selectedPath,
+    );
+    if (exists) {
+      return true;
+    }
+
+    if (role === "image") {
+      setCurrentImage(null);
+    } else {
+      setCurrentLabel(null);
+    }
+    message.error(
+      `The selected ${role} file is no longer present in app uploads. Please re-select or re-upload it.`,
+    );
+    return false;
+  };
+
+  const loadViewer = async (imageValue, labelValue, scalesValue) => {
+    const imagePath = getPath(imageValue);
+    const labelPath = getPath(labelValue);
 
     if (!imagePath) {
       message.error("Please select an image");
@@ -63,8 +103,22 @@ function Visualization(props) {
 
     setIsLoading(true);
     try {
-      const scalesArray = scales.split(",").map(Number);
-      // Use path string for ID generation
+      const imageSelectionOk = await validateManagedUploadSelection(
+        imageValue,
+        "image",
+      );
+      if (!imageSelectionOk) {
+        return;
+      }
+      const labelSelectionOk = await validateManagedUploadSelection(
+        labelValue,
+        "label",
+      );
+      if (!labelSelectionOk) {
+        return;
+      }
+
+      const scalesArray = scalesValue.split(",").map(Number);
       const viewerId =
         imagePath + (labelPath || "") + JSON.stringify(scalesArray);
 
@@ -82,36 +136,27 @@ function Visualization(props) {
         workflowContext?.workflow?.id,
       );
 
-      console.log("Current Viewer at ", res);
-
-      // Extract name from path for title
-      const getImageName = (val) => {
-        const display = getDisplay(val);
-        if (!display) return "";
-        const parts = display.split(/[/\\]/);
-        return parts[parts.length - 1];
-      };
-
       const newViewers = [
         ...updatedViewers,
         {
           key: viewerId,
-          title:
-            getImageName(currentImage) +
-            (currentLabel ? " & " + getImageName(currentLabel) : ""),
+          title: getViewerTitle(imageValue, labelValue),
           viewer: res,
         },
       ];
 
       setViewers(newViewers);
       setActiveKey(viewerId);
-
-      setIsLoading(false);
     } catch (e) {
       console.log(e);
+      message.error(e?.message || "Failed to load viewer");
+    } finally {
       setIsLoading(false);
-      message.error("Failed to load viewer");
     }
+  };
+
+  const fetchNeuroglancerViewer = async () => {
+    await loadViewer(currentImage, currentLabel, scales);
   };
 
   const handleEdit = (targetKey, action) => {
@@ -159,6 +204,13 @@ function Visualization(props) {
 
   return (
     <div style={{ height: "100%", display: "flex", flexDirection: "column" }}>
+      <div style={{ marginBottom: 12 }}>
+        <StageHeader
+          stage="visualization"
+          title="Visualization"
+          subtitle="Inspect image and label volumes before routing failures into inference or proofreading."
+        />
+      </div>
       {/* Input Section */}
       <div
         style={{
@@ -219,41 +271,66 @@ function Visualization(props) {
       {/* Viewers Section */}
       <div style={{ flex: 1, minHeight: 0 }}>
         {viewers.length > 0 ? (
-          <Tabs
-            closeIcon
-            type="editable-card"
-            hideAdd
-            onEdit={handleEdit}
-            activeKey={activeKey}
-            onChange={handleChange}
-            items={viewers.map((viewer) => ({
-              label: (
-                <span>
-                  {viewer.title}
-                  <Button
-                    type="link"
-                    icon={<ReloadOutlined />}
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      refreshViewer(viewer.key);
+          <div style={{ height: "calc(100vh - 250px)" }}>
+            <Tabs
+              className="visualization-viewer-tabs"
+              closeIcon
+              type="editable-card"
+              tabPosition="bottom"
+              hideAdd
+              onEdit={handleEdit}
+              activeKey={activeKey}
+              onChange={handleChange}
+              style={{ height: "100%" }}
+              items={viewers.map((viewer) => ({
+                label: (
+                  <span
+                    style={{
+                      display: "inline-flex",
+                      alignItems: "center",
+                      gap: 4,
                     }}
-                  />
-                </span>
-              ),
-              key: viewer.key,
-              children: (
-                <iframe
-                  title="Viewer Display"
-                  width="100%"
-                  height="800"
-                  frameBorder="0"
-                  scrolling="no"
-                  src={viewer.viewer}
-                  style={{ height: "calc(100vh - 250px)" }}
-                />
-              ),
-            }))}
-          />
+                  >
+                    <span>{viewer.title}</span>
+                    <Button
+                      type="link"
+                      icon={<ReloadOutlined />}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        refreshViewer(viewer.key);
+                      }}
+                      style={{ paddingInline: 4 }}
+                    />
+                  </span>
+                ),
+                key: viewer.key,
+                children: (
+                  <div
+                    style={{
+                      height: "100%",
+                      overflow: "hidden",
+                      borderRadius: 8,
+                      background: "#000",
+                    }}
+                  >
+                    <iframe
+                      title="Viewer Display"
+                      width="100%"
+                      height="800"
+                      frameBorder="0"
+                      scrolling="no"
+                      src={viewer.viewer}
+                      style={{
+                        width: "100%",
+                        height: "100%",
+                        display: "block",
+                      }}
+                    />
+                  </div>
+                ),
+              }))}
+            />
+          </div>
         ) : (
           <div style={{ textAlign: "center", padding: "40px", color: "#999" }}>
             <InboxOutlined style={{ fontSize: "48px", marginBottom: "16px" }} />

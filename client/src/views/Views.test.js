@@ -62,12 +62,12 @@ describe("Views", () => {
   it("shows all active modules without the workflow selector", () => {
     render(<Views />);
 
-    expect(screen.getByText("File Management")).toBeTruthy();
-    expect(screen.getByText("Visualization")).toBeTruthy();
-    expect(screen.getByText("Model Training")).toBeTruthy();
-    expect(screen.getByText("Model Inference")).toBeTruthy();
-    expect(screen.getByText("Tensorboard")).toBeTruthy();
-    expect(screen.getByText("Mask Proofreading")).toBeTruthy();
+    expect(screen.getByText("Files")).toBeTruthy();
+    expect(screen.getByText("Visualize")).toBeTruthy();
+    expect(screen.getByText("Train")).toBeTruthy();
+    expect(screen.getByText("Infer")).toBeTruthy();
+    expect(screen.getByText("Monitor")).toBeTruthy();
+    expect(screen.getByText("Proofread")).toBeTruthy();
     expect(screen.queryByText("SynAnno")).toBeNull();
     expect(screen.queryByText("Change Views")).toBeNull();
     expect(screen.queryByText("Launch Selected")).toBeNull();
@@ -79,7 +79,7 @@ describe("Views", () => {
 
     expect(screen.queryByText("Visualization Content")).toBeNull();
 
-    fireEvent.click(screen.getByText("Visualization"));
+    fireEvent.click(screen.getByText("Visualize"));
 
     expect(screen.getByText("Visualization Content")).toBeTruthy();
   });

@@ -1,7 +1,8 @@
-import React from "react";
-import { Card, Form, Input, Button, Modal, Space, Typography } from "antd";
+import React, { useEffect, useState } from "react";
+import { Card, Form, Input, Button, Modal, Space, Typography, Tag } from "antd";
 import { FolderOpenOutlined, UploadOutlined } from "@ant-design/icons";
 import UnifiedFileInput from "../../components/UnifiedFileInput";
+import { apiClient } from "../../api";
 
 const { Title, Text } = Typography;
 
@@ -11,6 +12,22 @@ const { Title, Text } = Typography;
  */
 function DatasetLoader({ onLoad, loading }) {
   const [form] = Form.useForm();
+  const [projectSuggestions, setProjectSuggestions] = useState([]);
+
+  useEffect(() => {
+    let active = true;
+    apiClient
+      .get("/files/project-suggestions")
+      .then((response) => {
+        if (active) setProjectSuggestions(response.data || []);
+      })
+      .catch(() => {
+        if (active) setProjectSuggestions([]);
+      });
+    return () => {
+      active = false;
+    };
+  }, []);
 
   const resolvePath = (value) => {
     if (!value) return "";
@@ -65,6 +82,38 @@ function DatasetLoader({ onLoad, loading }) {
     }
   };
 
+  const joinPath = (root, relative) => {
+    if (!root || !relative) return "";
+    return `${String(root).replace(/\/+$/, "")}/${String(relative).replace(/^\/+/, "")}`;
+  };
+
+  const suggestedProject =
+    projectSuggestions.find((item) => item.recommended) || projectSuggestions[0];
+  const suggestedPair = suggestedProject?.profile?.paired_examples?.[0];
+
+  const fillSuggestedPair = () => {
+    if (!suggestedProject || !suggestedPair) return;
+    const imagePath = joinPath(suggestedProject.directory_path, suggestedPair.image);
+    const maskPath = joinPath(suggestedProject.directory_path, suggestedPair.label);
+    form.setFieldsValue({
+      projectName: suggestedProject.name,
+      datasetPath: { path: imagePath, display: suggestedPair.image },
+      maskPath: { path: maskPath, display: suggestedPair.label },
+    });
+  };
+
+  const startSuggestedPair = () => {
+    if (!suggestedProject || !suggestedPair || loading) return;
+    const imagePath = joinPath(suggestedProject.directory_path, suggestedPair.image);
+    const maskPath = joinPath(suggestedProject.directory_path, suggestedPair.label);
+    form.setFieldsValue({
+      projectName: suggestedProject.name,
+      datasetPath: { path: imagePath, display: suggestedPair.image },
+      maskPath: { path: maskPath, display: suggestedPair.label },
+    });
+    onLoad(imagePath, maskPath, suggestedProject.name);
+  };
+
   return (
     <Card
       bordered={false}
@@ -79,16 +128,41 @@ function DatasetLoader({ onLoad, loading }) {
         <Space align="center">
           <FolderOpenOutlined style={{ color: "#1677ff", fontSize: 18 }} />
           <Title level={4} style={{ margin: 0 }}>
-            Start a Mask Proofreading Session
+            What should I proofread?
           </Title>
         </Space>
-        <Text type="secondary">
-          Load a volume (single file, folder, or glob). Add a mask if you have
-          one.
-        </Text>
       </Space>
 
       <div style={{ height: 16 }} />
+
+      {suggestedProject && suggestedPair && (
+        <div
+          style={{
+            border: "1px solid #d9f7be",
+            background: "#fbfff7",
+            borderRadius: 12,
+            padding: 12,
+            marginBottom: 16,
+            display: "grid",
+            gap: 8,
+          }}
+        >
+          <Space size="small" wrap>
+            <Tag color="green" style={{ margin: 0 }}>
+              suggested
+            </Tag>
+            <Text strong>{suggestedProject.name}</Text>
+          </Space>
+          <Space size="small" wrap>
+            <Button size="small" type="primary" onClick={startSuggestedPair} loading={loading}>
+              Start proofreading this pair
+            </Button>
+            <Button size="small" onClick={fillSuggestedPair}>
+              Fill form
+            </Button>
+          </Space>
+        </div>
+      )}
 
       <Form
         form={form}
@@ -99,23 +173,29 @@ function DatasetLoader({ onLoad, loading }) {
         }}
       >
         <Form.Item
-          label="Project Name"
+          label="Review name"
           name="projectName"
-          rules={[{ required: true, message: "Please enter a project name" }]}
+          rules={[{ required: true, message: "Name this review" }]}
         >
           <Input placeholder="My EM volume" />
         </Form.Item>
 
         <Form.Item
-          label="Dataset Path"
+          label="Image to proofread"
           name="datasetPath"
-          rules={[{ required: true, message: "Please enter dataset path" }]}
+          rules={[{ required: true, message: "Choose the image volume" }]}
         >
-          <UnifiedFileInput placeholder="/path/to/dataset" />
+          <UnifiedFileInput
+            placeholder="/path/to/image"
+            selectionType="fileOrDirectory"
+          />
         </Form.Item>
 
-        <Form.Item label="Mask Path (Optional)" name="maskPath">
-          <UnifiedFileInput placeholder="/path/to/masks" />
+        <Form.Item label="Mask to edit (optional)" name="maskPath">
+          <UnifiedFileInput
+            placeholder="/path/to/mask"
+            selectionType="fileOrDirectory"
+          />
         </Form.Item>
 
         <Form.Item style={{ marginBottom: 0 }}>
@@ -124,10 +204,10 @@ function DatasetLoader({ onLoad, loading }) {
             htmlType="submit"
             loading={loading}
             icon={<UploadOutlined />}
-            block
-            size="large"
-          >
-            Load Dataset
+          block
+          size="large"
+        >
+            Start proofreading
           </Button>
         </Form.Item>
       </Form>

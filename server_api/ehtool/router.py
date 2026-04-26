@@ -8,6 +8,7 @@ from sqlalchemy.orm import Session
 from typing import List, Optional
 import math
 import logging
+import time
 
 logger = logging.getLogger(__name__)
 
@@ -42,6 +43,7 @@ from server_api.workflows.service import (
     get_user_workflow_or_404,
     update_workflow_fields,
 )
+from app_event_logger import append_app_event
 
 router = APIRouter()
 
@@ -52,6 +54,18 @@ print("=" * 80)
 
 # In-memory cache for DataManagers (session_id -> DataManager)
 _data_managers = {}
+
+
+def _append_ehtool_event(event: str, level: str = "INFO", **fields):
+    try:
+        append_app_event(
+            component="ehtool.router",
+            event=event,
+            level=level,
+            **fields,
+        )
+    except Exception:
+        logger.debug("Failed to append EHTool app event", exc_info=True)
 
 
 def get_data_manager(session_id: int, db: Session) -> DataManager:
@@ -97,6 +111,14 @@ async def load_detection_dataset(
             workflow = get_user_workflow_or_404(
                 db, workflow_id=request.workflow_id, user_id=current_user.id
             )
+
+        _append_ehtool_event(
+            "proofreading_load_requested",
+            dataset_path=request.dataset_path,
+            mask_path=request.mask_path,
+            project_name=request.project_name,
+            workflow_id=request.workflow_id,
+        )
 
         # Create DataManager and load dataset
         data_manager = DataManager()
@@ -176,6 +198,14 @@ async def load_detection_dataset(
                 },
             )
 
+        _append_ehtool_event(
+            "proofreading_load_completed",
+            session_id=db_session.id,
+            total_layers=dataset_info["total_layers"],
+            project_name=request.project_name,
+            workflow_id=request.workflow_id,
+        )
+
         return DetectionLoadResponse(
             session_id=db_session.id,
             total_layers=dataset_info["total_layers"],
@@ -183,10 +213,13 @@ async def load_detection_dataset(
         )
 
     except FileNotFoundError as e:
+        _append_ehtool_event("proofreading_load_failed", level="ERROR", error=str(e))
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
     except ValueError as e:
+        _append_ehtool_event("proofreading_load_failed", level="ERROR", error=str(e))
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
     except Exception as e:
+        _append_ehtool_event("proofreading_load_failed", level="ERROR", error=str(e))
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to load dataset: {str(e)}",
@@ -479,6 +512,7 @@ async def get_instance_image(
             detail="No instance data available for this session",
         )
 
+    started_at = time.perf_counter()
     try:
         (
             image_bytes,
@@ -498,6 +532,24 @@ async def get_instance_image(
         )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+    elapsed_ms = (time.perf_counter() - started_at) * 1000.0
+    _append_ehtool_event(
+        "proofreading_instance_image_served",
+        session_id=session_id,
+        instance_id=instance_id,
+        kind=kind,
+        axis=resolved_axis,
+        z_index=resolved_index,
+        total_layers=total,
+        quality=quality,
+        format=format,
+        max_dim=max_dim,
+        bytes=len(image_bytes),
+        elapsed_ms=round(elapsed_ms, 2),
+        cache_hit=bool(perf_meta.get("cache_hit")),
+        decode_ms=round(float(perf_meta.get("decode_ms", 0.0)), 2),
+        resize_ms=round(float(perf_meta.get("resize_ms", 0.0)), 2),
+    )
 
     headers = {
         "X-Z-Index": str(resolved_index),
@@ -545,6 +597,7 @@ async def get_instance_filmstrip(
             detail="No instance data available for this session",
         )
 
+    started_at = time.perf_counter()
     try:
         (
             image_bytes,
@@ -567,6 +620,26 @@ async def get_instance_filmstrip(
         )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+    elapsed_ms = (time.perf_counter() - started_at) * 1000.0
+    _append_ehtool_event(
+        "proofreading_instance_filmstrip_served",
+        session_id=session_id,
+        instance_id=instance_id,
+        kind=kind,
+        axis=resolved_axis,
+        z_start=resolved_start,
+        z_count=resolved_count,
+        total_layers=total,
+        quality=quality,
+        format=format,
+        max_dim=max_dim,
+        bytes=len(image_bytes),
+        frame_height=frame_height,
+        elapsed_ms=round(elapsed_ms, 2),
+        cache_hit=bool(perf_meta.get("cache_hit")),
+        decode_ms=round(float(perf_meta.get("decode_ms", 0.0)), 2),
+        resize_ms=round(float(perf_meta.get("resize_ms", 0.0)), 2),
+    )
 
     headers = {
         "X-Z-Start": str(resolved_start),
@@ -814,7 +887,14 @@ async def save_instance_mask(
 
     try:
         data_manager = get_data_manager(request.session_id, db)
-        data_manager.save_instance_mask_slice(
+        _append_ehtool_event(
+            "proofreading_mask_save_requested",
+            session_id=request.session_id,
+            instance_id=request.instance_id,
+            axis=request.axis,
+            z_index=request.z_index,
+        )
+        save_result = data_manager.save_instance_mask_slice(
             instance_id=request.instance_id,
             axis=request.axis,
             index=request.z_index,
@@ -836,13 +916,48 @@ async def save_instance_mask(
                 "z_index": request.z_index,
             },
         )
-        return {"message": "Instance mask saved successfully"}
+        persistence = data_manager.get_persistence_status()
+        _append_ehtool_event(
+            "proofreading_mask_save_completed",
+            session_id=request.session_id,
+            instance_id=request.instance_id,
+            axis=request.axis,
+            z_index=request.z_index,
+            pixels_changed=save_result.get("pixels_changed"),
+            pixels_blocked=save_result.get("pixels_blocked"),
+            artifact_path=persistence.get("artifact_path"),
+            artifact_exists=persistence.get("artifact_exists"),
+            last_saved_at=persistence.get("last_saved_at"),
+        )
+        return {
+            "message": "Instance mask saved successfully",
+            "edit": save_result,
+            "persistence": persistence,
+        }
     except ValueError as exc:
+        _append_ehtool_event(
+            "proofreading_mask_save_failed",
+            level="ERROR",
+            session_id=request.session_id,
+            instance_id=request.instance_id,
+            axis=request.axis,
+            z_index=request.z_index,
+            error=str(exc),
+        )
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     except Exception as e:
         import traceback
 
         traceback.print_exc()
+        _append_ehtool_event(
+            "proofreading_mask_save_failed",
+            level="ERROR",
+            session_id=request.session_id,
+            instance_id=request.instance_id,
+            axis=request.axis,
+            z_index=request.z_index,
+            error=str(e),
+        )
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to save instance mask: {str(e)}",
