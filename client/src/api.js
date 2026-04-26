@@ -1,6 +1,10 @@
 import axios from "axios";
-import { message } from "antd";
 import yaml from "js-yaml";
+import { logClientEvent } from "./logging/appEventLog";
+import {
+  detectConfigDiagnostics,
+  summarizeConfigText,
+} from "./logging/configLogSummary";
 import {
   setInferenceExecutionDefaults,
   setInferenceOutputPath,
@@ -14,6 +18,102 @@ export const apiClient = axios.create({
   baseURL: BASE_URL,
   withCredentials: true,
 });
+
+const summarizePayload = (payload) => {
+  if (!payload) return { hasBody: false };
+  if (typeof payload === "string") {
+    return { hasBody: true, bodyLength: payload.length };
+  }
+  if (payload instanceof FormData) {
+    return { hasBody: true, bodyType: "FormData" };
+  }
+  if (typeof payload === "object") {
+    return {
+      hasBody: true,
+      bodyType: Array.isArray(payload) ? "array" : "object",
+      keys: Object.keys(payload).slice(0, 20),
+    };
+  }
+  return { hasBody: true, bodyType: typeof payload };
+};
+
+const attachApiLogging = (instance, source) => {
+  instance.interceptors.request.use(
+    (config) => {
+      config.metadata = {
+        startedAt:
+          typeof performance !== "undefined" ? performance.now() : Date.now(),
+      };
+      logClientEvent("api_request", {
+        level: "INFO",
+        message: `${String(config.method || "get").toUpperCase()} ${config.url}`,
+        source,
+        data: {
+          method: String(config.method || "get").toUpperCase(),
+          url: config.url,
+          baseURL: config.baseURL,
+          ...summarizePayload(config.data),
+        },
+      });
+      return config;
+    },
+    (error) => {
+      logClientEvent("api_request_setup_failed", {
+        level: "ERROR",
+        message: error.message || "Axios request setup failed",
+        source,
+        data: { error: error.message },
+      });
+      return Promise.reject(error);
+    },
+  );
+
+  instance.interceptors.response.use(
+    (response) => {
+      const startedAt = response.config?.metadata?.startedAt;
+      const endedAt =
+        typeof performance !== "undefined" ? performance.now() : Date.now();
+      logClientEvent("api_response", {
+        level: "INFO",
+        message: `${String(response.config?.method || "get").toUpperCase()} ${response.config?.url} -> ${response.status}`,
+        source,
+        data: {
+          method: String(response.config?.method || "get").toUpperCase(),
+          url: response.config?.url,
+          status: response.status,
+          latencyMs:
+            startedAt !== undefined ? Number((endedAt - startedAt).toFixed(2)) : null,
+        },
+      });
+      return response;
+    },
+    (error) => {
+      const config = error.config || {};
+      const startedAt = config.metadata?.startedAt;
+      const endedAt =
+        typeof performance !== "undefined" ? performance.now() : Date.now();
+      logClientEvent("api_response_error", {
+        level: "ERROR",
+        message:
+          error.message ||
+          `${String(config.method || "get").toUpperCase()} ${config.url} failed`,
+        source,
+        data: {
+          method: String(config.method || "get").toUpperCase(),
+          url: config.url,
+          status: error.response?.status,
+          latencyMs:
+            startedAt !== undefined ? Number((endedAt - startedAt).toFixed(2)) : null,
+          detail: error.response?.data?.detail || null,
+        },
+      });
+      return Promise.reject(error);
+    },
+  );
+};
+
+attachApiLogging(apiClient, "apiClient");
+attachApiLogging(axios, "axios");
 
 const buildFilePath = (file) => {
   if (!file) return "";
@@ -35,6 +135,9 @@ const getErrorDetailMessage = (detail) => {
     return detail.map(getErrorDetailMessage).filter(Boolean).join("; ");
   }
   if (typeof detail === "object") {
+    if (detail.user_message) {
+      return getErrorDetailMessage(detail.user_message);
+    }
     const nestedUpstream =
       detail.upstream_body !== undefined
         ? getErrorDetailMessage(detail.upstream_body)
@@ -86,9 +189,7 @@ export async function getNeuroglancerViewer(image, label, scales, workflowId = n
     const res = await axios.post(url, data);
     return res.data;
   } catch (error) {
-    message.error(
-      'Invalid Data Path(s). Be sure to include all "/" and that data path is correct.',
-    );
+    handleError(error);
   }
 }
 
@@ -171,6 +272,18 @@ export async function startModelTraining(
           "[API] Failed to parse/modify YAML, using original config:",
           e,
         );
+        logClientEvent("training_config_transform_failed", {
+          level: "WARNING",
+          message: "Failed to transform training config before request",
+          source: "api",
+          data: {
+            error: e.message || "unknown error",
+            configOriginPath,
+            outputPath,
+            logPath,
+            workflowId,
+          },
+        });
       }
     } else {
       console.warn(
@@ -189,6 +302,23 @@ export async function startModelTraining(
     console.log("[API] Request payload size:", data.length, "bytes");
     console.log("[API] Note: TensorBoard will monitor outputPath, not logPath");
     console.log("[API] =========================================");
+
+    const configSummary = summarizeConfigText(configToSend, "training");
+    const diagnostics = detectConfigDiagnostics(configSummary);
+    logClientEvent("training_api_payload_prepared", {
+      level: diagnostics.length ? "WARNING" : "INFO",
+      message: "Training API payload prepared",
+      source: "api",
+      data: {
+        workflowId,
+        configOriginPath,
+        outputPath,
+        logPath,
+        requestBytes: data.length,
+        configSummary,
+        diagnostics,
+      },
+    });
 
     return makeApiRequest("start_model_training", "post", data);
   } catch (error) {
@@ -224,6 +354,10 @@ export async function getTrainingLogs() {
 
 export async function getTensorboardURL() {
   return makeApiRequest("get_tensorboard_url", "get");
+}
+
+export async function getTensorboardStatus() {
+  return makeApiRequest("get_tensorboard_status", "get");
 }
 
 export async function startTensorboard(logPath) {
@@ -284,6 +418,18 @@ export async function startModelInference(
         console.error("[API] Error type:", e.constructor.name);
         console.error("[API] Error message:", e.message);
         console.warn("[API] Falling back to original config");
+        logClientEvent("inference_config_transform_failed", {
+          level: "WARNING",
+          message: "Failed to transform inference config before request",
+          source: "api",
+          data: {
+            error: e.message || "unknown error",
+            configOriginPath,
+            outputPath,
+            checkpointPath,
+            workflowId,
+          },
+        });
         configToSend = inferenceConfig;
       }
     } else {
@@ -321,6 +467,23 @@ export async function startModelInference(
       data.substring(0, 300),
     );
 
+    const configSummary = summarizeConfigText(configToSend, "inference");
+    const diagnostics = detectConfigDiagnostics(configSummary);
+    logClientEvent("inference_api_payload_prepared", {
+      level: diagnostics.length ? "WARNING" : "INFO",
+      message: "Inference API payload prepared",
+      source: "api",
+      data: {
+        workflowId,
+        configOriginPath,
+        outputPath,
+        checkpointPath,
+        requestBytes: data.length,
+        configSummary,
+        diagnostics,
+      },
+    });
+
     console.log("[API] Calling makeApiRequest...");
     console.log("[API] Target endpoint: start_model_inference");
     console.log("[API] Method: POST");
@@ -355,6 +518,18 @@ export async function getInferenceStatus() {
 export async function getInferenceLogs() {
   try {
     const res = await axios.get(`${BASE_URL}/inference_logs`);
+    return res.data;
+  } catch (error) {
+    handleError(error);
+  }
+}
+
+export async function syncWorkflowInferenceRuntime(workflowId, body = {}) {
+  try {
+    const res = await apiClient.post(
+      `/api/workflows/${workflowId}/sync-inference-runtime`,
+      body,
+    );
     return res.data;
   } catch (error) {
     handleError(error);
@@ -527,6 +702,76 @@ export async function getWorkflowMetrics(workflowId) {
   }
 }
 
+export async function getWorkflowAgentRecommendation(workflowId) {
+  try {
+    const res = await apiClient.get(
+      `/api/workflows/${workflowId}/agent/recommendation`,
+    );
+    return res.data;
+  } catch (error) {
+    handleError(error);
+  }
+}
+
+export async function listWorkflowArtifacts(workflowId) {
+  try {
+    const res = await apiClient.get(`/api/workflows/${workflowId}/artifacts`);
+    return res.data;
+  } catch (error) {
+    handleError(error);
+  }
+}
+
+export async function listWorkflowModelRuns(workflowId) {
+  try {
+    const res = await apiClient.get(`/api/workflows/${workflowId}/model-runs`);
+    return res.data;
+  } catch (error) {
+    handleError(error);
+  }
+}
+
+export async function listWorkflowModelVersions(workflowId) {
+  try {
+    const res = await apiClient.get(`/api/workflows/${workflowId}/model-versions`);
+    return res.data;
+  } catch (error) {
+    handleError(error);
+  }
+}
+
+export async function listWorkflowCorrectionSets(workflowId) {
+  try {
+    const res = await apiClient.get(`/api/workflows/${workflowId}/correction-sets`);
+    return res.data;
+  } catch (error) {
+    handleError(error);
+  }
+}
+
+export async function listWorkflowEvaluationResults(workflowId) {
+  try {
+    const res = await apiClient.get(
+      `/api/workflows/${workflowId}/evaluation-results`,
+    );
+    return res.data;
+  } catch (error) {
+    handleError(error);
+  }
+}
+
+export async function computeWorkflowEvaluationResult(workflowId, body) {
+  try {
+    const res = await apiClient.post(
+      `/api/workflows/${workflowId}/evaluation-results/compute`,
+      body,
+    );
+    return res.data;
+  } catch (error) {
+    handleError(error);
+  }
+}
+
 export async function exportWorkflowBundle(workflowId) {
   try {
     const res = await apiClient.post(`/api/workflows/${workflowId}/export-bundle`);
@@ -579,10 +824,11 @@ export async function rejectAgentAction(workflowId, eventId) {
   }
 }
 
-export async function queryWorkflowAgent(workflowId, query) {
+export async function queryWorkflowAgent(workflowId, query, conversationId = null) {
   try {
     const res = await apiClient.post(`/api/workflows/${workflowId}/agent/query`, {
       query,
+      conversation_id: conversationId,
     });
     return res.data;
   } catch (error) {

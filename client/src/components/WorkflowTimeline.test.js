@@ -43,6 +43,7 @@ jest.mock("antd", () => {
     Input: ({ ...props }) => <input {...props} />,
     Empty,
     List,
+    Progress: ({ percent }) => <div>{`progress-${percent}`}</div>,
     Select: ({ options = [], value, onChange, ...props }) => (
       <select
         value={value}

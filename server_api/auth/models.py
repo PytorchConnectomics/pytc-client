@@ -1,3 +1,5 @@
+import json
+
 from sqlalchemy import (
     Column,
     Integer,
@@ -11,7 +13,7 @@ from sqlalchemy import (
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
 from .database import Base
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from typing import Optional, List
 from datetime import datetime
 
@@ -103,9 +105,35 @@ class ChatMessage(Base):
     )
     role = Column(String, nullable=False)  # "user" or "assistant"
     content = Column(Text, nullable=False)
+    source = Column(String, nullable=True)
+    actions_json = Column(Text, nullable=True)
+    commands_json = Column(Text, nullable=True)
+    proposals_json = Column(Text, nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
     conversation = relationship("Conversation", back_populates="messages")
+
+    @staticmethod
+    def _decode_json_list(value):
+        if not value:
+            return []
+        try:
+            decoded = json.loads(value)
+        except (TypeError, json.JSONDecodeError):
+            return []
+        return decoded if isinstance(decoded, list) else []
+
+    @property
+    def actions(self):
+        return self._decode_json_list(self.actions_json)
+
+    @property
+    def commands(self):
+        return self._decode_json_list(self.commands_json)
+
+    @property
+    def proposals(self):
+        return self._decode_json_list(self.proposals_json)
 
 
 # Pydantic Schemas
@@ -209,6 +237,10 @@ class ChatMessageResponse(BaseModel):
     id: int
     role: str
     content: str
+    source: Optional[str] = None
+    actions: List[dict] = Field(default_factory=list)
+    commands: List[dict] = Field(default_factory=list)
+    proposals: List[dict] = Field(default_factory=list)
     created_at: datetime
 
     class Config:

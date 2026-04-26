@@ -1,11 +1,13 @@
 import argparse
+import json
 import os
 from pathlib import Path
 from typing import Optional, Tuple
 
-DEFAULT_OLLAMA_BASE_URL = "http://cscigpu08.bc.edu:4443"
-DEFAULT_OLLAMA_EMBED_MODEL = "qwen3-embedding:8b"
+DEFAULT_OLLAMA_BASE_URL = "http://127.0.0.1:11434"
+DEFAULT_OLLAMA_EMBED_MODEL = "nomic-embed-text:latest"
 INDEX_FILENAMES = ("index.faiss", "index.pkl")
+INDEX_SETTINGS_FILENAME = "ollama_settings.json"
 
 
 def get_chatbot_paths(base_dir: Optional[Path] = None) -> Tuple[Path, Path]:
@@ -25,6 +27,35 @@ def resolve_ollama_settings(
 
 def faiss_index_exists(faiss_directory: Path) -> bool:
     return all((faiss_directory / name).is_file() for name in INDEX_FILENAMES)
+
+
+def read_index_settings(faiss_directory: Path) -> Optional[dict]:
+    settings_path = faiss_directory / INDEX_SETTINGS_FILENAME
+    if not settings_path.is_file():
+        return None
+    try:
+        return json.loads(settings_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return None
+
+
+def write_index_settings(
+    faiss_directory: Path, *, model: str, base_url: str
+) -> None:
+    settings_path = faiss_directory / INDEX_SETTINGS_FILENAME
+    settings_path.write_text(
+        json.dumps({"model": model, "base_url": base_url}, indent=2) + "\n",
+        encoding="utf-8",
+    )
+
+
+def faiss_index_matches_settings(
+    faiss_directory: Path, *, model: str, base_url: str
+) -> bool:
+    settings = read_index_settings(faiss_directory)
+    if settings is None:
+        return False
+    return settings.get("model") == model and settings.get("base_url") == base_url
 
 
 def build_faiss_index(
@@ -71,6 +102,11 @@ def build_faiss_index(
     vectorstore = FAISS.from_documents(chunks, embeddings)
     faiss_directory.mkdir(parents=True, exist_ok=True)
     vectorstore.save_local(str(faiss_directory))
+    write_index_settings(
+        faiss_directory,
+        model=embed_model,
+        base_url=resolved_base_url,
+    )
     print(f"FAISS index saved with {vectorstore.index.ntotal} vectors")
 
 
@@ -84,15 +120,20 @@ def ensure_faiss_index(
     default_summaries_directory, default_faiss_directory = get_chatbot_paths()
     summaries_directory = summaries_directory or default_summaries_directory
     faiss_directory = faiss_directory or default_faiss_directory
+    embed_model, resolved_base_url = resolve_ollama_settings(model, base_url)
 
-    if faiss_index_exists(faiss_directory):
+    if faiss_index_exists(faiss_directory) and faiss_index_matches_settings(
+        faiss_directory,
+        model=embed_model,
+        base_url=resolved_base_url,
+    ):
         return False
 
     build_faiss_index(
         summaries_directory,
         faiss_directory,
-        model=model,
-        base_url=base_url,
+        model=embed_model,
+        base_url=resolved_base_url,
     )
     return True
 

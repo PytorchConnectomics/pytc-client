@@ -511,8 +511,8 @@ QUESTIONS = [
 
 
 def main():
-    embed_model = os.getenv("OLLAMA_EMBED_MODEL", "qwen3-embedding:8b")
-    base_url = os.getenv("OLLAMA_BASE_URL", "http://cscigpu08.bc.edu:4443")
+    embed_model = os.getenv("OLLAMA_EMBED_MODEL", "nomic-embed-text:latest")
+    base_url = os.getenv("OLLAMA_BASE_URL", "http://127.0.0.1:11434")
 
     print(f"Embeddings: {embed_model}  |  Ollama: {base_url}")
     print(f"FAISS dir:  {FAISS_DIR}")

@@ -5,23 +5,45 @@ import { AppContext } from "./GlobalContext";
 import { WorkflowProvider, useWorkflow } from "./WorkflowContext";
 import {
   approveAgentAction,
+  appendWorkflowEvent,
+  computeWorkflowEvaluationResult,
+  createAgentAction,
+  exportWorkflowBundle,
   getCurrentWorkflow,
+  getWorkflowAgentRecommendation,
   getWorkflowHotspots,
   getWorkflowImpactPreview,
+  listWorkflowArtifacts,
+  listWorkflowCorrectionSets,
   listWorkflowEvents,
+  listWorkflowEvaluationResults,
+  listWorkflowModelRuns,
+  listWorkflowModelVersions,
 } from "../api";
 
 jest.mock("../api", () => ({
   approveAgentAction: jest.fn(),
   appendWorkflowEvent: jest.fn(),
+  computeWorkflowEvaluationResult: jest.fn(),
   createAgentAction: jest.fn(),
+  exportWorkflowBundle: jest.fn(),
   getCurrentWorkflow: jest.fn(),
+  getWorkflowAgentRecommendation: jest.fn(),
   getWorkflowHotspots: jest.fn(),
   getWorkflowImpactPreview: jest.fn(),
+  listWorkflowArtifacts: jest.fn(),
+  listWorkflowCorrectionSets: jest.fn(),
   listWorkflowEvents: jest.fn(),
+  listWorkflowEvaluationResults: jest.fn(),
+  listWorkflowModelRuns: jest.fn(),
+  listWorkflowModelVersions: jest.fn(),
   queryWorkflowAgent: jest.fn(),
   rejectAgentAction: jest.fn(),
   updateWorkflow: jest.fn(),
+}));
+
+jest.mock("../logging/appEventLog", () => ({
+  logClientEvent: jest.fn(),
 }));
 
 const baseWorkflow = {
@@ -38,12 +60,90 @@ function Probe() {
       <div>{workflowContext.events.map((event) => event.event_type).join(",")}</div>
       <div>{workflowContext.hotspots?.[0]?.summary || "no-hotspot"}</div>
       <div>{workflowContext.impactPreview?.confidence || "no-impact"}</div>
+      <div>{workflowContext.agentRecommendation?.decision || "no-agent"}</div>
+      <div>{`artifacts:${workflowContext.artifacts.length}`}</div>
+      <div>{`runs:${workflowContext.modelRuns.length}`}</div>
+      <div>{`corrections:${workflowContext.correctionSets.length}`}</div>
+      <div>{`evaluations:${workflowContext.evaluationResults.length}`}</div>
       <button
         type="button"
         onClick={() => workflowContext.approveAgentAction(7)}
       >
         Approve proposal
       </button>
+      <button
+        type="button"
+        onClick={() =>
+          workflowContext.runClientEffects({
+            navigate_to: "inference",
+            set_inference_output_path: "/tmp/inference-out",
+          })
+        }
+      >
+        Run effects
+      </button>
+      <button
+        type="button"
+        onClick={() =>
+          workflowContext.executeAssistantItem({
+            id: "start-inference",
+            title: "Start inference in app",
+            command: "app inference run",
+            client_effects: {
+              navigate_to: "inference",
+              set_inference_output_path: "/tmp/runtime-out",
+              runtime_action: { kind: "start_inference" },
+            },
+          })
+        }
+      >
+        Execute assistant item
+      </button>
+      <button
+        type="button"
+        onClick={() =>
+          workflowContext.runClientEffects({
+            navigate_to: "mask-proofreading",
+            set_proofreading_dataset_path: "/tmp/image.tif",
+            set_proofreading_mask_path: "/tmp/mask.tif",
+            set_proofreading_project_name: "Proofread me",
+            runtime_action: { kind: "start_proofreading" },
+          })
+        }
+      >
+        Start proofreading
+      </button>
+      <button
+        type="button"
+        onClick={() =>
+          workflowContext.runClientEffects({
+            workflow_action: {
+              kind: "propose_retraining_stage",
+              corrected_mask_path: "/tmp/corrected.tif",
+            },
+            refresh_insights: true,
+          })
+        }
+      >
+        Propose retraining
+      </button>
+      <button
+        type="button"
+        onClick={() =>
+          workflowContext.appendEvent({
+            actor: "system",
+            event_type: "test.event",
+            summary: "Append test event.",
+          })
+        }
+      >
+        Append event
+      </button>
+      <div>{workflowContext.pendingRuntimeAction?.kind || "no-runtime-action"}</div>
+      <div>
+        {workflowContext.pendingRuntimeAction?.overrides?.datasetPath ||
+          "no-dataset-override"}
+      </div>
     </div>
   );
 }
@@ -75,6 +175,38 @@ describe("WorkflowProvider", () => {
       confidence: "medium",
       summary: "Impact summary",
     });
+    getWorkflowAgentRecommendation.mockResolvedValue({
+      workflow_id: 1,
+      stage: "setup",
+      decision: "Proofread this data if the mask is ready.",
+      rationale: "A human review pass is the fastest way to create useful edits.",
+      confidence: "medium",
+      next_stage: "proofreading",
+      readiness: [],
+      actions: [],
+      commands: [],
+    });
+    createAgentAction.mockResolvedValue({
+      id: 8,
+      event_type: "agent.proposal_created",
+    });
+    computeWorkflowEvaluationResult.mockResolvedValue({
+      id: 9,
+      summary: "Before/after evaluation computed.",
+    });
+    exportWorkflowBundle.mockResolvedValue({
+      artifacts: [{ id: 1 }],
+      artifact_paths: [],
+    });
+    listWorkflowArtifacts.mockResolvedValue([{ id: 1, artifact_type: "image_volume" }]);
+    listWorkflowModelRuns.mockResolvedValue([{ id: 2, run_type: "inference" }]);
+    listWorkflowModelVersions.mockResolvedValue([]);
+    listWorkflowCorrectionSets.mockResolvedValue([
+      { id: 3, corrected_mask_path: "/tmp/corrected.tif" },
+    ]);
+    listWorkflowEvaluationResults.mockResolvedValue([
+      { id: 4, metrics: { summary: { dice_delta: 0.1 } } },
+    ]);
   });
 
   it("loads the current workflow and events on startup", async () => {
@@ -89,8 +221,20 @@ describe("WorkflowProvider", () => {
     await waitFor(() => {
       expect(screen.getByText("Top hotspot")).toBeTruthy();
       expect(screen.getByText("medium")).toBeTruthy();
+      expect(
+        screen.getByText("Proofread this data if the mask is ready."),
+      ).toBeTruthy();
     });
+    await waitFor(() => {
+      expect(screen.getByText("artifacts:1")).toBeTruthy();
+      expect(screen.getByText("runs:1")).toBeTruthy();
+      expect(screen.getByText("corrections:1")).toBeTruthy();
+      expect(screen.getByText("evaluations:1")).toBeTruthy();
+    });
+    expect(listWorkflowArtifacts).toHaveBeenCalledWith(1);
+    expect(listWorkflowEvaluationResults).toHaveBeenCalledWith(1);
     expect(getCurrentWorkflow).toHaveBeenCalledTimes(1);
+    expect(getWorkflowAgentRecommendation).toHaveBeenCalledWith(1);
   });
 
   it("applies client effects when an agent proposal is approved", async () => {
@@ -114,5 +258,103 @@ describe("WorkflowProvider", () => {
     await waitFor(() => {
       expect(screen.getByText("retraining_staged")).toBeTruthy();
     });
+  });
+
+  it("exposes direct client-effect execution for chat action cards", async () => {
+    const setOutputPath = jest.fn();
+
+    renderProvider({
+      trainingState: { setInputLabel: jest.fn() },
+      inferenceState: { setOutputPath },
+    });
+    await screen.findByText("setup");
+
+    fireEvent.click(screen.getByText("Run effects"));
+
+    await waitFor(() => {
+      expect(setOutputPath).toHaveBeenCalledWith("/tmp/inference-out");
+    });
+  });
+
+  it("queues runtime actions and logs assistant command execution", async () => {
+    const setOutputPath = jest.fn();
+
+    renderProvider({
+      trainingState: { setInputLabel: jest.fn(), setLogPath: jest.fn() },
+      inferenceState: { setOutputPath, setCheckpointPath: jest.fn() },
+    });
+    await screen.findByText("setup");
+
+    fireEvent.click(screen.getByText("Execute assistant item"));
+
+    await waitFor(() => {
+      expect(setOutputPath).toHaveBeenCalledWith("/tmp/runtime-out");
+    });
+    await waitFor(() => {
+      expect(screen.getByText("start_inference")).toBeTruthy();
+    });
+    expect(appendWorkflowEvent).toHaveBeenCalledWith(
+      1,
+      expect.objectContaining({
+        actor: "user",
+        event_type: "assistant.command.invoked",
+      }),
+    );
+  });
+
+  it("queues proofreading runtime actions with image and mask overrides", async () => {
+    renderProvider({
+      trainingState: { setInputLabel: jest.fn(), setLogPath: jest.fn() },
+      inferenceState: { setOutputPath: jest.fn(), setCheckpointPath: jest.fn() },
+    });
+    await screen.findByText("setup");
+
+    fireEvent.click(screen.getByText("Start proofreading"));
+
+    await waitFor(() => {
+      expect(screen.getByText("start_proofreading")).toBeTruthy();
+      expect(screen.getByText("/tmp/image.tif")).toBeTruthy();
+    });
+  });
+
+  it("creates approval-gated retraining proposals from client workflow actions", async () => {
+    renderProvider({
+      trainingState: { setInputLabel: jest.fn() },
+      inferenceState: { setOutputPath: jest.fn() },
+    });
+    await screen.findByText("setup");
+
+    fireEvent.click(screen.getByText("Propose retraining"));
+
+    await waitFor(() => {
+      expect(createAgentAction).toHaveBeenCalledWith(
+        1,
+        expect.objectContaining({
+          action: "stage_retraining_from_corrections",
+          payload: { corrected_mask_path: "/tmp/corrected.tif" },
+        }),
+      );
+    });
+    expect(getWorkflowHotspots).toHaveBeenCalledWith(1);
+  });
+
+  it("does not throw when noncritical workflow event append fails", async () => {
+    appendWorkflowEvent.mockRejectedValueOnce(new Error("Network Error"));
+
+    renderProvider({
+      trainingState: { setInputLabel: jest.fn() },
+      inferenceState: { setOutputPath: jest.fn() },
+    });
+    await screen.findByText("setup");
+
+    fireEvent.click(screen.getByText("Append event"));
+
+    await waitFor(() => {
+      expect(appendWorkflowEvent).toHaveBeenCalledWith(
+        1,
+        expect.objectContaining({ event_type: "test.event" }),
+      );
+    });
+    expect(screen.getByText("workflow.created")).toBeTruthy();
   });
 });

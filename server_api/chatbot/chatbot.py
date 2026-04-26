@@ -14,14 +14,115 @@ from langchain_community.vectorstores import FAISS
 from langchain_core.tools import tool
 from langchain.agents import create_agent
 from server_api.utils.utils import process_path
-from server_api.chatbot.update_faiss import ensure_faiss_index
+from server_api.chatbot.update_faiss import (
+    DEFAULT_OLLAMA_BASE_URL,
+    DEFAULT_OLLAMA_EMBED_MODEL,
+    ensure_faiss_index,
+)
 from server_api.chatbot.tools import (
     list_training_configs,
     read_config,
     list_checkpoints,
 )
 
-TRAINING_AGENT_PROMPT = """You are a **Training Agent** for PyTorch Connectomics.
+DEFAULT_OLLAMA_MODEL = "llama3.2:1b"
+
+AGENT_RESPONSE_STYLE = """
+RESPONSE STYLE FOR BIOLOGISTS:
+- Default to 3 bullets or fewer. Maximum 90 words unless the user asks for detail.
+- Put the recommended next action first.
+- Use short labels like `Do this`, `Why`, and `Watch out`.
+- Avoid long background explanations, exhaustive lists, and implementation details.
+- Do not mention internal tools, agents, RAG, prompts, APIs, or code unless explicitly asked.
+- If a command is requested, provide one command plus at most one sentence of context.
+- If uncertainty matters, state the missing input in one sentence and stop.
+"""
+
+
+def _format_admin_llm_error(error: Exception) -> str:
+    return (
+        "The AI assistant could not connect to its configured language model. "
+        "Please contact your system administrator with this error: "
+        f"{str(error).strip() or error.__class__.__name__}"
+    )
+
+
+def _compact_agent_response(response: str, *, max_words: int = 120) -> str:
+    text = str(response or "").strip()
+    if not text:
+        return text
+    if "```" in text:
+        return text
+
+    lines = [line.rstrip() for line in text.splitlines()]
+    content_lines = [line for line in lines if line.strip()]
+    words = text.split()
+    if len(words) <= max_words and len(content_lines) <= 8:
+        return text
+
+    kept = []
+    word_count = 0
+    for line in content_lines:
+        line_words = line.split()
+        if word_count + len(line_words) > max_words:
+            break
+        kept.append(line)
+        word_count += len(line_words)
+        if len(kept) >= 6:
+            break
+    compacted = "\n".join(kept).strip()
+    if not compacted:
+        compacted = " ".join(words[:max_words]).strip()
+    return f"{compacted}\n\nAsk for details if you want the full version."
+
+
+_PROMPT_LEAK_MARKERS = [
+    "you are the **supervisor agent**",
+    "you are the supervisor agent",
+    "response style for biologists",
+    "routing — decide which tool",
+    "routing - decide which tool",
+    "critical rules:",
+    "sub-agents:",
+    "tools:",
+    "search_documentation:",
+    "delegate_to_training_agent",
+    "delegate_to_inference_agent",
+    "system_prompt",
+    "internal tools",
+]
+
+
+def _looks_like_prompt_leak(response: str) -> bool:
+    text = str(response or "").lower()
+    return any(marker in text for marker in _PROMPT_LEAK_MARKERS)
+
+
+def _sanitize_agent_response(response: str) -> str:
+    text = str(response or "").strip()
+    if not text:
+        return text
+    if not _looks_like_prompt_leak(text):
+        return text
+    return (
+        "Hi. I can help with the PyTC workflow.\n"
+        "Do this: tell me whether you want to run the model, proofread masks, "
+        "use saved edits for training, or compare results.\n"
+        "Watch out: I will ask before running long jobs or changing artifacts."
+    )
+
+
+def _resolve_ollama_settings():
+    return (
+        os.getenv("OLLAMA_BASE_URL", DEFAULT_OLLAMA_BASE_URL),
+        os.getenv("OLLAMA_MODEL", DEFAULT_OLLAMA_MODEL),
+        os.getenv("OLLAMA_EMBED_MODEL", DEFAULT_OLLAMA_EMBED_MODEL),
+    )
+
+
+TRAINING_AGENT_PROMPT = f"""You are a **Training Agent** for PyTorch Connectomics.
+
+{AGENT_RESPONSE_STYLE}
 
 RULES:
 1. Only report values that your tools return. Do NOT invent config names, paths, or settings.
@@ -51,7 +152,9 @@ Command format: `python scripts/main.py --config-file <path> [SECTION.KEY=value 
 Always generate commands for the user to run — never execute directly."""
 
 
-INFERENCE_AGENT_PROMPT = """You are an **Inference Agent** for PyTorch Connectomics.
+INFERENCE_AGENT_PROMPT = f"""You are an **Inference Agent** for PyTorch Connectomics.
+
+{AGENT_RESPONSE_STYLE}
 
 RULES:
 1. Only report values that your tools return. Do NOT invent checkpoint paths, config names, or settings.
@@ -81,7 +184,9 @@ IMPORTANT: Overrides use SECTION.KEY=value format (NO -- prefix). Example:
 Always generate commands for the user to run — never execute directly."""
 
 
-SUPERVISOR_PROMPT = """You are the **Supervisor Agent** for PyTorch Connectomics (PyTC Client).
+SUPERVISOR_PROMPT = f"""You are the **Supervisor Agent** for PyTorch Connectomics (PyTC Client).
+
+{AGENT_RESPONSE_STYLE}
 
 You help end users navigate and use the PyTC Client application.
 
@@ -114,9 +219,7 @@ Tools:
 
 def build_chain():
     """Build the multi-agent system with supervisor, training, and inference agents."""
-    ollama_base_url = os.getenv("OLLAMA_BASE_URL", "http://cscigpu08.bc.edu:4443")
-    ollama_model = os.getenv("OLLAMA_MODEL", "gpt-oss:20b")
-    ollama_embed_model = os.getenv("OLLAMA_EMBED_MODEL", "qwen3-embedding:8b")
+    ollama_base_url, ollama_model, ollama_embed_model = _resolve_ollama_settings()
     llm = ChatOllama(model=ollama_model, base_url=ollama_base_url, temperature=0)
     embeddings = OllamaEmbeddings(model=ollama_embed_model, base_url=ollama_base_url)
     faiss_path = process_path("server_api/chatbot/faiss_index")
@@ -224,7 +327,9 @@ def build_chain():
         # Auto-inject available configs so the agent doesn't need to call list_training_configs
         configs = list_training_configs.invoke({})
         config_summary = "\n".join(
-            f"- {c['name']} ({c['model']}) → {c['path']}" for c in configs if isinstance(c, dict) and 'name' in c
+            f"- {c['name']} ({c['model']}) → {c['path']}"
+            for c in configs
+            if isinstance(c, dict) and "name" in c
         )
         enriched_task = (
             f"{task}\n\n"
@@ -238,6 +343,7 @@ def build_chain():
         response = (
             messages[-1].content if messages else "Training agent did not respond."
         )
+        response = _compact_agent_response(response)
         print(f"[TOOL] training_agent responded ({len(response)} chars)")
         return response
 
@@ -261,6 +367,7 @@ def build_chain():
         response = (
             messages[-1].content if messages else "Inference agent did not respond."
         )
+        response = _compact_agent_response(response)
         print(f"[TOOL] inference_agent responded ({len(response)} chars)")
         return response
 
@@ -284,7 +391,9 @@ def build_chain():
 # Has access to search_documentation only — cannot start training/inference.
 # ---------------------------------------------------------------------------
 
-HELPER_PROMPT = """You are a concise UI helper for PyTorch Connectomics (PyTC Client).
+HELPER_PROMPT = f"""You are a concise UI helper for PyTorch Connectomics (PyTC Client).
+
+{AGENT_RESPONSE_STYLE}
 
 You answer questions about a SPECIFIC field or setting the user is looking at.
 You have access to the application documentation via the search_documentation tool.
@@ -306,9 +415,7 @@ def build_helper_chain():
     chatbot but has NO access to training/inference sub-agents.
     Returns ``(agent, reset_search_counter)`` — same interface as ``build_chain``.
     """
-    ollama_base_url = os.getenv("OLLAMA_BASE_URL", "http://cscigpu08.bc.edu:4443")
-    ollama_model = os.getenv("OLLAMA_MODEL", "gpt-oss:20b")
-    ollama_embed_model = os.getenv("OLLAMA_EMBED_MODEL", "qwen3-embedding:8b")
+    ollama_base_url, ollama_model, ollama_embed_model = _resolve_ollama_settings()
     llm = ChatOllama(model=ollama_model, base_url=ollama_base_url, temperature=0)
     embeddings = OllamaEmbeddings(model=ollama_embed_model, base_url=ollama_base_url)
     faiss_path = process_path("server_api/chatbot/faiss_index")

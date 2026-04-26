@@ -13,6 +13,7 @@ import {
   SendOutlined,
   CloseOutlined,
   DeleteOutlined,
+  EditOutlined,
   PlusOutlined,
   MessageOutlined,
   MenuFoldOutlined,
@@ -24,60 +25,121 @@ import {
   listConversations,
   getConversation,
   deleteConversation,
+  updateConversationTitle,
 } from "../api";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import WorkflowTimeline from "./WorkflowTimeline";
 import { useWorkflow } from "../contexts/WorkflowContext";
+import AgentProposalCard from "./chat/AgentProposalCard";
+import AssistantActionCard from "./chat/AssistantActionCard";
+import AssistantCommandCard from "./chat/AssistantCommandCard";
+import WorkflowEvidencePanel from "./workflow/WorkflowEvidencePanel";
+import { logClientEvent } from "../logging/appEventLog";
 
 const { TextArea } = Input;
 const { Text } = Typography;
+const MONO_FONT =
+  "'SFMono-Regular', Menlo, Monaco, Consolas, 'Liberation Mono', monospace";
 
 const GREETING = {
   role: "assistant",
   content:
-    "Hello! I'm your AI assistant, built to help you navigate PyTC Client. How can I help you today?",
+    "Tell me the workflow job. I can run the model, start proofreading, use edits for training, compare results, or move screens.",
+};
+
+const WORKFLOW_SLASH_COMMANDS = {
+  "/status": "status",
+  "/next": "next step",
+  "/help": "what can the agent do",
+  "/infer": "run model",
+  "/inference": "run model",
+  "/segment": "run model to segment this volume",
+  "/proofread": "proofread this data",
+  "/train": "start training",
+  "/compare": "compare results and compute metrics",
+  "/metrics": "compare results and compute metrics",
+  "/export": "export evidence bundle",
+};
+
+const normalizeWorkflowAgentQuery = (query) => {
+  const trimmed = query.trim();
+  if (!trimmed.startsWith("/")) {
+    return { agentQuery: query, commandAlias: null };
+  }
+  const [command, ...rest] = trimmed.split(/\s+/);
+  const alias = WORKFLOW_SLASH_COMMANDS[command.toLowerCase()];
+  if (!alias) {
+    return { agentQuery: query, commandAlias: null };
+  }
+  const suffix = rest.join(" ").trim();
+  return {
+    agentQuery: suffix ? `${alias}: ${suffix}` : alias,
+    commandAlias: command.toLowerCase(),
+  };
 };
 
 /* ─── helper: truncate a string to `n` chars ─────────────────────────────── */
 const truncate = (str, n = 50) =>
   str.length > n ? str.slice(0, n).trimEnd() + "…" : str;
 
-const WORKFLOW_QUERY_TERMS = [
-  "workflow",
-  "next",
-  "stage",
-  "retrain",
-  "training",
-  "corrected",
-  "proofread",
-  "mask",
-  "inference",
-  "visualize",
-  "evaluate",
+const PROMPT_LEAK_MARKERS = [
+  "you are the supervisor agent",
+  "response style for biologists",
+  "routing — decide",
+  "routing - decide",
+  "critical rules:",
+  "sub-agents:",
+  "search_documentation",
+  "delegate_to_training_agent",
+  "delegate_to_inference_agent",
 ];
+
+const sanitizeLoadedMessage = (message) => {
+  if (message.role !== "assistant") return message;
+  const content = String(message.content || "");
+  const lower = content.toLowerCase();
+  const leaked = PROMPT_LEAK_MARKERS.some((marker) => lower.includes(marker));
+  if (!leaked) return message;
+  return {
+    ...message,
+    content:
+      "Hi. I can help run this segmentation loop. Ask me to run the model, proofread masks, use saved edits for training, or compare results.",
+  };
+};
 
 /* ═══════════════════════════════════════════════════════════════════════════ */
 
-function Chatbot({ onClose }) {
+function Chatbot({
+  onClose,
+  forceShowWorkflowInspector = false,
+  onWorkflowInspectorConsumed,
+}) {
   /* ── state ─────────────────────────────────────────────────────────────── */
   const [conversations, setConversations] = useState([]);
   const [activeConvoId, setActiveConvoId] = useState(null);
   const [messages, setMessages] = useState([GREETING]);
   const [inputValue, setInputValue] = useState("");
   const [isSending, setIsSending] = useState(false);
-  const [sidebarOpen, setSidebarOpen] = useState(true);
+  const [sidebarOpen, setSidebarOpen] = useState(false);
   const [isLoadingConvo, setIsLoadingConvo] = useState(false);
+  const [showWorkflowInspector, setShowWorkflowInspector] = useState(false);
+  const [showWorkflowTimeline, setShowWorkflowTimeline] = useState(false);
+  const [editingTitleId, setEditingTitleId] = useState(null);
+  const [draftTitle, setDraftTitle] = useState("");
+  const [isRenamingTitle, setIsRenamingTitle] = useState(false);
 
   const lastMessageRef = useRef(null);
   const workflowContext = useWorkflow();
+  const runClientEffects = workflowContext?.runClientEffects;
+  const executeAssistantItem = workflowContext?.executeAssistantItem;
+  const workflow = workflowContext?.workflow;
 
-  const shouldUseWorkflowAgent = (query) => {
+  const shouldUseWorkflowAgent = () => {
     if (!workflowContext?.workflow?.id || !workflowContext?.queryAgent) {
       return false;
     }
-    const lower = query.toLowerCase();
-    return WORKFLOW_QUERY_TERMS.some((term) => lower.includes(term));
+    return true;
   };
 
   /* ── scroll ────────────────────────────────────────────────────────────── */
@@ -93,6 +155,12 @@ function Chatbot({ onClose }) {
   useEffect(() => {
     scrollToBottom();
   }, [messages, isSending, scrollToBottom]);
+
+  useEffect(() => {
+    if (!forceShowWorkflowInspector) return;
+    setShowWorkflowInspector(true);
+    onWorkflowInspectorConsumed?.();
+  }, [forceShowWorkflowInspector, onWorkflowInspectorConsumed]);
 
   /* ── load conversation list on mount ────────────────────────────────────── */
   useEffect(() => {
@@ -120,7 +188,16 @@ function Chatbot({ onClose }) {
       await clearChat(); // reset LangChain in-memory state
       setActiveConvoId(convo.id);
       const dbMessages =
-        convo.messages?.map((m) => ({ role: m.role, content: m.content })) ??
+        convo.messages
+          ?.map((m) => ({
+            role: m.role,
+            content: m.content,
+            source: m.source,
+            actions: m.actions || [],
+            commands: m.commands || [],
+            proposals: m.proposals || [],
+          }))
+          .map(sanitizeLoadedMessage) ??
         [];
       setMessages([GREETING, ...dbMessages]);
     } finally {
@@ -140,19 +217,62 @@ function Chatbot({ onClose }) {
   const handleSendMessage = async () => {
     if (!inputValue.trim() || isSending) return;
     const query = inputValue;
+    const isGreeting =
+      /^(hi|hello|hey|yo|sup|hiya)[\s!.?,]*$/i.test(query.trim());
     setInputValue("");
     setMessages((prev) => [...prev, { role: "user", content: query }]);
     setIsSending(true);
     try {
       if (shouldUseWorkflowAgent(query)) {
-        const data = await workflowContext.queryAgent(query);
+        const { agentQuery, commandAlias } = normalizeWorkflowAgentQuery(query);
+        logClientEvent("workflow_agent_chat_sent", {
+          source: "chatbot",
+          message: "Workflow-agent chat query sent",
+          data: {
+            workflowId: workflowContext.workflow.id,
+            conversationId: activeConvoId,
+            queryPreview: query.slice(0, 160),
+            agentQueryPreview: agentQuery.slice(0, 160),
+            commandAlias,
+            queryLength: query.length,
+          },
+        });
+        const data = await workflowContext.queryAgent(agentQuery, activeConvoId);
         const response =
           data?.response ||
           "I could not inspect the workflow state for that request.";
+        const returnedConvoId =
+          data?.conversationId ?? data?.conversation_id ?? activeConvoId;
         setMessages((prev) => [
           ...prev,
-          { role: "assistant", content: response },
+          {
+            role: "assistant",
+            content: response,
+            source: data?.source || "workflow_orchestrator",
+            actions: isGreeting ? [] : data?.actions || [],
+            commands: isGreeting ? [] : data?.commands || [],
+            proposals: isGreeting ? [] : data?.proposals || [],
+          },
         ]);
+        if (!activeConvoId && returnedConvoId) {
+          setActiveConvoId(returnedConvoId);
+        }
+        const convos = await listConversations();
+        if (convos) setConversations(convos);
+        logClientEvent("workflow_agent_chat_completed", {
+          source: "chatbot",
+          message: "Workflow-agent chat query completed",
+          data: {
+            workflowId: workflowContext.workflow.id,
+            conversationId: returnedConvoId,
+            responseSource: data?.source || "workflow_orchestrator",
+            intent: data?.intent || null,
+            commandAlias,
+            actionCount: data?.actions?.length || 0,
+            commandCount: data?.commands?.length || 0,
+            proposalCount: data?.proposals?.length || 0,
+          },
+        });
         return;
       }
 
@@ -175,6 +295,16 @@ function Chatbot({ onClose }) {
       const convos = await listConversations();
       if (convos) setConversations(convos);
     } catch (e) {
+      logClientEvent("chat_send_failed", {
+        level: "ERROR",
+        source: "chatbot",
+        message: e.message || "Error contacting chatbot.",
+        data: {
+          workflowId: workflowContext?.workflow?.id || null,
+          activeConvoId,
+          queryPreview: query.slice(0, 160),
+        },
+      });
       setMessages((prev) => [
         ...prev,
         {
@@ -201,6 +331,97 @@ function Chatbot({ onClose }) {
     setConversations((prev) => prev.filter((c) => c.id !== convoId));
     if (activeConvoId === convoId) {
       await handleNewChat();
+    }
+  };
+
+  const startRenameConvo = (conversation, e) => {
+    e?.stopPropagation();
+    setEditingTitleId(conversation.id);
+    setDraftTitle(conversation.title || "New Chat");
+  };
+
+  const cancelRenameConvo = (e) => {
+    e?.stopPropagation();
+    setEditingTitleId(null);
+    setDraftTitle("");
+  };
+
+  const submitRenameConvo = async (conversation, e) => {
+    e?.stopPropagation();
+    const nextTitle = draftTitle.trim();
+    if (!nextTitle || nextTitle === conversation.title || isRenamingTitle) {
+      cancelRenameConvo(e);
+      return;
+    }
+    setIsRenamingTitle(true);
+    try {
+      const updated = await updateConversationTitle(conversation.id, nextTitle);
+      setConversations((prev) =>
+        prev.map((item) =>
+          item.id === conversation.id ? { ...item, ...updated } : item,
+        ),
+      );
+      logClientEvent("chat_conversation_renamed", {
+        source: "chatbot",
+        message: "Chat conversation renamed",
+        data: {
+          conversationId: conversation.id,
+          titleLength: nextTitle.length,
+        },
+      });
+    } catch (error) {
+      logClientEvent("chat_conversation_rename_failed", {
+        level: "ERROR",
+        source: "chatbot",
+        message: error.message || "Chat conversation rename failed",
+        data: { conversationId: conversation.id },
+      });
+    } finally {
+      setIsRenamingTitle(false);
+      setEditingTitleId(null);
+      setDraftTitle("");
+    }
+  };
+
+  const handleRunAssistantItem = async (item) => {
+    const itemId = item?.id || item?.title || item?.label || "assistant-item";
+    logClientEvent("assistant_item_run_started", {
+      source: "chatbot",
+      message: "Assistant in-app item run started",
+      data: {
+        workflowId: workflow?.id || null,
+        activeConvoId,
+        itemId,
+        itemLabel: item?.title || item?.label || null,
+        itemType: item?.command ? "command" : "action",
+        runtimeActionKind: item?.client_effects?.runtime_action?.kind || null,
+      },
+    });
+    try {
+      if (executeAssistantItem) {
+        await executeAssistantItem(item);
+        logClientEvent("assistant_item_run_completed", {
+          source: "chatbot",
+          message: "Assistant in-app item run completed",
+          data: { workflowId: workflow?.id || null, activeConvoId, itemId },
+        });
+        return;
+      }
+      if (!item?.client_effects || !runClientEffects) return;
+      await runClientEffects(item.client_effects);
+      logClientEvent("assistant_item_run_completed", {
+        source: "chatbot",
+        message: "Assistant in-app item run completed",
+        data: { workflowId: workflow?.id || null, activeConvoId, itemId },
+      });
+    } catch (error) {
+      logClientEvent("assistant_item_run_failed", {
+        level: "ERROR",
+        source: "chatbot",
+        message: error.message || "Assistant in-app item run failed",
+        data: { workflowId: workflow?.id || null, activeConvoId, itemId },
+      });
+      throw error;
     }
   };
 
@@ -279,17 +500,23 @@ function Chatbot({ onClose }) {
   /* RENDER                                                                 */
   /* ═══════════════════════════════════════════════════════════════════════ */
   return (
-    <div style={{ height: "100vh", display: "flex" }}>
+    <div
+      style={{
+        height: "100vh",
+        display: "flex",
+        background: "#f3f4f1",
+      }}
+    >
       {/* ── Sidebar ─────────────────────────────────────────────────────── */}
       {sidebarOpen && (
         <div
           style={{
-            width: 220,
-            minWidth: 220,
-            borderRight: "1px solid #f0f0f0",
+            width: 216,
+            minWidth: 216,
+            borderRight: "1px solid #e5e7eb",
             display: "flex",
             flexDirection: "column",
-            background: "#fafafa",
+            background: "#fbfbfa",
           }}
         >
           {/* header */}
@@ -311,6 +538,7 @@ function Chatbot({ onClose }) {
                   size="small"
                   icon={<PlusOutlined />}
                   onClick={handleNewChat}
+                  aria-label="New chat"
                 />
               </Tooltip>
               <Tooltip title="Collapse sidebar">
@@ -319,6 +547,7 @@ function Chatbot({ onClose }) {
                   size="small"
                   icon={<MenuFoldOutlined />}
                   onClick={() => setSidebarOpen(false)}
+                  aria-label="Collapse conversations"
                 />
               </Tooltip>
             </Space>
@@ -346,22 +575,21 @@ function Chatbot({ onClose }) {
                 style={{
                   padding: "8px",
                   margin: "2px 0",
-                  borderRadius: 6,
+                  borderRadius: 8,
                   cursor: "pointer",
                   display: "flex",
                   alignItems: "center",
                   gap: 8,
-                  background:
-                    c.id === activeConvoId ? "#e6f4ff" : "transparent",
+                  background: c.id === activeConvoId ? "#f3f4f6" : "transparent",
                   border:
                     c.id === activeConvoId
-                      ? "1px solid #91caff"
+                      ? "1px solid #d1d5db"
                       : "1px solid transparent",
-                  transition: "background 0.15s",
+                  transition: "background 0.15s ease, border-color 0.15s ease",
                 }}
                 onMouseEnter={(e) => {
                   if (c.id !== activeConvoId)
-                    e.currentTarget.style.background = "#f0f0f0";
+                    e.currentTarget.style.background = "#f5f5f5";
                 }}
                 onMouseLeave={(e) => {
                   if (c.id !== activeConvoId)
@@ -371,12 +599,54 @@ function Chatbot({ onClose }) {
                 <MessageOutlined
                   style={{ fontSize: 13, color: "#999", flexShrink: 0 }}
                 />
-                <Text
-                  ellipsis
-                  style={{ flex: 1, fontSize: 13, lineHeight: "18px" }}
-                >
-                  {truncate(c.title)}
-                </Text>
+                {editingTitleId === c.id ? (
+                  <Input
+                    size="small"
+                    value={draftTitle}
+                    autoFocus
+                    disabled={isRenamingTitle}
+                    onClick={(e) => e.stopPropagation()}
+                    onChange={(e) => setDraftTitle(e.target.value)}
+                    onPressEnter={(e) => submitRenameConvo(c, e)}
+                    onKeyDown={(e) => {
+                      if (e.key === "Escape") cancelRenameConvo(e);
+                    }}
+                    onBlur={(e) => submitRenameConvo(c, e)}
+                    aria-label={`Rename chat ${c.title}`}
+                    style={{ flex: 1, minWidth: 0 }}
+                  />
+                ) : (
+                  <Text
+                    ellipsis
+                    onDoubleClick={(e) => startRenameConvo(c, e)}
+                    style={{ flex: 1, fontSize: 13, lineHeight: "18px" }}
+                    title="Double-click to rename"
+                  >
+                    {truncate(c.title)}
+                  </Text>
+                )}
+                {editingTitleId !== c.id && (
+                  <Tooltip title="Rename">
+                    <Button
+                      type="text"
+                      size="small"
+                      icon={<EditOutlined />}
+                      onClick={(e) => startRenameConvo(c, e)}
+                      aria-label={`Rename chat ${c.title}`}
+                      style={{
+                        flexShrink: 0,
+                        opacity: 0.35,
+                        transition: "opacity 0.15s",
+                      }}
+                      onMouseEnter={(e) =>
+                        (e.currentTarget.style.opacity = "1")
+                      }
+                      onMouseLeave={(e) =>
+                        (e.currentTarget.style.opacity = "0.35")
+                      }
+                    />
+                  </Tooltip>
+                )}
                 <Popconfirm
                   title="Delete this conversation?"
                   onConfirm={(e) => handleDeleteConvo(c.id, e)}
@@ -389,6 +659,7 @@ function Chatbot({ onClose }) {
                     size="small"
                     icon={<DeleteOutlined />}
                     onClick={(e) => e.stopPropagation()}
+                    aria-label={`Delete chat ${c.title}`}
                     style={{
                       flexShrink: 0,
                       opacity: 0.4,
@@ -418,10 +689,12 @@ function Chatbot({ onClose }) {
         {/* header */}
         <div
           style={{
-            padding: "16px",
+            padding: "12px 14px",
             display: "flex",
             justifyContent: "space-between",
             alignItems: "center",
+            borderBottom: "1px solid #e5e7eb",
+            background: "#fafaf9",
           }}
         >
           <Space>
@@ -432,18 +705,43 @@ function Chatbot({ onClose }) {
                   size="small"
                   icon={<MenuUnfoldOutlined />}
                   onClick={() => setSidebarOpen(true)}
+                  aria-label="Show conversations"
                 />
               </Tooltip>
             )}
-            <Text strong>AI Assistant</Text>
+            <div>
+              <Text
+                strong
+                style={{
+                  color: "#111827",
+                  display: "block",
+                  fontFamily: MONO_FONT,
+                  letterSpacing: "0.02em",
+                }}
+              >
+                Assistant
+              </Text>
+            </div>
           </Space>
           <Space>
+            {workflow?.id && (
+              <Button
+                type="text"
+                size="small"
+                onClick={() =>
+                  setShowWorkflowInspector((current) => !current)
+                }
+              >
+                {showWorkflowInspector ? "Hide Status" : "Status"}
+              </Button>
+            )}
             <Tooltip title="New chat">
               <Button
                 type="text"
                 icon={<PlusOutlined />}
                 onClick={handleNewChat}
                 size="small"
+                aria-label="New chat"
               />
             </Tooltip>
             <Button
@@ -451,14 +749,43 @@ function Chatbot({ onClose }) {
               icon={<CloseOutlined />}
               onClick={onClose}
               size="small"
+              aria-label="Close assistant"
             />
           </Space>
         </div>
 
-        <WorkflowTimeline />
+        {showWorkflowInspector && (
+          <div style={{ borderBottom: "1px solid #ececec" }}>
+            <WorkflowEvidencePanel compact />
+            <div
+              style={{
+                padding: "0 12px 10px",
+                background: "#fffdfa",
+              }}
+            >
+              <Button
+                size="small"
+                type="text"
+                onClick={() => setShowWorkflowTimeline((current) => !current)}
+              >
+                {showWorkflowTimeline ? "Hide timeline" : "Show timeline"}
+              </Button>
+            </div>
+            {showWorkflowTimeline && (
+              <WorkflowTimeline limit={5} showFilters={false} />
+            )}
+          </div>
+        )}
 
         {/* messages */}
-        <div style={{ flex: 1, overflow: "auto", padding: "0 16px 16px" }}>
+        <div
+          style={{
+            flex: 1,
+            overflow: "auto",
+            padding: "14px",
+            background: "#f6f5f2",
+          }}
+        >
           {isLoadingConvo ? (
             <div style={{ textAlign: "center", padding: 40 }}>
               <Spin />
@@ -474,17 +801,20 @@ function Chatbot({ onClose }) {
                     ref={isLast ? lastMessageRef : null}
                     style={{
                       border: "none",
-                      padding: "8px 0",
+                      padding: "10px 0",
                       justifyContent: isUser ? "flex-end" : "flex-start",
                     }}
                   >
                     <div
                       style={{
-                        maxWidth: "80%",
-                        padding: "8px 12px",
-                        borderRadius: "12px",
-                        backgroundColor: isUser ? "#1890ff" : "#f5f5f5",
+                        width: isUser ? "auto" : "min(100%, 760px)",
+                        maxWidth: isUser ? "78%" : "88%",
+                        padding: isUser ? "10px 12px" : "12px",
+                        borderRadius: isUser ? "14px 14px 4px 14px" : "14px",
+                        background: isUser ? "#1d4ed8" : "#ffffff",
                         color: isUser ? "white" : "black",
+                        border: isUser ? "none" : "1px solid #e5e7eb",
+                        boxShadow: "0 1px 2px rgba(15, 23, 42, 0.05)",
                       }}
                     >
                       {isUser ? (
@@ -492,12 +822,67 @@ function Chatbot({ onClose }) {
                           {message.content}
                         </Text>
                       ) : (
-                        <ReactMarkdown
-                          remarkPlugins={[remarkGfm]}
-                          components={mdComponents}
+                        <Space
+                          direction="vertical"
+                          size={10}
+                          style={{ width: "100%" }}
                         >
-                          {message.content}
-                        </ReactMarkdown>
+                          <ReactMarkdown
+                            remarkPlugins={[remarkGfm]}
+                            components={mdComponents}
+                          >
+                            {message.content}
+                          </ReactMarkdown>
+                          {(message.actions?.length > 0 ||
+                            message.commands?.length > 0 ||
+                            message.proposals?.length > 0) && (
+                            <div
+                              style={{
+                                display: "grid",
+                                gap: 10,
+                                marginTop: 2,
+                              }}
+                            >
+                              {message.actions?.map((action) => (
+                                <AssistantActionCard
+                                  key={action.id}
+                                  action={action}
+                                  onRun={handleRunAssistantItem}
+                                />
+                              ))}
+                              {message.commands?.map((command) => (
+                                <AssistantCommandCard
+                                  key={command.id}
+                                  command={command}
+                                  onRun={handleRunAssistantItem}
+                                />
+                              ))}
+                              {message.proposals?.map((proposal) => (
+                                <AgentProposalCard
+                                  key={proposal.id}
+                                  proposal={{
+                                    ...(proposal.payload || {}),
+                                    id: proposal.id,
+                                    type:
+                                      proposal.payload?.action || "agent_proposal",
+                                    rationale: proposal.summary,
+                                    ...(proposal.payload?.params || {}),
+                                  }}
+                                  onApprove={() =>
+                                    workflowContext?.approveAgentAction?.(
+                                      proposal.id,
+                                    )
+                                  }
+                                  onReject={() =>
+                                    workflowContext?.rejectAgentAction?.(
+                                      proposal.id,
+                                    )
+                                  }
+                                />
+                              ))}
+                            </div>
+                          )}
+                        </Space>
                       )}
                     </div>
                   </List.Item>
@@ -509,13 +894,19 @@ function Chatbot({ onClose }) {
         </div>
 
         {/* input */}
-        <div style={{ padding: "16px" }}>
+        <div
+          style={{
+            padding: "12px 14px 14px",
+            borderTop: "1px solid #e5e7eb",
+            background: "#fafaf9",
+          }}
+        >
           <Space.Compact style={{ width: "100%" }}>
             <TextArea
               value={inputValue}
               onChange={(e) => setInputValue(e.target.value)}
               onKeyPress={handleKeyPress}
-              placeholder="Type your message..."
+              placeholder="Message"
               autoSize={{ minRows: 1, maxRows: 3 }}
             />
             <Button
