@@ -35,6 +35,7 @@ Optional runtime environment variables:
 PYTC_AUTH_SECRET=replace-me
 PYTC_ALLOWED_ORIGINS=http://localhost:3000,http://127.0.0.1:3000,null
 PYTC_NEUROGLANCER_PUBLIC_BASE=http://localhost:4244
+OLLAMA_MODEL=llama3.1:8b
 ```
 
 ## Chatbot Docs Index
@@ -53,6 +54,10 @@ You can override the embeddings endpoint if needed:
 ```
 OLLAMA_BASE_URL=http://cscigpu08.bc.edu:4443 uv run python server_api/chatbot/update_faiss.py
 ```
+
+The local assistant defaults to `llama3.1:8b` because the previous 1B default
+was too weak for workflow-agent behavior. For experimental local model upgrades,
+see `docs/research/on-device-llm-options-2026-04-26.md`.
 
 If restarting after a crash or interrupted session, kill any lingering processes first:
 

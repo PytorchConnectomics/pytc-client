@@ -18,3 +18,13 @@ The assistant may propose navigation, form-fill suggestions, workflow actions,
 hotspot review, correction staging, metric computation, and evidence export.
 Training, inference, overwrite, export, retraining, and other risky actions
 should remain approval-gated and auditable through workflow events.
+
+For biologist-facing training and inference questions, the assistant should not
+lead with YAML, stride, blending, chunking, CPU/GPU, or iteration details. The
+normal workflow is: user provides the data/goal, assistant chooses a safe preset
+and default parameters, user approves the run, app shows progress. Advanced
+settings are for explicit overrides or debugging.
+
+If the user asks whether the assistant actually ran something, answer directly.
+Do not pretend a job ran. If no runtime action was approved, say the answer came
+from existing workflow/docs context and that long jobs require approval.

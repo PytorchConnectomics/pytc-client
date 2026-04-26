@@ -284,8 +284,7 @@ function Chatbot({
             commands: m.commands || [],
             proposals: m.proposals || [],
           }))
-          .map(sanitizeLoadedMessage) ??
-        [];
+          .map(sanitizeLoadedMessage) ?? [];
       setMessages([GREETING, ...dbMessages]);
     } finally {
       setIsLoadingConvo(false);
@@ -323,7 +322,10 @@ function Chatbot({
             queryLength: query.length,
           },
         });
-        const data = await workflowContext.queryAgent(agentQuery, activeConvoId);
+        const data = await workflowContext.queryAgent(
+          agentQuery,
+          activeConvoId,
+        );
         const response =
           data?.response ||
           "I could not inspect the workflow state for that request.";
@@ -532,11 +534,23 @@ function Chatbot({
 
   /* ── markdown renderers ────────────────────────────────────────────────── */
   const mdComponents = {
+    p: ({ children }) => (
+      <p style={{ margin: "0 0 8px", lineHeight: 1.45 }}>{children}</p>
+    ),
+    h1: ({ children }) => (
+      <h3 style={{ margin: "10px 0 6px", fontSize: 16 }}>{children}</h3>
+    ),
+    h2: ({ children }) => (
+      <h3 style={{ margin: "10px 0 6px", fontSize: 15 }}>{children}</h3>
+    ),
+    h3: ({ children }) => (
+      <h4 style={{ margin: "8px 0 4px", fontSize: 14 }}>{children}</h4>
+    ),
     ul: ({ children }) => (
-      <ul style={{ paddingLeft: "20px", margin: "8px 0" }}>{children}</ul>
+      <ul style={{ paddingLeft: "18px", margin: "6px 0" }}>{children}</ul>
     ),
     ol: ({ children }) => (
-      <ol style={{ paddingLeft: "20px", margin: "8px 0" }}>{children}</ol>
+      <ol style={{ paddingLeft: "18px", margin: "6px 0" }}>{children}</ol>
     ),
     table: ({ children }) => (
       <div style={{ overflowX: "auto", margin: "8px 0" }}>
@@ -685,7 +699,8 @@ function Chatbot({
                   display: "flex",
                   alignItems: "center",
                   gap: 8,
-                  background: c.id === activeConvoId ? "#f3f4f6" : "transparent",
+                  background:
+                    c.id === activeConvoId ? "#f3f4f6" : "transparent",
                   border:
                     c.id === activeConvoId
                       ? "1px solid #d1d5db"
@@ -833,9 +848,7 @@ function Chatbot({
               <Button
                 type="text"
                 size="small"
-                onClick={() =>
-                  setShowWorkflowInspector((current) => !current)
-                }
+                onClick={() => setShowWorkflowInspector((current) => !current)}
               >
                 {showWorkflowInspector ? "Hide Status" : "Status"}
               </Button>
@@ -971,7 +984,8 @@ function Chatbot({
                                     ...(proposal.payload || {}),
                                     id: proposal.id,
                                     type:
-                                      proposal.payload?.action || "agent_proposal",
+                                      proposal.payload?.action ||
+                                      "agent_proposal",
                                     rationale: proposal.summary,
                                     ...(proposal.payload?.params || {}),
                                   }}

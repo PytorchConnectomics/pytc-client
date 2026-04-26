@@ -12,6 +12,7 @@ import {
   computeWorkflowEvaluationResult,
   createAgentAction,
   exportWorkflowBundle,
+  getConfigPresetContent,
   getCurrentWorkflow,
   getWorkflowAgentRecommendation,
   getWorkflowHotspots,
@@ -237,11 +238,51 @@ export function WorkflowProvider({ children }) {
       if (effects.set_training_label_path && appContext?.trainingState) {
         appContext.trainingState.setInputLabel(effects.set_training_label_path);
       }
+      if (effects.set_training_image_path && appContext?.trainingState) {
+        appContext.trainingState.setInputImage?.(
+          effects.set_training_image_path,
+        );
+      }
       if (effects.set_training_log_path && appContext?.trainingState) {
         appContext.trainingState.setLogPath(effects.set_training_log_path);
       }
       if (effects.set_training_output_path && appContext?.trainingState) {
-        appContext.trainingState.setOutputPath(effects.set_training_output_path);
+        appContext.trainingState.setOutputPath(
+          effects.set_training_output_path,
+        );
+      }
+      let resolvedTrainingConfig = "";
+      let resolvedTrainingConfigOrigin = "";
+      if (effects.set_training_config_preset && appContext?.trainingState) {
+        try {
+          const preset = await getConfigPresetContent(
+            effects.set_training_config_preset,
+          );
+          resolvedTrainingConfig = preset?.content || "";
+          resolvedTrainingConfigOrigin =
+            preset?.path || effects.set_training_config_preset;
+          if (resolvedTrainingConfig) {
+            appContext.setTrainingConfig?.(resolvedTrainingConfig);
+            appContext.trainingState.setConfigOriginPath?.(
+              resolvedTrainingConfigOrigin,
+            );
+            appContext.trainingState.setSelectedYamlPreset?.(
+              resolvedTrainingConfigOrigin,
+            );
+            appContext.trainingState.setUploadedYamlFile?.("");
+          }
+        } catch (error) {
+          logClientEvent("workflow_action_training_preset_load_failed", {
+            level: "ERROR",
+            source: "workflow_context",
+            message: error.message || "Training preset load failed",
+            data: {
+              workflowId: workflow?.id || null,
+              preset: effects.set_training_config_preset,
+            },
+          });
+          throw error;
+        }
       }
       if (effects.set_inference_checkpoint_path && appContext?.inferenceState) {
         appContext.inferenceState.setCheckpointPath(
@@ -249,7 +290,9 @@ export function WorkflowProvider({ children }) {
         );
       }
       if (effects.set_inference_output_path && appContext?.inferenceState) {
-        appContext.inferenceState.setOutputPath(effects.set_inference_output_path);
+        appContext.inferenceState.setOutputPath(
+          effects.set_inference_output_path,
+        );
       }
       if (effects.runtime_action?.kind) {
         setPendingRuntimeAction({
@@ -257,11 +300,17 @@ export function WorkflowProvider({ children }) {
           ...effects.runtime_action,
           overrides: {
             inputLabelPath: effects.set_training_label_path || "",
+            inputImagePath: effects.set_training_image_path || "",
             logPath: effects.set_training_log_path || "",
             outputPath:
               effects.set_training_output_path ||
               effects.set_inference_output_path ||
               "",
+            trainingConfig: resolvedTrainingConfig || undefined,
+            configOriginPath: resolvedTrainingConfigOrigin || undefined,
+            autoParameters: Boolean(
+              effects.runtime_action?.autopick_parameters,
+            ),
             checkpointPath: effects.set_inference_checkpoint_path || "",
             datasetPath: effects.set_proofreading_dataset_path || "",
             maskPath: effects.set_proofreading_mask_path || "",
@@ -320,7 +369,10 @@ export function WorkflowProvider({ children }) {
             logClientEvent("workflow_action_compute_evaluation_completed", {
               source: "workflow_context",
               message: "Assistant-triggered evaluation completed",
-              data: { workflowId: workflow.id, evaluationId: result?.id || null },
+              data: {
+                workflowId: workflow.id,
+                evaluationId: result?.id || null,
+              },
             });
           } catch (error) {
             logClientEvent("workflow_action_compute_evaluation_failed", {
@@ -359,7 +411,8 @@ export function WorkflowProvider({ children }) {
           logClientEvent("workflow_action_export_bundle_failed", {
             level: "ERROR",
             source: "workflow_context",
-            message: error.message || "Assistant-triggered evidence export failed",
+            message:
+              error.message || "Assistant-triggered evidence export failed",
             data: { workflowId: workflow.id },
           });
           throw error;
@@ -447,7 +500,11 @@ export function WorkflowProvider({ children }) {
   const queryAgent = useCallback(
     async (query, conversationId = null) => {
       if (!workflow?.id) return null;
-      const result = await queryWorkflowAgent(workflow.id, query, conversationId);
+      const result = await queryWorkflowAgent(
+        workflow.id,
+        query,
+        conversationId,
+      );
       if (result?.proposals?.length) {
         await refreshEvents();
       }

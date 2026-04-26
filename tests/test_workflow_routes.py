@@ -1,6 +1,7 @@
 import pathlib
 import tempfile
 import unittest
+from unittest.mock import patch
 
 import numpy as np
 import pytest
@@ -487,6 +488,83 @@ class WorkflowRouteTests(unittest.TestCase):
         self.assertIn("proofreading", payload["response"])
         self.assertIn("mito25_im.h5", payload["response"])
         self.assertNotIn("0 inference failures", payload["response"])
+
+    def test_agent_start_training_uses_data_derived_defaults(self):
+        workflow, _ = self._current_workflow()
+        workflow_id = workflow["id"]
+        self.client.patch(
+            f"/api/workflows/{workflow_id}",
+            json={
+                "title": "mito25-paper-loop-smoke",
+                "stage": "retraining_staged",
+                "image_path": "/projects/mito25/data/image/mito25_im.h5",
+                "corrected_mask_path": "/projects/mito25/data/seg/corrected.tif",
+            },
+        )
+
+        response = self.client.post(
+            f"/api/workflows/{workflow_id}/agent/query",
+            json={"query": "train the model for me"},
+        )
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertEqual(payload["intent"], "start_training")
+        self.assertIn("safe defaults", payload["response"])
+        effects = payload["commands"][0]["client_effects"]
+        self.assertEqual(effects["navigate_to"], "training")
+        self.assertEqual(
+            effects["set_training_image_path"],
+            "/projects/mito25/data/image/mito25_im.h5",
+        )
+        self.assertEqual(
+            effects["set_training_label_path"],
+            "/projects/mito25/data/seg/corrected.tif",
+        )
+        self.assertEqual(
+            effects["set_training_config_preset"],
+            "configs/MitoEM/Mito25-Local-Smoke-BC.yaml",
+        )
+        self.assertTrue(effects["runtime_action"]["autopick_parameters"])
+        self.assertEqual(
+            effects["runtime_action"]["parameter_mode"],
+            "agent_default",
+        )
+
+    def test_general_chat_direct_guard_answers_meta_run_questions(self):
+        with patch("server_api.main._ensure_chatbot") as ensure_chatbot:
+            response = self.client.post(
+                "/chat/query",
+                json={"query": "how do you run so quickly?"},
+            )
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertEqual(payload["source"], "direct_guard")
+        self.assertIn("did not run training or inference", payload["response"])
+        ensure_chatbot.assert_not_called()
+
+        conversation_response = self.client.get(
+            f"/chat/conversations/{payload['conversationId']}"
+        )
+        self.assertEqual(conversation_response.status_code, 200)
+        messages = conversation_response.json()["messages"]
+        self.assertEqual(
+            [message["role"] for message in messages], ["user", "assistant"]
+        )
+        self.assertEqual(messages[1]["source"], "direct_guard")
+
+    def test_general_chat_direct_guard_handles_gibberish_without_llm(self):
+        with patch("server_api.main._ensure_chatbot") as ensure_chatbot:
+            response = self.client.post(
+                "/chat/query",
+                json={"query": "mmajkf,ansdjs"},
+            )
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertEqual(payload["source"], "direct_guard")
+        self.assertIn("did not understand", payload["response"])
+        ensure_chatbot.assert_not_called()
 
     def test_agent_handles_greetings_without_prompt_leakage(self):
         workflow, _ = self._current_workflow()

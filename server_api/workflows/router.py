@@ -958,10 +958,10 @@ def _recommendation_for_workflow(
             event.event_type == "proofreading.masks_exported" for event in events
         )
         if has_export or workflow.corrected_mask_path:
-            return "Saved edits are available. Use them for the next training run."
+            return "Saved edits are available. Ask the agent to train from them."
         return "Keep reviewing instances, then save or export edits before training."
     if workflow.stage == "retraining_staged":
-        return "The saved edits are linked. Check training settings, then train."
+        return "The saved edits are linked. Approve an agent-run training job."
     if workflow.stage == "evaluation":
         return "Training finished successfully. Use the latest checkpoint to run inference, and open TensorBoard only if you want to inspect the run."
     return "Review the workflow timeline and compare results before starting another iteration."
@@ -972,6 +972,16 @@ def _client_effects_to_command(client_effects: Dict[str, Any]) -> str:
     navigate_to = client_effects.get("navigate_to")
     if navigate_to:
         lines.append(f"app open {navigate_to}")
+
+    training_config_preset = client_effects.get("set_training_config_preset")
+    if training_config_preset:
+        lines.append(
+            f"app training config auto-select {json.dumps(str(training_config_preset))}"
+        )
+
+    training_image_path = client_effects.get("set_training_image_path")
+    if training_image_path:
+        lines.append(f"app training image set {json.dumps(str(training_image_path))}")
 
     training_label_path = client_effects.get("set_training_label_path")
     if training_label_path:
@@ -1128,17 +1138,89 @@ def _build_start_inference_effects(workflow: WorkflowSession) -> Dict[str, Any]:
     return effects
 
 
+def _split_path_parent(path: Optional[str]) -> str:
+    if not path:
+        return ""
+    normalized = str(path).replace("\\", "/").rstrip("/")
+    if not normalized:
+        return ""
+    if "/" not in normalized:
+        return ""
+    return normalized.rsplit("/", 1)[0]
+
+
+def _derive_workflow_root_path(workflow: WorkflowSession) -> str:
+    candidates = [
+        workflow.dataset_path,
+        workflow.image_path,
+        workflow.label_path,
+        workflow.mask_path,
+        workflow.corrected_mask_path,
+        workflow.training_output_path,
+    ]
+    for candidate in candidates:
+        if not candidate:
+            continue
+        normalized = str(candidate).replace("\\", "/")
+        if "/data/" in normalized:
+            return normalized.split("/data/", 1)[0]
+        parent = _split_path_parent(normalized)
+        if parent:
+            return parent
+    return ""
+
+
+def _derive_training_output_path(workflow: WorkflowSession) -> str:
+    if workflow.training_output_path:
+        return workflow.training_output_path
+    root = _derive_workflow_root_path(workflow)
+    if root:
+        return f"{root.rstrip('/')}/outputs/training"
+    return ""
+
+
+def _choose_training_config_preset(workflow: WorkflowSession) -> str:
+    haystack = " ".join(
+        str(value or "")
+        for value in [
+            workflow.title,
+            workflow.dataset_path,
+            workflow.image_path,
+            workflow.label_path,
+            workflow.mask_path,
+            workflow.corrected_mask_path,
+        ]
+    ).lower()
+    if "mito" in haystack:
+        return "configs/MitoEM/Mito25-Local-Smoke-BC.yaml"
+    if "snemi" in haystack:
+        return "configs/SNEMI/SNEMI-Affinity-UNet.yaml"
+    if "cremi" in haystack:
+        return "configs/CREMI/CREMI-Foreground-UNet.yaml"
+    return "configs/Lucchi-Mitochondria.yaml"
+
+
 def _build_start_training_effects(
     workflow: WorkflowSession, corrected_mask_path: Optional[str]
 ) -> Dict[str, Any]:
+    output_path = _derive_training_output_path(workflow)
+    image_path = workflow.image_path or workflow.dataset_path or ""
     effects: Dict[str, Any] = {
         "navigate_to": "training",
-        "runtime_action": {"kind": "start_training"},
+        "runtime_action": {
+            "kind": "start_training",
+            "autopick_parameters": True,
+            "parameter_mode": "agent_default",
+        },
+        "set_training_config_preset": _choose_training_config_preset(workflow),
     }
+    if image_path:
+        effects["set_training_image_path"] = image_path
     if corrected_mask_path:
         effects["set_training_label_path"] = corrected_mask_path
-    if workflow.training_output_path:
-        effects["set_training_output_path"] = workflow.training_output_path
+    if output_path:
+        effects["set_training_output_path"] = output_path
+        effects["set_training_log_path"] = output_path
     return effects
 
 
@@ -3297,7 +3379,16 @@ async def query_workflow_agent(
     )
     wants_training_launch = any(
         term in lower_query
-        for term in ["start training", "run training", "launch training", "retrain now"]
+        for term in [
+            "start training",
+            "run training",
+            "launch training",
+            "retrain now",
+            "train the model",
+            "train for me",
+            "run a training job",
+            "run training job",
+        ]
     )
     wants_inference_launch = any(
         term in lower_query
@@ -3510,7 +3601,7 @@ async def query_workflow_agent(
         training_effects = _build_start_training_effects(workflow, corrected_mask_path)
         response = (
             "Do this: train on the saved edits.\n"
-            "Why: the edited masks are already linked to this workflow."
+            "Why: I can choose the preset and safe defaults from the current image/mask paths."
         )
         actions = [
             _build_agent_chat_action(

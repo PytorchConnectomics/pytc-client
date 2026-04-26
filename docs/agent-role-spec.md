@@ -109,6 +109,19 @@ Implemented UI commitments:
 - File path text boxes remain editable fallback controls, but ordinary users
   should be able to open the picker from the folder icon or Browse button.
 
+## 2026-04-26 Agent-Run Training Defaults
+
+- The biologist should provide the goal, data, and approval; the agent should
+  choose the nearest safe training preset and fill routine runtime paths.
+- Low-level YAML, stride, blending, chunk, CPU/GPU, and iteration settings are
+  advanced controls. The assistant must not lead with them unless the user asks
+  to override defaults or debug a failed run.
+- Agent-triggered training uses `agent_default` mode: current image path,
+  corrected mask path, output/log directory, preset config, and conservative
+  memory-safe defaults are staged together before the user approves the run.
+- Meta questions such as "how did you run so quickly?" should state whether the
+  app actually ran a job. Do not answer those with retrieved training docs.
+
 ## 2026-04-25 Claude Code Pattern Pass
 
 - Treat chat as a control surface over typed workflow tools. The agent should

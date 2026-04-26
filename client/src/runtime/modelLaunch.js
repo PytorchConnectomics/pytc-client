@@ -44,7 +44,8 @@ function resolveInferenceConfigSource(appContext, overrides = {}) {
   const trainingState = appContext?.trainingState || {};
   const explicitInferenceConfig = overrides.inferenceConfig;
   const explicitOriginPath = overrides.configOriginPath;
-  const inferenceConfig = explicitInferenceConfig ?? appContext?.inferenceConfig;
+  const inferenceConfig =
+    explicitInferenceConfig ?? appContext?.inferenceConfig;
   const inferenceOriginPath =
     explicitOriginPath || getInferenceConfigOriginPath(inferenceState);
   const trainingConfig = appContext?.trainingConfig;
@@ -63,15 +64,11 @@ function resolveInferenceConfigSource(appContext, overrides = {}) {
   const trainingSchema = detectConfigSchema(parseConfigText(trainingConfig));
   const needsTrainingFallback =
     Boolean(trainingConfig) &&
-    (
-      !inferenceConfig ||
+    (!inferenceConfig ||
       (inferenceSchema !== "legacy" && trainingSchema === "legacy") ||
-      (
-        inferenceOriginPath &&
+      (inferenceOriginPath &&
         inferenceOriginPath.startsWith("tutorials/") &&
-        trainingSchema === "legacy"
-      )
-    );
+        trainingSchema === "legacy"));
 
   if (!needsTrainingFallback) {
     return {
@@ -135,13 +132,33 @@ function prepareConfig(configText, mutator) {
   }
 }
 
+function ensureObject(parent, key) {
+  if (!parent[key] || typeof parent[key] !== "object") {
+    parent[key] = {};
+  }
+  return parent[key];
+}
+
+function applyAgentTrainingDefaults(yamlData) {
+  const solver = ensureObject(yamlData, "SOLVER");
+  const system = ensureObject(yamlData, "SYSTEM");
+
+  // Memory-safe defaults: large biomedical volumes are more likely to fail from
+  // over-aggressive batches than from conservative throughput.
+  solver.SAMPLES_PER_BATCH = 1;
+  if (solver.ITERATION_SAVE === undefined) solver.ITERATION_SAVE = 1000;
+  if (solver.ITERATION_TOTAL === undefined) solver.ITERATION_TOTAL = 2000;
+  if (system.NUM_CPUS === undefined) system.NUM_CPUS = 4;
+  if (system.NUM_GPUS === undefined) system.NUM_GPUS = 0;
+}
+
 export function buildTrainingLaunchRequest(
   appContext,
   workflowId = null,
   overrides = {},
 ) {
   const trainingState = appContext?.trainingState || {};
-  const trainingConfig = overrides.trainingConfig ?? appContext?.trainingConfig;
+  const trainingConfig = overrides.trainingConfig || appContext?.trainingConfig;
 
   if (!trainingConfig) {
     throw new Error(
@@ -149,7 +166,9 @@ export function buildTrainingLaunchRequest(
     );
   }
 
-  const outputPath = getPathValue(overrides.outputPath ?? trainingState.outputPath);
+  const outputPath = getPathValue(
+    overrides.outputPath ?? trainingState.outputPath,
+  );
   if (!outputPath) {
     throw new Error("Please set output path first in Step 1.");
   }
@@ -173,6 +192,9 @@ export function buildTrainingLaunchRequest(
       inputPath: "",
       outputPath,
     });
+    if (overrides.autoParameters) {
+      applyAgentTrainingDefaults(yamlData);
+    }
   });
   const configSummary = summarizeConfigText(preparedTrainingConfig, "training");
   const diagnostics = detectConfigDiagnostics(configSummary);
@@ -188,6 +210,7 @@ export function buildTrainingLaunchRequest(
       logPath,
       inputImagePath,
       inputLabelPath,
+      autoParameters: Boolean(overrides.autoParameters),
       configSummary,
       diagnostics,
     },
@@ -223,13 +246,14 @@ export function buildInferenceLaunchRequest(
   overrides = {},
 ) {
   const inferenceState = appContext?.inferenceState || {};
-  const inferenceConfigSource = resolveInferenceConfigSource(appContext, overrides);
+  const inferenceConfigSource = resolveInferenceConfigSource(
+    appContext,
+    overrides,
+  );
   const inferenceConfig = inferenceConfigSource.configText;
 
   if (!inferenceConfig) {
-    throw new Error(
-      "Please load or upload an inference configuration first.",
-    );
+    throw new Error("Please load or upload an inference configuration first.");
   }
 
   const checkpointPath = getPathValue(
@@ -256,7 +280,10 @@ export function buildInferenceLaunchRequest(
       outputPath,
     });
   });
-  const configSummary = summarizeConfigText(preparedInferenceConfig, "inference");
+  const configSummary = summarizeConfigText(
+    preparedInferenceConfig,
+    "inference",
+  );
   const diagnostics = detectConfigDiagnostics(configSummary);
 
   logClientEvent("inference_launch_request_built", {
@@ -290,7 +317,11 @@ export async function launchInferenceFromContext(
   workflowId = null,
   overrides = {},
 ) {
-  const request = buildInferenceLaunchRequest(appContext, workflowId, overrides);
+  const request = buildInferenceLaunchRequest(
+    appContext,
+    workflowId,
+    overrides,
+  );
   return startModelInference(
     request.inferenceConfig,
     request.outputPath,

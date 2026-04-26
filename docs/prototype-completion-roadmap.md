@@ -73,8 +73,17 @@ evaluation over fresh app-generated outputs.
   producing workflow action cards.
 - The workflow-agent router now clarifies unknown requests without app action
   cards, preventing gibberish from being interpreted as a next-step command.
+- Main chat now has direct guardrails for low-signal gibberish, meta questions
+  about whether a job actually ran, and biologist-facing parameter delegation.
+  These responses persist to chat history without invoking the docs RAG path.
+- The local assistant default model is now `llama3.1:8b` instead of
+  `llama3.2:1b`; current local-model evaluation notes live in
+  `docs/research/on-device-llm-options-2026-04-26.md`.
 - Assistant command details are collapsed behind a route disclosure so the
   visible UI stays domain-oriented rather than command-oriented.
+- Agent-triggered training now stages an inferred preset, current image path,
+  corrected mask path, output/log directory, and conservative default runtime
+  parameters before the user approves the run.
 - Proofreading mask exports materialize correction sets with edit and region
   counts derived from preceding proofreading events.
 - File Management has a one-click suggested mito25 smoke-project mount.
@@ -186,6 +195,9 @@ Run the first fresh app-generated before/after loop:
    - Next agentic-system hardening: durable job/task state, approval modes,
      workflow hooks/gates, focused biomedical subagents, and context compaction
      for long assistant sessions.
+   - Next UI integration: add a compact preflight surface near training and
+     inference start controls that says "ready", "missing X", or "agent can run
+     this with inferred defaults" without exposing raw YAML by default.
 
 7. Evaluation and provenance
    - Compute before/after segmentation metrics over real outputs.

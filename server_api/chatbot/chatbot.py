@@ -25,7 +25,7 @@ from server_api.chatbot.tools import (
     list_checkpoints,
 )
 
-DEFAULT_OLLAMA_MODEL = "llama3.2:1b"
+DEFAULT_OLLAMA_MODEL = "llama3.1:8b"
 
 AGENT_RESPONSE_STYLE = """
 RESPONSE STYLE FOR BIOLOGISTS:
@@ -51,13 +51,13 @@ def _compact_agent_response(response: str, *, max_words: int = 120) -> str:
     text = str(response or "").strip()
     if not text:
         return text
-    if "```" in text:
-        return text
 
     lines = [line.rstrip() for line in text.splitlines()]
     content_lines = [line for line in lines if line.strip()]
     words = text.split()
     if len(words) <= max_words and len(content_lines) <= 8:
+        return text
+    if "```" in text and len(words) <= (max_words * 2) and len(content_lines) <= 8:
         return text
 
     kept = []
@@ -128,7 +128,7 @@ RULES:
 1. Only report values that your tools return. Do NOT invent config names, paths, or settings.
 2. Never tell the user to write a YAML from scratch. Always start from an existing config.
 3. If the task is unsupported, say so. PyTC only does segmentation.
-4. Be concise. State the facts, generate the command, stop.
+4. Be concise. State the facts and stop. Generate a CLI command only if the user explicitly asks for one.
 
 WORKFLOW: The available configs are provided in your task message. Pick the best match, then:
 1. Call read_config on the chosen config path to see its YAML overrides.
@@ -148,8 +148,8 @@ Common override keys (ALWAYS use these exact keys, never search for alternatives
 
 NEVER invent keys like TRAIN.MAX_ITER, TRAINING.BATCH_SIZE, or CLI flags like --batch-size, --checkpoint-interval — these do not exist.
 
-Command format: `python scripts/main.py --config-file <path> [SECTION.KEY=value ...]`
-Always generate commands for the user to run — never execute directly."""
+Command format, only when explicitly requested: `python scripts/main.py --config-file <path> [SECTION.KEY=value ...]`
+Default app workflow: recommend agent-selected preset/defaults plus approval-gated training inside PyTC Client, not manual YAML tuning."""
 
 
 INFERENCE_AGENT_PROMPT = f"""You are an **Inference Agent** for PyTorch Connectomics.
@@ -158,7 +158,7 @@ INFERENCE_AGENT_PROMPT = f"""You are an **Inference Agent** for PyTorch Connecto
 
 RULES:
 1. Only report values that your tools return. Do NOT invent checkpoint paths, config names, or settings.
-2. Be concise. State the facts, generate the command, stop.
+2. Be concise. State the facts and stop. Generate a CLI command only if the user explicitly asks for one.
 
 WORKFLOW:
 1. If the user did NOT provide a checkpoint path, call list_checkpoints first to see available checkpoints.
@@ -175,13 +175,13 @@ Here is the correct override key mapping (use these exact keys):
 - Process volumes one at a time → INFERENCE.DO_SINGLY
 - Batch size → INFERENCE.SAMPLES_PER_BATCH
 
-Command format: `python scripts/main.py --config-file <path> --inference --checkpoint <ckpt> [SECTION.KEY=value ...]`
+Command format, only when explicitly requested: `python scripts/main.py --config-file <path> --inference --checkpoint <ckpt> [SECTION.KEY=value ...]`
 
 IMPORTANT: Overrides use SECTION.KEY=value format (NO -- prefix). Example:
   ✅ CORRECT: INFERENCE.AUG_NUM=8
   ❌ WRONG: --inference.AUG_NUM=8
 
-Always generate commands for the user to run — never execute directly."""
+Default app workflow: recommend approval-gated inference inside PyTC Client, not manual stride/blending/chunking setup."""
 
 
 SUPERVISOR_PROMPT = f"""You are the **Supervisor Agent** for PyTorch Connectomics (PyTC Client).
@@ -195,6 +195,7 @@ ROUTING — decide which tool to use BEFORE calling anything:
 - **General PyTC questions** (what architectures are supported, what augmentations exist, what loss functions are available, etc.) → search_documentation
 - **Generate a specific training/inference command** → delegate_to_training_agent or delegate_to_inference_agent
 - **General/greeting/off-topic** → answer directly, no tool needed
+- **Run/segment/proofread/train/compare/export workflow jobs** → answer briefly that the app can do this through approval-gated workflow actions. Do not provide low-level tuning advice by default.
 
 CRITICAL RULES:
 1. **ALWAYS search documentation first for UI questions.** If the user asks "how do I train", "what do I need to provide", "how do I start", "where do I configure", etc., use search_documentation to find the UI workflow in the docs. Do NOT delegate to sub-agents for these questions.
@@ -203,6 +204,7 @@ CRITICAL RULES:
 4. **Do not fabricate specifics.** Never make up keyboard shortcuts, button labels, or step-by-step instructions unless they come from retrieved docs or a sub-agent response.
 4a. **NEVER use command-line instructions for UI questions.** The PyTC Client is a desktop GUI application. If the user asks how to do something, explain the UI workflow (buttons, tabs, forms) from the documentation. Do NOT provide Python scripts, bash commands, or CLI examples unless the sub-agent explicitly generates them.
 4b. **NEVER fabricate file paths or scripts.** Do NOT invent scripts like `scripts/evaluate.py`, `scripts/resume_training.py`, or any other files that don't exist. If evaluation requires Python code, show inline code using `connectomics.utils.evaluate`, not fake script paths.
+4c. **Do not lead with low-level YAML parameters for biologists.** For ordinary training or inference requests, say the assistant should infer safe defaults from the current project and ask for approval before running. Mention stride, blending, chunking, GPUs, CPUs, or iterations only when asked to override or debug.
 5. **Answer every part of the user's question.** If they ask about two things, address both.
 6. **Use retrieved content even if wording differs.** If the documentation describes relevant features or workflows, use that information to answer the question. Don't claim something isn't documented just because it uses different terminology than the user's question.
 7. **HARD LIMIT: You may call search_documentation at most 3 times yourself.** Sub-agents also have access to search_documentation. If the tool returns "Search limit reached", immediately stop and answer based on what you already have.

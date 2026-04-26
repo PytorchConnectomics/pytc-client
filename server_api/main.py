@@ -1425,6 +1425,108 @@ def _load_history_for_convo(convo_id: int, db: Session):
 
 
 # Chatbot endpoints
+def _direct_general_chat_response(query: str) -> Optional[str]:
+    lower = query.strip().lower()
+    compact = re.sub(r"[^a-z0-9]+", "", lower)
+    if not compact:
+        return None
+
+    vowel_count = len(re.findall(r"[aeiou]", compact))
+    looks_like_gibberish_token = (
+        len(compact) >= 8
+        and " " not in lower
+        and vowel_count <= 2
+        and not lower.startswith("/")
+    )
+    if looks_like_gibberish_token:
+        return (
+            "I did not understand that.\n"
+            "Try a workflow job like: run inference, proofread, train on saved edits, compare results, or status."
+        )
+
+    quick_run_phrases = [
+        "how do you run so quickly",
+        "how did you run so quickly",
+        "why did you run so quickly",
+        "did you actually run",
+        "are you actually running",
+    ]
+    if any(phrase in lower for phrase in quick_run_phrases):
+        return (
+            "I did not run training or inference there.\n"
+            "I answered from existing workflow/docs context, which is fast.\n"
+            "Long jobs still require your approval and should show progress."
+        )
+
+    parameter_phrases = [
+        "do i need to set parameters",
+        "do i need to tune",
+        "choose parameters",
+        "pick parameters",
+        "infer parameters",
+        "stride",
+        "blending",
+        "chunk",
+    ]
+    if any(phrase in lower for phrase in parameter_phrases) and any(
+        term in lower for term in ["agent", "you", "biologist", "training", "inference"]
+    ):
+        return (
+            "You should not have to tune low-level parameters by default.\n"
+            "Do this: give me the image/mask goal and approve the run; I should choose a safe preset and defaults.\n"
+            "Use advanced settings only when you explicitly want to override me."
+        )
+
+    return None
+
+
+def _persist_chat_exchange(
+    db: Session,
+    *,
+    conversation: models.Conversation,
+    query: str,
+    response: str,
+    source: Optional[str] = None,
+) -> None:
+    db.add(
+        models.ChatMessage(conversation_id=conversation.id, role="user", content=query)
+    )
+    db.add(
+        models.ChatMessage(
+            conversation_id=conversation.id,
+            role="assistant",
+            content=response,
+            source=source,
+        )
+    )
+    if conversation.title == "New Chat":
+        conversation.title = query[:120].strip() or "New Chat"
+    conversation.updated_at = datetime.now(timezone.utc)
+
+
+def _get_or_create_chat_conversation(
+    db: Session, *, user_id: int, conversation_id: Optional[int]
+) -> models.Conversation:
+    if not conversation_id:
+        convo = models.Conversation(user_id=user_id, title="New Chat")
+        db.add(convo)
+        db.commit()
+        db.refresh(convo)
+        return convo
+
+    convo = (
+        db.query(models.Conversation)
+        .filter(
+            models.Conversation.id == conversation_id,
+            models.Conversation.user_id == user_id,
+        )
+        .first()
+    )
+    if not convo:
+        raise HTTPException(status_code=404, detail="Conversation not found")
+    return convo
+
+
 @app.post("/chat/query")
 async def chat_query(
     req: Request,
@@ -1435,6 +1537,43 @@ async def chat_query(
     request_id = request_id_from_request(req).replace("-", "")[:8]
     request_start = time.perf_counter()
     print(f"[CHATBOT][{request_id}] Incoming /chat/query request from user={user.id}")
+    body = await req.json()
+    query = body.get("query")
+    convo_id = body.get("conversationId")
+    if not isinstance(query, str) or not query.strip():
+        raise HTTPException(status_code=400, detail="Query must be a non-empty string.")
+    print(
+        f"[CHATBOT][{request_id}] Parsed request: convo_id={convo_id}, "
+        f"query_len={len(query.strip())}"
+    )
+
+    convo = _get_or_create_chat_conversation(
+        db, user_id=user.id, conversation_id=convo_id
+    )
+    convo_id = convo.id
+
+    direct_response = _direct_general_chat_response(query)
+    if direct_response:
+        _persist_chat_exchange(
+            db,
+            conversation=convo,
+            query=query,
+            response=direct_response,
+            source="direct_guard",
+        )
+        db.commit()
+        log_request_summary(
+            request_id=request_id,
+            endpoint="/chat/query",
+            start_time=request_start,
+            status="ok",
+        )
+        return {
+            "response": direct_response,
+            "conversationId": convo_id,
+            "source": "direct_guard",
+        }
+
     if not _ensure_chatbot():
         print(f"[CHATBOT][{request_id}] Main chain unavailable before request")
         log_request_summary(
@@ -1447,34 +1586,6 @@ async def chat_query(
         raise HTTPException(
             status_code=503, detail=_llm_unavailable_detail(_chatbot_error)
         )
-    body = await req.json()
-    query = body.get("query")
-    convo_id = body.get("conversationId")
-    if not isinstance(query, str) or not query.strip():
-        raise HTTPException(status_code=400, detail="Query must be a non-empty string.")
-    print(
-        f"[CHATBOT][{request_id}] Parsed request: convo_id={convo_id}, "
-        f"query_len={len(query.strip())}"
-    )
-
-    # Auto-create a conversation if none supplied
-    if not convo_id:
-        convo = models.Conversation(user_id=user.id, title="New Chat")
-        db.add(convo)
-        db.commit()
-        db.refresh(convo)
-        convo_id = convo.id
-    else:
-        convo = (
-            db.query(models.Conversation)
-            .filter(
-                models.Conversation.id == convo_id,
-                models.Conversation.user_id == user.id,
-            )
-            .first()
-        )
-        if not convo:
-            raise HTTPException(status_code=404, detail="Conversation not found")
 
     # Rebuild in-memory history from DB when switching conversations
     _load_history_for_convo(convo_id, db)
@@ -1520,17 +1631,13 @@ async def chat_query(
         f"response_len={len(response) if isinstance(response, str) else 0}"
     )
 
-    # Persist to DB
-    db.add(models.ChatMessage(conversation_id=convo_id, role="user", content=query))
-    db.add(
-        models.ChatMessage(conversation_id=convo_id, role="assistant", content=response)
+    _persist_chat_exchange(
+        db,
+        conversation=convo,
+        query=query,
+        response=response,
+        source="llm",
     )
-
-    # Auto-title: first user message becomes the title (truncated)
-    if convo.title == "New Chat":
-        convo.title = query[:120].strip() or "New Chat"
-    convo.updated_at = datetime.now(timezone.utc)
-
     db.commit()
 
     # Update in-memory history
@@ -1548,7 +1655,7 @@ async def chat_query(
         status="ok",
     )
 
-    return {"response": response, "conversationId": convo_id}
+    return {"response": response, "conversationId": convo_id, "source": "llm"}
 
 
 @app.post("/chat/clear")

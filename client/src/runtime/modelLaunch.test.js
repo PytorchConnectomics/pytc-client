@@ -39,6 +39,45 @@ DATASET:
     expect(request.workflowId).toBe(7);
   });
 
+  it("applies agent-selected training defaults from runtime overrides", () => {
+    const request = buildTrainingLaunchRequest(
+      {
+        trainingState: {},
+      },
+      7,
+      {
+        trainingConfig: `
+DATASET:
+  INPUT_PATH: ""
+  IMAGE_NAME: ""
+  LABEL_NAME: ""
+  OUTPUT_PATH: ""
+SOLVER: {}
+SYSTEM: {}
+`,
+        inputImagePath: "/tmp/image.h5",
+        inputLabelPath: "/tmp/corrected.tif",
+        outputPath: "/tmp/agent-training",
+        logPath: "/tmp/agent-training",
+        configOriginPath: "configs/MitoEM/Mito25-Local-Smoke-BC.yaml",
+        autoParameters: true,
+      },
+    );
+
+    const parsed = yaml.load(request.trainingConfig);
+    expect(parsed.DATASET.IMAGE_NAME).toBe("/tmp/image.h5");
+    expect(parsed.DATASET.LABEL_NAME).toBe("/tmp/corrected.tif");
+    expect(parsed.DATASET.OUTPUT_PATH).toBe("/tmp/agent-training");
+    expect(parsed.SOLVER.SAMPLES_PER_BATCH).toBe(1);
+    expect(parsed.SOLVER.ITERATION_SAVE).toBe(1000);
+    expect(parsed.SOLVER.ITERATION_TOTAL).toBe(2000);
+    expect(parsed.SYSTEM.NUM_CPUS).toBe(4);
+    expect(parsed.SYSTEM.NUM_GPUS).toBe(0);
+    expect(request.configOriginPath).toBe(
+      "configs/MitoEM/Mito25-Local-Smoke-BC.yaml",
+    );
+  });
+
   it("uses runtime overrides when building an inference launch request", () => {
     const request = buildInferenceLaunchRequest(
       {
@@ -100,6 +139,8 @@ default:
 
     const parsed = yaml.load(request.inferenceConfig);
     expect(parsed.DATASET.IMAGE_NAME).toBe("/tmp/inference-image.h5");
-    expect(request.configOriginPath).toBe("configs/MitoEM/Mito25-Local-BC.yaml");
+    expect(request.configOriginPath).toBe(
+      "configs/MitoEM/Mito25-Local-BC.yaml",
+    );
   });
 });

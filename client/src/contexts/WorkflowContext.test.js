@@ -9,6 +9,7 @@ import {
   computeWorkflowEvaluationResult,
   createAgentAction,
   exportWorkflowBundle,
+  getConfigPresetContent,
   getCurrentWorkflow,
   getWorkflowAgentRecommendation,
   getWorkflowHotspots,
@@ -27,6 +28,7 @@ jest.mock("../api", () => ({
   computeWorkflowEvaluationResult: jest.fn(),
   createAgentAction: jest.fn(),
   exportWorkflowBundle: jest.fn(),
+  getConfigPresetContent: jest.fn(),
   getCurrentWorkflow: jest.fn(),
   getWorkflowAgentRecommendation: jest.fn(),
   getWorkflowHotspots: jest.fn(),
@@ -57,7 +59,9 @@ function Probe() {
   return (
     <div>
       <div>{workflowContext.workflow?.stage || "loading"}</div>
-      <div>{workflowContext.events.map((event) => event.event_type).join(",")}</div>
+      <div>
+        {workflowContext.events.map((event) => event.event_type).join(",")}
+      </div>
       <div>{workflowContext.hotspots?.[0]?.summary || "no-hotspot"}</div>
       <div>{workflowContext.impactPreview?.confidence || "no-impact"}</div>
       <div>{workflowContext.agentRecommendation?.decision || "no-agent"}</div>
@@ -130,6 +134,26 @@ function Probe() {
       <button
         type="button"
         onClick={() =>
+          workflowContext.runClientEffects({
+            navigate_to: "training",
+            set_training_config_preset:
+              "configs/MitoEM/Mito25-Local-Smoke-BC.yaml",
+            set_training_image_path: "/tmp/image.h5",
+            set_training_label_path: "/tmp/corrected.tif",
+            set_training_output_path: "/tmp/output",
+            set_training_log_path: "/tmp/output",
+            runtime_action: {
+              kind: "start_training",
+              autopick_parameters: true,
+            },
+          })
+        }
+      >
+        Auto train
+      </button>
+      <button
+        type="button"
+        onClick={() =>
           workflowContext.appendEvent({
             actor: "system",
             event_type: "test.event",
@@ -139,10 +163,21 @@ function Probe() {
       >
         Append event
       </button>
-      <div>{workflowContext.pendingRuntimeAction?.kind || "no-runtime-action"}</div>
+      <div>
+        {workflowContext.pendingRuntimeAction?.kind || "no-runtime-action"}
+      </div>
       <div>
         {workflowContext.pendingRuntimeAction?.overrides?.datasetPath ||
           "no-dataset-override"}
+      </div>
+      <div>
+        {workflowContext.pendingRuntimeAction?.overrides?.inputImagePath ||
+          "no-training-image-override"}
+      </div>
+      <div>
+        {workflowContext.pendingRuntimeAction?.overrides?.autoParameters
+          ? "auto-parameters"
+          : "manual-parameters"}
       </div>
     </div>
   );
@@ -168,7 +203,9 @@ describe("WorkflowProvider", () => {
     listWorkflowEvents.mockResolvedValue([]);
     getWorkflowHotspots.mockResolvedValue({
       workflow_id: 1,
-      hotspots: [{ region_key: "z:9", summary: "Top hotspot", severity: "high" }],
+      hotspots: [
+        { region_key: "z:9", summary: "Top hotspot", severity: "high" },
+      ],
     });
     getWorkflowImpactPreview.mockResolvedValue({
       workflow_id: 1,
@@ -179,7 +216,8 @@ describe("WorkflowProvider", () => {
       workflow_id: 1,
       stage: "setup",
       decision: "Proofread this data if the mask is ready.",
-      rationale: "A human review pass is the fastest way to create useful edits.",
+      rationale:
+        "A human review pass is the fastest way to create useful edits.",
       confidence: "medium",
       next_stage: "proofreading",
       readiness: [],
@@ -198,7 +236,13 @@ describe("WorkflowProvider", () => {
       artifacts: [{ id: 1 }],
       artifact_paths: [],
     });
-    listWorkflowArtifacts.mockResolvedValue([{ id: 1, artifact_type: "image_volume" }]);
+    getConfigPresetContent.mockResolvedValue({
+      path: "configs/MitoEM/Mito25-Local-Smoke-BC.yaml",
+      content: "DATASET: {}\nSOLVER: {}\n",
+    });
+    listWorkflowArtifacts.mockResolvedValue([
+      { id: 1, artifact_type: "image_volume" },
+    ]);
     listWorkflowModelRuns.mockResolvedValue([{ id: 2, run_type: "inference" }]);
     listWorkflowModelVersions.mockResolvedValue([]);
     listWorkflowCorrectionSets.mockResolvedValue([
@@ -302,10 +346,58 @@ describe("WorkflowProvider", () => {
     );
   });
 
+  it("loads agent-selected training config before queueing training", async () => {
+    const setInputImage = jest.fn();
+    const setInputLabel = jest.fn();
+    const setOutputPath = jest.fn();
+    const setLogPath = jest.fn();
+    const setConfigOriginPath = jest.fn();
+    const setSelectedYamlPreset = jest.fn();
+    const setUploadedYamlFile = jest.fn();
+    const setTrainingConfig = jest.fn();
+
+    renderProvider({
+      setTrainingConfig,
+      trainingState: {
+        setInputImage,
+        setInputLabel,
+        setOutputPath,
+        setLogPath,
+        setConfigOriginPath,
+        setSelectedYamlPreset,
+        setUploadedYamlFile,
+      },
+      inferenceState: {
+        setOutputPath: jest.fn(),
+        setCheckpointPath: jest.fn(),
+      },
+    });
+    await screen.findByText("setup");
+    fireEvent.click(screen.getByText("Auto train"));
+
+    await waitFor(() => {
+      expect(getConfigPresetContent).toHaveBeenCalledWith(
+        "configs/MitoEM/Mito25-Local-Smoke-BC.yaml",
+      );
+      expect(setTrainingConfig).toHaveBeenCalledWith(
+        "DATASET: {}\nSOLVER: {}\n",
+      );
+      expect(setInputImage).toHaveBeenCalledWith("/tmp/image.h5");
+      expect(setInputLabel).toHaveBeenCalledWith("/tmp/corrected.tif");
+      expect(setOutputPath).toHaveBeenCalledWith("/tmp/output");
+      expect(screen.getByText("start_training")).toBeTruthy();
+      expect(screen.getByText("/tmp/image.h5")).toBeTruthy();
+      expect(screen.getByText("auto-parameters")).toBeTruthy();
+    });
+  });
+
   it("queues proofreading runtime actions with image and mask overrides", async () => {
     renderProvider({
       trainingState: { setInputLabel: jest.fn(), setLogPath: jest.fn() },
-      inferenceState: { setOutputPath: jest.fn(), setCheckpointPath: jest.fn() },
+      inferenceState: {
+        setOutputPath: jest.fn(),
+        setCheckpointPath: jest.fn(),
+      },
     });
     await screen.findByText("setup");
 

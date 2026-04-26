@@ -5,7 +5,7 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 CLIENT_DIR="${ROOT_DIR}/client"
 DEFAULT_OLLAMA_BASE_URL="http://127.0.0.1:11434"
-DEFAULT_OLLAMA_MODEL="llama3.2:1b"
+DEFAULT_OLLAMA_MODEL="llama3.1:8b"
 DEFAULT_OLLAMA_EMBED_MODEL="nomic-embed-text:latest"
 
 if ! command -v uv >/dev/null 2>&1; then

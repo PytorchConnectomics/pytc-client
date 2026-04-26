@@ -3,6 +3,7 @@ import tempfile
 import unittest
 
 import pytest
+
 pytest.importorskip("sqlalchemy")
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
@@ -57,7 +58,12 @@ class WorkflowSpineSmokeTests(unittest.TestCase):
 
         self.client.patch(
             f"/api/workflows/{workflow_id}",
-            json={"stage": "proofreading", "corrected_mask_path": str(export_path)},
+            json={
+                "title": "mito25-paper-loop-smoke",
+                "stage": "proofreading",
+                "image_path": "/projects/mito25/data/image/mito25_im.h5",
+                "corrected_mask_path": str(export_path),
+            },
         )
         self.client.post(
             f"/api/workflows/{workflow_id}/events",
@@ -106,13 +112,27 @@ class WorkflowSpineSmokeTests(unittest.TestCase):
             ],
             "start_training",
         )
+        training_effects = launch_query_payload["commands"][0]["client_effects"]
+        self.assertEqual(
+            training_effects["set_training_config_preset"],
+            "configs/MitoEM/Mito25-Local-Smoke-BC.yaml",
+        )
+        self.assertEqual(
+            training_effects["set_training_image_path"],
+            "/projects/mito25/data/image/mito25_im.h5",
+        )
+        self.assertTrue(
+            training_effects["runtime_action"]["autopick_parameters"],
+        )
         self.assertEqual(
             launch_query_payload["commands"][0]["client_effects"]["navigate_to"],
             "training",
         )
 
         hotspots_response = self.client.get(f"/api/workflows/{workflow_id}/hotspots")
-        impact_response = self.client.get(f"/api/workflows/{workflow_id}/impact-preview")
+        impact_response = self.client.get(
+            f"/api/workflows/{workflow_id}/impact-preview"
+        )
         metrics_response = self.client.get(f"/api/workflows/{workflow_id}/metrics")
         bundle_response = self.client.post(
             f"/api/workflows/{workflow_id}/export-bundle"
