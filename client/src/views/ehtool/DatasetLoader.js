@@ -126,7 +126,9 @@ function DatasetLoader({ onLoad, loading }) {
     >
       <Space direction="vertical" size={4} style={{ width: "100%" }}>
         <Space align="center">
-          <FolderOpenOutlined style={{ color: "#1677ff", fontSize: 18 }} />
+          <FolderOpenOutlined
+            style={{ color: "var(--seg-accent-primary, #3f37c9)", fontSize: 18 }}
+          />
           <Title level={4} style={{ margin: 0 }}>
             What should I proofread?
           </Title>

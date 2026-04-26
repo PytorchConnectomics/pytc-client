@@ -101,10 +101,10 @@ function LayerGrid({
                 hoverable
                 style={{
                   border: isSelected
-                    ? "2px solid #1677ff"
+                    ? "2px solid var(--seg-accent-primary, #3f37c9)"
                     : "1px solid #e5e7eb",
                   boxShadow: isSelected
-                    ? "0 0 12px rgba(22, 119, 255, 0.18)"
+                    ? "0 0 12px var(--seg-focus-ring, rgba(63, 55, 201, 0.22))"
                     : "0 6px 20px rgba(15, 23, 42, 0.05)",
                   cursor: "pointer",
                   position: "relative",

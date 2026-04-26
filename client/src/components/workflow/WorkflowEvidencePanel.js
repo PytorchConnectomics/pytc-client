@@ -918,7 +918,14 @@ function WorkflowEvidencePanel({ compact = false }) {
             </Text>
           )}
           {bundleNotice && (
-            <Text style={{ display: "block", marginTop: 8, fontSize: 12, color: "#256f68" }}>
+            <Text
+              style={{
+                display: "block",
+                marginTop: 8,
+                fontSize: 12,
+                color: "var(--seg-accent-primary, #3f37c9)",
+              }}
+            >
               {bundleNotice}
             </Text>
           )}

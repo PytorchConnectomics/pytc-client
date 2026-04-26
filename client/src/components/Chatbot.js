@@ -811,7 +811,9 @@ function Chatbot({
                         maxWidth: isUser ? "78%" : "88%",
                         padding: isUser ? "10px 12px" : "12px",
                         borderRadius: isUser ? "14px 14px 4px 14px" : "14px",
-                        background: isUser ? "#1d4ed8" : "#ffffff",
+                        background: isUser
+                          ? "var(--seg-accent-primary, #3f37c9)"
+                          : "#ffffff",
                         color: isUser ? "white" : "black",
                         border: isUser ? "none" : "1px solid #e5e7eb",
                         boxShadow: "0 1px 2px rgba(15, 23, 42, 0.05)",

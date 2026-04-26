@@ -2184,7 +2184,10 @@ function DetectionWorkflow({
     marks[count - 1] = String(count);
     marks[current] = {
       label: String(current + 1),
-      style: { color: "#0f766e", fontWeight: 700 },
+      style: {
+        color: "var(--seg-accent-primary, #3f37c9)",
+        fontWeight: 700,
+      },
     };
     return marks;
   };

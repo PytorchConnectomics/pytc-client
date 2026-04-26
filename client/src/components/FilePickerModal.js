@@ -440,7 +440,10 @@ const FilePickerModal = ({
                   avatar={
                     item.is_folder ? (
                       <FolderFilled
-                        style={{ color: "#1890ff", fontSize: "20px" }}
+                        style={{
+                          color: "var(--seg-accent-primary, #3f37c9)",
+                          fontSize: "20px",
+                        }}
                       />
                     ) : isImageFile(item) ? (
                       <div
@@ -496,9 +499,11 @@ const FilePickerModal = ({
                               padding: "2px 6px",
                               fontSize: 10,
                               borderRadius: 10,
-                              background: "#f0f5ff",
-                              color: "#2f54eb",
-                              border: "1px solid #adc6ff",
+                              background:
+                                "var(--seg-accent-primary-soft, #f0efff)",
+                              color: "var(--seg-accent-primary, #3f37c9)",
+                              border:
+                                "1px solid var(--seg-accent-primary-border, #c7c2ff)",
                             }}
                           >
                             Mounted

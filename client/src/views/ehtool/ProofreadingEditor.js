@@ -1573,7 +1573,7 @@ const ProofreadingEditor = forwardRef(
                       height: activeBrushSize * fittedCanvasSize.scale * zoom,
                       border:
                         tool === "paint"
-                          ? "2px solid #1890ff"
+                          ? "2px solid var(--seg-accent-primary, #3f37c9)"
                           : "2px dashed #ff4d4f",
                       boxShadow: tool === "erase" ? "0 0 0 1px white" : "none", // High contrast for eraser
                       borderRadius: 4,

@@ -1,7 +1,7 @@
 export const antdWorkflowTheme = {
   token: {
-    colorPrimary: "#256f68",
-    colorInfo: "#256f68",
+    colorPrimary: "#3f37c9",
+    colorInfo: "#3f37c9",
     colorSuccess: "#2f7d32",
     colorWarning: "#b8660f",
     colorError: "#b13a2f",

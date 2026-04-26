@@ -10,7 +10,12 @@
   --seg-border-strong: #c9bda9;
   --seg-text-primary: #1f2933;
   --seg-text-muted: #667085;
-  --seg-accent-teal: #256f68;
+  --seg-accent-primary: #3f37c9;
+  --seg-accent-primary-soft: #f0efff;
+  --seg-accent-primary-border: #c7c2ff;
+  --seg-focus-ring: rgba(63, 55, 201, 0.22);
+  --seg-selection-fill: rgba(63, 55, 201, 0.12);
+  --seg-accent-teal: var(--seg-accent-primary);
   --seg-accent-blue: #2b5b9f;
   --seg-accent-amber: #b8660f;
   --seg-accent-green: #2f7d32;

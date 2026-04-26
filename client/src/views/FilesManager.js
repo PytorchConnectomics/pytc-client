@@ -1205,7 +1205,12 @@ function FilesManager() {
         )}
       </div>
     ) : type === "folder" ? (
-      <FolderFilled style={{ fontSize: iconSize, color: "#1890ff" }} />
+      <FolderFilled
+        style={{
+          fontSize: iconSize,
+          color: "var(--seg-accent-primary, #3f37c9)",
+        }}
+      />
     ) : (
       <FileOutlined style={{ fontSize: iconSize, color: "#555" }} />
     );
@@ -1244,8 +1249,12 @@ function FilesManager() {
           textAlign: viewMode === "grid" ? "center" : "left",
           cursor: "pointer",
           borderRadius: 4,
-          backgroundColor: isSelected ? "#e6f7ff" : "transparent",
-          border: isSelected ? "1px solid #1890ff" : "1px solid transparent",
+          backgroundColor: isSelected
+            ? "var(--seg-selection-fill, rgba(63, 55, 201, 0.12))"
+            : "transparent",
+          border: isSelected
+            ? "1px solid var(--seg-accent-primary, #3f37c9)"
+            : "1px solid transparent",
           display: viewMode === "list" ? "flex" : "block",
           alignItems: "center",
           userSelect: "none",
@@ -1294,9 +1303,10 @@ function FilesManager() {
                     padding: "2px 6px",
                     fontSize: 10,
                     borderRadius: 10,
-                    background: "#f0f5ff",
-                    color: "#2f54eb",
-                    border: "1px solid #adc6ff",
+                    background: "var(--seg-accent-primary-soft, #f0efff)",
+                    color: "var(--seg-accent-primary, #3f37c9)",
+                    border:
+                      "1px solid var(--seg-accent-primary-border, #c7c2ff)",
                   }}
                 >
                   Mounted
@@ -1318,7 +1328,7 @@ function FilesManager() {
           margin: viewMode === "grid" ? 8 : 0,
           textAlign: viewMode === "grid" ? "center" : "left",
           borderRadius: 4,
-          border: "1px solid #1890ff",
+          border: "1px solid var(--seg-accent-primary, #3f37c9)",
           display: viewMode === "list" ? "flex" : "block",
           alignItems: "center",
         }}
@@ -1335,7 +1345,7 @@ function FilesManager() {
           <FolderFilled
             style={{
               fontSize: viewMode === "grid" ? 48 : 24,
-              color: "#1890ff",
+              color: "var(--seg-accent-primary, #3f37c9)",
             }}
           />
         </div>
@@ -1423,8 +1433,9 @@ function FilesManager() {
                 borderRadius: 999,
                 padding: "3px 8px",
                 background: "#fff",
-                border: "1px solid #adc6ff",
-                color: "#2f54eb",
+                border:
+                  "1px solid var(--seg-accent-primary-border, #c7c2ff)",
+                color: "var(--seg-accent-primary, #3f37c9)",
                 fontSize: 11,
                 fontWeight: 600,
               }}
@@ -2057,8 +2068,9 @@ function FilesManager() {
                 top: Math.min(selectionBox.startY, selectionBox.currentY),
                 width: Math.abs(selectionBox.currentX - selectionBox.startX),
                 height: Math.abs(selectionBox.currentY - selectionBox.startY),
-                backgroundColor: "rgba(24, 144, 255, 0.2)",
-                border: "1px solid #1890ff",
+                backgroundColor:
+                  "var(--seg-selection-fill, rgba(63, 55, 201, 0.12))",
+                border: "1px solid var(--seg-accent-primary, #3f37c9)",
                 pointerEvents: "none",
                 zIndex: 100,
               }}
@@ -2194,7 +2206,12 @@ function FilesManager() {
                 }}
               >
                 {propertiesData.isFolder ? (
-                  <FolderFilled style={{ fontSize: 48, color: "#1890ff" }} />
+                  <FolderFilled
+                    style={{
+                      fontSize: 48,
+                      color: "var(--seg-accent-primary, #3f37c9)",
+                    }}
+                  />
                 ) : (
                   <FileOutlined style={{ fontSize: 48, color: "#555" }} />
                 )}

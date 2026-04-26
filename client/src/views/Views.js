@@ -209,7 +209,8 @@ function Views() {
             zIndex: 10,
           }}
           onMouseEnter={(e) =>
-            (e.currentTarget.style.backgroundColor = "#1890ff")
+            (e.currentTarget.style.backgroundColor =
+              "var(--seg-accent-primary, #3f37c9)")
           }
           onMouseLeave={(e) =>
             !isResizing.current &&
