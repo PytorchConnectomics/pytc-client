@@ -1,4 +1,5 @@
 import json
+import logging
 import pathlib
 import re
 import shutil
@@ -6,15 +7,22 @@ import tempfile
 import traceback
 import time
 from concurrent.futures import ThreadPoolExecutor, TimeoutError
-from typing import List, Optional
+from datetime import datetime, timezone
+from typing import Any, List, Optional
 from urllib.parse import urlsplit, urlunsplit
 
 import requests
 import uvicorn
 from fastapi import Depends, FastAPI, HTTPException, Request, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
+from pydantic import BaseModel
 from sqlalchemy import inspect, text
 from sqlalchemy.orm import Session
+from app_event_logger import (
+    append_app_event,
+    configure_process_logging,
+    get_app_event_log_path,
+)
 from runtime_settings import (
     get_allowed_origins,
     get_neuroglancer_public_base,
@@ -30,8 +38,10 @@ from server_api.chatbot.logging_utils import (
     request_id_from_request,
 )
 from server_api.workflows import router as workflow_router
+from server_api.workflows.db_models import WorkflowEvent
 from server_api.workflows.service import (
     append_event_for_workflow_if_present,
+    decode_json,
     get_user_workflow_or_404,
     update_workflow_fields,
 )
@@ -45,7 +55,9 @@ try:
     from server_api.chatbot.chatbot import (
         build_chain,
         build_helper_chain,
+        _compact_agent_response,
         _format_admin_llm_error,
+        _sanitize_agent_response,
     )
 except Exception as exc:  # pragma: no cover - exercised indirectly via endpoints
     build_chain = None
@@ -58,6 +70,13 @@ except Exception as exc:  # pragma: no cover - exercised indirectly via endpoint
             "Please contact your system administrator with this error: "
             f"{str(error).strip() or error.__class__.__name__}"
         )
+
+    def _compact_agent_response(response, max_words=120):
+        return str(response or "")
+
+    def _sanitize_agent_response(response):
+        return str(response or "").strip()
+
 else:
     _chatbot_error = None
 
@@ -118,9 +137,7 @@ def _invoke_with_progress(invoke_fn, *, label: str, request_id: str, poll_second
             try:
                 result = future.result(timeout=poll_seconds)
                 elapsed = time.perf_counter() - start_time
-                print(
-                    f"[CHATBOT][{request_id}] {label} completed in {elapsed:.2f}s"
-                )
+                print(f"[CHATBOT][{request_id}] {label} completed in {elapsed:.2f}s")
                 return result
             except TimeoutError:
                 elapsed = time.perf_counter() - start_time
@@ -128,6 +145,8 @@ def _invoke_with_progress(invoke_fn, *, label: str, request_id: str, poll_second
                     f"[CHATBOT][{request_id}] {label} still running "
                     f"after {elapsed:.2f}s..."
                 )
+
+
 REACT_APP_SERVER_PROTOCOL = "http"
 REACT_APP_SERVER_URL = "localhost:4243"
 
@@ -148,6 +167,10 @@ def _ensure_sqlite_column(table_name: str, column_name: str, ddl: str) -> None:
 
 
 _ensure_sqlite_column("ehtool_sessions", "workflow_id", "workflow_id INTEGER")
+_ensure_sqlite_column("chat_messages", "source", "source VARCHAR")
+_ensure_sqlite_column("chat_messages", "actions_json", "actions_json TEXT")
+_ensure_sqlite_column("chat_messages", "commands_json", "commands_json TEXT")
+_ensure_sqlite_column("chat_messages", "proposals_json", "proposals_json TEXT")
 
 app = FastAPI()
 
@@ -167,9 +190,229 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+logger = logging.getLogger(__name__)
+
+
+class ClientAppLogEvent(BaseModel):
+    event: str
+    level: str = "INFO"
+    message: Optional[str] = None
+    source: Optional[str] = None
+    sessionId: Optional[str] = None
+    url: Optional[str] = None
+    data: Optional[dict[str, Any]] = None
+
+
+class WorkflowInferenceRuntimeSyncRequest(BaseModel):
+    stage: Optional[str] = None
+
+
+_PREDICTION_OUTPUT_SUFFIXES = (
+    ".h5",
+    ".hdf5",
+    ".hdf",
+    ".tif",
+    ".tiff",
+    ".ome.tif",
+    ".ome.tiff",
+    ".zarr",
+    ".n5",
+    ".npy",
+    ".npz",
+    ".nii",
+    ".nii.gz",
+    ".mrc",
+    ".map",
+    ".rec",
+)
+
+
+def _path_has_prediction_suffix(path: pathlib.Path) -> bool:
+    lower_name = path.name.lower()
+    lower_path = str(path).lower()
+    return lower_name.endswith(_PREDICTION_OUTPUT_SUFFIXES) or lower_path.endswith(
+        (".ome.tif", ".ome.tiff", ".nii.gz")
+    )
+
+
+def _is_prediction_output_candidate(path: pathlib.Path) -> bool:
+    if path.name.startswith("."):
+        return False
+    if not _path_has_prediction_suffix(path):
+        return False
+    if path.is_dir():
+        return path.name.lower().endswith((".zarr", ".n5"))
+    return path.is_file()
+
+
+def _prediction_output_priority(path: pathlib.Path) -> tuple[float, int, str]:
+    name = path.name.lower()
+    preferred = 0
+    if name.startswith("result_xy"):
+        preferred = 3
+    elif name.startswith("result"):
+        preferred = 2
+    elif "prediction" in name or "pred" in name:
+        preferred = 1
+    try:
+        mtime = path.stat().st_mtime
+    except OSError:
+        mtime = 0.0
+    return (mtime, preferred, path.name)
+
+
+def _discover_prediction_output(path_value: Optional[str]) -> Optional[str]:
+    if not path_value or not str(path_value).strip():
+        return None
+
+    candidate = pathlib.Path(str(path_value).strip()).expanduser()
+    if not candidate.is_absolute():
+        candidate = (pathlib.Path.cwd() / candidate).resolve()
+    else:
+        candidate = candidate.resolve()
+    if _is_prediction_output_candidate(candidate):
+        return str(candidate)
+
+    if candidate.is_dir():
+        output_dir = candidate
+    elif candidate.parent.exists():
+        output_dir = candidate.parent
+    else:
+        return None
+
+    candidates = [
+        child
+        for child in output_dir.rglob("*")
+        if _is_prediction_output_candidate(child)
+    ]
+    if not candidates:
+        return None
+    return str(max(candidates, key=_prediction_output_priority).resolve())
+
+
+def _metadata_path(metadata: dict[str, Any], *keys: str) -> Optional[str]:
+    for key in keys:
+        value = metadata.get(key)
+        if isinstance(value, str) and value.strip():
+            return value
+    return None
+
+
+def _find_synced_inference_event(
+    db: Session,
+    *,
+    workflow_id: int,
+    event_type: str,
+    output_path: Optional[str] = None,
+    ended_at: Optional[str] = None,
+) -> Optional[WorkflowEvent]:
+    events = (
+        db.query(WorkflowEvent)
+        .filter(
+            WorkflowEvent.workflow_id == workflow_id,
+            WorkflowEvent.event_type == event_type,
+        )
+        .order_by(WorkflowEvent.id.desc())
+        .all()
+    )
+    for event in events:
+        payload = decode_json(event.payload_json)
+        if payload.get("source") != "runtime_sync":
+            continue
+        if output_path and payload.get("outputPath") == output_path:
+            return event
+        if ended_at and payload.get("runtimeEndedAt") == ended_at:
+            return event
+    return None
+
+
+@app.on_event("startup")
+async def configure_app_event_logging():
+    log_path = configure_process_logging("server_api")
+    logger.info("App event logging enabled at %s", log_path)
+
+
+@app.middleware("http")
+async def log_http_requests(request: Request, call_next):
+    request_id = request_id_from_request(request)
+    start_time = time.perf_counter()
+    path = request.url.path
+    method = request.method
+    client_host = request.client.host if request.client else None
+    is_client_log_endpoint = path == "/app/log-event"
+    if not is_client_log_endpoint:
+        append_app_event(
+            component="server_api",
+            event="http_request_started",
+            level="INFO",
+            message=f"{method} {path}",
+            request_id=request_id,
+            method=method,
+            path=path,
+            query=str(request.url.query or ""),
+            client_host=client_host,
+        )
+    try:
+        response = await call_next(request)
+    except Exception as exc:
+        append_app_event(
+            component="server_api",
+            event="http_request_failed",
+            level="ERROR",
+            message=f"{method} {path} failed",
+            request_id=request_id,
+            method=method,
+            path=path,
+            client_host=client_host,
+            latency_ms=round((time.perf_counter() - start_time) * 1000, 2),
+            error_type=exc.__class__.__name__,
+            error=str(exc),
+        )
+        raise
+
+    response.headers.setdefault("x-request-id", request_id)
+    latency_ms = round((time.perf_counter() - start_time) * 1000, 2)
+    if not is_client_log_endpoint or response.status_code >= 400 or latency_ms >= 1000:
+        append_app_event(
+            component="server_api",
+            event="http_request_completed",
+            level="INFO",
+            message=f"{method} {path} -> {response.status_code}",
+            request_id=request_id,
+            method=method,
+            path=path,
+            client_host=client_host,
+            status_code=response.status_code,
+            latency_ms=latency_ms,
+        )
+    return response
+
 
 @app.get("/health")
 def health():
+    return {"status": "ok"}
+
+
+@app.get("/app/log-path")
+def app_log_path():
+    return {"path": str(get_app_event_log_path())}
+
+
+@app.post("/app/log-event")
+async def app_log_event(payload: ClientAppLogEvent, request: Request):
+    request_id = request_id_from_request(request)
+    append_app_event(
+        component="client",
+        event=payload.event,
+        level=payload.level,
+        message=payload.message,
+        source=payload.source,
+        session_id=payload.sessionId,
+        url=payload.url,
+        data=payload.data or {},
+        request_id=request_id,
+        client_host=request.client.host if request.client else None,
+    )
     return {"status": "ok"}
 
 
@@ -357,22 +600,22 @@ def _resolve_requested_config(path: str) -> Optional[pathlib.Path]:
 
 
 def _read_model_architectures() -> List[str]:
-    # Prefer runtime registry from the installed connectomics package.
+    # Prefer the runtime model map from the installed connectomics package.
     try:
-        from connectomics.models.arch import list_architectures
+        from connectomics.model.build import MODEL_MAP
 
-        architectures = list_architectures()
+        architectures = sorted(set(MODEL_MAP.keys()))
         if architectures:
-            return sorted(set(architectures))
+            return architectures
     except Exception:
         pass
 
-    # Fallback: parse decorator registrations from source files.
-    pattern = re.compile(r"""@register_architecture\(\s*['"]([^'"]+)['"]\s*\)""")
+    # Fallback: parse the static model map from source.
+    pattern = re.compile(r"""['"]([^'"]+)['"]\s*:\s*[A-Za-z_][A-Za-z0-9_]*""")
     architectures = []
-    arch_root = PYTC_ROOT / "connectomics" / "models" / "arch"
-    for py_file in arch_root.rglob("*.py"):
-        text = py_file.read_text(encoding="utf-8", errors="ignore")
+    build_file = PYTC_ROOT / "connectomics" / "model" / "build.py"
+    if build_file.is_file():
+        text = build_file.read_text(encoding="utf-8", errors="ignore")
         architectures.extend(pattern.findall(text))
     return sorted(set(architectures))
 
@@ -443,6 +686,98 @@ def _is_probable_label_volume(image_array) -> bool:
     return False
 
 
+def _smallest_unsigned_dtype_for_max(max_value: int):
+    import numpy as np
+
+    if max_value <= np.iinfo(np.uint8).max:
+        return np.uint8
+    if max_value <= np.iinfo(np.uint16).max:
+        return np.uint16
+    if max_value <= np.iinfo(np.uint32).max:
+        return np.uint32
+    return np.uint64
+
+
+def _normalize_segmentation_volume_for_neuroglancer(volume):
+    import numpy as np
+
+    array = np.asarray(volume)
+    if array.ndim == 4:
+        if array.shape[0] <= 16:
+            channel_axis = 0
+        elif array.shape[-1] <= 16:
+            channel_axis = -1
+        else:
+            raise ValueError(
+                "4D label volumes must use a small channel axis to be visualized."
+            )
+
+        if channel_axis != 0:
+            array = np.moveaxis(array, channel_axis, 0)
+
+        channel_count = int(array.shape[0])
+        if channel_count == 1:
+            array = array[0]
+        elif channel_count == 2:
+            try:
+                from connectomics.utils.process import bc_watershed
+
+                array = bc_watershed(array, thres_small=1, seed_thres=1)
+            except Exception as exc:
+                raise ValueError(
+                    "Failed to derive a 3D segmentation preview from the "
+                    f"2-channel prediction volume: {exc}"
+                ) from exc
+        else:
+            array = np.argmax(array, axis=0)
+
+    if array.size == 0:
+        return array.astype(np.uint8, copy=False)
+
+    if np.issubdtype(array.dtype, np.bool_):
+        return array.astype(np.uint8, copy=False)
+
+    if np.issubdtype(array.dtype, np.floating):
+        if not np.all(np.isfinite(array)):
+            raise ValueError(
+                "Segmentation volumes must not contain NaN or infinite values."
+            )
+        rounded = np.rint(array)
+        if not np.allclose(array, rounded):
+            raise ValueError("Segmentation volumes must use integer-valued labels.")
+        array = rounded.astype(np.int64, copy=False)
+
+    if not np.issubdtype(array.dtype, np.integer):
+        raise ValueError(f"Segmentation volume dtype {array.dtype} is not supported.")
+
+    min_value = int(array.min())
+    if min_value < 0:
+        raise ValueError("Segmentation volumes must contain non-negative label ids.")
+
+    max_value = int(array.max())
+    target_dtype = _smallest_unsigned_dtype_for_max(max_value)
+    if array.dtype == np.dtype(target_dtype):
+        return array
+    return array.astype(target_dtype, copy=False)
+
+
+def _raise_missing_volume_error(path: pathlib.Path, role: str) -> None:
+    target = str(path)
+    role_name = "image" if role == "image" else "label"
+    if "/uploads/" in target or target.startswith("uploads/"):
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                f"The selected {role_name} file is no longer present in app uploads. "
+                f"Please re-select or re-upload it."
+            ),
+        )
+    raise HTTPException(
+        status_code=400,
+        detail=f"The selected {role_name} file does not exist on disk: {target}",
+    )
+
+
 @app.post("/neuroglancer")
 async def neuroglancer(
     req: Request,
@@ -492,6 +827,10 @@ async def neuroglancer(
             raise HTTPException(
                 status_code=400, detail="Image path or file is required."
             )
+        if not pathlib.Path(image).exists():
+            _raise_missing_volume_error(pathlib.Path(image), "image")
+        if label is not None and not pathlib.Path(label).exists():
+            _raise_missing_volume_error(pathlib.Path(label), "label")
 
         # neuroglancer setting -- bind to this to make accessible outside of container
         ip = "0.0.0.0"
@@ -504,16 +843,29 @@ async def neuroglancer(
         )
         try:
             im = readVol(image, image_type="im")
-            gt = readVol(label, image_type="im") if label else None
         except Exception as e:
             raise HTTPException(
                 status_code=400, detail=f"Failed to read image volume: {str(e)}"
             )
+        try:
+            gt = readVol(label, image_type="seg") if label else None
+            if gt is not None:
+                gt = _normalize_segmentation_volume_for_neuroglancer(gt)
+        except Exception as e:
+            raise HTTPException(
+                status_code=400, detail=f"Failed to prepare label volume: {str(e)}"
+            )
 
         def ngLayer(data, res, oo=[0, 0, 0], tt="segmentation"):
-            return neuroglancer.LocalVolume(
-                data, dimensions=res, volume_type=tt, voxel_offset=oo
-            )
+            try:
+                return neuroglancer.LocalVolume(
+                    data, dimensions=res, volume_type=tt, voxel_offset=oo
+                )
+            except Exception as exc:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Failed to prepare Neuroglancer {tt} layer: {exc}",
+                ) from exc
 
         with viewer.txn() as s:
             s.layers.append(name="im", layer=ngLayer(im, res, tt="image"))
@@ -569,6 +921,20 @@ async def start_model_training(
     db: Session = Depends(get_db),
 ):
     body = await req.json()
+    append_app_event(
+        component="server_api",
+        event="training_request_received",
+        level="INFO",
+        message="Training request received by API",
+        source="api_endpoint",
+        payload_keys=sorted(body.keys()),
+        config_origin_path=body.get("configOriginPath"),
+        output_path=body.get("outputPath"),
+        log_path=body.get("logPath"),
+        training_config_length=len(body.get("trainingConfig") or ""),
+        workflow_id=body.get("workflow_id") or body.get("workflowId"),
+        user_id=current_user.id,
+    )
     workflow_id = body.get("workflow_id") or body.get("workflowId")
     if workflow_id:
         workflow = get_user_workflow_or_404(
@@ -635,6 +1001,21 @@ async def start_model_inference(
     db: Session = Depends(get_db),
 ):
     body = await req.json()
+    append_app_event(
+        component="server_api",
+        event="inference_request_received",
+        level="INFO",
+        message="Inference request received by API",
+        source="api_endpoint",
+        payload_keys=sorted(body.keys()),
+        config_origin_path=body.get("configOriginPath"),
+        output_path=body.get("outputPath"),
+        checkpoint_path=(body.get("arguments") or {}).get("checkpoint")
+        or body.get("checkpointPath"),
+        inference_config_length=len(body.get("inferenceConfig") or ""),
+        workflow_id=body.get("workflow_id") or body.get("workflowId"),
+        user_id=current_user.id,
+    )
     workflow_id = body.get("workflow_id") or body.get("workflowId")
     if workflow_id:
         workflow = get_user_workflow_or_404(
@@ -696,6 +1077,156 @@ async def get_inference_logs():
     return _proxy_to_worker("get", "/inference_logs", timeout=5)
 
 
+@app.post("/api/workflows/{workflow_id}/sync-inference-runtime")
+async def sync_workflow_inference_runtime(
+    workflow_id: int,
+    body: Optional[WorkflowInferenceRuntimeSyncRequest] = None,
+    current_user: models.User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    workflow = get_user_workflow_or_404(
+        db, workflow_id=int(workflow_id), user_id=current_user.id
+    )
+    runtime = _proxy_to_worker("get", "/inference_logs", timeout=5) or {}
+    metadata = runtime.get("metadata") if isinstance(runtime, dict) else {}
+    metadata = metadata if isinstance(metadata, dict) else {}
+    phase = runtime.get("phase") if isinstance(runtime, dict) else None
+    checkpoint_path = _metadata_path(
+        metadata,
+        "checkpointPath",
+        "latestCheckpointPath",
+        "checkpoint",
+    )
+    output_directory = _metadata_path(metadata, "outputPath", "output_path")
+    prediction_path = _metadata_path(
+        metadata,
+        "predictionPath",
+        "latestPredictionPath",
+        "outputPredictionPath",
+    ) or _discover_prediction_output(output_directory)
+
+    if phase not in {"finished", "failed"}:
+        return {
+            "synced": False,
+            "phase": phase or "unknown",
+            "reason": "runtime_not_terminal",
+            "metadata": metadata,
+        }
+
+    runtime_payload = {
+        "source": "runtime_sync",
+        "runtimePhase": phase,
+        "runtimePid": runtime.get("pid") if isinstance(runtime, dict) else None,
+        "runtimeExitCode": (
+            runtime.get("exitCode") if isinstance(runtime, dict) else None
+        ),
+        "runtimeStartedAt": (
+            runtime.get("startedAt") if isinstance(runtime, dict) else None
+        ),
+        "runtimeEndedAt": runtime.get("endedAt") if isinstance(runtime, dict) else None,
+        "runtimeLineCount": (
+            runtime.get("lineCount") if isinstance(runtime, dict) else None
+        ),
+        "outputDirectory": output_directory,
+        "checkpointPath": checkpoint_path,
+        "configPath": runtime.get("configPath") if isinstance(runtime, dict) else None,
+        "configOriginPath": (
+            runtime.get("configOriginPath") if isinstance(runtime, dict) else None
+        )
+        or metadata.get("configOriginPath"),
+        "workflowId": metadata.get("workflowId") or workflow_id,
+        "predictionName": (
+            pathlib.Path(prediction_path).name if prediction_path else None
+        ),
+    }
+
+    if phase == "failed":
+        ended_at = runtime_payload.get("runtimeEndedAt")
+        existing = _find_synced_inference_event(
+            db,
+            workflow_id=workflow.id,
+            event_type="inference.failed",
+            ended_at=ended_at,
+        )
+        if existing is None:
+            append_event_for_workflow_if_present(
+                db,
+                workflow_id=workflow.id,
+                actor="system",
+                event_type="inference.failed",
+                stage="inference",
+                summary="Synchronized failed PyTC inference runtime.",
+                payload={
+                    **runtime_payload,
+                    "lastError": (
+                        runtime.get("lastError") if isinstance(runtime, dict) else None
+                    ),
+                },
+            )
+        return {
+            "synced": True,
+            "phase": phase,
+            "event_type": "inference.failed",
+            "deduplicated": existing is not None,
+        }
+
+    if not prediction_path:
+        return {
+            "synced": False,
+            "phase": phase,
+            "reason": "prediction_artifact_not_found",
+            "metadata": metadata,
+        }
+
+    requested_stage = body.stage if body else None
+    target_stage = requested_stage or (
+        "evaluation"
+        if workflow.stage in {"retraining_staged", "evaluation"}
+        else "inference"
+    )
+    update_payload = {
+        "stage": target_stage,
+        "inference_output_path": prediction_path,
+    }
+    if checkpoint_path:
+        update_payload["checkpoint_path"] = checkpoint_path
+    update_workflow_fields(db, workflow, update_payload, commit=True)
+
+    existing = _find_synced_inference_event(
+        db,
+        workflow_id=workflow.id,
+        event_type="inference.completed",
+        output_path=prediction_path,
+        ended_at=runtime_payload.get("runtimeEndedAt"),
+    )
+    event = existing
+    if event is None:
+        event = append_event_for_workflow_if_present(
+            db,
+            workflow_id=workflow.id,
+            actor="system",
+            event_type="inference.completed",
+            stage=target_stage,
+            summary="Synchronized completed PyTC inference output.",
+            payload={
+                **runtime_payload,
+                "outputPath": prediction_path,
+                "latestPredictionPath": prediction_path,
+            },
+        )
+
+    return {
+        "synced": True,
+        "phase": phase,
+        "event_type": "inference.completed",
+        "event_id": event.id if event else None,
+        "deduplicated": existing is not None,
+        "outputPath": prediction_path,
+        "checkpointPath": checkpoint_path,
+        "stage": target_stage,
+    }
+
+
 @app.get("/start_tensorboard")
 async def start_tensorboard(logPath: Optional[str] = None):
     return _proxy_to_worker(
@@ -709,6 +1240,11 @@ async def start_tensorboard(logPath: Optional[str] = None):
 @app.get("/get_tensorboard_url")
 async def get_tensorboard_url():
     return _proxy_to_worker("get", "/get_tensorboard_url", timeout=5)
+
+
+@app.get("/get_tensorboard_status")
+async def get_tensorboard_status():
+    return _proxy_to_worker("get", "/get_tensorboard_status", timeout=5)
 
 
 # TODO: Improve on this: basic idea: labels are binary -- black or white?
@@ -863,7 +1399,11 @@ def update_conversation(
     if not convo:
         raise HTTPException(status_code=404, detail="Conversation not found")
     if "title" in req_body:
-        convo.title = req_body["title"][:120]  # cap at 120 chars
+        title = str(req_body["title"] or "").strip()
+        if not title:
+            raise HTTPException(status_code=400, detail="Title must be non-empty")
+        convo.title = title[:120]  # cap at 120 chars
+        convo.updated_at = datetime.now(timezone.utc)
     db.commit()
     db.refresh(convo)
     return convo
@@ -959,10 +1499,7 @@ async def chat_query(
         )
     except Exception as exc:
         _chatbot_error = exc
-        print(
-            "[CHATBOT] LLM request failed: "
-            f"{exc.__class__.__name__}: {exc!r}"
-        )
+        print("[CHATBOT] LLM request failed: " f"{exc.__class__.__name__}: {exc!r}")
         traceback.print_exc()
         log_request_summary(
             request_id=request_id,
@@ -976,6 +1513,8 @@ async def chat_query(
         ) from exc
     messages = result.get("messages", [])
     response = messages[-1].content if messages else "No response generated"
+    response = _compact_agent_response(response)
+    response = _sanitize_agent_response(response)
     print(
         f"[CHATBOT][{request_id}] Chain returned messages={len(messages)}, "
         f"response_len={len(response) if isinstance(response, str) else 0}"
@@ -990,6 +1529,7 @@ async def chat_query(
     # Auto-title: first user message becomes the title (truncated)
     if convo.title == "New Chat":
         convo.title = query[:120].strip() or "New Chat"
+    convo.updated_at = datetime.now(timezone.utc)
 
     db.commit()
 
@@ -1042,6 +1582,114 @@ async def chat_status():
 # Helper chat endpoints (inline "?" popovers — RAG only, no training/inference)
 # ---------------------------------------------------------------------------
 
+_INLINE_HELP_DOCS_CACHE: Optional[dict[str, str]] = None
+
+
+def _inline_helper_mode() -> str:
+    return os.getenv("PYTC_INLINE_HELP_MODE", "docs").strip().lower()
+
+
+def _load_inline_help_docs() -> dict[str, str]:
+    global _INLINE_HELP_DOCS_CACHE
+    if _INLINE_HELP_DOCS_CACHE is not None:
+        return _INLINE_HELP_DOCS_CACHE
+
+    docs_dir = BASE_DIR / "server_api" / "chatbot" / "file_summaries"
+    docs: dict[str, str] = {}
+    if docs_dir.is_dir():
+        for path in docs_dir.rglob("*.md"):
+            docs[path.name] = path.read_text(encoding="utf-8", errors="ignore")
+    _INLINE_HELP_DOCS_CACHE = docs
+    return docs
+
+
+def _helper_tokens(*values: Optional[str]) -> set[str]:
+    text = " ".join(value or "" for value in values).lower()
+    return {
+        token
+        for token in re.findall(r"[a-z0-9_]+", text)
+        if len(token) >= 3 and token not in {"the", "and", "for", "this", "that"}
+    }
+
+
+def _extract_helper_snippet(
+    content: str, tokens: set[str], *, max_lines: int = 7
+) -> str:
+    lines = [line.strip() for line in content.splitlines() if line.strip()]
+    matching = [
+        line
+        for line in lines
+        if any(token in line.lower() for token in tokens)
+        and not line.lower().startswith("image:")
+    ]
+    selected = matching[:max_lines] or lines[:max_lines]
+    return "\n".join(selected)
+
+
+def _direct_inline_help(query: str, field_context: str) -> Optional[str]:
+    normalized = f"{field_context} {query}".lower()
+    if "aug_num" in normalized or "augment" in normalized:
+        return (
+            "`INFERENCE.AUG_NUM` controls how many test-time transformed predictions are "
+            "averaged for inference. Use `4` for quick smoke runs; use `8` or `16` "
+            "when you can spend more time for a more stable output. Higher values "
+            "increase runtime substantially."
+        )
+    if "samples_per_batch" in normalized or "batch size" in normalized:
+        return (
+            "Batch size controls how many patches are processed at once. Keep it at "
+            "`1` for large 3D volumes or memory-constrained runs; raise it only after "
+            "a successful small run proves there is headroom."
+        )
+    if "blending" in normalized:
+        return (
+            "Blending controls how overlapping inference patches are combined. "
+            "`gaussian` is usually the safer default because it softens patch-edge "
+            "artifacts; use simpler blending only for quick debugging."
+        )
+    if "do_eval" in normalized or "eval mode" in normalized:
+        return (
+            "Eval mode asks the inference config to run evaluation-style behavior "
+            "when matching labels/metrics are available. Leave it off for a plain "
+            "prediction export unless you intentionally configured evaluation inputs."
+        )
+    return None
+
+
+def _docs_only_helper_response(*, task_key: str, query: str, field_context: str) -> str:
+    direct = _direct_inline_help(query, field_context)
+    docs = _load_inline_help_docs()
+    tokens = _helper_tokens(task_key, query, field_context)
+    scored: list[tuple[int, str, str]] = []
+    for filename, content in docs.items():
+        haystack = f"{filename}\n{content}".lower()
+        score = sum(
+            3 if token in filename.lower() else 1
+            for token in tokens
+            if token in haystack
+        )
+        if score > 0:
+            scored.append((score, filename, content))
+    scored.sort(key=lambda item: item[0], reverse=True)
+
+    snippets = []
+    for _, filename, content in scored[:2]:
+        snippet = _extract_helper_snippet(content, tokens)
+        if snippet:
+            snippets.append(f"From `{filename}`:\n{snippet}")
+
+    if direct and snippets:
+        return f"{direct}\n\nRelevant local docs:\n\n" + "\n\n".join(snippets)
+    if direct:
+        return direct
+    if snippets:
+        return "Relevant local docs:\n\n" + "\n\n".join(snippets)
+    return (
+        "I could not find a precise local-doc match for this field. Use the visible "
+        "YAML key and current value as the source of truth, and prefer a small smoke "
+        "run before increasing runtime-heavy settings."
+    )
+
 
 def _ensure_helper_chat(task_key: str):
     """Lazily build a helper agent for *task_key*, reusing it on subsequent calls."""
@@ -1059,9 +1707,7 @@ def _ensure_helper_chat(task_key: str):
         _helper_chains[task_key] = (agent, reset_fn)
         _helper_histories[task_key] = []
         elapsed = time.perf_counter() - start_time
-        print(
-            f"[CHATBOT] Helper chain ready for task_key={task_key} in {elapsed:.2f}s"
-        )
+        print(f"[CHATBOT] Helper chain ready for task_key={task_key} in {elapsed:.2f}s")
         return True
     except Exception as exc:
         _chatbot_error = exc
@@ -1091,8 +1737,24 @@ async def chat_helper_query(req: Request):
         f"task_key={task_key} query_len={len(query.strip())}"
     )
 
+    if _inline_helper_mode() != "agent":
+        response = _docs_only_helper_response(
+            task_key=task_key,
+            query=query,
+            field_context=field_context,
+        )
+        log_request_summary(
+            request_id=request_id,
+            endpoint="/chat/helper/query",
+            start_time=request_start,
+            status="ok",
+        )
+        return {"response": response, "mode": "docs"}
+
     if not _ensure_helper_chat(task_key):
-        print(f"[CHATBOT][{request_id}] Helper chain unavailable for task_key={task_key}")
+        print(
+            f"[CHATBOT][{request_id}] Helper chain unavailable for task_key={task_key}"
+        )
         log_request_summary(
             request_id=request_id,
             endpoint="/chat/helper/query",
@@ -1127,8 +1789,7 @@ async def chat_helper_query(req: Request):
         )
     except Exception as exc:
         print(
-            "[CHATBOT] Helper LLM request failed: "
-            f"{exc.__class__.__name__}: {exc!r}"
+            "[CHATBOT] Helper LLM request failed: " f"{exc.__class__.__name__}: {exc!r}"
         )
         traceback.print_exc()
         log_request_summary(
@@ -1143,6 +1804,8 @@ async def chat_helper_query(req: Request):
         ) from exc
     messages = result.get("messages", [])
     response = messages[-1].content if messages else "No response generated"
+    response = _compact_agent_response(response, max_words=80)
+    response = _sanitize_agent_response(response)
     history.append({"role": "user", "content": user_content})
     history.append({"role": "assistant", "content": response})
     total_elapsed = time.perf_counter() - request_start
@@ -1169,6 +1832,8 @@ async def chat_helper_clear(req: Request):
 
 
 def run():
+    log_path = configure_process_logging("server_api")
+    print(f"[APP LOG] Writing app events to {log_path}")
     uvicorn.run(
         app,
         host="0.0.0.0",

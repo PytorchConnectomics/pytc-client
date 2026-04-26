@@ -4,6 +4,7 @@ import unittest
 
 import numpy as np
 import pytest
+
 pytest.importorskip("sqlalchemy")
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
@@ -108,7 +109,9 @@ class WorkflowRouteTests(unittest.TestCase):
             f"{reject_proposal.json()['id']}/reject"
         )
         self.assertEqual(reject_response.status_code, 200)
-        self.assertEqual(reject_response.json()["event_type"], "agent.proposal_rejected")
+        self.assertEqual(
+            reject_response.json()["event_type"], "agent.proposal_rejected"
+        )
 
         approve_proposal = self.client.post(
             f"/api/workflows/{workflow_id}/agent-actions",
@@ -140,6 +143,76 @@ class WorkflowRouteTests(unittest.TestCase):
         self.assertIn("agent.proposal_approved", event_types)
         self.assertIn("agent.proposal_rejected", event_types)
         self.assertIn("retraining.staged", event_types)
+
+    def test_agent_plan_preview_control_and_bundle_export(self):
+        workflow, _ = self._current_workflow()
+        workflow_id = workflow["id"]
+
+        plan_response = self.client.post(
+            f"/api/workflows/{workflow_id}/agent-plans",
+            json={
+                "title": "Case-study acceptance loop",
+                "goal": "Drive a bounded closed-loop segmentation study.",
+            },
+        )
+        self.assertEqual(plan_response.status_code, 200)
+        plan = plan_response.json()
+        self.assertEqual(plan["title"], "Case-study acceptance loop")
+        self.assertEqual(plan["approval_status"], "pending")
+        self.assertGreaterEqual(len(plan["steps"]), 8)
+        self.assertEqual(
+            plan["graph"]["execution_model"]["mode"],
+            "bounded_human_approved_plan_preview",
+        )
+        self.assertIn(
+            plan["graph"]["execution_model"]["langgraph"]["status"],
+            {"available_not_executing", "available_compile_failed", "unavailable"},
+        )
+
+        approval_step = next(
+            step for step in plan["steps"] if step["requires_approval"]
+        )
+        step_approval = self.client.post(
+            f"/api/workflows/{workflow_id}/agent-plans/{plan['id']}/steps/"
+            f"{approval_step['id']}/approve"
+        )
+        self.assertEqual(step_approval.status_code, 200)
+        self.assertEqual(step_approval.json()["status"], "approved")
+
+        approve_response = self.client.post(
+            f"/api/workflows/{workflow_id}/agent-plans/{plan['id']}/approve"
+        )
+        self.assertEqual(approve_response.status_code, 200)
+        self.assertEqual(approve_response.json()["status"], "approved")
+        self.assertEqual(approve_response.json()["approval_status"], "approved")
+
+        interrupt_response = self.client.post(
+            f"/api/workflows/{workflow_id}/agent-plans/{plan['id']}/interrupt"
+        )
+        self.assertEqual(interrupt_response.status_code, 200)
+        self.assertEqual(interrupt_response.json()["status"], "interrupted")
+
+        resume_response = self.client.post(
+            f"/api/workflows/{workflow_id}/agent-plans/{plan['id']}/resume"
+        )
+        self.assertEqual(resume_response.status_code, 200)
+        self.assertEqual(resume_response.json()["status"], "approved")
+
+        readiness_response = self.client.get(
+            f"/api/workflows/{workflow_id}/case-study-readiness"
+        )
+        self.assertEqual(readiness_response.status_code, 200)
+        readiness_gates = {
+            gate["id"]: gate for gate in readiness_response.json()["gates"]
+        }
+        self.assertTrue(readiness_gates["agent_plan_preview"]["complete"])
+        self.assertTrue(readiness_gates["agent_audit"]["complete"])
+
+        bundle_response = self.client.post(
+            f"/api/workflows/{workflow_id}/export-bundle"
+        )
+        self.assertEqual(bundle_response.status_code, 200)
+        self.assertEqual(len(bundle_response.json()["agent_plans"]), 1)
 
     def test_hotspots_and_impact_preview(self):
         workflow, _ = self._current_workflow()
@@ -217,6 +290,264 @@ class WorkflowRouteTests(unittest.TestCase):
         )
         self.assertIn(impact_payload["confidence"], {"low", "medium", "high"})
         self.assertIn("proofreading_mask_saved", impact_payload["signals"])
+
+        recommendation_response = self.client.get(
+            f"/api/workflows/{workflow_id}/agent/recommendation"
+        )
+        self.assertEqual(recommendation_response.status_code, 200)
+        recommendation = recommendation_response.json()
+        self.assertEqual(recommendation["stage"], "proofreading")
+        self.assertIn("training", recommendation["decision"].lower())
+        self.assertEqual(
+            recommendation["impact_preview"]["corrected_mask_path"],
+            "/tmp/corrected-z12.tif",
+        )
+        action_ids = {action["id"] for action in recommendation["actions"]}
+        self.assertIn("propose-retraining-handoff", action_ids)
+        readiness = {item["id"]: item for item in recommendation["readiness"]}
+        self.assertTrue(readiness["corrections"]["complete"])
+        self.assertGreaterEqual(len(recommendation["commands"]), 1)
+
+    def test_agent_can_start_proofreading_from_current_image_mask_pair(self):
+        workflow, _ = self._current_workflow()
+        workflow_id = workflow["id"]
+        image_path = "/tmp/mito-image.h5"
+        mask_path = "/tmp/mito-seg.h5"
+        patch_response = self.client.patch(
+            f"/api/workflows/{workflow_id}",
+            json={
+                "title": "Mito proofread",
+                "stage": "visualization",
+                "image_path": image_path,
+                "mask_path": mask_path,
+            },
+        )
+        self.assertEqual(patch_response.status_code, 200)
+
+        recommendation_response = self.client.get(
+            f"/api/workflows/{workflow_id}/agent/recommendation"
+        )
+        self.assertEqual(recommendation_response.status_code, 200)
+        recommendation = recommendation_response.json()
+        primary = next(
+            action
+            for action in recommendation["actions"]
+            if action["variant"] == "primary"
+        )
+        self.assertEqual(primary["id"], "start-proofreading")
+        effects = primary["client_effects"]
+        self.assertEqual(effects["navigate_to"], "mask-proofreading")
+        self.assertEqual(effects["runtime_action"]["kind"], "start_proofreading")
+        self.assertEqual(effects["set_proofreading_dataset_path"], image_path)
+        self.assertEqual(effects["set_proofreading_mask_path"], mask_path)
+        self.assertEqual(effects["set_proofreading_project_name"], "Mito proofread")
+
+        query_response = self.client.post(
+            f"/api/workflows/{workflow_id}/agent/query",
+            json={"query": "proofread this data"},
+        )
+        self.assertEqual(query_response.status_code, 200)
+        query_payload = query_response.json()
+        self.assertIn("proofread this data", query_payload["response"].lower())
+        self.assertEqual(
+            query_payload["commands"][0]["client_effects"]["runtime_action"]["kind"],
+            "start_proofreading",
+        )
+
+    def test_agent_routes_segmentation_and_capability_requests_to_app_actions(self):
+        workflow, _ = self._current_workflow()
+        workflow_id = workflow["id"]
+        self.client.patch(
+            f"/api/workflows/{workflow_id}",
+            json={
+                "stage": "inference",
+                "image_path": "/tmp/image.h5",
+                "mask_path": "/tmp/mask.h5",
+                "checkpoint_path": "/tmp/checkpoint.pth.tar",
+            },
+        )
+
+        segment_response = self.client.post(
+            f"/api/workflows/{workflow_id}/agent/query",
+            json={"query": "I want to get my volume segmented"},
+        )
+        self.assertEqual(segment_response.status_code, 200)
+        segment_payload = segment_response.json()
+        self.assertIn("run the model", segment_payload["response"].lower())
+        conversation_id = segment_payload["conversationId"]
+        self.assertIsInstance(conversation_id, int)
+        self.assertEqual(segment_payload["actions"][0]["label"], "Run model")
+        self.assertEqual(
+            segment_payload["commands"][0]["client_effects"]["runtime_action"]["kind"],
+            "start_inference",
+        )
+        conversation_response = self.client.get(
+            f"/chat/conversations/{conversation_id}"
+        )
+        self.assertEqual(conversation_response.status_code, 200)
+        messages = conversation_response.json()["messages"]
+        self.assertEqual(
+            [message["role"] for message in messages], ["user", "assistant"]
+        )
+        self.assertEqual(messages[0]["content"], "I want to get my volume segmented")
+        self.assertIn("run the model", messages[1]["content"].lower())
+        self.assertEqual(messages[1]["source"], "workflow_orchestrator")
+        self.assertEqual(messages[1]["actions"][0]["label"], "Run model")
+        self.assertEqual(
+            messages[1]["commands"][0]["client_effects"]["runtime_action"]["kind"],
+            "start_inference",
+        )
+
+        capabilities_response = self.client.post(
+            f"/api/workflows/{workflow_id}/agent/query",
+            json={
+                "query": "what can the agent do then? can it run things?",
+                "conversation_id": conversation_id,
+            },
+        )
+        self.assertEqual(capabilities_response.status_code, 200)
+        capabilities_payload = capabilities_response.json()
+        self.assertEqual(capabilities_payload["conversationId"], conversation_id)
+        self.assertIn("run model inference", capabilities_payload["response"])
+        self.assertGreaterEqual(len(capabilities_payload["actions"]), 1)
+        updated_conversation_response = self.client.get(
+            f"/chat/conversations/{conversation_id}"
+        )
+        self.assertEqual(updated_conversation_response.status_code, 200)
+        self.assertEqual(len(updated_conversation_response.json()["messages"]), 4)
+
+    def test_agent_answers_current_project_context_instead_of_repeating_next_step(self):
+        workflow, _ = self._current_workflow()
+        workflow_id = workflow["id"]
+        self.client.patch(
+            f"/api/workflows/{workflow_id}",
+            json={
+                "title": "mito25-paper-loop-smoke",
+                "stage": "proofreading",
+                "image_path": "/projects/mito25/data/image/mito25_im.h5",
+                "mask_path": "/projects/mito25/data/seg/mito25_seg.h5",
+            },
+        )
+
+        response = self.client.post(
+            f"/api/workflows/{workflow_id}/agent/query",
+            json={"query": "what exactly is the project I am on right now?"},
+        )
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertEqual(payload["intent"], "project_context")
+        self.assertIn("mito25-paper-loop-smoke", payload["response"])
+        self.assertIn("proofreading", payload["response"])
+        self.assertIn("mito25_im.h5", payload["response"])
+        self.assertNotIn("0 inference failures", payload["response"])
+
+    def test_agent_handles_greetings_without_prompt_leakage(self):
+        workflow, _ = self._current_workflow()
+        workflow_id = workflow["id"]
+        self.client.patch(
+            f"/api/workflows/{workflow_id}",
+            json={
+                "stage": "proofreading",
+                "image_path": "/tmp/image.h5",
+                "mask_path": "/tmp/mask.h5",
+            },
+        )
+
+        response = self.client.post(
+            f"/api/workflows/{workflow_id}/agent/query",
+            json={"query": "hi!"},
+        )
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertIn("Hi.", payload["response"])
+        self.assertIn("Next:", payload["response"])
+        self.assertNotIn("Supervisor Agent", payload["response"])
+        self.assertNotIn("RESPONSE STYLE", payload["response"])
+        self.assertEqual(payload["actions"], [])
+        self.assertEqual(payload["commands"], [])
+        self.assertEqual(payload["intent"], "greeting")
+
+    def test_agent_can_offer_evaluation_and_export_actions(self):
+        workflow, _ = self._current_workflow()
+        workflow_id = workflow["id"]
+        self.client.patch(
+            f"/api/workflows/{workflow_id}",
+            json={
+                "stage": "evaluation",
+                "label_path": "/tmp/ground-truth.tif",
+                "inference_output_path": "/tmp/candidate.tif",
+            },
+        )
+        baseline_run = self.client.post(
+            f"/api/workflows/{workflow_id}/model-runs",
+            json={
+                "run_type": "inference",
+                "status": "completed",
+                "output_path": "/tmp/baseline.tif",
+            },
+        )
+        self.assertEqual(baseline_run.status_code, 200)
+        candidate_run = self.client.post(
+            f"/api/workflows/{workflow_id}/model-runs",
+            json={
+                "run_type": "inference",
+                "status": "completed",
+                "output_path": "/tmp/candidate.tif",
+            },
+        )
+        self.assertEqual(candidate_run.status_code, 200)
+
+        evaluation_response = self.client.post(
+            f"/api/workflows/{workflow_id}/agent/query",
+            json={"query": "compare results and compute metrics"},
+        )
+        self.assertEqual(evaluation_response.status_code, 200)
+        evaluation_payload = evaluation_response.json()
+        self.assertIn("compute before/after metrics", evaluation_payload["response"])
+        compute_action = evaluation_payload["actions"][0]
+        self.assertEqual(compute_action["id"], "compute-evaluation")
+        self.assertEqual(compute_action["risk_level"], "writes_workflow_record")
+        self.assertTrue(compute_action["requires_approval"])
+        self.assertEqual(
+            compute_action["client_effects"]["workflow_action"]["kind"],
+            "compute_evaluation",
+        )
+        self.assertEqual(
+            compute_action["client_effects"]["workflow_action"][
+                "baseline_prediction_path"
+            ],
+            "/tmp/baseline.tif",
+        )
+
+        export_response = self.client.post(
+            f"/api/workflows/{workflow_id}/agent/query",
+            json={"query": "export evidence bundle"},
+        )
+        self.assertEqual(export_response.status_code, 200)
+        export_payload = export_response.json()
+        self.assertEqual(export_payload["actions"][0]["id"], "export-workflow-bundle")
+        self.assertEqual(export_payload["actions"][0]["risk_level"], "exports_evidence")
+        self.assertTrue(export_payload["actions"][0]["requires_approval"])
+        self.assertEqual(
+            export_payload["actions"][0]["client_effects"]["workflow_action"]["kind"],
+            "export_bundle",
+        )
+
+    def test_agent_slash_command_aliases_route_to_actions(self):
+        workflow, _ = self._current_workflow()
+        workflow_id = workflow["id"]
+
+        response = self.client.post(
+            f"/api/workflows/{workflow_id}/agent/query",
+            json={"query": "/infer"},
+        )
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertEqual(payload["intent"], "start_inference")
+        self.assertEqual(payload["actions"][0]["id"], "start-inference")
+        self.assertEqual(payload["actions"][0]["risk_level"], "runs_job")
+        self.assertTrue(payload["actions"][0]["requires_approval"])
+        self.assertTrue(payload["tasks"])
 
     def test_ehtool_load_classify_save_and_export_append_workflow_events(self):
         workflow, _ = self._current_workflow()

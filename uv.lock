@@ -1,5 +1,5 @@
 version = 1
-revision = 3
+revision = 2
 requires-python = ">=3.10, <3.12"
 resolution-markers = [
     "python_full_version >= '3.11' and sys_platform == 'darwin'",
@@ -2829,6 +2829,7 @@ dependencies = [
     { name = "langchain-classic" },
     { name = "langchain-community" },
     { name = "langchain-ollama" },
+    { name = "langgraph" },
     { name = "neuroglancer" },
     { name = "numpy" },
     { name = "opencv-python" },
@@ -2869,6 +2870,7 @@ requires-dist = [
     { name = "langchain-classic", specifier = "==1.0.0" },
     { name = "langchain-community", specifier = "==0.4.1" },
     { name = "langchain-ollama", specifier = "==1.0.0" },
+    { name = "langgraph", specifier = ">=1.0.0" },
     { name = "neuroglancer", specifier = "==2.38" },
     { name = "numpy", specifier = ">=1.24,<2.0" },
     { name = "opencv-python", specifier = ">=4.11.0.86" },

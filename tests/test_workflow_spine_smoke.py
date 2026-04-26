@@ -12,6 +12,7 @@ from fastapi.testclient import TestClient
 
 from server_api.auth import database as auth_database
 from server_api.auth import models
+import server_api.main as server_api_main
 from server_api.main import app as server_api_app
 
 
@@ -42,6 +43,9 @@ class WorkflowSpineSmokeTests(unittest.TestCase):
         self.engine.dispose()
         self.temp_dir.cleanup()
 
+    def test_chatbot_backend_import_contract_is_available(self):
+        self.assertIsNotNone(server_api_main.build_chain)
+
     def test_spine_loop_load_proofread_stage_and_export_evidence(self):
         workflow_response = self.client.get("/api/workflows/current")
         self.assertEqual(workflow_response.status_code, 200)
@@ -71,8 +75,15 @@ class WorkflowSpineSmokeTests(unittest.TestCase):
             json={"query": "stage corrected masks for retraining"},
         )
         self.assertEqual(query_response.status_code, 200)
-        proposals = query_response.json()["proposals"]
+        query_payload = query_response.json()
+        proposals = query_payload["proposals"]
         self.assertEqual(len(proposals), 1)
+        self.assertGreaterEqual(len(query_payload["actions"]), 1)
+        self.assertGreaterEqual(len(query_payload["commands"]), 1)
+        self.assertEqual(
+            query_payload["actions"][0]["client_effects"]["navigate_to"],
+            "training",
+        )
         proposal_id = proposals[0]["id"]
 
         approve_response = self.client.post(
@@ -81,6 +92,23 @@ class WorkflowSpineSmokeTests(unittest.TestCase):
         self.assertEqual(approve_response.status_code, 200)
         self.assertEqual(
             approve_response.json()["workflow"]["stage"], "retraining_staged"
+        )
+
+        launch_query_response = self.client.post(
+            f"/api/workflows/{workflow_id}/agent/query",
+            json={"query": "start training"},
+        )
+        self.assertEqual(launch_query_response.status_code, 200)
+        launch_query_payload = launch_query_response.json()
+        self.assertEqual(
+            launch_query_payload["commands"][0]["client_effects"]["runtime_action"][
+                "kind"
+            ],
+            "start_training",
+        )
+        self.assertEqual(
+            launch_query_payload["commands"][0]["client_effects"]["navigate_to"],
+            "training",
         )
 
         hotspots_response = self.client.get(f"/api/workflows/{workflow_id}/hotspots")

@@ -2,11 +2,28 @@
 
 set -euo pipefail
 
-# Prefer Homebrew's Node over nvm to avoid version conflicts
-export PATH="/opt/homebrew/bin:$PATH"
-export OLLAMA_BASE_URL="http://cscigpu08.bc.edu:4443"
-export OLLAMA_MODEL="gpt-oss:20b"
-export OLLAMA_EMBED_MODEL="qwen3-embedding:8b"
+# Prefer system/Homebrew Node over shell-specific managers to avoid version conflicts.
+append_path_if_dir() {
+	local dir="$1"
+	if [[ -d "${dir}" && ":${PATH}:" != *":${dir}:"* ]]; then
+		PATH="${dir}:${PATH}"
+	fi
+}
+
+append_path_if_dir "/opt/homebrew/bin"
+append_path_if_dir "/usr/local/bin"
+
+if command -v brew >/dev/null 2>&1; then
+	BREW_PREFIX="$(brew --prefix 2>/dev/null || true)"
+	if [[ -n "${BREW_PREFIX}" ]]; then
+		append_path_if_dir "${BREW_PREFIX}/bin"
+	fi
+fi
+
+export PATH
+export OLLAMA_BASE_URL="${OLLAMA_BASE_URL:-http://127.0.0.1:11434}"
+export OLLAMA_MODEL="${OLLAMA_MODEL:-llama3.2:1b}"
+export OLLAMA_EMBED_MODEL="${OLLAMA_EMBED_MODEL:-nomic-embed-text:latest}"
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 CLIENT_DIR="${ROOT_DIR}/client"
@@ -16,9 +33,10 @@ if ! command -v uv >/dev/null 2>&1; then
 	echo "uv is required. Install it from https://docs.astral.sh/uv/." >&2
 	exit 1
 fi
+UV_BIN="$(command -v uv)"
 
-if ! command -v npm >/dev/null 2>&1; then
-	echo "npm is required to run the Electron client." >&2
+if ! NPM_BIN="$(command -v npm)"; then
+	echo "npm is required to run the Electron client. Current PATH: ${PATH}" >&2
 	exit 1
 fi
 
@@ -108,27 +126,45 @@ start_service \
 	8000 \
 	"http://localhost:8000/" \
 	"${LOG_DIR}/data-server.log" \
-	uv run --directory "${ROOT_DIR}" python server_api/scripts/serve_data.py
+	"${UV_BIN}" run --directory "${ROOT_DIR}" python server_api/scripts/serve_data.py
 
 start_service \
 	"API server" \
 	4242 \
 	"http://localhost:4242/health" \
 	"${LOG_DIR}/api-server.log" \
-	env PYTHONDONTWRITEBYTECODE=1 uv run --directory "${ROOT_DIR}" python -m server_api.main
+	env PYTHONDONTWRITEBYTECODE=1 "${UV_BIN}" run --directory "${ROOT_DIR}" python -m server_api.main
 
 start_service \
 	"PyTC server" \
 	4243 \
 	"http://localhost:4243/hello" \
 	"${LOG_DIR}/pytc-server.log" \
-	uv run --directory "${ROOT_DIR}" python -m server_pytc.main
+	"${UV_BIN}" run --directory "${ROOT_DIR}" python -m server_pytc.main
+
+ensure_client_dependencies() {
+	if [[ -x "${CLIENT_DIR}/node_modules/.bin/react-scripts" && -x "${CLIENT_DIR}/node_modules/.bin/cross-env" ]]; then
+		return 0
+	fi
+
+	local install_log="${LOG_DIR}/npm-install.log"
+	echo "Client dependencies missing; installing with npm (log: $(relative_log_path "${install_log}"))..."
+	: >"${install_log}"
+	if "${NPM_BIN}" install >"${install_log}" 2>&1; then
+		echo "Client dependencies installed"
+	else
+		echo "ERROR: npm install failed. Recent log output:" >&2
+		tail -n 60 "${install_log}" >&2 || true
+		exit 1
+	fi
+}
 
 pushd "${CLIENT_DIR}" >/dev/null
+ensure_client_dependencies
 if [[ "${SKIP_CLIENT_BUILD:-0}" != "1" ]]; then
 	BUILD_LOG="${LOG_DIR}/react-build.log"
 	echo "Building React client (log: $(relative_log_path "${BUILD_LOG}"))..."
-	if npm run build >"${BUILD_LOG}" 2>&1; then
+	if "${NPM_BIN}" run build >"${BUILD_LOG}" 2>&1; then
 		echo "React build complete"
 	else
 		echo "ERROR: React build failed. Recent log output:" >&2
@@ -148,7 +184,7 @@ if port_is_listening 3000; then
 else
 	: >"${REACT_LOG}"
 	echo "React server starting on :3000 (log: $(relative_log_path "${REACT_LOG}"))"
-	BROWSER=none npm start >"${REACT_LOG}" 2>&1 &
+	BROWSER=none "${NPM_BIN}" start >"${REACT_LOG}" 2>&1 &
 	STARTED_PIDS+=("$!")
 fi
 
@@ -171,7 +207,7 @@ wait_for_react() {
 if wait_for_react; then
 	echo "Startup logs are under $(relative_log_path "${LOG_DIR}")"
 	echo "Starting Electron client..."
-	ENVIRONMENT=development npm run electron
+	ENVIRONMENT=development "${NPM_BIN}" run electron
 else
 	echo "Failed to start React server" >&2
 	exit 1

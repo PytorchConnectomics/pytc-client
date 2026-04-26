@@ -32,6 +32,7 @@ dependencies = [
     "uvicorn==0.38.0",
     "zarr>=2.18",
     "connectomics",
+    "langgraph>=1.0.0",
 ]
 
 [tool.uv.sources]
