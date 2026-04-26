@@ -110,6 +110,10 @@ function resolveSliderPath(configObj, type, key) {
   return pickFirstExistingPath(configObj, candidates);
 }
 
+export function getSliderPath(configObj, type, key) {
+  return resolveSliderPath(configObj, type, key);
+}
+
 export function getSliderValue(configObj, type, key) {
   const path = resolveSliderPath(configObj, type, key);
   return path ? getPathValue(configObj, path) : undefined;
@@ -251,34 +255,27 @@ export function applyInputPaths(
   }
 }
 
-export function getArchitectureValue(configObj) {
-  if (!isObject(configObj)) return undefined;
-  const path = pickFirstExistingPath(configObj, [
+export function getArchitecturePath(configObj) {
+  if (!isObject(configObj)) return null;
+  return pickFirstExistingPath(configObj, [
     ["MODEL", "ARCHITECTURE"],
     ["model", "arch", "type"],
     ["default", "model", "arch", "profile"],
   ]);
+}
+
+export function getArchitectureValue(configObj) {
+  const path = getArchitecturePath(configObj);
   return path ? getPathValue(configObj, path) : undefined;
 }
 
 export function isArchitectureSupported(configObj) {
-  if (!isObject(configObj)) return false;
-  return Boolean(
-    pickFirstExistingPath(configObj, [
-      ["MODEL", "ARCHITECTURE"],
-      ["model", "arch", "type"],
-      ["default", "model", "arch", "profile"],
-    ]),
-  );
+  return Boolean(getArchitecturePath(configObj));
 }
 
 export function setArchitectureValue(configObj, value) {
   if (!isObject(configObj)) return false;
-  const existingPath = pickFirstExistingPath(configObj, [
-    ["MODEL", "ARCHITECTURE"],
-    ["model", "arch", "type"],
-    ["default", "model", "arch", "profile"],
-  ]);
+  const existingPath = getArchitecturePath(configObj);
   if (existingPath) {
     setPathValue(configObj, existingPath, value);
     return true;
