@@ -93,6 +93,29 @@ evaluation over fresh app-generated outputs.
 - Suggested project mounting now registers detected workflow paths: dataset,
   image, label/mask, prediction, and checkpoint paths are pushed into the
   workflow session and logged as a `dataset.loaded` event.
+- Suggested project mounting is now project-agnostic through
+  `pytc-project-profile/v1`: folders can be `image_only`, `image_mask_pair`, or
+  `closed_loop_ready`, and image-only volume folders count as valid workflow
+  starts.
+- Workflow preflight now exposes the current runnable state for setup,
+  visualization, inference, proofreading, training, and evaluation from typed
+  workflow records. It treats config/YAML as an agent-inferred implementation
+  detail rather than a first-order biologist blocker.
+- A stable app-shell `What next?` button now opens the assistant and asks the
+  workflow agent for the next action from current preflight/evidence state,
+  preserving the response and action cards in chat history.
+- The app now opens directly to the main module shell. The startup
+  session-intake/splash gate was removed because the user goal is always the
+  same closed-loop segmentation task.
+- The workflow agent now gathers biological project context at action time:
+  before inference, training, or proofreading triage it asks for missing
+  modality, target structure, and speed/accuracy preference, then stores that
+  as `metadata.project_context`.
+- Suggested project mounting no longer depends on a startup goal. SNEMI/TIFF
+  and raw HDF5 smoke-data fixtures remain available as realistic alternate
+  starts alongside the mito smoke project.
+- A fresh workflow reset path now creates a clean `setup` workflow session
+  while preserving old workflow evidence for audit/history.
 - File Management now keeps the suggested project setup card on the root
   project view only, reducing repeated clutter once the user is inside a
   mounted project.
@@ -164,10 +187,9 @@ Run the first fresh app-generated before/after loop:
    - Implemented agent continuity: the assistant drawer/status entry exposes
      the next recommended workflow action and a one-click evidence/context view
      without requiring a persistent canvas strip.
-   - Next UI hardening: expose model versions/config lineage more directly,
-     make file-role assignment editable when auto-detection guesses wrong, and
-     make the file/project mounting flow feel like guided biomedical dataset
-     setup rather than a generic file browser.
+   - Next UI hardening: expose model versions/config lineage as secondary
+     provenance, make file-role assignment editable when auto-detection guesses
+     wrong, and continue reducing the generic file-browser feel.
    - Keep approval/rejection controls for risky agent actions.
    - Refine workflow rail placement and visibility.
    - Do not expose researcher protocol gates to participants.
@@ -195,9 +217,11 @@ Run the first fresh app-generated before/after loop:
    - Next agentic-system hardening: durable job/task state, approval modes,
      workflow hooks/gates, focused biomedical subagents, and context compaction
      for long assistant sessions.
-   - Next UI integration: add a compact preflight surface near training and
-     inference start controls that says "ready", "missing X", or "agent can run
-     this with inferred defaults" without exposing raw YAML by default.
+   - Implemented preflight backend/context: training and inference readiness can
+     now say "ready", "missing X", or "agent can run this with inferred
+     defaults" without exposing raw YAML by default.
+   - Next UI integration: surface preflight only at decision points, not as
+     persistent clutter.
 
 7. Evaluation and provenance
    - Compute before/after segmentation metrics over real outputs.
@@ -230,8 +254,12 @@ Run the first fresh app-generated before/after loop:
      checkpoint detection, duplicate/stale mount cleanup, better picker labels,
      one-click test-project mounting for smoke workflows, and editable role
      confirmation when auto-detected project roles are wrong. Current progress:
-     suggested projects are profiled and registered into workflow state; missing
-     work is an editable role-confirmation surface before registration.
+     suggested and manually mounted projects are profiled first, then routed
+     through a compact role-confirmation modal before workflow registration.
+     Confirmed config paths are persisted as workflow state and used as the
+     preferred agent training preset. Remaining hardening is multi-dataset
+     selection, batch role assignment, and browser-level blank-state rehearsal
+     on non-mito data.
 
 10. Paper alignment
    - Maintain the paper-claim-vs-implementation matrix.

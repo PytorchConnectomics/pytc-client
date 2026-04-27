@@ -109,6 +109,42 @@ Implemented UI commitments:
 - File path text boxes remain editable fallback controls, but ordinary users
   should be able to open the picker from the folder icon or Browse button.
 
+## 2026-04-26 Contextual Project Context
+
+- Do not use a startup splash or session-goal gate. The product goal is fixed:
+  move from an initial biomedical image volume to fully proofread
+  segmentations.
+- The agent should gather biological context only when it is needed to run or
+  stage a workflow action: inference, training, proofreading triage, or
+  comparison.
+- Minimal project context is `imaging_modality`, `target_structure`, and
+  `optimization_priority` such as speed versus accuracy. Store it under
+  `metadata.project_context`, distinct from workflow progress events.
+- The agent may ask one compact question before acting: modality, target
+  structure, and speed/accuracy preference. The user can also say "use
+  defaults" to proceed with conservative settings.
+- Running progress remains append-only workflow events and artifacts:
+  `dataset.loaded`, training/inference runs, correction sets, evaluation
+  results, and bundle exports.
+
+## 2026-04-27 Project Role Confirmation Contract
+
+- The app and agent may infer image, mask/label, prediction, checkpoint, and
+  config roles from a mounted directory, but workflow state is not populated
+  until the user confirms or edits those roles.
+- Image volume is the only required setup role. Mask/label, prediction,
+  checkpoint, and config roles are optional so image-only folders remain valid
+  starting points.
+- Confirmed roles are recorded as a `dataset.loaded` event with the inferred
+  profile mode, mounted directory, confirmed role paths, and resulting workflow
+  patch.
+- Config is now a first-class workflow path. It may seed agent-selected
+  training defaults, but the user still approves the resulting runtime action
+  before a job launches.
+- The agent should treat unconfirmed project-role guesses as suggestions, not
+  facts. After confirmation, it can use those paths to recommend visualization,
+  inference, proofreading, training, or comparison.
+
 ## 2026-04-26 Agent-Run Training Defaults
 
 - The biologist should provide the goal, data, and approval; the agent should
@@ -121,6 +157,34 @@ Implemented UI commitments:
   memory-safe defaults are staged together before the user approves the run.
 - Meta questions such as "how did you run so quickly?" should state whether the
   app actually ran a job. Do not answer those with retrieved training docs.
+
+## 2026-04-26 Project-Agnostic Setup Contract
+
+- The agent and UI should not depend on the mito25 demo path. Any mounted folder
+  can become a workable project if it contains a detectable image volume.
+- Folder profiling returns `pytc-project-profile/v1` with modes:
+  `not_workable`, `image_only`, `image_mask_pair`, and `closed_loop_ready`.
+- The biologist-facing blocker is the missing data artifact, not YAML. Training
+  configs and inference presets are agent-inferred implementation details unless
+  the user asks to override them.
+- Workflow preflight is exposed at `GET /api/workflows/{id}/preflight`. It
+  reports whether setup, visualization, inference, proofreading, training, and
+  evaluation can run from the current workflow records.
+- Image-only projects are valid starts. The next step is to add/run a model or
+  provide a mask/label, not to force the mito smoke fixture.
+
+## 2026-04-27 Quick Next-Step Affordance
+
+- The app shell can ask the workflow agent `What should I do next?` from any
+  module. This is a stable entry point, not a per-module card.
+- The quick action routes through the same workflow-agent chat path as typed
+  requests, so the answer is persisted, action cards are preserved in history,
+  and risky actions remain approval-gated.
+- The agent response should be derived from workflow preflight, artifacts, runs,
+  corrections, metrics, and current stage. The prompt/query is only a trigger;
+  it must not become a free-form hallucinated opinion.
+- Keep the answer compact: one recommended action, one reason, readiness count,
+  and at most one blocker.
 
 ## 2026-04-25 Claude Code Pattern Pass
 
