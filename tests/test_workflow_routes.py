@@ -90,6 +90,180 @@ class WorkflowRouteTests(unittest.TestCase):
         event_types = [event["event_type"] for event in events_response.json()]
         self.assertEqual(event_types, ["workflow.created", "dataset.loaded"])
 
+    def test_current_workflow_reset_starts_clean_session(self):
+        workflow, _ = self._current_workflow()
+        patch_response = self.client.patch(
+            f"/api/workflows/{workflow['id']}",
+            json={
+                "stage": "proofreading",
+                "image_path": "/tmp/old-image.h5",
+                "mask_path": "/tmp/old-mask.h5",
+                "metadata": {"session_onboarding": {"goals": "old goal"}},
+            },
+        )
+        self.assertEqual(patch_response.status_code, 200)
+
+        reset_response = self.client.post(
+            "/api/workflows/current/reset",
+            json={"metadata": {"created_from": "test_reset"}},
+        )
+        self.assertEqual(reset_response.status_code, 200)
+        reset_payload = reset_response.json()
+        reset_workflow = reset_payload["workflow"]
+        self.assertNotEqual(reset_workflow["id"], workflow["id"])
+        self.assertEqual(reset_workflow["stage"], "setup")
+        self.assertIsNone(reset_workflow["image_path"])
+        self.assertEqual(reset_workflow["metadata"]["created_from"], "test_reset")
+        self.assertEqual(reset_payload["events"][0]["event_type"], "workflow.created")
+
+        current_workflow, _ = self._current_workflow()
+        self.assertEqual(current_workflow["id"], reset_workflow["id"])
+
+    def test_workflow_preflight_accepts_image_only_project_start(self):
+        workflow, _ = self._current_workflow()
+        workflow_id = workflow["id"]
+
+        patch_response = self.client.patch(
+            f"/api/workflows/{workflow_id}",
+            json={
+                "dataset_path": "/tmp/new-project",
+                "image_path": "/tmp/new-project/image/sample.ome.tif",
+            },
+        )
+        self.assertEqual(patch_response.status_code, 200)
+
+        response = self.client.get(f"/api/workflows/{workflow_id}/preflight")
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertEqual(payload["overall_status"], "image_only")
+        self.assertIn("checkpoint or mask/label", payload["summary"])
+
+        items = {item["id"]: item for item in payload["items"]}
+        self.assertTrue(items["project_setup"]["can_run"])
+        self.assertTrue(items["visualization"]["can_run"])
+        self.assertFalse(items["inference"]["can_run"])
+        self.assertEqual(items["inference"]["missing"], ["checkpoint"])
+        self.assertFalse(items["proofreading"]["can_run"])
+        self.assertIn("mask, label, or prediction", items["proofreading"]["missing"])
+
+        recommendation_response = self.client.get(
+            f"/api/workflows/{workflow_id}/agent/recommendation"
+        )
+        self.assertEqual(recommendation_response.status_code, 200)
+        self.assertEqual(
+            recommendation_response.json()["decision"],
+            "Add a checkpoint or mask/label.",
+        )
+
+        quick_next_response = self.client.post(
+            f"/api/workflows/{workflow_id}/agent/query",
+            json={"query": "What should I do next?"},
+        )
+        self.assertEqual(quick_next_response.status_code, 200)
+        quick_next_payload = quick_next_response.json()
+        self.assertEqual(quick_next_payload["intent"], "status")
+        self.assertIn("Add a checkpoint", quick_next_payload["response"])
+        self.assertTrue(quick_next_payload["actions"])
+
+    def test_workflow_preflight_treats_config_as_agent_inferred_detail(self):
+        workflow, _ = self._current_workflow()
+        workflow_id = workflow["id"]
+
+        patch_response = self.client.patch(
+            f"/api/workflows/{workflow_id}",
+            json={
+                "image_path": "/tmp/project/raw-volume.h5",
+                "label_path": "/tmp/project/labels-volume.h5",
+                "mask_path": "/tmp/project/labels-volume.h5",
+                "config_path": "/tmp/project/configs/custom.yaml",
+            },
+        )
+        self.assertEqual(patch_response.status_code, 200)
+        self.assertEqual(
+            patch_response.json()["config_path"], "/tmp/project/configs/custom.yaml"
+        )
+
+        response = self.client.get(f"/api/workflows/{workflow_id}/preflight")
+        self.assertEqual(response.status_code, 200)
+        items = {item["id"]: item for item in response.json()["items"]}
+
+        self.assertEqual(response.json()["overall_status"], "ready_to_proofread")
+        self.assertTrue(items["proofreading"]["can_run"])
+        self.assertTrue(items["training"]["can_run"])
+        self.assertEqual(items["training"]["missing"], [])
+        self.assertIn("inferred defaults", items["training"]["action"])
+        self.assertEqual(items["inference"]["missing"], ["checkpoint"])
+
+    def test_agent_training_prefers_confirmed_project_config_path(self):
+        workflow, _ = self._current_workflow()
+        workflow_id = workflow["id"]
+        self.client.patch(
+            f"/api/workflows/{workflow_id}",
+            json={
+                "title": "custom-connectomics-project",
+                "stage": "retraining_staged",
+                "image_path": "/projects/custom/data/raw.h5",
+                "corrected_mask_path": "/projects/custom/data/corrected.tif",
+                "config_path": "/projects/custom/configs/custom-training.yaml",
+                "metadata": {
+                    "project_context": {
+                        "imaging_modality": "EM",
+                        "target_structure": "membranes",
+                        "optimization_priority": "accuracy",
+                    }
+                },
+            },
+        )
+
+        response = self.client.post(
+            f"/api/workflows/{workflow_id}/agent/query",
+            json={"query": "train the model"},
+        )
+        self.assertEqual(response.status_code, 200)
+        effects = response.json()["commands"][0]["client_effects"]
+        self.assertEqual(
+            effects["set_training_config_preset"],
+            "/projects/custom/configs/custom-training.yaml",
+        )
+
+    def test_workflow_preflight_reports_compare_ready_from_two_outputs(self):
+        workflow, _ = self._current_workflow()
+        workflow_id = workflow["id"]
+
+        patch_response = self.client.patch(
+            f"/api/workflows/{workflow_id}",
+            json={
+                "image_path": "/tmp/project/raw-volume.h5",
+                "label_path": "/tmp/project/reference.h5",
+                "checkpoint_path": "/tmp/project/checkpoint.pth.tar",
+                "inference_output_path": "/tmp/project/candidate.h5",
+            },
+        )
+        self.assertEqual(patch_response.status_code, 200)
+        for name, output_path in [
+            ("baseline", "/tmp/project/baseline.h5"),
+            ("candidate", "/tmp/project/candidate.h5"),
+        ]:
+            run_response = self.client.post(
+                f"/api/workflows/{workflow_id}/model-runs",
+                json={
+                    "run_type": "inference",
+                    "status": "completed",
+                    "name": name,
+                    "output_path": output_path,
+                },
+            )
+            self.assertEqual(run_response.status_code, 200)
+
+        response = self.client.get(f"/api/workflows/{workflow_id}/preflight")
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        items = {item["id"]: item for item in payload["items"]}
+        self.assertEqual(payload["overall_status"], "ready_to_compare")
+        self.assertTrue(items["inference"]["can_run"])
+        self.assertTrue(items["evaluation"]["can_run"])
+        self.assertEqual(items["evaluation"]["missing"], [])
+
     def test_agent_action_approve_and_reject_flow(self):
         workflow, _ = self._current_workflow()
         workflow_id = workflow["id"]
@@ -321,6 +495,13 @@ class WorkflowRouteTests(unittest.TestCase):
                 "stage": "visualization",
                 "image_path": image_path,
                 "mask_path": mask_path,
+                "metadata": {
+                    "project_context": {
+                        "imaging_modality": "EM",
+                        "target_structure": "mitochondria",
+                        "optimization_priority": "accuracy",
+                    }
+                },
             },
         )
         self.assertEqual(patch_response.status_code, 200)
@@ -365,6 +546,13 @@ class WorkflowRouteTests(unittest.TestCase):
                 "image_path": "/tmp/image.h5",
                 "mask_path": "/tmp/mask.h5",
                 "checkpoint_path": "/tmp/checkpoint.pth.tar",
+                "metadata": {
+                    "project_context": {
+                        "imaging_modality": "EM",
+                        "target_structure": "mitochondria",
+                        "optimization_priority": "speed",
+                    }
+                },
             },
         )
 
@@ -464,7 +652,7 @@ class WorkflowRouteTests(unittest.TestCase):
         self.assertEqual(payload["actions"], [])
         self.assertEqual(payload["commands"], [])
 
-    def test_agent_answers_current_project_context_instead_of_repeating_next_step(self):
+    def test_agent_answers_current_workflow_context_instead_of_repeating_next_step(self):
         workflow, _ = self._current_workflow()
         workflow_id = workflow["id"]
         self.client.patch(
@@ -474,6 +662,13 @@ class WorkflowRouteTests(unittest.TestCase):
                 "stage": "proofreading",
                 "image_path": "/projects/mito25/data/image/mito25_im.h5",
                 "mask_path": "/projects/mito25/data/seg/mito25_seg.h5",
+                "metadata": {
+                    "project_context": {
+                        "imaging_modality": "EM",
+                        "target_structure": "mitochondria",
+                        "optimization_priority": "accuracy",
+                    }
+                },
             },
         )
 
@@ -485,9 +680,65 @@ class WorkflowRouteTests(unittest.TestCase):
         payload = response.json()
         self.assertEqual(payload["intent"], "project_context")
         self.assertIn("mito25-paper-loop-smoke", payload["response"])
+        self.assertIn("EM", payload["response"])
+        self.assertIn("mitochondria", payload["response"])
+        self.assertIn("accuracy", payload["response"])
         self.assertIn("proofreading", payload["response"])
         self.assertIn("mito25_im.h5", payload["response"])
         self.assertNotIn("0 inference failures", payload["response"])
+
+    def test_agent_asks_for_biological_context_before_running_inference(self):
+        workflow, _ = self._current_workflow()
+        workflow_id = workflow["id"]
+        self.client.patch(
+            f"/api/workflows/{workflow_id}",
+            json={
+                "stage": "inference",
+                "image_path": "/projects/unknown/image.tif",
+                "checkpoint_path": "/projects/unknown/checkpoint.pth.tar",
+            },
+        )
+
+        response = self.client.post(
+            f"/api/workflows/{workflow_id}/agent/query",
+            json={"query": "run inference"},
+        )
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertEqual(payload["intent"], "collect_project_context")
+        self.assertIn("imaging modality", payload["response"])
+        self.assertIn("target structure", payload["response"])
+        self.assertEqual(payload["actions"], [])
+        self.assertEqual(payload["commands"], [])
+
+    def test_agent_stores_context_and_then_runs_inference(self):
+        workflow, _ = self._current_workflow()
+        workflow_id = workflow["id"]
+        self.client.patch(
+            f"/api/workflows/{workflow_id}",
+            json={
+                "stage": "inference",
+                "image_path": "/projects/unknown/image.tif",
+                "checkpoint_path": "/projects/unknown/checkpoint.pth.tar",
+            },
+        )
+
+        response = self.client.post(
+            f"/api/workflows/{workflow_id}/agent/query",
+            json={
+                "query": "run inference on EM mitochondria; prioritize accuracy"
+            },
+        )
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertEqual(payload["intent"], "start_inference")
+        self.assertTrue(payload["actions"])
+
+        current_workflow, _ = self._current_workflow()
+        project_context = current_workflow["metadata"]["project_context"]
+        self.assertEqual(project_context["imaging_modality"], "EM")
+        self.assertEqual(project_context["target_structure"], "mitochondria")
+        self.assertEqual(project_context["optimization_priority"], "accuracy")
 
     def test_agent_start_training_uses_data_derived_defaults(self):
         workflow, _ = self._current_workflow()
@@ -499,6 +750,13 @@ class WorkflowRouteTests(unittest.TestCase):
                 "stage": "retraining_staged",
                 "image_path": "/projects/mito25/data/image/mito25_im.h5",
                 "corrected_mask_path": "/projects/mito25/data/seg/corrected.tif",
+                "metadata": {
+                    "project_context": {
+                        "imaging_modality": "EM",
+                        "target_structure": "mitochondria",
+                        "optimization_priority": "accuracy",
+                    }
+                },
             },
         )
 
@@ -661,6 +919,21 @@ class WorkflowRouteTests(unittest.TestCase):
     def test_agent_slash_command_aliases_route_to_actions(self):
         workflow, _ = self._current_workflow()
         workflow_id = workflow["id"]
+        self.client.patch(
+            f"/api/workflows/{workflow_id}",
+            json={
+                "stage": "inference",
+                "image_path": "/tmp/image.h5",
+                "checkpoint_path": "/tmp/checkpoint.pth.tar",
+                "metadata": {
+                    "project_context": {
+                        "imaging_modality": "EM",
+                        "target_structure": "mitochondria",
+                        "optimization_priority": "accuracy",
+                    }
+                },
+            },
+        )
 
         response = self.client.post(
             f"/api/workflows/{workflow_id}/agent/query",

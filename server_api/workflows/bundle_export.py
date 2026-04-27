@@ -1,7 +1,12 @@
 from __future__ import annotations
 
+import hashlib
+import json
 import os
+import re
+import shutil
 from datetime import datetime, timezone
+from pathlib import Path
 from typing import Any, Dict, Iterable, List, Tuple
 
 from .db_models import WorkflowEvent, WorkflowSession
@@ -41,6 +46,12 @@ def _normalize_value(value: Any) -> Any:
     if isinstance(value, list):
         return [_normalize_value(item) for item in value]
     return value
+
+
+def _safe_filename(value: str, fallback: str = "artifact") -> str:
+    name = os.path.basename(str(value).rstrip("/")) or fallback
+    cleaned = re.sub(r"[^A-Za-z0-9._-]+", "_", name).strip("._")
+    return cleaned or fallback
 
 
 def _collect_paths(value: Any) -> Iterable[str]:
@@ -131,3 +142,113 @@ def build_export_bundle(
         "agent_plans": agent_plans,
         "artifact_paths": artifacts,
     }
+
+
+def write_export_bundle_directory(
+    bundle: Dict[str, Any],
+    *,
+    base_dir: str | None = None,
+    copy_max_bytes: int | None = None,
+) -> Dict[str, Any]:
+    """Persist a paper/debuggable workflow bundle without blindly copying huge data."""
+
+    root = Path(
+        base_dir
+        or os.environ.get("PYTC_WORKFLOW_BUNDLE_DIR")
+        or ".logs/workflow-bundles"
+    )
+    root.mkdir(parents=True, exist_ok=True)
+
+    timestamp = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S-%f")
+    workflow_id = bundle.get("workflow_id") or "unknown"
+    export_dir = root / f"workflow-{workflow_id}-{timestamp}"
+    export_dir.mkdir(parents=True, exist_ok=False)
+    files_dir = export_dir / "files"
+    files_dir.mkdir(parents=True, exist_ok=True)
+
+    max_bytes = (
+        copy_max_bytes
+        if copy_max_bytes is not None
+        else int(os.environ.get("PYTC_WORKFLOW_BUNDLE_COPY_MAX_BYTES", "104857600"))
+    )
+    copied_artifacts: List[Dict[str, Any]] = []
+    skipped_artifacts: List[Dict[str, Any]] = []
+
+    for artifact in bundle.get("artifact_paths") or []:
+        path_text = artifact.get("path")
+        if not path_text:
+            continue
+        source = Path(path_text).expanduser()
+        if not source.exists():
+            skipped_artifacts.append(
+                {"path": path_text, "reason": "missing", "exists": False}
+            )
+            continue
+        if not source.is_file():
+            skipped_artifacts.append(
+                {"path": path_text, "reason": "not_a_file", "exists": True}
+            )
+            continue
+        size_bytes = source.stat().st_size
+        if size_bytes > max_bytes:
+            skipped_artifacts.append(
+                {
+                    "path": path_text,
+                    "reason": "larger_than_copy_limit",
+                    "exists": True,
+                    "size_bytes": size_bytes,
+                    "copy_limit_bytes": max_bytes,
+                }
+            )
+            continue
+        digest = hashlib.sha1(str(source.resolve()).encode("utf-8")).hexdigest()[:10]
+        destination = files_dir / f"{digest}-{_safe_filename(source.name)}"
+        shutil.copy2(source, destination)
+        copied_artifacts.append(
+            {
+                "path": path_text,
+                "bundle_path": str(destination),
+                "relative_bundle_path": str(destination.relative_to(export_dir)),
+                "size_bytes": size_bytes,
+            }
+        )
+
+    bundle.update(
+        {
+            "bundle_directory": str(export_dir),
+            "bundle_manifest_path": str(export_dir / "workflow-bundle.json"),
+            "copied_artifacts": copied_artifacts,
+            "skipped_artifacts": skipped_artifacts,
+        }
+    )
+
+    with (export_dir / "workflow-bundle.json").open("w", encoding="utf-8") as handle:
+        json.dump(bundle, handle, ensure_ascii=False, indent=2, sort_keys=True)
+        handle.write("\n")
+    with (export_dir / "artifact-paths.json").open("w", encoding="utf-8") as handle:
+        json.dump(
+            bundle.get("artifact_paths") or [],
+            handle,
+            ensure_ascii=False,
+            indent=2,
+            sort_keys=True,
+        )
+        handle.write("\n")
+    with (export_dir / "README.md").open("w", encoding="utf-8") as handle:
+        handle.write(
+            "# PyTC Workflow Evidence Bundle\n\n"
+            f"- Workflow ID: {workflow_id}\n"
+            f"- Exported at: {bundle.get('exported_at')}\n"
+            f"- Events: {len(bundle.get('events') or [])}\n"
+            f"- Typed artifacts: {len(bundle.get('artifacts') or [])}\n"
+            f"- Model runs: {len(bundle.get('model_runs') or [])}\n"
+            f"- Model versions: {len(bundle.get('model_versions') or [])}\n"
+            f"- Correction sets: {len(bundle.get('correction_sets') or [])}\n"
+            f"- Evaluation results: {len(bundle.get('evaluation_results') or [])}\n"
+            f"- Copied files: {len(copied_artifacts)}\n"
+            f"- Skipped paths: {len(skipped_artifacts)}\n\n"
+            "Large files are referenced in `artifact-paths.json` and copied only "
+            "when they fit the configured bundle copy limit.\n"
+        )
+
+    return bundle

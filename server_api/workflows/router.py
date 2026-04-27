@@ -31,6 +31,7 @@ from .service import (
     append_workflow_event,
     artifact_to_dict,
     correction_set_to_dict,
+    create_workflow_session,
     create_workflow_artifact,
     decode_json,
     encode_json,
@@ -45,7 +46,7 @@ from .service import (
     validate_stage,
     workflow_to_dict,
 )
-from .bundle_export import build_export_bundle
+from .bundle_export import build_export_bundle, write_export_bundle_directory
 from .agent_plan import build_case_study_plan_graph
 from .evaluation import compute_before_after_evaluation, write_evaluation_report
 from .metrics import compute_workflow_metrics
@@ -65,6 +66,7 @@ class WorkflowResponse(BaseModel):
     neuroglancer_url: Optional[str] = None
     inference_output_path: Optional[str] = None
     checkpoint_path: Optional[str] = None
+    config_path: Optional[str] = None
     proofreading_session_id: Optional[int] = None
     corrected_mask_path: Optional[str] = None
     training_output_path: Optional[str] = None
@@ -102,10 +104,16 @@ class WorkflowUpdateRequest(BaseModel):
     neuroglancer_url: Optional[str] = None
     inference_output_path: Optional[str] = None
     checkpoint_path: Optional[str] = None
+    config_path: Optional[str] = None
     proofreading_session_id: Optional[int] = None
     corrected_mask_path: Optional[str] = None
     training_output_path: Optional[str] = None
     metadata: Optional[Dict[str, Any]] = None
+
+
+class WorkflowResetRequest(BaseModel):
+    title: Optional[str] = None
+    metadata: Dict[str, Any] = Field(default_factory=dict)
 
 
 class WorkflowEventCreateRequest(BaseModel):
@@ -233,6 +241,24 @@ class WorkflowAgentRecommendationResponse(BaseModel):
     commands: List[AgentCommandBlock] = Field(default_factory=list)
 
 
+class WorkflowPreflightItem(BaseModel):
+    id: str
+    label: str
+    status: str
+    can_run: bool = False
+    missing: List[str] = Field(default_factory=list)
+    action: str
+    risk_level: str = "normal"
+
+
+class WorkflowPreflightResponse(BaseModel):
+    workflow_id: int
+    generated_at: str
+    overall_status: str
+    summary: str
+    items: List[WorkflowPreflightItem] = Field(default_factory=list)
+
+
 class WorkflowMetricsResponse(BaseModel):
     workflow_id: int
     metrics: Dict[str, Any] = Field(default_factory=dict)
@@ -252,6 +278,10 @@ class WorkflowExportBundleResponse(BaseModel):
     persisted_hotspots: List[Dict[str, Any]] = Field(default_factory=list)
     agent_plans: List[Dict[str, Any]] = Field(default_factory=list)
     artifact_paths: List[Dict[str, Any]] = Field(default_factory=list)
+    bundle_directory: Optional[str] = None
+    bundle_manifest_path: Optional[str] = None
+    copied_artifacts: List[Dict[str, Any]] = Field(default_factory=list)
+    skipped_artifacts: List[Dict[str, Any]] = Field(default_factory=list)
 
 
 class WorkflowArtifactCreateRequest(BaseModel):
@@ -1180,6 +1210,9 @@ def _derive_training_output_path(workflow: WorkflowSession) -> str:
 
 
 def _choose_training_config_preset(workflow: WorkflowSession) -> str:
+    if workflow.config_path:
+        return workflow.config_path
+    project_context = _workflow_project_context(workflow)
     haystack = " ".join(
         str(value or "")
         for value in [
@@ -1189,6 +1222,9 @@ def _choose_training_config_preset(workflow: WorkflowSession) -> str:
             workflow.label_path,
             workflow.mask_path,
             workflow.corrected_mask_path,
+            project_context.get("imaging_modality"),
+            project_context.get("target_structure"),
+            project_context.get("optimization_priority"),
         ]
     ).lower()
     if "mito" in haystack:
@@ -1781,6 +1817,11 @@ def _workflow_agent_decision(
 ) -> Dict[str, Any]:
     incomplete = {item.id for item in readiness if not item.complete}
     top_hotspot = hotspots[0] if hotspots else None
+    has_source_volume = bool(workflow.dataset_path or workflow.image_path)
+    has_mask_like = bool(
+        workflow.mask_path or workflow.label_path or workflow.inference_output_path
+    )
+    has_checkpoint = bool(workflow.checkpoint_path)
 
     if "dataset" in incomplete and workflow.stage in {"setup", "visualization"}:
         return {
@@ -1790,6 +1831,27 @@ def _workflow_agent_decision(
             "confidence": "high",
         }
     if workflow.stage in {"setup", "visualization"}:
+        if has_source_volume and has_mask_like:
+            return {
+                "decision": "Proofread this data.",
+                "rationale": "Image and mask-like data are ready for human review.",
+                "next_stage": "proofreading",
+                "confidence": "medium",
+            }
+        if has_source_volume and has_checkpoint:
+            return {
+                "decision": "Run the model on this image.",
+                "rationale": "Image and checkpoint are ready; I can infer routine settings.",
+                "next_stage": "inference",
+                "confidence": "medium",
+            }
+        if has_source_volume:
+            return {
+                "decision": "Add a checkpoint or mask/label.",
+                "rationale": "The project has an image volume, but no model output or editable mask yet.",
+                "next_stage": "setup",
+                "confidence": "high",
+            }
         return {
             "decision": "Proofread this data if the mask is ready.",
             "rationale": "A human review pass is the fastest way to create useful edits.",
@@ -1925,6 +1987,282 @@ def _build_workflow_agent_recommendation(
     )
 
 
+def _workflow_path_present(value: Optional[str]) -> bool:
+    return bool(value and str(value).strip())
+
+
+def _latest_artifact_path(
+    artifacts: List[WorkflowArtifact],
+    *,
+    roles: Optional[set[str]] = None,
+    artifact_types: Optional[set[str]] = None,
+) -> Optional[str]:
+    for artifact in sorted(
+        artifacts,
+        key=lambda row: (row.created_at or datetime.min.replace(tzinfo=timezone.utc), row.id),
+        reverse=True,
+    ):
+        if roles and artifact.role not in roles:
+            continue
+        if artifact_types and artifact.artifact_type not in artifact_types:
+            continue
+        if artifact.path:
+            return artifact.path
+        if artifact.uri:
+            return artifact.uri
+    return None
+
+
+def _latest_model_checkpoint(
+    model_versions: List[WorkflowModelVersion],
+    artifacts: List[WorkflowArtifact],
+) -> Optional[str]:
+    for version in sorted(
+        model_versions,
+        key=lambda row: (row.created_at or datetime.min.replace(tzinfo=timezone.utc), row.id),
+        reverse=True,
+    ):
+        if version.checkpoint_path:
+            return version.checkpoint_path
+    return _latest_artifact_path(
+        artifacts,
+        roles={"candidate_checkpoint", "checkpoint"},
+        artifact_types={"model_checkpoint"},
+    )
+
+
+def _preflight_item(
+    item_id: str,
+    label: str,
+    *,
+    can_run: bool,
+    missing: Optional[List[str]] = None,
+    action: str,
+    risk_level: str = "normal",
+    status: Optional[str] = None,
+) -> WorkflowPreflightItem:
+    missing = missing or []
+    resolved_status = status or ("ready" if can_run else "needs_input")
+    return WorkflowPreflightItem(
+        id=item_id,
+        label=label,
+        status=resolved_status,
+        can_run=can_run,
+        missing=missing,
+        action=action,
+        risk_level=risk_level,
+    )
+
+
+def _build_workflow_preflight(
+    db: Session,
+    workflow: WorkflowSession,
+) -> WorkflowPreflightResponse:
+    artifacts = (
+        db.query(WorkflowArtifact)
+        .filter(WorkflowArtifact.workflow_id == workflow.id)
+        .order_by(WorkflowArtifact.created_at.asc(), WorkflowArtifact.id.asc())
+        .all()
+    )
+    model_versions = (
+        db.query(WorkflowModelVersion)
+        .filter(WorkflowModelVersion.workflow_id == workflow.id)
+        .order_by(WorkflowModelVersion.created_at.asc(), WorkflowModelVersion.id.asc())
+        .all()
+    )
+    correction_sets = (
+        db.query(WorkflowCorrectionSet)
+        .filter(WorkflowCorrectionSet.workflow_id == workflow.id)
+        .order_by(WorkflowCorrectionSet.created_at.asc(), WorkflowCorrectionSet.id.asc())
+        .all()
+    )
+    evaluation_results = (
+        db.query(WorkflowEvaluationResult)
+        .filter(WorkflowEvaluationResult.workflow_id == workflow.id)
+        .order_by(
+            WorkflowEvaluationResult.created_at.asc(), WorkflowEvaluationResult.id.asc()
+        )
+        .all()
+    )
+
+    completed_inference_runs = _latest_completed_inference_runs(db, workflow.id)
+    baseline_run = completed_inference_runs[0] if completed_inference_runs else None
+    candidate_run = (
+        completed_inference_runs[-1] if len(completed_inference_runs) > 1 else None
+    )
+
+    image_path = workflow.image_path or workflow.dataset_path
+    reference_path = workflow.label_path or workflow.mask_path
+    corrected_mask_path = (
+        workflow.corrected_mask_path
+        or _latest_exported_mask_path(db, workflow.id)
+        or (correction_sets[-1].corrected_mask_path if correction_sets else None)
+    )
+    checkpoint_path = workflow.checkpoint_path or _latest_model_checkpoint(
+        model_versions,
+        artifacts,
+    )
+    prediction_path = (
+        workflow.inference_output_path
+        or (completed_inference_runs[-1].output_path if completed_inference_runs else None)
+        or _latest_artifact_path(
+            artifacts,
+            roles={"prediction"},
+            artifact_types={"inference_output"},
+        )
+    )
+    baseline_path = baseline_run.output_path if baseline_run else prediction_path
+    candidate_path = (
+        candidate_run.output_path
+        if candidate_run
+        else (
+            workflow.inference_output_path
+            if workflow.inference_output_path and workflow.inference_output_path != baseline_path
+            else None
+        )
+    )
+    ground_truth_path = reference_path or corrected_mask_path
+
+    has_image = _workflow_path_present(image_path)
+    has_reference = _workflow_path_present(reference_path)
+    has_mask_like = has_reference or _workflow_path_present(prediction_path)
+    has_checkpoint = _workflow_path_present(checkpoint_path)
+    has_correction = _workflow_path_present(corrected_mask_path)
+    has_training_target = has_reference or has_correction
+    has_baseline = _workflow_path_present(baseline_path)
+    has_candidate = _workflow_path_present(candidate_path)
+    has_ground_truth = _workflow_path_present(ground_truth_path)
+    has_evaluation = bool(evaluation_results)
+
+    inference_missing = []
+    if not has_image:
+        inference_missing.append("image volume")
+    if not has_checkpoint:
+        inference_missing.append("checkpoint")
+
+    proofreading_missing = []
+    if not has_image:
+        proofreading_missing.append("image volume")
+    if not has_mask_like:
+        proofreading_missing.append("mask, label, or prediction")
+
+    training_missing = []
+    if not has_image:
+        training_missing.append("image volume")
+    if not has_training_target:
+        training_missing.append("label or corrected mask")
+
+    evaluation_missing = []
+    if not has_baseline:
+        evaluation_missing.append("previous result")
+    if not has_candidate:
+        evaluation_missing.append("new result")
+    if not has_ground_truth:
+        evaluation_missing.append("reference mask")
+
+    items = [
+        _preflight_item(
+            "project_setup",
+            "Project data",
+            can_run=has_image,
+            missing=[] if has_image else ["image volume"],
+            action=(
+                "Use this project."
+                if has_image
+                else "Mount a folder or upload an image volume."
+            ),
+            risk_level="view_only",
+        ),
+        _preflight_item(
+            "visualization",
+            "Visualize data",
+            can_run=has_image,
+            missing=[] if has_image else ["image volume"],
+            action="Open the image volume for inspection.",
+            risk_level="view_only",
+        ),
+        _preflight_item(
+            "inference",
+            "Run model",
+            can_run=has_image and has_checkpoint,
+            missing=inference_missing,
+            action=(
+                "Run inference with inferred defaults."
+                if has_image and has_checkpoint
+                else "Add a checkpoint before running inference."
+            ),
+            risk_level="runs_job",
+        ),
+        _preflight_item(
+            "proofreading",
+            "Proofread masks",
+            can_run=has_image and has_mask_like,
+            missing=proofreading_missing,
+            action=(
+                "Open Proofread on the current image/mask pair."
+                if has_image and has_mask_like
+                else "Add a mask, label, or prediction to proofread."
+            ),
+            risk_level="writes_record",
+        ),
+        _preflight_item(
+            "training",
+            "Use edits for training",
+            can_run=has_image and has_training_target,
+            missing=training_missing,
+            action=(
+                "Train with inferred defaults from the current labels/corrections."
+                if has_image and has_training_target
+                else "Add a label or save corrected masks first."
+            ),
+            risk_level="runs_job",
+        ),
+        _preflight_item(
+            "evaluation",
+            "Compare results",
+            can_run=has_baseline and has_candidate and has_ground_truth,
+            missing=evaluation_missing,
+            action=(
+                "Compute before/after metrics."
+                if has_baseline and has_candidate and has_ground_truth
+                else "Run two model outputs and select a reference mask."
+            ),
+            risk_level="view_only",
+            status="completed" if has_evaluation else None,
+        ),
+    ]
+
+    if not has_image:
+        overall_status = "needs_project"
+        summary = "Choose an image volume to start a workable project."
+    elif has_evaluation:
+        overall_status = "evaluated"
+        summary = "Before/after evaluation evidence is recorded."
+    elif has_baseline and has_candidate and has_ground_truth:
+        overall_status = "ready_to_compare"
+        summary = "Ready to compare previous and new segmentation results."
+    elif has_correction:
+        overall_status = "ready_to_train"
+        summary = "Corrected masks are available; training can use them next."
+    elif has_image and has_mask_like:
+        overall_status = "ready_to_proofread"
+        summary = "Image and mask-like data are ready for proofreading."
+    elif has_image and has_checkpoint:
+        overall_status = "ready_to_infer"
+        summary = "Image and checkpoint are ready for inference."
+    else:
+        overall_status = "image_only"
+        summary = "Image volume is loaded; add a checkpoint or mask/label next."
+
+    return WorkflowPreflightResponse(
+        workflow_id=workflow.id,
+        generated_at=datetime.now(timezone.utc).isoformat(),
+        overall_status=overall_status,
+        summary=summary,
+        items=items,
+    )
+
+
 def _format_workflow_agent_response(
     recommendation: WorkflowAgentRecommendationResponse,
 ) -> str:
@@ -1948,23 +2286,170 @@ def _short_path_label(path: Optional[str]) -> str:
     return parts[-1] or str(path)
 
 
+def _workflow_project_context(workflow: WorkflowSession) -> Dict[str, Any]:
+    metadata = decode_json(workflow.metadata_json)
+    context = metadata.get("project_context") if isinstance(metadata, dict) else {}
+    return context if isinstance(context, dict) else {}
+
+
+def _extract_project_context_from_query(query: str) -> Dict[str, Any]:
+    lower = query.lower()
+    context: Dict[str, Any] = {}
+    modality_terms = [
+        ("electron microscopy", ["electron microscopy", "electron microscope"]),
+        ("EM", [" em ", "em ", "sem", "tem", "fib-sem", "fib sem"]),
+        ("confocal microscopy", ["confocal"]),
+        ("light-sheet microscopy", ["light sheet", "light-sheet"]),
+        ("fluorescence microscopy", ["fluorescence", "fluorescent"]),
+        ("brightfield microscopy", ["brightfield", "bright-field"]),
+        ("MRI", [" mri ", "mri"]),
+        ("CT", [" ct ", "micro-ct", "micro ct"]),
+    ]
+    padded_lower = f" {lower} "
+    for label, terms in modality_terms:
+        if any(term in padded_lower for term in terms):
+            context["imaging_modality"] = label
+            break
+
+    target_terms = [
+        ("mitochondria", ["mitochondria", "mitochondrion", "mito"]),
+        ("membranes", ["membrane", "membranes"]),
+        ("synapses", ["synapse", "synapses"]),
+        ("nuclei", ["nucleus", "nuclei"]),
+        ("cells", ["cell", "cells"]),
+        ("neurites", ["neurite", "neurites", "axon", "dendrite"]),
+        ("vasculature", ["vessel", "vasculature", "blood vessel"]),
+        ("organelle", ["organelle", "organelles"]),
+    ]
+    for label, terms in target_terms:
+        if any(term in lower for term in terms):
+            context["target_structure"] = label
+            break
+
+    if any(term in lower for term in ["fast", "quick", "smoke", "prototype"]):
+        context["optimization_priority"] = "speed"
+    elif any(term in lower for term in ["accurate", "accuracy", "quality", "best"]):
+        context["optimization_priority"] = "accuracy"
+
+    if context:
+        context["freeform_note"] = query[:500]
+    return context
+
+
+def _merge_project_context(
+    db: Session,
+    workflow: WorkflowSession,
+    context_update: Dict[str, Any],
+) -> None:
+    if not context_update:
+        return
+    metadata = decode_json(workflow.metadata_json)
+    project_context = metadata.get("project_context")
+    if not isinstance(project_context, dict):
+        project_context = {}
+    project_context = {
+        **project_context,
+        **context_update,
+        "updated_at": datetime.now(timezone.utc).isoformat(),
+        "source": "workflow_agent_context",
+    }
+    metadata["project_context"] = project_context
+    update_workflow_fields(db, workflow, {"metadata": metadata}, commit=False)
+
+
+def _project_context_missing_fields(workflow: WorkflowSession) -> List[str]:
+    context = _workflow_project_context(workflow)
+    if context.get("use_defaults"):
+        return []
+    missing = []
+    if not context.get("imaging_modality"):
+        missing.append("imaging modality")
+    if not context.get("target_structure"):
+        missing.append("target structure")
+    if not context.get("optimization_priority"):
+        missing.append("speed vs accuracy preference")
+    return missing
+
+
+def _format_project_context_prompt(
+    workflow: WorkflowSession,
+    action_label: str,
+) -> str:
+    missing = _project_context_missing_fields(workflow)
+    if not missing:
+        missing = [
+            "imaging modality",
+            "target structure",
+            "speed vs accuracy preference",
+        ]
+    return "\n".join(
+        [
+            f"Before I {action_label}, I need project context.",
+            f"Tell me: {', '.join(missing[:3])}.",
+            "Example: EM mitochondria; prioritize accuracy. Or say: use defaults.",
+        ]
+    )
+
+
+def _format_project_context_saved_response(
+    workflow: WorkflowSession,
+    recommendation: WorkflowAgentRecommendationResponse,
+) -> str:
+    context = _workflow_project_context(workflow)
+    summary = []
+    if context.get("imaging_modality"):
+        summary.append(context["imaging_modality"])
+    if context.get("target_structure"):
+        summary.append(context["target_structure"])
+    if context.get("optimization_priority"):
+        summary.append(f"{context['optimization_priority']} priority")
+    missing = _project_context_missing_fields(workflow)
+    if missing:
+        return "\n".join(
+            [
+                f"Saved context: {', '.join(summary) or 'partial'}.",
+                f"Still need: {', '.join(missing)}.",
+                "Then I can choose the model/preset and run the next app step.",
+            ]
+        )
+    return "\n".join(
+        [
+            f"Saved context: {', '.join(summary)}.",
+            f"Next: {recommendation.decision}",
+            "Tell me the workflow job when you want me to act.",
+        ]
+    )
+
+
 def _format_project_context_response(
     workflow: WorkflowSession,
     recommendation: WorkflowAgentRecommendationResponse,
 ) -> str:
+    project_context = _workflow_project_context(workflow)
     project_name = workflow.title or f"Workflow #{workflow.id}"
     image_label = _short_path_label(workflow.image_path or workflow.dataset_path)
     mask_label = _short_path_label(
         workflow.mask_path or workflow.label_path or workflow.inference_output_path
     )
-    return "\n".join(
-        [
-            f"Project: {project_name}.",
-            f"Stage: {workflow.stage.replace('_', ' ')}.",
-            f"Image: {image_label}. Mask/result: {mask_label}.",
-            f"Next: {recommendation.decision}",
+    lines = [
+        f"Project: {project_name}.",
+        f"Stage: {workflow.stage.replace('_', ' ')}.",
+        f"Image: {image_label}. Mask/result: {mask_label}.",
+    ]
+    if project_context.get("imaging_modality") or project_context.get(
+        "target_structure"
+    ):
+        context_bits = [
+            project_context.get("imaging_modality"),
+            project_context.get("target_structure"),
+            project_context.get("optimization_priority"),
         ]
-    )
+        lines.append(
+            "Context: " + ", ".join(str(bit) for bit in context_bits if bit) + "."
+        )
+    lines.append(f"Next: {recommendation.decision}")
+    return "\n".join(lines)
+
 
 
 def _format_needed_from_user_response(
@@ -2061,6 +2546,28 @@ def get_current_workflow(
     }
 
 
+@router.post("/current/reset", response_model=WorkflowDetailResponse)
+def reset_current_workflow(
+    body: Optional[WorkflowResetRequest] = None,
+    user: auth_models.User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    body = body or WorkflowResetRequest()
+    workflow = create_workflow_session(
+        db,
+        user_id=user.id,
+        title=body.title or "Segmentation Workflow",
+        metadata={
+            **body.metadata,
+            "created_from": body.metadata.get("created_from", "workflow_reset"),
+        },
+    )
+    return {
+        "workflow": _workflow_response(workflow),
+        "events": _event_list(db, workflow.id),
+    }
+
+
 @router.patch("/{workflow_id}", response_model=WorkflowResponse)
 async def update_workflow(
     workflow_id: int,
@@ -2144,6 +2651,19 @@ def get_workflow_agent_recommendation(
 ):
     workflow = get_user_workflow_or_404(db, workflow_id=workflow_id, user_id=user.id)
     return _build_workflow_agent_recommendation(db, workflow)
+
+
+@router.get(
+    "/{workflow_id}/preflight",
+    response_model=WorkflowPreflightResponse,
+)
+def get_workflow_preflight(
+    workflow_id: int,
+    user: auth_models.User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    workflow = get_user_workflow_or_404(db, workflow_id=workflow_id, user_id=user.id)
+    return _build_workflow_preflight(db, workflow)
 
 
 @router.get(
@@ -3006,6 +3526,7 @@ def export_workflow_bundle(
     workflow = get_user_workflow_or_404(db, workflow_id=workflow_id, user_id=user.id)
     events = _event_rows(db, workflow.id)
     bundle = build_export_bundle(workflow, events)
+    bundle = write_export_bundle_directory(bundle)
     append_workflow_event(
         db,
         workflow_id=workflow.id,
@@ -3019,6 +3540,10 @@ def export_workflow_bundle(
             "model_version_count": len(bundle.get("model_versions") or []),
             "correction_set_count": len(bundle.get("correction_sets") or []),
             "evaluation_result_count": len(bundle.get("evaluation_results") or []),
+            "bundle_directory": bundle.get("bundle_directory"),
+            "bundle_manifest_path": bundle.get("bundle_manifest_path"),
+            "copied_artifact_count": len(bundle.get("copied_artifacts") or []),
+            "skipped_artifact_count": len(bundle.get("skipped_artifacts") or []),
             "missing_artifact_path_count": len(
                 [
                     path_info
@@ -3421,6 +3946,36 @@ async def query_workflow_agent(
     wants_failure_analysis = any(
         term in lower_query for term in ["fail", "failure", "error", "hotspot", "where"]
     )
+    wants_use_defaults = any(
+        phrase in lower_query
+        for phrase in [
+            "use defaults",
+            "use safe defaults",
+            "default settings",
+            "safe defaults",
+        ]
+    )
+    context_update = _extract_project_context_from_query(query)
+    if wants_use_defaults:
+        context_update = {
+            **context_update,
+            "use_defaults": True,
+            "freeform_note": query[:500],
+        }
+    if context_update:
+        _merge_project_context(db, workflow, context_update)
+    action_needs_context = (
+        wants_training_launch
+        or wants_inference_launch
+        or wants_segmentation_launch
+        or wants_proofreading_launch
+    )
+    if wants_training_launch:
+        context_action_label = "choose a training preset"
+    elif wants_inference_launch or wants_segmentation_launch:
+        context_action_label = "choose and run a segmentation model"
+    else:
+        context_action_label = "prioritize proofreading work"
     corrected_mask_path = workflow.corrected_mask_path or _latest_exported_mask_path(
         db, workflow.id
     )
@@ -3432,7 +3987,20 @@ async def query_workflow_agent(
         corrected_mask_path,
     )
 
-    if wants_greeting:
+    if action_needs_context and _project_context_missing_fields(workflow):
+        intent = "collect_project_context"
+        response = _format_project_context_prompt(workflow, context_action_label)
+        actions = []
+        commands = []
+    elif context_update and not action_needs_context:
+        intent = "project_context_updated"
+        response = _format_project_context_saved_response(
+            workflow,
+            agent_recommendation,
+        )
+        actions = []
+        commands = []
+    elif wants_greeting:
         intent = "greeting"
         response = _format_greeting_response(agent_recommendation)
         actions = []

@@ -171,6 +171,7 @@ _ensure_sqlite_column("chat_messages", "source", "source VARCHAR")
 _ensure_sqlite_column("chat_messages", "actions_json", "actions_json TEXT")
 _ensure_sqlite_column("chat_messages", "commands_json", "commands_json TEXT")
 _ensure_sqlite_column("chat_messages", "proposals_json", "proposals_json TEXT")
+_ensure_sqlite_column("workflow_sessions", "config_path", "config_path VARCHAR")
 
 app = FastAPI()
 

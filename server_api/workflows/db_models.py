@@ -19,6 +19,7 @@ class WorkflowSession(Base):
     neuroglancer_url = Column(Text, nullable=True)
     inference_output_path = Column(String, nullable=True)
     checkpoint_path = Column(String, nullable=True)
+    config_path = Column(String, nullable=True)
     proofreading_session_id = Column(Integer, nullable=True, index=True)
     corrected_mask_path = Column(String, nullable=True)
     training_output_path = Column(String, nullable=True)

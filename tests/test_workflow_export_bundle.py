@@ -1,6 +1,7 @@
 import pathlib
 import tempfile
 import unittest
+from unittest.mock import patch
 
 import pytest
 pytest.importorskip("sqlalchemy")
@@ -73,7 +74,12 @@ class WorkflowExportBundleTests(unittest.TestCase):
             },
         )
 
-        response = self.client.post(f"/api/workflows/{workflow_id}/export-bundle")
+        bundle_root = pathlib.Path(self.temp_dir.name) / "bundles"
+        with patch.dict(
+            "os.environ",
+            {"PYTC_WORKFLOW_BUNDLE_DIR": str(bundle_root)},
+        ):
+            response = self.client.post(f"/api/workflows/{workflow_id}/export-bundle")
         self.assertEqual(response.status_code, 200)
         payload = response.json()
 
@@ -87,6 +93,27 @@ class WorkflowExportBundleTests(unittest.TestCase):
         self.assertIn(str(missing_path), artifacts)
         self.assertTrue(artifacts[str(existing_path)])
         self.assertFalse(artifacts[str(missing_path)])
+        manifest_path = pathlib.Path(payload["bundle_manifest_path"])
+        self.assertTrue(manifest_path.exists())
+        self.assertEqual(manifest_path.name, "workflow-bundle.json")
+        self.assertTrue((manifest_path.parent / "README.md").exists())
+        self.assertTrue((manifest_path.parent / "artifact-paths.json").exists())
+        copied_paths = {
+            pathlib.Path(entry["bundle_path"]).name
+            for entry in payload["copied_artifacts"]
+        }
+        self.assertTrue(any("existing-mask.tif" in name for name in copied_paths))
+
+        events = self.client.get(f"/api/workflows/{workflow_id}/events").json()
+        export_event = [
+            event
+            for event in events
+            if event["event_type"] == "workflow.bundle_exported"
+        ][-1]
+        self.assertEqual(
+            export_event["payload"]["bundle_manifest_path"],
+            payload["bundle_manifest_path"],
+        )
 
 
 if __name__ == "__main__":

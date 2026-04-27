@@ -281,6 +281,7 @@ def workflow_to_dict(workflow: WorkflowSession) -> Dict[str, Any]:
         "neuroglancer_url": workflow.neuroglancer_url,
         "inference_output_path": workflow.inference_output_path,
         "checkpoint_path": workflow.checkpoint_path,
+        "config_path": workflow.config_path,
         "proofreading_session_id": workflow.proofreading_session_id,
         "corrected_mask_path": workflow.corrected_mask_path,
         "training_output_path": workflow.training_output_path,
@@ -734,7 +735,22 @@ def get_current_or_create_workflow(db: Session, *, user_id: int) -> WorkflowSess
     if workflow:
         return workflow
 
-    workflow = WorkflowSession(user_id=user_id, title="Segmentation Workflow")
+    return create_workflow_session(db, user_id=user_id)
+
+
+def create_workflow_session(
+    db: Session,
+    *,
+    user_id: int,
+    title: str = "Segmentation Workflow",
+    metadata: Optional[Dict[str, Any]] = None,
+) -> WorkflowSession:
+    workflow = WorkflowSession(
+        user_id=user_id,
+        title=title or "Segmentation Workflow",
+        stage="setup",
+        metadata_json=encode_json(metadata or {}),
+    )
     db.add(workflow)
     db.commit()
     db.refresh(workflow)
@@ -761,6 +777,7 @@ WORKFLOW_PATCH_FIELDS = {
     "neuroglancer_url",
     "inference_output_path",
     "checkpoint_path",
+    "config_path",
     "proofreading_session_id",
     "corrected_mask_path",
     "training_output_path",
