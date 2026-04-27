@@ -17,6 +17,7 @@ import {
   getWorkflowAgentRecommendation,
   getWorkflowHotspots,
   getWorkflowImpactPreview,
+  getWorkflowPreflight,
   listWorkflowArtifacts,
   listWorkflowCorrectionSets,
   listWorkflowEvents,
@@ -25,6 +26,7 @@ import {
   listWorkflowModelVersions,
   queryWorkflowAgent,
   rejectAgentAction as rejectAgentActionApi,
+  startNewWorkflow as startNewWorkflowApi,
   updateWorkflow as updateWorkflowApi,
 } from "../api";
 import { AppContext } from "./GlobalContext";
@@ -43,6 +45,7 @@ export function WorkflowProvider({ children }) {
   const [hotspots, setHotspots] = useState([]);
   const [impactPreview, setImpactPreview] = useState(null);
   const [agentRecommendation, setAgentRecommendation] = useState(null);
+  const [preflight, setPreflight] = useState(null);
   const [artifacts, setArtifacts] = useState([]);
   const [modelRuns, setModelRuns] = useState([]);
   const [modelVersions, setModelVersions] = useState([]);
@@ -107,6 +110,21 @@ export function WorkflowProvider({ children }) {
       return recommendation || null;
     } catch (error) {
       console.warn("Workflow agent recommendation refresh failed:", error);
+      return null;
+    }
+  }, [workflow?.id]);
+
+  const refreshPreflight = useCallback(async () => {
+    if (!workflow?.id) {
+      setPreflight(null);
+      return null;
+    }
+    try {
+      const nextPreflight = await getWorkflowPreflight(workflow.id);
+      setPreflight(nextPreflight || null);
+      return nextPreflight || null;
+    } catch (error) {
+      console.warn("Workflow preflight refresh failed:", error);
       return null;
     }
   }, [workflow?.id]);
@@ -195,6 +213,24 @@ export function WorkflowProvider({ children }) {
     refreshAgentRecommendation,
   ]);
 
+  useEffect(() => {
+    refreshPreflight();
+  }, [
+    workflow?.id,
+    workflow?.stage,
+    workflow?.dataset_path,
+    workflow?.image_path,
+    workflow?.label_path,
+    workflow?.mask_path,
+    workflow?.inference_output_path,
+    workflow?.checkpoint_path,
+    workflow?.config_path,
+    workflow?.corrected_mask_path,
+    workflow?.training_output_path,
+    events.length,
+    refreshPreflight,
+  ]);
+
   const updateWorkflow = useCallback(
     async (patch) => {
       if (!workflow?.id) return null;
@@ -220,6 +256,46 @@ export function WorkflowProvider({ children }) {
       }
     },
     [workflow?.id],
+  );
+
+  const clearLocalWorkflowInputs = useCallback(async () => {
+    await appContext?.resetFileState?.();
+    appContext?.setTrainingConfig?.(null);
+    appContext?.setInferenceConfig?.(null);
+    appContext?.setViewer?.(null);
+    appContext?.setTensorBoardURL?.(null);
+    appContext?.trainingState?.setConfigOriginPath?.("");
+    appContext?.trainingState?.setUploadedYamlFile?.("");
+    appContext?.trainingState?.setSelectedYamlPreset?.("");
+    appContext?.trainingState?.setOutputPath?.(null);
+    appContext?.trainingState?.setLogPath?.(null);
+    appContext?.inferenceState?.setConfigOriginPath?.("");
+    appContext?.inferenceState?.setUploadedYamlFile?.("");
+    appContext?.inferenceState?.setSelectedYamlPreset?.("");
+    appContext?.inferenceState?.setOutputPath?.(null);
+    appContext?.inferenceState?.setCheckpointPath?.(null);
+  }, [appContext]);
+
+  const startNewWorkflow = useCallback(
+    async (body = {}) => {
+      const data = await startNewWorkflowApi(body);
+      setWorkflow(data?.workflow || null);
+      setEvents(data?.events || []);
+      setHotspots([]);
+      setImpactPreview(null);
+      setAgentRecommendation(null);
+      setPreflight(null);
+      setArtifacts([]);
+      setModelRuns([]);
+      setModelVersions([]);
+      setCorrectionSets([]);
+      setEvaluationResults([]);
+      setLastClientEffects(null);
+      setPendingRuntimeAction(null);
+      await clearLocalWorkflowInputs();
+      return data;
+    },
+    [clearLocalWorkflowInputs],
   );
 
   const proposeAgentAction = useCallback(
@@ -527,6 +603,7 @@ export function WorkflowProvider({ children }) {
         hotspots,
         impactPreview,
         agentRecommendation,
+        preflight,
         artifacts,
         modelRuns,
         modelVersions,
@@ -539,7 +616,9 @@ export function WorkflowProvider({ children }) {
         refreshEvents,
         refreshInsights,
         refreshAgentRecommendation,
+        refreshPreflight,
         refreshEvidence,
+        startNewWorkflow,
         updateWorkflow,
         appendEvent,
         proposeAgentAction,

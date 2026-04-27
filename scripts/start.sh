@@ -159,8 +159,24 @@ ensure_client_dependencies() {
 	fi
 }
 
+patch_electron_dev_app_name() {
+	if [[ "$(uname -s)" != "Darwin" ]]; then
+		return 0
+	fi
+	local plist="${CLIENT_DIR}/node_modules/electron/dist/Electron.app/Contents/Info.plist"
+	if [[ ! -f "${plist}" || ! -x /usr/libexec/PlistBuddy ]]; then
+		return 0
+	fi
+	/usr/libexec/PlistBuddy -c "Set :CFBundleName PyTC Client" "${plist}" >/dev/null 2>&1 || true
+	/usr/libexec/PlistBuddy -c "Set :CFBundleDisplayName PyTC Client" "${plist}" >/dev/null 2>&1 ||
+		/usr/libexec/PlistBuddy -c "Add :CFBundleDisplayName string PyTC Client" "${plist}" >/dev/null 2>&1 || true
+	/usr/libexec/PlistBuddy -c "Set :CFBundleIdentifier bio.seg.pytc-client" "${plist}" >/dev/null 2>&1 || true
+	touch "${CLIENT_DIR}/node_modules/electron/dist/Electron.app" >/dev/null 2>&1 || true
+}
+
 pushd "${CLIENT_DIR}" >/dev/null
 ensure_client_dependencies
+patch_electron_dev_app_name
 if [[ "${SKIP_CLIENT_BUILD:-0}" != "1" ]]; then
 	BUILD_LOG="${LOG_DIR}/react-build.log"
 	echo "Building React client (log: $(relative_log_path "${BUILD_LOG}"))..."

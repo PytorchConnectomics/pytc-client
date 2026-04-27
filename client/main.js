@@ -17,6 +17,7 @@ const APP_NAME = "PyTC Client";
 
 app.setName(APP_NAME);
 app.setAppUserModelId("bio.seg.pytc-client");
+process.title = APP_NAME;
 
 function getAppIconPath() {
   const candidates = [
@@ -46,6 +47,7 @@ function createWindow() {
   const { width, height } = screen.getPrimaryDisplay().workAreaSize;
   const appIcon = loadAppIcon();
   mainWindow = new BrowserWindow({
+    title: APP_NAME,
     width,
     height,
     icon: appIcon,
@@ -73,6 +75,7 @@ function createWindow() {
     });
   }
   mainWindow.loadURL(startUrl);
+  mainWindow.setTitle(APP_NAME);
 
   mainWindow.on("closed", () => {
     mainWindow = null;
@@ -82,6 +85,8 @@ function createWindow() {
 }
 
 function createMenu() {
+  app.setName(APP_NAME);
+  app.setAboutPanelOptions({ applicationName: APP_NAME });
   const template = [
     {
       label: APP_NAME,

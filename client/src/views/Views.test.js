@@ -1,10 +1,16 @@
 import React from "react";
-import { fireEvent, render, screen } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 
 import Views from "./Views";
 
+let mockWorkflowContext;
+
 jest.mock("../contexts/WorkflowContext", () => ({
-  useWorkflow: () => null,
+  useWorkflow: () => mockWorkflowContext,
+}));
+
+jest.mock("../logging/appEventLog", () => ({
+  logClientEvent: jest.fn(),
 }));
 
 jest.mock("antd", () => {
@@ -30,8 +36,15 @@ jest.mock("antd", () => {
   return {
     Layout,
     Menu,
-    Button: ({ children, ...props }) => <button {...props}>{children}</button>,
+    Button: ({ children, icon: _icon, ...props }) => (
+      <button {...props}>{children}</button>
+    ),
     Drawer: ({ children, open }) => (open ? <div>{children}</div> : null),
+    message: {
+      error: jest.fn(),
+      success: jest.fn(),
+      warning: jest.fn(),
+    },
   };
 });
 
@@ -44,7 +57,7 @@ jest.mock("@ant-design/icons", () => {
     ThunderboltOutlined: Icon,
     DashboardOutlined: Icon,
     BugOutlined: Icon,
-    MessageOutlined: Icon,
+  MessageOutlined: Icon,
   };
 });
 
@@ -56,10 +69,31 @@ jest.mock("./Monitoring", () => () => <div>Monitoring Content</div>);
 jest.mock("./MaskProofreading", () => () => (
   <div>Mask Proofreading Content</div>
 ));
-jest.mock("../components/Chatbot", () => () => <div>Chatbot</div>);
+jest.mock("../components/Chatbot", () => (props) => (
+  <div>
+    <div>Chatbot</div>
+    {props.queuedWorkflowQuery?.displayText && (
+      <div>{props.queuedWorkflowQuery.displayText}</div>
+    )}
+  </div>
+));
 
 describe("Views", () => {
-  it("shows all active modules without the workflow selector", () => {
+  beforeEach(() => {
+    jest.clearAllMocks();
+    mockWorkflowContext = {
+      workflow: {
+        id: 1,
+        stage: "setup",
+        metadata: {},
+      },
+      loading: false,
+      startNewWorkflow: jest.fn().mockResolvedValue({}),
+      consumeClientEffects: jest.fn(),
+    };
+  });
+
+  it("shows all active modules without a startup splash screen", () => {
     render(<Views />);
 
     expect(screen.getByText("Files")).toBeTruthy();
@@ -68,9 +102,8 @@ describe("Views", () => {
     expect(screen.getByText("Infer")).toBeTruthy();
     expect(screen.getByText("Monitor")).toBeTruthy();
     expect(screen.getByText("Proofread")).toBeTruthy();
-    expect(screen.queryByText("SynAnno")).toBeNull();
-    expect(screen.queryByText("Change Views")).toBeNull();
-    expect(screen.queryByText("Launch Selected")).toBeNull();
+    expect(screen.queryByText("What are you trying to do?")).toBeNull();
+    expect(screen.queryByText("Confirm project folders")).toBeNull();
     expect(screen.getByText("Files Manager Content")).toBeTruthy();
   });
 
@@ -82,5 +115,29 @@ describe("Views", () => {
     fireEvent.click(screen.getByText("Visualize"));
 
     expect(screen.getByText("Visualization Content")).toBeTruthy();
+  });
+
+  it("starts a fresh workflow from the app shell", async () => {
+    const confirmSpy = jest.spyOn(window, "confirm").mockReturnValue(true);
+
+    render(<Views />);
+    fireEvent.click(screen.getByText("New project"));
+
+    await waitFor(() => {
+      expect(mockWorkflowContext.startNewWorkflow).toHaveBeenCalledWith({
+        metadata: { created_from: "new_project_button" },
+      });
+    });
+    expect(confirmSpy).toHaveBeenCalled();
+    confirmSpy.mockRestore();
+  });
+
+  it("opens the assistant with a quick next-step request", async () => {
+    render(<Views />);
+
+    fireEvent.click(screen.getByText("What next?"));
+
+    expect(screen.getByText("Chatbot")).toBeTruthy();
+    expect(screen.getByText("What should I do next?")).toBeTruthy();
   });
 });

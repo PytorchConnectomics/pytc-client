@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef, useCallback } from "react";
-import { Layout, Menu, Button, Drawer } from "antd";
+import { Layout, Menu, Button, Drawer, message } from "antd";
 import {
   FolderOpenOutlined,
   EyeOutlined,
@@ -46,8 +46,10 @@ function Views() {
   const consumeClientEffects = workflowContext?.consumeClientEffects;
   const [isChatOpen, setIsChatOpen] = useState(false);
   const [assistantContextOpen, setAssistantContextOpen] = useState(false);
+  const [quickAgentRequest, setQuickAgentRequest] = useState(null);
   const [chatWidth, setChatWidth] = useState(460);
   const isResizing = useRef(false);
+  const quickAgentRequestId = useRef(0);
 
   const [viewers, setViewers] = useState([]);
   const [isInferring, setIsInferring] = useState(false);
@@ -119,6 +121,53 @@ function Views() {
     });
   }, [chatWidth, isChatOpen]);
 
+  const handleStartNewProject = async () => {
+    const confirmed =
+      typeof window === "undefined" ||
+      window.confirm(
+        "Start a new workflow? Existing workflow evidence stays saved, but this app session will start from setup.",
+      );
+    if (!confirmed) return;
+
+    try {
+      await workflowContext?.startNewWorkflow?.({
+        metadata: { created_from: "new_project_button" },
+      });
+      setCurrent("files");
+      setVisitedTabs(new Set(["files"]));
+      message.success("Started a fresh workflow.");
+    } catch (error) {
+      console.error("Could not start a new workflow", error);
+      message.error("Could not start a fresh workflow.");
+    }
+  };
+
+  const handleAskWhatNext = () => {
+    if (!workflowContext?.workflow?.id) {
+      message.warning("Start or load a workflow first.");
+      return;
+    }
+    quickAgentRequestId.current += 1;
+    const request = {
+      id: quickAgentRequestId.current,
+      query: "What should I do next?",
+      displayText: "What should I do next?",
+      source: "quick_next",
+    };
+    setQuickAgentRequest(request);
+    setIsChatOpen(true);
+    logClientEvent("workflow_agent_quick_next_requested", {
+      level: "INFO",
+      source: "views",
+      message: "Quick next-step assistant request",
+      data: {
+        workflowId: workflowContext.workflow.id,
+        stage: workflowContext.workflow.stage,
+        view: current,
+      },
+    });
+  };
+
   const renderTabContent = (key, component) => {
     if (!visitedTabs.has(key)) return null;
     return (
@@ -129,6 +178,24 @@ function Views() {
       </div>
     );
   };
+
+  if (workflowContext?.loading && !workflowContext?.workflow) {
+    return (
+      <Layout style={{ minHeight: "100vh", background: "#f6f7fb" }}>
+        <Content
+          style={{
+            minHeight: "100vh",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            color: "#6b7280",
+          }}
+        >
+          Loading workspace...
+        </Content>
+      </Layout>
+    );
+  }
 
   return (
     <Layout style={{ minHeight: "100vh", height: "100vh" }}>
@@ -156,10 +223,21 @@ function Views() {
           }}
         />
         <Button
+          onClick={handleAskWhatNext}
+          title="Ask the assistant for the best next workflow step"
+          disabled={!workflowContext?.workflow?.id}
+        >
+          What next?
+        </Button>
+        <Button onClick={handleStartNewProject} title="Start a fresh workflow">
+          New project
+        </Button>
+        <Button
           type="primary"
           shape="circle"
           icon={<MessageOutlined />}
           onClick={() => setIsChatOpen(true)}
+          style={{ marginLeft: 8 }}
         />
       </div>
       <Content
@@ -221,6 +299,12 @@ function Views() {
           onClose={() => setIsChatOpen(false)}
           forceShowWorkflowInspector={assistantContextOpen}
           onWorkflowInspectorConsumed={() => setAssistantContextOpen(false)}
+          queuedWorkflowQuery={quickAgentRequest}
+          onQueuedWorkflowQueryConsumed={(id) => {
+            setQuickAgentRequest((currentRequest) =>
+              currentRequest?.id === id ? null : currentRequest,
+            );
+          }}
         />
       </Drawer>
     </Layout>

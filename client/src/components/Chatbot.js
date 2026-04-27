@@ -48,6 +48,8 @@ const GREETING = {
     "Tell me the workflow job. I can run the model, start proofreading, use edits for training, compare results, or move screens.",
 };
 
+const QUICK_NEXT_QUERY = "What should I do next?";
+
 const WORKFLOW_SLASH_COMMANDS = {
   "/status": "status",
   "/next": "next step",
@@ -201,6 +203,8 @@ function Chatbot({
   onClose,
   forceShowWorkflowInspector = false,
   onWorkflowInspectorConsumed,
+  queuedWorkflowQuery = null,
+  onQueuedWorkflowQueryConsumed,
 }) {
   /* ── state ─────────────────────────────────────────────────────────────── */
   const [conversations, setConversations] = useState([]);
@@ -217,6 +221,7 @@ function Chatbot({
   const [isRenamingTitle, setIsRenamingTitle] = useState(false);
 
   const lastMessageRef = useRef(null);
+  const handledQueuedQueryRef = useRef(null);
   const workflowContext = useWorkflow();
   const runClientEffects = workflowContext?.runClientEffects;
   const executeAssistantItem = workflowContext?.executeAssistantItem;
@@ -299,27 +304,35 @@ function Chatbot({
     setInputValue("");
   };
 
-  /* ── send message ──────────────────────────────────────────────────────── */
-  const handleSendMessage = async () => {
-    if (!inputValue.trim() || isSending) return;
-    const query = inputValue;
-    const isGreeting = isGreetingQuery(query);
-    setInputValue("");
-    setMessages((prev) => [...prev, { role: "user", content: query }]);
-    setIsSending(true);
-    try {
-      if (shouldUseWorkflowAgent(query)) {
-        const { agentQuery, commandAlias } = normalizeWorkflowAgentQuery(query);
+  const sendWorkflowAgentMessage = useCallback(
+    async (
+      query,
+      {
+        displayQuery = query,
+        source = "chatbot",
+        hideGreetingActions = true,
+      } = {},
+    ) => {
+      if (!query.trim() || isSending) return false;
+      if (!workflowContext?.workflow?.id || !workflowContext?.queryAgent) {
+        return false;
+      }
+
+      const isGreeting = hideGreetingActions && isGreetingQuery(displayQuery);
+      const { agentQuery, commandAlias } = normalizeWorkflowAgentQuery(query);
+      setMessages((prev) => [...prev, { role: "user", content: displayQuery }]);
+      setIsSending(true);
+      try {
         logClientEvent("workflow_agent_chat_sent", {
-          source: "chatbot",
+          source,
           message: "Workflow-agent chat query sent",
           data: {
             workflowId: workflowContext.workflow.id,
             conversationId: activeConvoId,
-            queryPreview: query.slice(0, 160),
+            queryPreview: displayQuery.slice(0, 160),
             agentQueryPreview: agentQuery.slice(0, 160),
             commandAlias,
-            queryLength: query.length,
+            queryLength: agentQuery.length,
           },
         });
         const data = await workflowContext.queryAgent(
@@ -348,7 +361,7 @@ function Chatbot({
         const convos = await listConversations();
         if (convos) setConversations(convos);
         logClientEvent("workflow_agent_chat_completed", {
-          source: "chatbot",
+          source,
           message: "Workflow-agent chat query completed",
           data: {
             workflowId: workflowContext.workflow.id,
@@ -361,9 +374,65 @@ function Chatbot({
             proposalCount: data?.proposals?.length || 0,
           },
         });
+        return true;
+      } catch (e) {
+        logClientEvent("chat_send_failed", {
+          level: "ERROR",
+          source,
+          message: e.message || "Error contacting chatbot.",
+          data: {
+            workflowId: workflowContext?.workflow?.id || null,
+            activeConvoId,
+            queryPreview: displayQuery.slice(0, 160),
+          },
+        });
+        setMessages((prev) => [
+          ...prev,
+          {
+            role: "assistant",
+            content: e.message || "Error contacting chatbot.",
+          },
+        ]);
+        return false;
+      } finally {
+        setIsSending(false);
+      }
+    },
+    [activeConvoId, isSending, workflowContext],
+  );
+
+  useEffect(() => {
+    if (!queuedWorkflowQuery?.id) return;
+    if (handledQueuedQueryRef.current === queuedWorkflowQuery.id) return;
+    if (isSending) return;
+
+    handledQueuedQueryRef.current = queuedWorkflowQuery.id;
+    onQueuedWorkflowQueryConsumed?.(queuedWorkflowQuery.id);
+    sendWorkflowAgentMessage(queuedWorkflowQuery.query || QUICK_NEXT_QUERY, {
+      displayQuery: queuedWorkflowQuery.displayText || QUICK_NEXT_QUERY,
+      source: queuedWorkflowQuery.source || "quick_next",
+      hideGreetingActions: false,
+    });
+  }, [
+    isSending,
+    onQueuedWorkflowQueryConsumed,
+    queuedWorkflowQuery,
+    sendWorkflowAgentMessage,
+  ]);
+
+  /* ── send message ──────────────────────────────────────────────────────── */
+  const handleSendMessage = async () => {
+    if (!inputValue.trim() || isSending) return;
+    const query = inputValue;
+    setInputValue("");
+    try {
+      if (shouldUseWorkflowAgent(query)) {
+        await sendWorkflowAgentMessage(query);
         return;
       }
 
+      setMessages((prev) => [...prev, { role: "user", content: query }]);
+      setIsSending(true);
       logClientEvent("llm_chat_sent", {
         source: "chatbot",
         message: "General assistant chat query sent",

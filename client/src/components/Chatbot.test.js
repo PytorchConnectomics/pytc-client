@@ -34,7 +34,7 @@ jest.mock("react-markdown", () => {
 
 jest.mock("remark-gfm", () => () => {});
 
-function renderChatbot(workflowValue = {}) {
+function renderChatbot(workflowValue = {}, props = {}) {
   window.matchMedia = jest.fn().mockImplementation((query) => ({
     matches: false,
     media: query,
@@ -62,7 +62,7 @@ function renderChatbot(workflowValue = {}) {
 
   render(
     <WorkflowContext.Provider value={value}>
-      <Chatbot onClose={jest.fn()} />
+      <Chatbot onClose={jest.fn()} {...props} />
     </WorkflowContext.Provider>,
   );
   return value;
@@ -166,6 +166,49 @@ describe("Chatbot workflow routing", () => {
       expect(workflow.queryAgent).toHaveBeenCalledWith("run model", null);
     });
     expect(queryChatBot).not.toHaveBeenCalled();
+  });
+
+  it("runs a queued quick next-step request through the workflow agent", async () => {
+    const workflow = renderChatbot(
+      {
+        queryAgent: jest.fn().mockResolvedValue({
+          response: "Do this: add a checkpoint or mask/label.",
+          conversationId: 45,
+          source: "workflow_orchestrator",
+          actions: [
+            {
+              id: "open-files",
+              label: "Choose data",
+              description: "Pick data.",
+              client_effects: { navigate_to: "files" },
+            },
+          ],
+          commands: [],
+          proposals: [],
+        }),
+      },
+      {
+        queuedWorkflowQuery: {
+          id: 1,
+          query: "What should I do next?",
+          displayText: "What should I do next?",
+          source: "quick_next",
+        },
+      },
+    );
+
+    await waitFor(() => {
+      expect(workflow.queryAgent).toHaveBeenCalledWith(
+        "What should I do next?",
+        null,
+      );
+    });
+    expect(queryChatBot).not.toHaveBeenCalled();
+    expect(await screen.findByText("What should I do next?")).toBeTruthy();
+    expect(
+      await screen.findByText("Do this: add a checkpoint or mask/label."),
+    ).toBeTruthy();
+    expect(await screen.findByText("Choose data")).toBeTruthy();
   });
 
   it("routes non-workflow text to the general assistant instead of action cards", async () => {

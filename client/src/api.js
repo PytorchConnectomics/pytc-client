@@ -713,6 +713,15 @@ export async function getWorkflowAgentRecommendation(workflowId) {
   }
 }
 
+export async function getWorkflowPreflight(workflowId) {
+  try {
+    const res = await apiClient.get(`/api/workflows/${workflowId}/preflight`);
+    return res.data;
+  } catch (error) {
+    handleError(error);
+  }
+}
+
 export async function listWorkflowArtifacts(workflowId) {
   try {
     const res = await apiClient.get(`/api/workflows/${workflowId}/artifacts`);
@@ -775,6 +784,15 @@ export async function computeWorkflowEvaluationResult(workflowId, body) {
 export async function exportWorkflowBundle(workflowId) {
   try {
     const res = await apiClient.post(`/api/workflows/${workflowId}/export-bundle`);
+    return res.data;
+  } catch (error) {
+    handleError(error);
+  }
+}
+
+export async function startNewWorkflow(body = {}) {
+  try {
+    const res = await apiClient.post("/api/workflows/current/reset", body);
     return res.data;
   } catch (error) {
     handleError(error);

@@ -14,6 +14,7 @@ import {
   getWorkflowAgentRecommendation,
   getWorkflowHotspots,
   getWorkflowImpactPreview,
+  getWorkflowPreflight,
   listWorkflowArtifacts,
   listWorkflowCorrectionSets,
   listWorkflowEvents,
@@ -33,6 +34,7 @@ jest.mock("../api", () => ({
   getWorkflowAgentRecommendation: jest.fn(),
   getWorkflowHotspots: jest.fn(),
   getWorkflowImpactPreview: jest.fn(),
+  getWorkflowPreflight: jest.fn(),
   listWorkflowArtifacts: jest.fn(),
   listWorkflowCorrectionSets: jest.fn(),
   listWorkflowEvents: jest.fn(),
@@ -41,6 +43,7 @@ jest.mock("../api", () => ({
   listWorkflowModelVersions: jest.fn(),
   queryWorkflowAgent: jest.fn(),
   rejectAgentAction: jest.fn(),
+  startNewWorkflow: jest.fn(),
   updateWorkflow: jest.fn(),
 }));
 
@@ -65,6 +68,7 @@ function Probe() {
       <div>{workflowContext.hotspots?.[0]?.summary || "no-hotspot"}</div>
       <div>{workflowContext.impactPreview?.confidence || "no-impact"}</div>
       <div>{workflowContext.agentRecommendation?.decision || "no-agent"}</div>
+      <div>{workflowContext.preflight?.overall_status || "no-preflight"}</div>
       <div>{`artifacts:${workflowContext.artifacts.length}`}</div>
       <div>{`runs:${workflowContext.modelRuns.length}`}</div>
       <div>{`corrections:${workflowContext.correctionSets.length}`}</div>
@@ -224,6 +228,12 @@ describe("WorkflowProvider", () => {
       actions: [],
       commands: [],
     });
+    getWorkflowPreflight.mockResolvedValue({
+      workflow_id: 1,
+      overall_status: "image_only",
+      summary: "Image volume is loaded; add a checkpoint or mask/label next.",
+      items: [],
+    });
     createAgentAction.mockResolvedValue({
       id: 8,
       event_type: "agent.proposal_created",
@@ -268,6 +278,7 @@ describe("WorkflowProvider", () => {
       expect(
         screen.getByText("Proofread this data if the mask is ready."),
       ).toBeTruthy();
+      expect(screen.getByText("image_only")).toBeTruthy();
     });
     await waitFor(() => {
       expect(screen.getByText("artifacts:1")).toBeTruthy();
@@ -279,6 +290,7 @@ describe("WorkflowProvider", () => {
     expect(listWorkflowEvaluationResults).toHaveBeenCalledWith(1);
     expect(getCurrentWorkflow).toHaveBeenCalledTimes(1);
     expect(getWorkflowAgentRecommendation).toHaveBeenCalledWith(1);
+    expect(getWorkflowPreflight).toHaveBeenCalledWith(1);
   });
 
   it("applies client effects when an agent proposal is approved", async () => {
