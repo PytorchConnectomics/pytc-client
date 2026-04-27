@@ -27,9 +27,16 @@ import {
 } from "@ant-design/icons";
 import { apiClient } from "../api";
 import FileTreeSidebar from "../components/FileTreeSidebar";
+import FilePickerModal from "../components/FilePickerModal";
 import { openLocalFile, revealInFinder } from "../electronApi";
 import { AppContext } from "../contexts/GlobalContext";
 import { useWorkflow } from "../contexts/WorkflowContext";
+import { logClientEvent } from "../logging/appEventLog";
+import {
+  PROJECT_ROLE_LABELS,
+  buildWorkflowPatchFromConfirmedProjectRoles,
+  getProjectRoleDefaultsFromSuggestion,
+} from "../utils/projectSuggestions";
 
 const HIDDEN_SYSTEM_FILES = new Set([
   "workflow_preference.json",
@@ -58,42 +65,58 @@ const IMAGE_EXTENSIONS = new Set([
   ".mrc",
   ".mrcs",
 ]);
-const PROJECT_ROLE_LABELS = {
-  image: "image",
-  label: "label",
-  prediction: "prediction",
-  config: "config",
-  checkpoint: "checkpoint",
-  volume: "other volume",
+const PROJECT_CONFIRMATION_ROLES = [
+  {
+    key: "image",
+    label: "Image volume",
+    required: true,
+    placeholder: "/path/to/image-volume",
+  },
+  {
+    key: "label",
+    label: "Mask / label",
+    required: false,
+    placeholder: "/path/to/mask-or-label",
+  },
+  {
+    key: "prediction",
+    label: "Existing prediction",
+    required: false,
+    placeholder: "/path/to/prediction-output",
+  },
+  {
+    key: "checkpoint",
+    label: "Checkpoint",
+    required: false,
+    placeholder: "/path/to/model-checkpoint",
+  },
+  {
+    key: "config",
+    label: "Config preset",
+    required: false,
+    placeholder: "/path/to/config.yaml",
+    provenanceOnly: true,
+  },
+];
+
+const workflowReadinessLabels = {
+  setup: "Can start",
+  visualization: "Can visualize",
+  inference: "Can infer",
+  proofreading: "Can proofread",
+  training: "Can train",
+  evaluation: "Can compare",
 };
 
-const joinProjectPath = (rootPath, relativePath) => {
-  if (!rootPath || !relativePath) return "";
-  return `${String(rootPath).replace(/\/+$/, "")}/${String(relativePath).replace(/^\/+/, "")}`;
+const getSelectedFilePath = (item) => {
+  if (!item) return "";
+  if (item.physical_path) return item.physical_path;
+  if (item.logical_path) return item.logical_path;
+  if (item.path && item.path !== "root" && item.name) {
+    return `${item.path}/${item.name}`;
+  }
+  return item.name || item.path || "";
 };
-
-const buildWorkflowPatchFromProjectSuggestion = (suggestion) => {
-  const profile = suggestion?.profile || {};
-  const examples = profile.examples || {};
-  const paired = profile.paired_examples?.[0] || {};
-  const rootPath = suggestion?.directory_path;
-  const imageRelative = paired.image || examples.image?.[0];
-  const labelRelative = paired.label || examples.label?.[0];
-  const predictionRelative = examples.prediction?.[0];
-  const checkpointRelative = examples.checkpoint?.[0];
-  const patch = {
-    dataset_path: rootPath || null,
-    image_path: joinProjectPath(rootPath, imageRelative) || null,
-    label_path: joinProjectPath(rootPath, labelRelative) || null,
-    mask_path: joinProjectPath(rootPath, labelRelative) || null,
-    inference_output_path: joinProjectPath(rootPath, predictionRelative) || null,
-    checkpoint_path: joinProjectPath(rootPath, checkpointRelative) || null,
-  };
-  return Object.fromEntries(
-    Object.entries(patch).filter(([, value]) => Boolean(value)),
-  );
-};
-
 const collectDescendantFolderIds = (folderList, rootIds) => {
   const removed = new Set();
   const queue = [...rootIds];
@@ -191,6 +214,9 @@ function FilesManager() {
   const [hasShownServerWarning, setHasShownServerWarning] = useState(false);
   const [previewStatus, setPreviewStatus] = useState({});
   const [projectSuggestions, setProjectSuggestions] = useState([]);
+  const [pendingProjectSetup, setPendingProjectSetup] = useState(null);
+  const [projectSetupSaving, setProjectSetupSaving] = useState(false);
+  const [rolePickerTarget, setRolePickerTarget] = useState(null);
   const containerRef = useRef(null);
   const itemRefs = useRef({});
   const isDragSelecting = useRef(false);
@@ -1373,19 +1399,153 @@ function FilesManager() {
   const currentFolders = folders.filter((f) => f.parent === currentFolder);
   const currentFiles = files[currentFolder] || [];
   const suggestedProject =
+    projectSuggestions.find((item) => item.profile?.schema?.workable) ||
     projectSuggestions.find((item) => item.recommended) || projectSuggestions[0];
+
+  const openProjectSetupConfirmation = (suggestion, source) => {
+    const roles = getProjectRoleDefaultsFromSuggestion(suggestion);
+    setPendingProjectSetup({
+      source,
+      suggestion,
+      roles,
+    });
+    logClientEvent("project_role_confirmation_opened", {
+      source: "files_manager",
+      message: "Project role confirmation opened",
+      data: {
+        setupSource: source,
+        suggestionId: suggestion?.id || null,
+        projectName: suggestion?.name || null,
+        profileMode: suggestion?.profile?.schema?.mode || null,
+        hasImage: Boolean(roles.image),
+        hasLabel: Boolean(roles.label),
+        hasPrediction: Boolean(roles.prediction),
+        hasCheckpoint: Boolean(roles.checkpoint),
+      },
+    });
+  };
+
+  const setPendingRoleValue = (roleKey, nextValue) => {
+    setPendingProjectSetup((current) => {
+      if (!current) return current;
+      return {
+        ...current,
+        roles: {
+          ...current.roles,
+          [roleKey]: nextValue,
+        },
+      };
+    });
+  };
+
+  const closeProjectSetupConfirmation = () => {
+    setPendingProjectSetup(null);
+    setRolePickerTarget(null);
+  };
+
+  const handleRolePickerSelect = (item) => {
+    if (!rolePickerTarget) return;
+    setPendingRoleValue(rolePickerTarget, getSelectedFilePath(item));
+    setRolePickerTarget(null);
+  };
+
+  const handleConfirmProjectSetup = async () => {
+    if (!pendingProjectSetup || projectSetupSaving) return;
+    const { suggestion, roles, source } = pendingProjectSetup;
+    if (!String(roles.image || "").trim()) {
+      message.warning("Choose an image volume before starting the project.");
+      return;
+    }
+    if (!workflowContext?.updateWorkflow) {
+      message.warning("Workflow state is not ready yet.");
+      return;
+    }
+
+    const rootPath = suggestion?.directory_path || "";
+    const patch = buildWorkflowPatchFromConfirmedProjectRoles({
+      rootPath,
+      roles,
+    });
+    if (!patch.image_path) {
+      message.warning("Choose an image volume before starting the project.");
+      return;
+    }
+
+    setProjectSetupSaving(true);
+    try {
+      await workflowContext.updateWorkflow(patch);
+      await workflowContext.appendEvent?.({
+        actor: "user",
+        event_type: "dataset.loaded",
+        stage: workflowContext.workflow?.stage || "setup",
+        summary: `Confirmed project data for ${suggestion.name}.`,
+        payload: {
+          source: "file_management_project_confirmation",
+          setup_source: source,
+          suggestion_id: suggestion.id,
+          directory_path: rootPath,
+          mounted_root_id: suggestion.mounted_root_id || null,
+          profile_mode: suggestion.profile?.schema?.mode || null,
+          profile_schema_version:
+            suggestion.profile?.schema?.schema_version || null,
+          confirmed_roles: roles,
+          workflow_patch: patch,
+        },
+      });
+      await Promise.allSettled([
+        workflowContext.refreshPreflight?.(),
+        workflowContext.refreshAgentRecommendation?.(),
+      ]);
+      logClientEvent("project_role_confirmation_completed", {
+        source: "files_manager",
+        message: "Project roles confirmed and registered",
+        data: {
+          setupSource: source,
+          suggestionId: suggestion?.id || null,
+          projectName: suggestion?.name || null,
+          workflowPatchKeys: Object.keys(patch),
+        },
+      });
+      message.success("Project data confirmed.");
+      closeProjectSetupConfirmation();
+    } catch (error) {
+      console.warn("Failed to register confirmed project roles", error);
+      logClientEvent("project_role_confirmation_failed", {
+        level: "ERROR",
+        source: "files_manager",
+        message: error.message || "Project role confirmation failed",
+        data: {
+          suggestionId: suggestion?.id || null,
+          projectName: suggestion?.name || null,
+        },
+      });
+      message.error("Failed to register project data.");
+    } finally {
+      setProjectSetupSaving(false);
+    }
+  };
 
   const renderProjectSuggestion = () => {
     if (!suggestedProject || currentFolder !== "root") {
       return null;
     }
     const profile = suggestedProject.profile || {};
+    const projectSchema = profile.schema || {};
     const counts = profile.counts || {};
     const shownRoles = Object.entries(PROJECT_ROLE_LABELS).filter(
       ([role]) => counts[role] > 0,
     );
     const missingRoles = profile.missing_roles || [];
     const pairedExample = profile.paired_examples?.[0];
+    const projectSetupSummary =
+      projectSchema.summary ||
+      (profile.ready_for_smoke
+        ? "Ready for image/label, checkpoint, prediction, and metric checks."
+        : projectSchema.workable
+          ? "Ready to start from detected image data."
+          : missingRoles.length
+            ? `Missing detected ${missingRoles.join(", ")} role(s).`
+            : suggestedProject.description);
 
     return (
       <div
@@ -1406,11 +1566,7 @@ function FilesManager() {
             Project setup: {suggestedProject.name}
           </div>
           <div style={{ color: "#5f6f89", fontSize: 12, marginTop: 2 }}>
-            {profile.ready_for_smoke
-              ? "Ready for image/label, checkpoint, prediction, and metric checks."
-              : missingRoles.length
-                ? `Missing detected ${missingRoles.join(", ")} role(s).`
-                : suggestedProject.description}
+            {projectSetupSummary}
           </div>
           {pairedExample && (
             <div
@@ -1445,7 +1601,7 @@ function FilesManager() {
           ))}
         </div>
         <Button size="small" onClick={handleSuggestedProject}>
-          {suggestedProject.already_mounted ? "Open" : "Mount"}
+          {suggestedProject.already_mounted ? "Open project" : "Use project"}
         </Button>
       </div>
     );
@@ -1594,6 +1750,22 @@ function FilesManager() {
         await fetchFolderContents(mountedRootId, { force: true });
         handleNavigate(mountedRootId);
       }
+      openProjectSetupConfirmation(
+        {
+          id: res?.data?.mounted_root_id
+            ? `mounted-${res.data.mounted_root_id}`
+            : "mounted-project",
+          name:
+            res?.data?.mount_name ||
+            selectedDirectory.split(/[\\/]/).filter(Boolean).pop() ||
+            "Mounted project",
+          directory_path: selectedDirectory,
+          already_mounted: true,
+          mounted_root_id: res?.data?.mounted_root_id || null,
+          profile: res?.data?.profile || {},
+        },
+        "manual_mount",
+      );
       message.success(res?.data?.message || "Project directory mounted.");
     } catch (err) {
       console.error("Mount directory error", err);
@@ -1612,7 +1784,7 @@ function FilesManager() {
       const mountedRootId = String(suggestion.mounted_root_id);
       await fetchFolderContents(mountedRootId, { force: true });
       handleNavigate(mountedRootId);
-      await registerProjectWithWorkflow(suggestion);
+      openProjectSetupConfirmation(suggestion, "suggested_existing");
       message.success(`${suggestion.name} is already mounted.`);
       return;
     }
@@ -1633,37 +1805,19 @@ function FilesManager() {
         await fetchFolderContents(mountedRootId, { force: true });
         handleNavigate(mountedRootId);
       }
-      await registerProjectWithWorkflow(suggestion);
+      openProjectSetupConfirmation(
+        {
+          ...suggestion,
+          already_mounted: true,
+          mounted_root_id: res?.data?.mounted_root_id || suggestion.mounted_root_id,
+          profile: res?.data?.profile || suggestion.profile || {},
+        },
+        "suggested_mount",
+      );
       message.success(res?.data?.message || `${suggestion.name} mounted.`);
     } catch (error) {
       console.error("Suggested project mount error", error);
       message.error(`Failed to mount ${suggestion.name}`);
-    }
-  };
-
-  const registerProjectWithWorkflow = async (suggestion) => {
-    if (!workflowContext?.updateWorkflow) {
-      return;
-    }
-    const patch = buildWorkflowPatchFromProjectSuggestion(suggestion);
-    if (!Object.keys(patch).length) {
-      return;
-    }
-    try {
-      await workflowContext.updateWorkflow(patch);
-      await workflowContext.appendEvent?.({
-        actor: "user",
-        event_type: "dataset.loaded",
-        stage: workflowContext.workflow?.stage || "setup",
-        summary: `Registered project roles from ${suggestion.name}.`,
-        payload: {
-          source: "file_management_project_suggestion",
-          suggestion_id: suggestion.id,
-          ...patch,
-        },
-      });
-    } catch (error) {
-      console.warn("Failed to register mounted project with workflow", error);
     }
   };
 
@@ -1996,8 +2150,8 @@ function FilesManager() {
             }
           >
             {projectSuggestions.some((item) => item.already_mounted)
-              ? "Open Test Project"
-              : "Mount Test Project"}
+              ? "Open suggested project"
+              : "Use suggested project"}
           </Button>
           <Dropdown
             menu={{
@@ -2135,6 +2289,164 @@ function FilesManager() {
             />
           </div>
         )}
+
+        {/* Project role confirmation */}
+        <Modal
+          title="Confirm project data"
+          open={!!pendingProjectSetup}
+          onCancel={closeProjectSetupConfirmation}
+          width={720}
+          footer={[
+            <Button
+              key="cancel"
+              onClick={closeProjectSetupConfirmation}
+              disabled={projectSetupSaving}
+            >
+              Cancel
+            </Button>,
+            <Button
+              key="start"
+              type="primary"
+              onClick={handleConfirmProjectSetup}
+              loading={projectSetupSaving}
+              disabled={!pendingProjectSetup?.roles?.image}
+            >
+              Start project
+            </Button>,
+          ]}
+        >
+          {pendingProjectSetup && (
+            <div>
+              <div
+                style={{
+                  marginBottom: 12,
+                  color: "#4b5563",
+                  fontSize: 13,
+                }}
+              >
+                Confirm what each file is before the workflow uses it.
+              </div>
+              <div
+                style={{
+                  display: "flex",
+                  flexWrap: "wrap",
+                  gap: 6,
+                  marginBottom: 14,
+                }}
+              >
+                {Object.entries(
+                  pendingProjectSetup.suggestion?.profile?.schema?.stages || {},
+                ).map(([stage, value]) => {
+                  const ready =
+                    typeof value === "boolean"
+                      ? value
+                      : Boolean(
+                          value?.ready ||
+                            value?.available ||
+                            value?.complete ||
+                            value?.enabled,
+                        );
+                  return (
+                    <span
+                      key={stage}
+                      style={{
+                        borderRadius: 999,
+                        padding: "3px 8px",
+                        fontSize: 11,
+                        fontWeight: 600,
+                        color: ready ? "#1f7a4d" : "#8a6d3b",
+                        background: ready ? "#f0fbf4" : "#fff9e8",
+                        border: ready
+                          ? "1px solid #b7ebc6"
+                          : "1px solid #ffe4a3",
+                      }}
+                    >
+                      {workflowReadinessLabels[stage] || stage}
+                    </span>
+                  );
+                })}
+              </div>
+              <div style={{ display: "grid", gap: 10 }}>
+                {PROJECT_CONFIRMATION_ROLES.map((role) => (
+                  <div
+                    key={role.key}
+                    style={{
+                      display: "grid",
+                      gridTemplateColumns: "130px minmax(0, 1fr) auto auto",
+                      gap: 8,
+                      alignItems: "center",
+                    }}
+                  >
+                    <div style={{ fontWeight: 700, fontSize: 13 }}>
+                      {role.label}
+                      {role.required ? (
+                        <span style={{ color: "#d4380d" }}> *</span>
+                      ) : null}
+                      {role.provenanceOnly ? (
+                        <span
+                          style={{
+                            marginLeft: 6,
+                            color: "#8c8c8c",
+                            fontWeight: 500,
+                            fontSize: 11,
+                          }}
+                        >
+                          optional
+                        </span>
+                      ) : null}
+                    </div>
+                    <Input
+                      value={pendingProjectSetup.roles?.[role.key] || ""}
+                      placeholder={role.placeholder}
+                      onChange={(event) =>
+                        setPendingRoleValue(role.key, event.target.value)
+                      }
+                    />
+                    <Button
+                      icon={<FolderOpenOutlined />}
+                      onClick={() => setRolePickerTarget(role.key)}
+                    >
+                      Browse
+                    </Button>
+                    <Button
+                      onClick={() => setPendingRoleValue(role.key, "")}
+                      disabled={
+                        role.required && !pendingProjectSetup.roles?.[role.key]
+                      }
+                    >
+                      Clear
+                    </Button>
+                  </div>
+                ))}
+              </div>
+              <div
+                style={{
+                  marginTop: 12,
+                  padding: "8px 10px",
+                  borderRadius: 8,
+                  background: "#fafafa",
+                  color: "#6b7280",
+                  fontSize: 12,
+                  wordBreak: "break-word",
+                }}
+              >
+                Project: {pendingProjectSetup.suggestion?.name || "Mounted project"}
+              </div>
+            </div>
+          )}
+        </Modal>
+
+        <FilePickerModal
+          visible={!!rolePickerTarget}
+          onCancel={() => setRolePickerTarget(null)}
+          onSelect={handleRolePickerSelect}
+          title={`Select ${
+            PROJECT_CONFIRMATION_ROLES.find(
+              (role) => role.key === rolePickerTarget,
+            )?.label || "project file"
+          }`}
+          selectionType="file"
+        />
 
         {/* Preview Modal */}
         <Modal

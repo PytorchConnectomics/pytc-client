@@ -216,6 +216,9 @@ class FileWorkspaceRouteTests(unittest.TestCase):
         smoke_suggestion = next(
             item for item in suggestions if item["id"] == "mito25-paper-loop-smoke"
         )
+        self.assertTrue(
+            any(item["id"] == "snemi-proofreading-data" for item in suggestions)
+        )
         self.assertFalse(smoke_suggestion["already_mounted"])
 
         mount_response = self.client.post(
@@ -272,6 +275,10 @@ class FileWorkspaceRouteTests(unittest.TestCase):
         self.assertEqual(profile["counts"]["prediction"], 2)
         self.assertEqual(profile["counts"]["config"], 1)
         self.assertEqual(profile["counts"]["checkpoint"], 1)
+        self.assertEqual(profile["schema"]["schema_version"], "pytc-project-profile/v1")
+        self.assertTrue(profile["schema"]["workable"])
+        self.assertEqual(profile["schema"]["mode"], "closed_loop_ready")
+        self.assertEqual(profile["schema"]["stages"]["inference"]["status"], "ready")
         self.assertEqual(
             profile["paired_examples"],
             [
@@ -280,6 +287,31 @@ class FileWorkspaceRouteTests(unittest.TestCase):
                     "label": "data/seg/mito25_smoke_seg.h5",
                 }
             ],
+        )
+
+    def test_project_profile_treats_image_only_volume_as_workable_start(self):
+        project_root = pathlib.Path(self.temp_dir.name) / "image-only-project"
+        (project_root / "raw").mkdir(parents=True)
+        (project_root / "raw" / "sample_volume.ome.tif").write_bytes(b"image")
+
+        profile = _scan_project_profile(str(project_root))
+
+        self.assertFalse(profile["ready_for_smoke"])
+        self.assertEqual(profile["counts"]["image"], 1)
+        self.assertTrue(profile["schema"]["workable"])
+        self.assertEqual(profile["schema"]["mode"], "image_only")
+        self.assertEqual(
+            profile["schema"]["primary_paths"]["image"],
+            "raw/sample_volume.ome.tif",
+        )
+        self.assertEqual(profile["schema"]["stages"]["visualization"]["status"], "ready")
+        self.assertEqual(
+            profile["schema"]["stages"]["inference"]["status"],
+            "needs_input",
+        )
+        self.assertEqual(
+            profile["schema"]["stages"]["inference"]["missing"],
+            ["checkpoint"],
         )
 
 

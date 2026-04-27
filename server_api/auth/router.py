@@ -85,6 +85,22 @@ def _project_suggestion_candidates() -> List[dict]:
             "description": "Raw mito25 image/seg source data.",
             "recommended": False,
         },
+        {
+            "id": "mito25-smoke-raw-data",
+            "name": "mito25-smoke",
+            "directory_path": os.path.join(
+                workspace_root, "testing_data", "mito25_smoke"
+            ),
+            "description": "Small paired mito25 HDF5 image/seg volumes for fast smoke testing.",
+            "recommended": False,
+        },
+        {
+            "id": "snemi-proofreading-data",
+            "name": "snemi-proofreading",
+            "directory_path": os.path.join(workspace_root, "testing_data", "snemi"),
+            "description": "SNEMI-style TIFF image/label volumes for proofreading-focused testing.",
+            "recommended": False,
+        },
     ]
 
 
@@ -175,6 +191,145 @@ def _looks_like_image_label_pair(image_path: str, label_path: str) -> bool:
     return normalized_image.split(".")[0] == normalized_label.split(".")[0]
 
 
+def _first_project_path(roles: dict, role: str) -> Optional[str]:
+    values = roles.get(role) or []
+    return values[0] if values else None
+
+
+def _project_stage_status(
+    *,
+    ready: bool,
+    missing: Optional[List[str]] = None,
+    ready_label: str,
+    needed_label: str,
+    blocked_label: str = "Add an image volume first.",
+) -> dict:
+    missing = missing or []
+    if ready:
+        return {"status": "ready", "label": ready_label, "missing": []}
+    if missing:
+        return {"status": "needs_input", "label": needed_label, "missing": missing}
+    return {"status": "blocked", "label": blocked_label, "missing": []}
+
+
+def _build_project_workable_schema(
+    roles: dict,
+    counts: dict,
+    paired_examples: List[dict],
+    *,
+    truncated: bool,
+) -> dict:
+    primary_image = _first_project_path(roles, "image") or _first_project_path(
+        roles, "volume"
+    )
+    primary_label = (
+        paired_examples[0]["label"] if paired_examples else _first_project_path(roles, "label")
+    )
+    primary_prediction = _first_project_path(roles, "prediction")
+    primary_config = _first_project_path(roles, "config")
+    primary_checkpoint = _first_project_path(roles, "checkpoint")
+    has_image = bool(primary_image)
+    has_mask_like = bool(primary_label or primary_prediction)
+    has_image_label = bool(primary_image and primary_label)
+    # Configs are implementation details the agent can infer from presets. They
+    # are tracked for provenance, but should not block a biologist from starting
+    # an otherwise valid image/checkpoint or image/label workflow.
+    has_inference_inputs = bool(primary_image and primary_checkpoint)
+    has_training_inputs = bool(primary_image and primary_label)
+    has_evaluation_inputs = bool(
+        primary_label and counts.get("prediction", 0) >= 2
+    )
+
+    if not has_image:
+        mode = "not_workable"
+        summary = "No image volume detected yet."
+    elif has_evaluation_inputs and has_training_inputs and primary_checkpoint:
+        mode = "closed_loop_ready"
+        summary = "Ready for visualization, proofreading, training, and before/after checks."
+    elif has_image_label:
+        mode = "image_mask_pair"
+        summary = "Ready to start from an image and mask/label pair."
+    else:
+        mode = "image_only"
+        summary = "Ready to start from an image volume; masks, configs, or checkpoints can be added later."
+
+    inference_missing = []
+    if not primary_image:
+        inference_missing.append("image volume")
+    if not primary_checkpoint:
+        inference_missing.append("checkpoint")
+
+    proofreading_missing = []
+    if not primary_image:
+        proofreading_missing.append("image volume")
+    if not has_mask_like:
+        proofreading_missing.append("mask, label, or prediction")
+
+    training_missing = []
+    if not primary_image:
+        training_missing.append("image volume")
+    if not primary_label:
+        training_missing.append("label or corrected mask")
+
+    evaluation_missing = []
+    if counts.get("prediction", 0) < 2:
+        evaluation_missing.append("baseline and candidate predictions")
+    if not primary_label:
+        evaluation_missing.append("reference label or ground truth")
+
+    return {
+        "schema_version": "pytc-project-profile/v1",
+        "workable": has_image,
+        "mode": mode,
+        "summary": summary,
+        "truncated": truncated,
+        "primary_paths": {
+            "image": primary_image,
+            "label": primary_label,
+            "mask": primary_label or primary_prediction,
+            "prediction": primary_prediction,
+            "config": primary_config,
+            "checkpoint": primary_checkpoint,
+        },
+        "stages": {
+            "setup": _project_stage_status(
+                ready=has_image,
+                ready_label="Image volume detected.",
+                needed_label="Choose an image volume.",
+            ),
+            "visualization": _project_stage_status(
+                ready=has_image,
+                ready_label="Ready to visualize.",
+                needed_label="Choose an image volume.",
+            ),
+            "inference": _project_stage_status(
+                ready=has_inference_inputs,
+                ready_label="Ready to run inference.",
+                needed_label="Needs inference inputs.",
+                missing=inference_missing,
+            ),
+            "proofreading": _project_stage_status(
+                ready=bool(primary_image and has_mask_like),
+                ready_label="Ready to proofread masks.",
+                needed_label="Needs a mask, label, or prediction.",
+                missing=proofreading_missing,
+            ),
+            "training": _project_stage_status(
+                ready=has_training_inputs,
+                ready_label="Ready to train from labels/corrections.",
+                needed_label="Needs training inputs.",
+                missing=training_missing,
+            ),
+            "evaluation": _project_stage_status(
+                ready=has_evaluation_inputs,
+                ready_label="Ready to compare before/after predictions.",
+                needed_label="Needs comparison inputs.",
+                missing=evaluation_missing,
+            ),
+        },
+    }
+
+
 def _scan_project_profile(directory_path: str) -> dict:
     roles = {
         "image": [],
@@ -223,6 +378,13 @@ def _scan_project_profile(directory_path: str) -> dict:
         if len(paired_examples) >= 4:
             break
 
+    schema = _build_project_workable_schema(
+        roles,
+        counts,
+        paired_examples,
+        truncated=truncated,
+    )
+
     required_roles = {
         "image": counts["image"] > 0,
         "label": counts["label"] > 0,
@@ -242,6 +404,7 @@ def _scan_project_profile(directory_path: str) -> dict:
         "paired_examples": paired_examples,
         "ready_for_smoke": not missing_roles,
         "missing_roles": missing_roles,
+        "schema": schema,
     }
 
 
@@ -784,8 +947,10 @@ def mount_directory(
     return {
         "message": f"Mounted {mounted_files} files from {source_dir}",
         "mounted_root_id": mounted_root.id,
+        "mount_name": root_name,
         "mounted_folders": mounted_folders,
         "mounted_files": mounted_files,
+        "profile": _scan_project_profile(source_dir),
     }
 
 
@@ -824,6 +989,22 @@ def list_project_suggestions(
                 "already_mounted": mounted_root is not None,
                 "mounted_root_id": mounted_root.id if mounted_root else None,
                 "profile": _scan_project_profile(directory_path),
+            }
+        )
+    suggested_paths = {item["directory_path"] for item in suggestions}
+    for mounted_path, mounted_root in mounted_by_path.items():
+        if mounted_path in suggested_paths or not os.path.isdir(mounted_path):
+            continue
+        suggestions.append(
+            {
+                "id": f"mounted-{mounted_root.id}",
+                "name": mounted_root.name,
+                "directory_path": mounted_path,
+                "description": "Mounted project directory.",
+                "recommended": False,
+                "already_mounted": True,
+                "mounted_root_id": mounted_root.id,
+                "profile": _scan_project_profile(mounted_path),
             }
         )
     return suggestions
