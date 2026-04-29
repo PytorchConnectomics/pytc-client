@@ -293,16 +293,19 @@ non-new ESLint warnings unless they are directly related to the bug at hand.
 
 ## Memory Docs Worth Reading
 
+- `docs/codex-working-memory/README.md`
+- `docs/codex-working-memory/research-log.md`
+- `docs/codex-working-memory/backlog.md`
+- `docs/codex-working-memory/progress-log.md`
 - `docs/prototype-completion-roadmap.md`
 - `docs/agent-role-spec.md`
 - `docs/case-study-prototype-readiness.md`
 - `docs/manual-bulk-test-checklist.md`
 - `docs/research/pytc-prepilot-dataset-stress-test.md`
 
-External local notes from this Codex session, if available on the local Mac:
-
-- `/Users/adamg/seg.bio/pytc-client-codex-notes/research-log.md`
-- `/Users/adamg/seg.bio/pytc-client-codex-notes/backlog.md`
+The `docs/codex-working-memory/` files are vendored from the local Mac's
+external Codex notes so remote Codex can operate with the same progress log and
+backlog context.
 
 ## Current High-Level Priority
 
@@ -314,4 +317,3 @@ It is:
 3. Make visualization/proofreading/training blockers explicit.
 4. Avoid UI clutter and long agent prose.
 5. Capture enough evidence to know where the prototype still breaks.
-
