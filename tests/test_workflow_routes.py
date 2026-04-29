@@ -995,6 +995,76 @@ class WorkflowRouteTests(unittest.TestCase):
             "agent_default",
         )
 
+    def test_agent_train_short_phrases_do_not_fall_to_unknown(self):
+        workflow, _ = self._current_workflow()
+        workflow_id = workflow["id"]
+
+        response = self.client.post(
+            f"/api/workflows/{workflow_id}/agent/query",
+            json={"query": "train"},
+        )
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertEqual(payload["intent"], "collect_project_context")
+        self.assertIn("Before I choose a training preset", payload["response"])
+        self.assertNotIn("did not understand", payload["response"].lower())
+
+    def test_agent_train_model_from_current_labels(self):
+        workflow, _ = self._current_workflow()
+        workflow_id = workflow["id"]
+        self.client.patch(
+            f"/api/workflows/{workflow_id}",
+            json={
+                "stage": "setup",
+                "image_path": "/projects/sample/data/image/train",
+                "label_path": "/projects/sample/data/labels/train",
+                "metadata": {"project_context": {"use_defaults": True}},
+            },
+        )
+
+        response = self.client.post(
+            f"/api/workflows/{workflow_id}/agent/query",
+            json={"query": "can we train a model for this?"},
+        )
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertEqual(payload["intent"], "start_training")
+        self.assertIn("train a model", payload["response"].lower())
+        self.assertEqual(payload["actions"][0]["id"], "start-training")
+        effects = payload["actions"][0]["client_effects"]
+        self.assertEqual(effects["navigate_to"], "training")
+        self.assertEqual(
+            effects["set_training_image_path"],
+            "/projects/sample/data/image/train",
+        )
+        self.assertEqual(
+            effects["set_training_label_path"],
+            "/projects/sample/data/labels/train",
+        )
+        self.assertEqual(effects["runtime_action"]["kind"], "start_training")
+
+    def test_agent_train_model_names_missing_label_blocker(self):
+        workflow, _ = self._current_workflow()
+        workflow_id = workflow["id"]
+        self.client.patch(
+            f"/api/workflows/{workflow_id}",
+            json={
+                "stage": "setup",
+                "image_path": "/projects/sample/data/image/train",
+                "metadata": {"project_context": {"use_defaults": True}},
+            },
+        )
+
+        response = self.client.post(
+            f"/api/workflows/{workflow_id}/agent/query",
+            json={"query": "train on saved edits"},
+        )
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertEqual(payload["intent"], "start_training")
+        self.assertIn("need labels or saved proofreading edits", payload["response"])
+        self.assertEqual(payload["commands"], [])
+
     def test_general_chat_direct_guard_answers_meta_run_questions(self):
         with patch("server_api.main._ensure_chatbot") as ensure_chatbot:
             response = self.client.post(

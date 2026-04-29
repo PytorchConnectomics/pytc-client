@@ -4163,18 +4163,22 @@ async def query_workflow_agent(
     wants_retraining = any(
         term in lower_query for term in ["retrain", "training", "stage", "corrected"]
     )
-    wants_training_launch = any(
-        term in lower_query
-        for term in [
+    wants_training_launch = _query_has(
+        lower_query,
+        [
+            "train",
             "start training",
             "run training",
             "launch training",
             "retrain now",
+            "train model",
+            "train a model",
             "train the model",
             "train for me",
+            "train on saved edits",
             "run a training job",
             "run training job",
-        ]
+        ],
     )
     wants_inference_launch = any(
         term in lower_query
@@ -4577,7 +4581,8 @@ async def query_workflow_agent(
         commands = []
     elif wants_training_launch and workflow.stage == "retraining_staged":
         intent = "start_training"
-        training_effects = _build_start_training_effects(workflow, corrected_mask_path)
+        training_label_path = corrected_mask_path or workflow.label_path or workflow.mask_path
+        training_effects = _build_start_training_effects(workflow, training_label_path)
         response = (
             "Do this: train on the saved edits.\n"
             "Why: I can choose the preset and safe defaults from the current image/mask paths."
@@ -4605,6 +4610,72 @@ async def query_workflow_agent(
                 training_effects,
             )
         ]
+    elif wants_training_launch:
+        intent = "start_training"
+        training_label_path = corrected_mask_path or workflow.label_path or workflow.mask_path
+        image_path = workflow.image_path or workflow.dataset_path or ""
+        if not image_path:
+            response = (
+                "I can train a model, but I need image data first.\n"
+                "Do this: choose the project image and label folders in Files."
+            )
+            actions = [
+                _build_agent_chat_action(
+                    "open-files",
+                    "Choose data",
+                    "Select the image and label data needed for training.",
+                    variant="primary",
+                    client_effects={"navigate_to": "files"},
+                )
+            ]
+            commands = []
+        elif not training_label_path:
+            response = (
+                "I can train a model, but I need labels or saved proofreading edits first.\n"
+                "Do this: choose label data, proofread a mask, or run the model to create a prediction."
+            )
+            actions = [
+                _build_agent_chat_action(
+                    "open-files",
+                    "Choose labels",
+                    "Select label data or saved edits for training.",
+                    variant="primary",
+                    client_effects={"navigate_to": "files"},
+                ),
+                _build_agent_chat_action(
+                    "open-proofreading",
+                    "Proofread",
+                    "Create saved edits before training.",
+                    client_effects={"navigate_to": "mask-proofreading"},
+                ),
+            ]
+            commands = []
+        else:
+            training_effects = _build_start_training_effects(
+                workflow,
+                training_label_path,
+            )
+            response = (
+                "Do this: train a model from the current image and label data.\n"
+                "Why: I found the training inputs and can choose safe defaults."
+            )
+            actions = [
+                _build_agent_chat_action(
+                    "start-training",
+                    "Train model",
+                    "Start training with the current image and label data.",
+                    variant="primary",
+                    client_effects=training_effects,
+                )
+            ]
+            commands = [
+                _build_agent_command_block(
+                    "start-training-command",
+                    "Start training in app",
+                    "Run this in-app command block to launch training from chat.",
+                    training_effects,
+                )
+            ]
     elif wants_inference_launch:
         intent = "start_inference"
         inference_effects = _build_start_inference_effects(workflow)
