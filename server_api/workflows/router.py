@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import json
+import pathlib
+import re
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 
@@ -50,6 +52,7 @@ from .bundle_export import build_export_bundle, write_export_bundle_directory
 from .agent_plan import build_case_study_plan_graph
 from .evaluation import compute_before_after_evaluation, write_evaluation_report
 from .metrics import compute_workflow_metrics
+from .volume_pairs import discover_neuroglancer_volume_pairs
 
 router = APIRouter()
 
@@ -1288,11 +1291,95 @@ def _build_start_proofreading_effects(workflow: WorkflowSession) -> Dict[str, An
     return effects
 
 
+def _workflow_source_volume_path(workflow: WorkflowSession) -> str:
+    return (
+        workflow.image_path
+        or workflow.dataset_path
+        or workflow.inference_output_path
+        or ""
+    )
+
+
+def _workflow_mask_like_path(workflow: WorkflowSession) -> str:
+    return (
+        workflow.mask_path
+        or workflow.inference_output_path
+        or workflow.corrected_mask_path
+        or workflow.label_path
+        or ""
+    )
+
+
+def _proofreading_input_blockers(workflow: WorkflowSession) -> List[str]:
+    blockers = []
+    if not _workflow_source_volume_path(workflow):
+        blockers.append("image volume")
+    if not _workflow_mask_like_path(workflow):
+        blockers.append("mask, label, or prediction")
+    return blockers
+
+
+def _build_view_data_effects(
+    workflow: WorkflowSession,
+    *,
+    image_path: Optional[str] = None,
+    label_path: Optional[str] = None,
+) -> Dict[str, Any]:
+    image_path = image_path or workflow.image_path or workflow.dataset_path or ""
+    label_path = label_path or (
+        workflow.label_path
+        or workflow.mask_path
+        or workflow.inference_output_path
+        or workflow.corrected_mask_path
+        or ""
+    )
+    effects: Dict[str, Any] = {"navigate_to": "visualization"}
+    if image_path:
+        effects["set_visualization_image_path"] = image_path
+    if label_path:
+        effects["set_visualization_label_path"] = label_path
+    return effects
+
+
+def _build_proofreading_action(
+    workflow: WorkflowSession,
+    *,
+    label: str = "Proofread this data",
+    variant: str = "primary",
+) -> AgentChatAction:
+    return _build_agent_chat_action(
+        "start-proofreading",
+        label,
+        "Open the image and mask in the proofreading workbench.",
+        variant=variant,
+        client_effects=_build_start_proofreading_effects(workflow),
+    )
+
+
 def _build_default_agent_actions(
     workflow: WorkflowSession,
     corrected_mask_path: Optional[str],
 ) -> List[AgentChatAction]:
+    proofreading_blockers = _proofreading_input_blockers(workflow)
+    can_start_proofreading = not proofreading_blockers
+
     if workflow.stage == "setup":
+        if can_start_proofreading:
+            return [
+                _build_proofreading_action(workflow, variant="primary"),
+                _build_agent_chat_action(
+                    "open-visualization",
+                    "View data",
+                    "Open the current image and mask in the viewer.",
+                    client_effects=_build_view_data_effects(workflow),
+                ),
+                _build_agent_chat_action(
+                    "open-inference",
+                    "Run Model",
+                    "Open model inference setup.",
+                    client_effects={"navigate_to": "inference"},
+                ),
+            ]
         return [
             _build_agent_chat_action(
                 "open-files",
@@ -1305,35 +1392,41 @@ def _build_default_agent_actions(
                 "open-visualization",
                 "View data",
                 "Open the image viewer after data is mounted.",
-                client_effects={"navigate_to": "visualization"},
+                client_effects=_build_view_data_effects(workflow),
             ),
             _build_agent_chat_action(
                 "open-inference",
-                "Run model",
+                "Run Model",
                 "Open model inference setup.",
                 client_effects={"navigate_to": "inference"},
             ),
         ]
 
     if workflow.stage == "visualization":
-        can_start_proofreading = bool(
-            workflow.mask_path or workflow.label_path or workflow.inference_output_path
-        )
+        if not can_start_proofreading:
+            return [
+                _build_agent_chat_action(
+                    "open-files",
+                    "Choose data",
+                    f"Proofreading needs {', '.join(proofreading_blockers)}.",
+                    variant="primary",
+                    client_effects={"navigate_to": "files"},
+                ),
+                _build_agent_chat_action(
+                    "open-inference",
+                    "Run Model",
+                    "Make a prediction for the current data.",
+                    client_effects={"navigate_to": "inference"},
+                ),
+            ]
         return [
-            _build_agent_chat_action(
-                "start-proofreading",
-                "Proofread this data",
-                "Open the image and mask in the proofreading workbench.",
-                variant="primary" if can_start_proofreading else "default",
-                client_effects=_build_start_proofreading_effects(workflow),
-            ),
+            _build_proofreading_action(workflow, variant="primary"),
             _build_agent_chat_action(
                 "open-inference",
-                "Run model",
+                "Run Model",
                 "Make a prediction for the current data.",
-                variant="default" if can_start_proofreading else "primary",
                 client_effects={"navigate_to": "inference"},
-            ),
+            )
         ]
 
     if workflow.stage == "inference":
@@ -1341,7 +1434,7 @@ def _build_default_agent_actions(
             return [
                 _build_agent_chat_action(
                     "start-inference",
-                    "Run model",
+                    "Run Model",
                     "Start the model run with the current settings.",
                     variant="primary",
                     client_effects=_build_start_inference_effects(workflow),
@@ -1354,12 +1447,10 @@ def _build_default_agent_actions(
                 ),
             ]
         return [
-            _build_agent_chat_action(
-                "start-proofreading",
-                "Proofread this result",
-                "Open the image and mask in the proofreading workbench.",
+            _build_proofreading_action(
+                workflow,
+                label="Proofread this result",
                 variant="primary",
-                client_effects=_build_start_proofreading_effects(workflow),
             ),
             _build_agent_chat_action(
                 "refresh-insights",
@@ -1371,14 +1462,11 @@ def _build_default_agent_actions(
 
     if workflow.stage == "proofreading":
         actions = [
-            _build_agent_chat_action(
-                "start-proofreading",
-                "Proofread this data",
-                "Open the image and mask in the proofreading workbench.",
+            _build_proofreading_action(
+                workflow,
                 variant=(
                     "primary" if not workflow.proofreading_session_id else "default"
                 ),
-                client_effects=_build_start_proofreading_effects(workflow),
             ),
             _build_agent_chat_action(
                 "refresh-insights",
@@ -1476,7 +1564,20 @@ def _build_default_agent_actions(
 
 
 def _query_has(lower_query: str, terms: List[str]) -> bool:
-    return any(term in lower_query for term in terms)
+    for term in terms:
+        normalized = term.strip().lower()
+        if not normalized:
+            continue
+        if re.search(r"[^\w]", normalized):
+            if normalized in lower_query:
+                return True
+            continue
+        if re.search(
+            rf"(?<![a-z0-9_]){re.escape(normalized)}(?![a-z0-9_])",
+            lower_query,
+        ):
+            return True
+    return False
 
 
 def _is_greeting_query(lower_query: str) -> bool:
@@ -1581,10 +1682,18 @@ def _target_tab_from_query(lower_query: str) -> Optional[Dict[str, str]]:
             },
         ),
         (
-            ["infer", "inference", "prediction", "predict", "run model", "segment"],
+            [
+                "infer",
+                "inference",
+                "prediction",
+                "predict",
+                "run model",
+                "segment",
+                "segmentation",
+            ],
             {
                 "tab": "inference",
-                "label": "Open Infer",
+                "label": "Open Run Model",
                 "description": "Open model inference setup.",
             },
         ),
@@ -1592,7 +1701,7 @@ def _target_tab_from_query(lower_query: str) -> Optional[Dict[str, str]]:
             ["train", "training", "retrain"],
             {
                 "tab": "training",
-                "label": "Open Train",
+                "label": "Open Train Model",
                 "description": "Open model training setup.",
             },
         ),
@@ -2286,10 +2395,145 @@ def _short_path_label(path: Optional[str]) -> str:
     return parts[-1] or str(path)
 
 
+def _workflow_volume_pair_discovery(workflow: WorkflowSession) -> Dict[str, Any]:
+    metadata = decode_json(workflow.metadata_json)
+    stored_discovery = (
+        metadata.get("volume_pair_discovery") if isinstance(metadata, dict) else None
+    )
+    image_path = workflow.image_path or workflow.dataset_path
+    label_path = (
+        workflow.label_path
+        or workflow.mask_path
+        or workflow.inference_output_path
+        or workflow.corrected_mask_path
+    )
+    if not image_path:
+        return {"pair_count": 0, "pairs": []}
+    try:
+        image = pathlib.Path(str(image_path))
+        label = pathlib.Path(str(label_path)) if label_path else None
+        if not image.exists() or (label is not None and not label.exists()):
+            return (
+                stored_discovery
+                if isinstance(stored_discovery, dict)
+                else {"pair_count": 0, "pairs": []}
+            )
+        discovery = discover_neuroglancer_volume_pairs(image, label, max_pairs=12)
+        if isinstance(discovery, dict) and discovery.get("pair_count"):
+            return discovery
+        return (
+            stored_discovery
+            if isinstance(stored_discovery, dict)
+            else {"pair_count": 0, "pairs": []}
+        )
+    except Exception as exc:
+        append_app_event(
+            component="workflow_agent",
+            event="workflow_volume_pair_discovery_failed",
+            level="WARNING",
+            message=str(exc),
+            workflow_id=workflow.id,
+            image_path=str(image_path),
+            label_path=str(label_path) if label_path else None,
+        )
+        return (
+            stored_discovery
+            if isinstance(stored_discovery, dict)
+            else {"pair_count": 0, "pairs": []}
+        )
+
+
 def _workflow_project_context(workflow: WorkflowSession) -> Dict[str, Any]:
     metadata = decode_json(workflow.metadata_json)
     context = metadata.get("project_context") if isinstance(metadata, dict) else {}
     return context if isinstance(context, dict) else {}
+
+
+def _format_scale_number(value: float) -> str:
+    return str(int(value)) if float(value).is_integer() else f"{value:g}"
+
+
+def _format_scales(scales: List[float]) -> str:
+    return ",".join(_format_scale_number(value) for value in scales)
+
+
+def _parse_visualization_scales_from_query(query: str) -> Optional[List[float]]:
+    lower = query.lower()
+    values = [float(value) for value in re.findall(r"\d+(?:\.\d+)?", query)]
+    unit_multiplier = (
+        1000.0
+        if any(term in lower for term in ["µm", "um", "micron", "microns"])
+        else 1.0
+    )
+    if len(values) >= 3:
+        return [value * unit_multiplier for value in values[:3]]
+    if len(values) == 1 and any(
+        term in lower for term in ["isotropic", "same scale", "same voxel"]
+    ):
+        value = values[0] * unit_multiplier
+        return [value, value, value]
+    return None
+
+
+def _query_wants_visualization_scales(lower_query: str) -> bool:
+    explicit_scale_language = _query_has(
+        lower_query,
+        [
+            "scales",
+            "voxel size",
+            "voxel spacing",
+            "spacing",
+            "resolution",
+            "nanometer",
+            "nanometers",
+            "micron",
+            "microns",
+        ],
+    )
+    singular_scale_language = bool(
+        re.search(r"(?<![a-z0-9_-])scale(?![a-z0-9_-])", lower_query)
+    )
+    reload_with_values = (
+        "reload" in lower_query
+        and bool(re.search(r"\d", lower_query))
+        and any(marker in lower_query for marker in [",", "-", "nm", "um", "µm"])
+    )
+    return explicit_scale_language or singular_scale_language or reload_with_values
+
+
+def _store_visualization_scales(
+    db: Session,
+    workflow: WorkflowSession,
+    scales_nm: List[float],
+    *,
+    source_query: str,
+) -> None:
+    metadata = decode_json(workflow.metadata_json)
+    if not isinstance(metadata, dict):
+        metadata = {}
+    metadata["visualization_scales"] = scales_nm
+    metadata["visualization_scales_source"] = "workflow_agent"
+    project_context = metadata.get("project_context")
+    if not isinstance(project_context, dict):
+        project_context = {}
+    project_context["voxel_size_nm"] = scales_nm
+    project_context["voxel_size_source"] = "workflow_agent"
+    metadata["project_context"] = project_context
+    update_workflow_fields(db, workflow, {"metadata": metadata}, commit=True)
+    append_workflow_event(
+        db,
+        workflow_id=workflow.id,
+        actor="agent",
+        event_type="visualization.scales_updated",
+        stage=workflow.stage,
+        summary=f"Saved visualization voxel scale {_format_scales(scales_nm)} nm.",
+        payload={
+            "scales_nm": scales_nm,
+            "source": "workflow_agent",
+            "query_preview": source_query[:240],
+        },
+        commit=True,
+    )
 
 
 def _extract_project_context_from_query(query: str) -> Dict[str, Any]:
@@ -3899,6 +4143,23 @@ async def query_workflow_agent(
             "download bundle",
         ],
     )
+    wants_visualization_launch = _query_has(
+        lower_query,
+        [
+            "visualize",
+            "visualization",
+            "view data",
+            "view volume",
+            "view volumes",
+            "show data",
+            "show volume",
+            "inspect data",
+            "inspect volume",
+            "look at data",
+            "look at volume",
+        ],
+    )
+    wants_visualization_scales = _query_wants_visualization_scales(lower_query)
     wants_retraining = any(
         term in lower_query for term in ["retrain", "training", "stage", "corrected"]
     )
@@ -3926,22 +4187,43 @@ async def query_workflow_agent(
             "launch model",
         ]
     )
-    wants_segmentation_launch = any(
-        term in lower_query
-        for term in [
-            "segment",
-            "segmented",
-            "segmentation",
-            "predict",
-            "prediction",
-            "get my volume",
+    wants_segmentation_launch = _query_has(
+        lower_query,
+        [
+            "run segmentation",
+            "start segmentation",
+            "launch segmentation",
+            "segment this",
+            "segment my",
+            "segment volume",
+            "segment the volume",
+            "get my volume segmented",
             "process volume",
             "run this volume",
-        ]
+            "predict masks",
+            "make a prediction",
+            "make predictions",
+        ],
     )
-    wants_proofreading_launch = any(
-        term in lower_query
-        for term in ["proofread", "proofreading", "review mask", "fix mask"]
+    wants_proofreading_launch = _query_has(
+        lower_query,
+        [
+            "proofread",
+            "proofreading",
+            "review mask",
+            "review masks",
+            "review segmentation",
+            "review segmentations",
+            "fix mask",
+            "fix masks",
+            "fix segmentation",
+            "inspect segmentation",
+            "check segmentation",
+            "check segmentations",
+            "curate segmentation",
+            "curate segmentations",
+            "human review",
+        ],
     )
     wants_failure_analysis = any(
         term in lower_query for term in ["fail", "failure", "error", "hotspot", "where"]
@@ -3965,10 +4247,7 @@ async def query_workflow_agent(
     if context_update:
         _merge_project_context(db, workflow, context_update)
     action_needs_context = (
-        wants_training_launch
-        or wants_inference_launch
-        or wants_segmentation_launch
-        or wants_proofreading_launch
+        wants_training_launch or wants_inference_launch or wants_segmentation_launch
     )
     if wants_training_launch:
         context_action_label = "choose a training preset"
@@ -3986,8 +4265,61 @@ async def query_workflow_agent(
         hotspots,
         corrected_mask_path,
     )
+    proofreading_blockers = _proofreading_input_blockers(workflow)
 
-    if action_needs_context and _project_context_missing_fields(workflow):
+    if wants_visualization_scales:
+        intent = "set_visualization_scales"
+        parsed_scales = _parse_visualization_scales_from_query(query)
+        if not parsed_scales:
+            response = (
+                "I can reload with new voxel scales, but I need three values in z,y,x.\n"
+                "Example: reload with 1,1,1 nm."
+            )
+            actions = [
+                _build_agent_chat_action(
+                    "open-visualization",
+                    "Open viewer",
+                    "Open the visualization screen so you can set the voxel scales.",
+                    variant="primary",
+                    client_effects={"navigate_to": "visualization"},
+                )
+            ]
+            commands = []
+        else:
+            _store_visualization_scales(
+                db,
+                workflow,
+                parsed_scales,
+                source_query=query,
+            )
+            scale_text = _format_scales(parsed_scales)
+            view_effects = _build_view_data_effects(workflow)
+            view_effects["set_visualization_scales"] = parsed_scales
+            view_effects["runtime_action"] = {"kind": "load_visualization"}
+            response = (
+                f"Do this: reload the viewer with {scale_text} nm voxel scales.\n"
+                "Why: I saved that z,y,x scale in project context for this workflow."
+            )
+            actions = [
+                _build_agent_chat_action(
+                    "reload-visualization-scales",
+                    "Reload viewer",
+                    f"Reload the current volume view with {scale_text} nm scales.",
+                    variant="primary",
+                    client_effects=view_effects,
+                )
+            ]
+            if not workflow.image_path and not workflow.dataset_path:
+                actions.append(
+                    _build_agent_chat_action(
+                        "choose-data",
+                        "Choose data",
+                        "Pick an image and mask before loading the viewer.",
+                        client_effects={"navigate_to": "files"},
+                    )
+                )
+            commands = []
+    elif action_needs_context and _project_context_missing_fields(workflow):
         intent = "collect_project_context"
         response = _format_project_context_prompt(workflow, context_action_label)
         actions = []
@@ -4108,7 +4440,7 @@ async def query_workflow_agent(
                 ),
                 _build_agent_chat_action(
                     "open-inference",
-                    "Open Infer",
+                    "Open Run Model",
                     "Run or register model outputs for comparison.",
                     client_effects={"navigate_to": "inference"},
                 ),
@@ -4142,7 +4474,86 @@ async def query_workflow_agent(
                     evaluation_effects,
                 )
             ]
-    elif wants_status:
+    elif wants_visualization_launch:
+        intent = "view_data"
+        image_path = workflow.image_path or workflow.dataset_path or ""
+        label_path = (
+            workflow.label_path
+            or workflow.mask_path
+            or workflow.inference_output_path
+            or workflow.corrected_mask_path
+            or ""
+        )
+        if not image_path:
+            response = (
+                "I can visualize this, but I need the image volume first.\n"
+                "Do this: confirm the image and mask/label paths in Files."
+            )
+            actions = [
+                _build_agent_chat_action(
+                    "open-files",
+                    "Choose data",
+                    "Confirm the image and mask/label paths before viewing.",
+                    variant="primary",
+                    client_effects={"navigate_to": "files"},
+                )
+            ]
+            commands = []
+        else:
+            pair_discovery = _workflow_volume_pair_discovery(workflow)
+            detected_pairs = pair_discovery.get("pairs") or []
+            selected_pair = detected_pairs[0] if detected_pairs else None
+            selected_image_path = (
+                selected_pair.get("image_path") if selected_pair else image_path
+            )
+            selected_label_path = (
+                selected_pair.get("label_path") if selected_pair else label_path
+            )
+            view_effects = _build_view_data_effects(
+                workflow,
+                image_path=selected_image_path,
+                label_path=selected_label_path,
+            )
+            pair_count = int(pair_discovery.get("pair_count") or 0)
+            pair_line = ""
+            if pair_count > 1:
+                pair_line = (
+                    f"\nI found {pair_count} clear image/seg pairs and will open "
+                    f"{_short_path_label(selected_image_path)} first. "
+                    "Tell me if there are more folders or pairs I should include."
+                )
+            elif pair_count == 1:
+                pair_line = (
+                    f"\nI found one clear image/seg pair: "
+                    f"{_short_path_label(selected_image_path)}"
+                    f"{' with ' + _short_path_label(selected_label_path) if selected_label_path else ''}."
+                )
+            response = (
+                f"Do this: view {_short_path_label(selected_image_path)}"
+                f"{' with ' + _short_path_label(selected_label_path) if selected_label_path else ''}.\n"
+                "Why: the workflow has a source volume"
+                f"{' and a mask/label' if selected_label_path else ''} ready for inspection."
+                f"{pair_line}"
+            )
+            actions = [
+                _build_agent_chat_action(
+                    "open-visualization",
+                    "View data",
+                    "Open the selected image and mask in the viewer.",
+                    variant="primary",
+                    client_effects=view_effects,
+                )
+            ]
+            if not proofreading_blockers:
+                actions.append(_build_proofreading_action(workflow, variant="default"))
+            commands = []
+    elif wants_status and not (
+        wants_training_launch
+        or wants_inference_launch
+        or wants_segmentation_launch
+        or wants_proofreading_launch
+        or wants_visualization_launch
+    ):
         intent = "status"
         response = _format_workflow_agent_response(agent_recommendation)
         actions = [
@@ -4226,34 +4637,54 @@ async def query_workflow_agent(
         ]
     elif wants_proofreading_launch:
         intent = "start_proofreading"
-        proofreading_effects = _build_start_proofreading_effects(workflow)
-        response = (
-            "Do this: proofread this data.\n"
-            "Why: I found the current image/mask paths in the workflow."
-        )
-        actions = [
-            _build_agent_chat_action(
-                "start-proofreading",
-                "Proofread this data",
-                "Open the image and mask in the proofreading workbench.",
-                variant="primary",
-                client_effects=proofreading_effects,
-            ),
-            _build_agent_chat_action(
-                "refresh-insights",
-                "Refresh",
-                "Update the recommendation using the latest edits.",
-                client_effects={"refresh_insights": True},
-            ),
-        ]
-        commands = [
-            _build_agent_command_block(
-                "start-proofreading-command",
-                "Start proofreading in app",
-                "Open the current image/mask pair in proofreading.",
-                proofreading_effects,
+        if proofreading_blockers:
+            missing = ", ".join(proofreading_blockers)
+            response = (
+                f"I can proofread this, but I need {missing} first.\n"
+                "Do this: confirm the image and mask/label paths in Files."
             )
-        ]
+            actions = [
+                _build_agent_chat_action(
+                    "open-files",
+                    "Choose data",
+                    f"Proofreading needs {missing}.",
+                    variant="primary",
+                    client_effects={"navigate_to": "files"},
+                )
+            ]
+            if "mask, label, or prediction" in proofreading_blockers:
+                actions.append(
+                    _build_agent_chat_action(
+                        "open-inference",
+                        "Run model",
+                        "Create a prediction if no editable mask/label exists.",
+                        client_effects={"navigate_to": "inference"},
+                    )
+                )
+            commands = []
+        else:
+            proofreading_effects = _build_start_proofreading_effects(workflow)
+            response = (
+                "Do this: proofread this data.\n"
+                "Why: I found the current image/mask paths in the workflow."
+            )
+            actions = [
+                _build_proofreading_action(workflow, variant="primary"),
+                _build_agent_chat_action(
+                    "refresh-insights",
+                    "Refresh",
+                    "Update the recommendation using the latest edits.",
+                    client_effects={"refresh_insights": True},
+                ),
+            ]
+            commands = [
+                _build_agent_command_block(
+                    "start-proofreading-command",
+                    "Start proofreading in app",
+                    "Open the current image/mask pair in proofreading.",
+                    proofreading_effects,
+                )
+            ]
     elif wants_segmentation_launch:
         intent = "start_segmentation"
         inference_effects = _build_start_inference_effects(workflow)
@@ -4397,6 +4828,13 @@ async def query_workflow_agent(
         response_len=len(response),
         response_source="workflow_orchestrator",
         intent=intent,
+        recommendation_decision=agent_recommendation.decision,
+        recommendation_stage=agent_recommendation.next_stage,
+        action_ids=[action.id for action in actions],
+        action_labels=[action.label for action in actions],
+        command_ids=[command.id for command in commands],
+        command_titles=[command.title for command in commands],
+        proofreading_blockers=proofreading_blockers,
         action_count=len(actions),
         command_count=len(commands),
         proposal_count=len(proposals),

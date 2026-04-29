@@ -1,4 +1,10 @@
-import React, { useState } from "react";
+import React, {
+  useCallback,
+  useContext,
+  useEffect,
+  useRef,
+  useState,
+} from "react";
 import { Button, Tabs, Input, Space, Typography, message } from "antd";
 import {
   ArrowRightOutlined,
@@ -8,66 +14,104 @@ import {
 import { apiClient, getNeuroglancerViewer } from "../api";
 import UnifiedFileInput from "../components/UnifiedFileInput";
 import StageHeader from "../components/workflow/StageHeader";
+import { AppContext } from "../contexts/GlobalContext";
 import { useWorkflow } from "../contexts/WorkflowContext";
 
 const { Title } = Typography;
 
+const formatScales = (value) => {
+  if (!value) return "";
+  if (Array.isArray(value)) return value.join(",");
+  return String(value);
+};
+
+const getPath = (val) => {
+  if (!val) return "";
+  if (typeof val === "string") return val;
+  return val.path || "";
+};
+
+const getDisplay = (val) => {
+  if (!val) return "";
+  if (typeof val === "string") return val;
+  return val.display || val.path || "";
+};
+
+const getViewerTitle = (imageValue, labelValue) => {
+  const getImageName = (val) => {
+    const display = getDisplay(val);
+    if (!display) return "";
+    const parts = display.split(/[/\\]/);
+    return parts[parts.length - 1];
+  };
+
+  return (
+    getImageName(imageValue) + (labelValue ? " & " + getImageName(labelValue) : "")
+  );
+};
+
 function Visualization(props) {
   const { viewers, setViewers } = props;
   const workflowContext = useWorkflow();
+  const appContext = useContext(AppContext);
+  const globalImage = appContext?.currentImage || null;
+  const globalLabel = appContext?.currentLabel || null;
+  const globalScales = appContext?.visualizationScales || "";
+  const workflowScales =
+    workflowContext?.workflow?.metadata?.visualization_scales ||
+    workflowContext?.workflow?.metadata?.project_context?.voxel_size_nm ||
+    null;
+  const handledRuntimeActionRef = useRef(null);
   const [activeKey, setActiveKey] = useState(
     viewers.length > 0 ? viewers[0].key : null,
   );
 
   // Input states
-  const [currentImage, setCurrentImage] = useState(null);
-  const [currentLabel, setCurrentLabel] = useState(null);
-  const [scales, setScales] = useState("30,6,6");
+  const [currentImage, setCurrentImage] = useState(globalImage);
+  const [currentLabel, setCurrentLabel] = useState(globalLabel);
+  const [scales, setScales] = useState(
+    formatScales(globalScales) || formatScales(workflowScales) || "30,6,6",
+  );
   const [isLoading, setIsLoading] = useState(false);
 
   const handleImageChange = (value) => {
     console.log(`selected image:`, value);
     setCurrentImage(value);
+    appContext?.setCurrentImage?.(value);
   };
 
   const handleLabelChange = (value) => {
     console.log(`selected label:`, value);
     setCurrentLabel(value);
+    appContext?.setCurrentLabel?.(value);
   };
+
+  useEffect(() => {
+    if (globalImage !== currentImage) {
+      setCurrentImage(globalImage);
+    }
+  }, [globalImage, currentImage]);
+
+  useEffect(() => {
+    if (globalLabel !== currentLabel) {
+      setCurrentLabel(globalLabel);
+    }
+  }, [globalLabel, currentLabel]);
+
+  useEffect(() => {
+    const nextScales = formatScales(globalScales || workflowScales);
+    if (nextScales && nextScales !== scales) {
+      setScales(nextScales);
+    }
+  }, [globalScales, workflowScales, scales]);
 
   const handleInputScales = (event) => {
-    setScales(event.target.value);
+    const nextScales = event.target.value;
+    setScales(nextScales);
+    appContext?.setVisualizationScales?.(nextScales);
   };
 
-  // Helper to get path string from potential object
-  const getPath = (val) => {
-    if (!val) return "";
-    if (typeof val === "string") return val;
-    return val.path || "";
-  };
-
-  // Helper to get display string from potential object
-  const getDisplay = (val) => {
-    if (!val) return "";
-    if (typeof val === "string") return val;
-    return val.display || val.path || "";
-  };
-
-  const getViewerTitle = (imageValue, labelValue) => {
-    const getImageName = (val) => {
-      const display = getDisplay(val);
-      if (!display) return "";
-      const parts = display.split(/[/\\]/);
-      return parts[parts.length - 1];
-    };
-
-    return (
-      getImageName(imageValue) +
-      (labelValue ? " & " + getImageName(labelValue) : "")
-    );
-  };
-
-  const validateManagedUploadSelection = async (value, role) => {
+  const validateManagedUploadSelection = useCallback(async (value, role) => {
     const selectedPath = getPath(value);
     if (!selectedPath || !selectedPath.startsWith("uploads/")) {
       return true;
@@ -90,9 +134,9 @@ function Visualization(props) {
       `The selected ${role} file is no longer present in app uploads. Please re-select or re-upload it.`,
     );
     return false;
-  };
+  }, []);
 
-  const loadViewer = async (imageValue, labelValue, scalesValue) => {
+  const loadViewer = useCallback(async (imageValue, labelValue, scalesValue) => {
     const imagePath = getPath(imageValue);
     const labelPath = getPath(labelValue);
 
@@ -129,19 +173,45 @@ function Visualization(props) {
         updatedViewers = viewers.filter((viewer) => viewer.key !== viewerId);
       }
 
-      const res = await getNeuroglancerViewer(
+      const viewerResult = await getNeuroglancerViewer(
         imagePath,
         labelPath,
         scalesArray,
         workflowContext?.workflow?.id,
       );
+      const viewerUrl =
+        typeof viewerResult === "string"
+          ? viewerResult
+          : viewerResult?.url || viewerResult?.neuroglancer_url || "";
+
+      if (!viewerUrl) {
+        throw new Error("Viewer did not return a Neuroglancer URL.");
+      }
+
+      const resolvedImagePath = viewerResult?.image_path;
+      const resolvedLabelPath = viewerResult?.label_path;
+      const pairQuestion = viewerResult?.pair_question;
+      if (resolvedImagePath && resolvedImagePath !== imagePath) {
+        setCurrentImage(resolvedImagePath);
+        appContext?.setCurrentImage?.(resolvedImagePath);
+      }
+      if (resolvedLabelPath && resolvedLabelPath !== labelPath) {
+        setCurrentLabel(resolvedLabelPath);
+        appContext?.setCurrentLabel?.(resolvedLabelPath);
+      }
+      if (pairQuestion) {
+        message.info(pairQuestion, 8);
+      }
 
       const newViewers = [
         ...updatedViewers,
         {
           key: viewerId,
-          title: getViewerTitle(imageValue, labelValue),
-          viewer: res,
+          title: getViewerTitle(
+            resolvedImagePath || imageValue,
+            resolvedLabelPath || labelValue,
+          ),
+          viewer: viewerUrl,
         },
       ];
 
@@ -153,11 +223,56 @@ function Visualization(props) {
     } finally {
       setIsLoading(false);
     }
-  };
+  }, [
+    appContext,
+    setViewers,
+    validateManagedUploadSelection,
+    viewers,
+    workflowContext?.workflow?.id,
+  ]);
 
   const fetchNeuroglancerViewer = async () => {
     await loadViewer(currentImage, currentLabel, scales);
   };
+
+  useEffect(() => {
+    const action = workflowContext?.pendingRuntimeAction;
+    if (!action || action.kind !== "load_visualization") return;
+    if (handledRuntimeActionRef.current === action.id) return;
+    handledRuntimeActionRef.current = action.id;
+
+    const overrideScales = formatScales(action.overrides?.visualizationScales);
+    const imageValue =
+      action.overrides?.visualizationImagePath || currentImage || globalImage;
+    const labelValue =
+      action.overrides?.visualizationLabelPath || currentLabel || globalLabel;
+    const scalesValue = overrideScales || scales;
+    if (overrideScales) {
+      setScales(overrideScales);
+      appContext?.setVisualizationScales?.(overrideScales);
+    }
+    if (imageValue) {
+      setCurrentImage(imageValue);
+      appContext?.setCurrentImage?.(imageValue);
+    }
+    if (labelValue) {
+      setCurrentLabel(labelValue);
+      appContext?.setCurrentLabel?.(labelValue);
+    }
+
+    loadViewer(imageValue, labelValue, scalesValue).finally(() => {
+      workflowContext?.consumeRuntimeAction?.(action.id);
+    });
+  }, [
+    appContext,
+    currentImage,
+    currentLabel,
+    globalImage,
+    globalLabel,
+    loadViewer,
+    scales,
+    workflowContext,
+  ]);
 
   const handleEdit = (targetKey, action) => {
     if (action === "remove") {

@@ -8,8 +8,8 @@ When you first open PyTC Client, the main workflows are available immediately in
 
 - **File Management** — Browse, upload, and organize files on the server
 - **Visualization** — View image and label data in Neuroglancer
-- **Model Training** — Configure and launch training jobs
-- **Model Inference** — Run inference with trained models
+- **Train Model** — Configure and launch training jobs
+- **Run Model** — Generate predictions with trained models
 - **Tensorboard** — Monitor training metrics in real time
 - **Mask Proofreading** — Review and edit mask layers in image stacks
 
@@ -19,7 +19,7 @@ The application has three main areas:
 
 1. **Top Navigation Bar** — Displays the PyTC logo, application title, and a row of tabs for each workflow. Click a tab to switch between pages. The bar also includes an **AI Chat** toggle button.
 
-2. **Main Content Area** — Shows the currently selected workflow page (e.g., File Manager, Visualization, Model Training).
+2. **Main Content Area** — Shows the currently selected workflow page (e.g., File Manager, Visualization, Train Model).
 
 3. **AI Chat Drawer** — A collapsible panel on the right side of the screen. Click the **AI Chat** button in the top bar to open or close it. You can drag the left edge of the chat drawer to resize it. Use the chat to ask questions about the application, get help with workflows, or request training/inference commands.
 

@@ -24,9 +24,9 @@ const { Content } = Layout;
 const MODULE_ITEMS = [
   { label: "Files", key: "files", icon: <FolderOpenOutlined /> },
   { label: "Visualize", key: "visualization", icon: <EyeOutlined /> },
-  { label: "Train", key: "training", icon: <ExperimentOutlined /> },
+  { label: "Train Model", key: "training", icon: <ExperimentOutlined /> },
   {
-    label: "Infer",
+    label: "Run Model",
     key: "inference",
     icon: <ThunderboltOutlined />,
   },

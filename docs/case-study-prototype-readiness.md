@@ -72,7 +72,7 @@ manager.
 - Agent proposals always display title, proposal type, approval state, rationale,
   artifact references, and approve/reject controls.
 - Repeated functions keep consistent labels: `Approve`, `Reject`, `Refresh
-  Insights`, `Start Training`, `Start Inference`, `Open Proofreading`.
+  Insights`, `Start Training`, `Run Model`, `Open Proofreading`.
 - Status colors are semantic, not decorative: amber for review/staging, green for
   completed/model-ready, red for failure/high risk, blue/teal for inspection.
 - Keyboard focus and accessible names must remain consistent across repeated

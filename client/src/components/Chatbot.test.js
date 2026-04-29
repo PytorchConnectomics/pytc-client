@@ -104,6 +104,90 @@ describe("Chatbot workflow routing", () => {
     expect(await screen.findByText("Do this: run the model.")).toBeTruthy();
   });
 
+  it("routes visualization requests to the workflow agent instead of generic chat", async () => {
+    const workflow = renderChatbot({
+      queryAgent: jest.fn().mockResolvedValue({
+        response: "Do this: view the current volume pair.",
+        conversationId: 46,
+        source: "workflow_orchestrator",
+        actions: [
+          {
+            id: "open-visualization",
+            label: "View data",
+            description: "Open the image and mask in the viewer.",
+            client_effects: { navigate_to: "visualization" },
+          },
+        ],
+        commands: [],
+        proposals: [],
+      }),
+    });
+
+    fireEvent.change(screen.getByPlaceholderText("Message"), {
+      target: { value: "can we visualize a volume pair?" },
+    });
+    fireEvent.keyPress(screen.getByPlaceholderText("Message"), {
+      key: "Enter",
+      code: "Enter",
+      charCode: 13,
+    });
+
+    await waitFor(() => {
+      expect(workflow.queryAgent).toHaveBeenCalledWith(
+        "can we visualize a volume pair?",
+        null,
+      );
+    });
+    expect(queryChatBot).not.toHaveBeenCalled();
+    expect(await screen.findByText("Do this: view the current volume pair.")).toBeTruthy();
+    expect(await screen.findByText("View data")).toBeTruthy();
+  });
+
+  it("routes visualization scale corrections to the workflow agent", async () => {
+    const workflow = renderChatbot({
+      queryAgent: jest.fn().mockResolvedValue({
+        response: "Do this: reload the viewer with 1,1,1 nm voxel scales.",
+        conversationId: 48,
+        source: "workflow_orchestrator",
+        actions: [
+          {
+            id: "reload-visualization-scales",
+            label: "Reload viewer",
+            description: "Reload with updated scales.",
+            client_effects: {
+              navigate_to: "visualization",
+              set_visualization_scales: [1, 1, 1],
+              runtime_action: { kind: "load_visualization" },
+            },
+          },
+        ],
+        commands: [],
+        proposals: [],
+      }),
+    });
+
+    fireEvent.change(screen.getByPlaceholderText("Message"), {
+      target: { value: "the scales are off; reload with 1-1-1" },
+    });
+    fireEvent.keyPress(screen.getByPlaceholderText("Message"), {
+      key: "Enter",
+      code: "Enter",
+      charCode: 13,
+    });
+
+    await waitFor(() => {
+      expect(workflow.queryAgent).toHaveBeenCalledWith(
+        "the scales are off; reload with 1-1-1",
+        null,
+      );
+    });
+    expect(queryChatBot).not.toHaveBeenCalled();
+    expect(
+      await screen.findByText("Do this: reload the viewer with 1,1,1 nm voxel scales."),
+    ).toBeTruthy();
+    expect(await screen.findByText("Reload viewer")).toBeTruthy();
+  });
+
   it("routes greetings to the workflow agent so internal LLM prompts cannot leak", async () => {
     const workflow = renderChatbot({
       queryAgent: jest.fn().mockResolvedValue({
@@ -235,6 +319,61 @@ describe("Chatbot workflow routing", () => {
       await screen.findByText(
         "I did not understand that. Try a workflow job or ask status.",
       ),
+    ).toBeTruthy();
+  });
+
+  it("does not render raw JSON tool calls from the general assistant", async () => {
+    renderChatbot({ workflow: null, queryAgent: null });
+    queryChatBot.mockResolvedValue({
+      response:
+        '{"name": "visualize_volume_pair", "parameters": {"query": "volume pair visualization"}}',
+      conversationId: 47,
+    });
+
+    fireEvent.change(screen.getByPlaceholderText("Message"), {
+      target: { value: "can we visualize a volume pair?" },
+    });
+    fireEvent.keyPress(screen.getByPlaceholderText("Message"), {
+      key: "Enter",
+      code: "Enter",
+      charCode: 13,
+    });
+
+    await waitFor(() => {
+      expect(queryChatBot).toHaveBeenCalledWith(
+        "can we visualize a volume pair?",
+        null,
+      );
+    });
+    expect(screen.queryByText(/"visualize_volume_pair"/)).toBeNull();
+    expect(
+      await screen.findByText(/I should not have shown that internal command/),
+    ).toBeTruthy();
+  });
+
+  it("does not render embedded JSON tool calls from the general assistant", async () => {
+    renderChatbot({ workflow: null, queryAgent: null });
+    queryChatBot.mockResolvedValue({
+      response:
+        'Here is the revised function call in JSON format:\n{"name":"search_documentation","parameters":{"query":"train"}}',
+      conversationId: 49,
+    });
+
+    fireEvent.change(screen.getByPlaceholderText("Message"), {
+      target: { value: "how do i tune this" },
+    });
+    fireEvent.keyPress(screen.getByPlaceholderText("Message"), {
+      key: "Enter",
+      code: "Enter",
+      charCode: 13,
+    });
+
+    await waitFor(() => {
+      expect(queryChatBot).toHaveBeenCalledWith("how do i tune this", null);
+    });
+    expect(screen.queryByText(/search_documentation/)).toBeNull();
+    expect(
+      await screen.findByText(/I should not have shown that internal command/),
     ).toBeTruthy();
   });
 

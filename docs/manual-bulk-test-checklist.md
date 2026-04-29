@@ -25,7 +25,7 @@ TOCHI-facing workflow without running full PyTC training.
 
 ## File Selection
 
-- In Train or Infer, click the folder icon inside a path field and confirm the
+- In Train Model or Run Model, click the folder icon inside a path field and confirm the
   file picker opens.
 - Click a folder row/name to navigate into it.
 - Use `Use folder` or `Select Current Directory` when the folder itself is the

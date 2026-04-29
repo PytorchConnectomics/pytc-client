@@ -14,7 +14,7 @@ from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
 from .database import Base
 from pydantic import BaseModel, Field
-from typing import Optional, List
+from typing import Optional, List, Dict, Any
 from datetime import datetime
 
 
@@ -180,6 +180,11 @@ class MountDirectoryRequest(BaseModel):
     directory_path: str
     destination_path: str = "root"
     mount_name: Optional[str] = None
+
+
+class ProjectContextProfileRequest(BaseModel):
+    directory_path: str
+    profile: Dict[str, Any] = Field(default_factory=dict)
 
 
 class FileResponse(FileBase):

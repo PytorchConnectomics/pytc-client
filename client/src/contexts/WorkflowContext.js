@@ -370,6 +370,21 @@ export function WorkflowProvider({ children }) {
           effects.set_inference_output_path,
         );
       }
+      if (effects.set_visualization_image_path && appContext?.setCurrentImage) {
+        appContext.setCurrentImage(effects.set_visualization_image_path);
+      }
+      if (effects.set_visualization_label_path && appContext?.setCurrentLabel) {
+        appContext.setCurrentLabel(effects.set_visualization_label_path);
+      }
+      if (
+        effects.set_visualization_scales &&
+        appContext?.setVisualizationScales
+      ) {
+        const nextScales = Array.isArray(effects.set_visualization_scales)
+          ? effects.set_visualization_scales.join(",")
+          : String(effects.set_visualization_scales);
+        appContext.setVisualizationScales(nextScales);
+      }
       if (effects.runtime_action?.kind) {
         setPendingRuntimeAction({
           id: `${effects.runtime_action.kind}:${Date.now()}`,
@@ -391,6 +406,9 @@ export function WorkflowProvider({ children }) {
             datasetPath: effects.set_proofreading_dataset_path || "",
             maskPath: effects.set_proofreading_mask_path || "",
             projectName: effects.set_proofreading_project_name || "",
+            visualizationImagePath: effects.set_visualization_image_path || "",
+            visualizationLabelPath: effects.set_visualization_label_path || "",
+            visualizationScales: effects.set_visualization_scales || "",
           },
         });
       }

@@ -351,7 +351,7 @@ function ModelTraining() {
         <div style={{ marginBottom: 12 }}>
           <StageHeader
             stage={workflowStage}
-            title="Model Training"
+            title="Train Model"
             subtitle="Train a candidate model from staged corrections and register the resulting checkpoint."
           />
         </div>
@@ -393,7 +393,7 @@ function ModelTraining() {
               )}
               <Space wrap size={8}>
                 <Button size="small" type="primary" onClick={handleOpenInference}>
-                  Open Inference
+                  Open Run Model
                 </Button>
                 <Button size="small" onClick={handleOpenTensorboard}>
                   TensorBoard
@@ -410,7 +410,7 @@ function ModelTraining() {
           </div>
         )}
         <RuntimeLogPanel
-          title="Training Runtime Log"
+          title="Train Model Runtime"
           runtime={trainingRuntime}
           onRefresh={refreshTrainingLogs}
         />

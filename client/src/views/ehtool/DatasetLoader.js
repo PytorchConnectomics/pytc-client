@@ -1,8 +1,7 @@
-import React, { useEffect, useState } from "react";
+import React, { useMemo } from "react";
 import { Card, Form, Input, Button, Modal, Space, Typography, Tag } from "antd";
 import { FolderOpenOutlined, UploadOutlined } from "@ant-design/icons";
 import UnifiedFileInput from "../../components/UnifiedFileInput";
-import { apiClient } from "../../api";
 
 const { Title, Text } = Typography;
 
@@ -10,24 +9,8 @@ const { Title, Text } = Typography;
  * Dataset Loader Component
  * Interface for loading image datasets
  */
-function DatasetLoader({ onLoad, loading }) {
+function DatasetLoader({ onLoad, loading, workflow }) {
   const [form] = Form.useForm();
-  const [projectSuggestions, setProjectSuggestions] = useState([]);
-
-  useEffect(() => {
-    let active = true;
-    apiClient
-      .get("/files/project-suggestions")
-      .then((response) => {
-        if (active) setProjectSuggestions(response.data || []);
-      })
-      .catch(() => {
-        if (active) setProjectSuggestions([]);
-      });
-    return () => {
-      active = false;
-    };
-  }, []);
 
   const resolvePath = (value) => {
     if (!value) return "";
@@ -82,41 +65,70 @@ function DatasetLoader({ onLoad, loading }) {
     }
   };
 
-  const joinPath = (root, relative) => {
-    if (!root || !relative) return "";
-    return `${String(root).replace(/\/+$/, "")}/${String(relative).replace(/^\/+/, "")}`;
+  const basename = (value) => {
+    if (!value) return "";
+    const trimmed = String(value).replace(/\/+$/, "");
+    return trimmed.split("/").pop() || trimmed;
   };
 
-  const suggestedProject =
-    projectSuggestions.find((item) => item.recommended) || projectSuggestions[0];
-  const suggestedPair = suggestedProject?.profile?.paired_examples?.[0];
+  const currentPair = useMemo(() => {
+    if (!workflow) return null;
+    const imagePath =
+      workflow.image_path ||
+      workflow.dataset_path ||
+      workflow.inference_output_path ||
+      "";
+    const maskPath =
+      workflow.mask_path ||
+      workflow.corrected_mask_path ||
+      workflow.label_path ||
+      "";
 
-  const fillSuggestedPair = () => {
-    if (!suggestedProject || !suggestedPair) return;
-    const imagePath = joinPath(suggestedProject.directory_path, suggestedPair.image);
-    const maskPath = joinPath(suggestedProject.directory_path, suggestedPair.label);
+    if (!imagePath) return null;
+    return {
+      imagePath,
+      maskPath,
+      projectName:
+        workflow.project_name ||
+        workflow.metadata?.project_name ||
+        workflow.metadata?.projectName ||
+        workflow.title ||
+        "Proofreading review",
+    };
+  }, [workflow]);
+
+  const fillCurrentPair = () => {
+    if (!currentPair) return;
     form.setFieldsValue({
-      projectName: suggestedProject.name,
-      datasetPath: { path: imagePath, display: suggestedPair.image },
-      maskPath: { path: maskPath, display: suggestedPair.label },
+      projectName: currentPair.projectName,
+      datasetPath: {
+        path: currentPair.imagePath,
+        display: basename(currentPair.imagePath),
+      },
+      maskPath: currentPair.maskPath
+        ? { path: currentPair.maskPath, display: basename(currentPair.maskPath) }
+        : undefined,
     });
   };
 
-  const startSuggestedPair = () => {
-    if (!suggestedProject || !suggestedPair || loading) return;
-    const imagePath = joinPath(suggestedProject.directory_path, suggestedPair.image);
-    const maskPath = joinPath(suggestedProject.directory_path, suggestedPair.label);
+  const startCurrentPair = () => {
+    if (!currentPair || loading) return;
     form.setFieldsValue({
-      projectName: suggestedProject.name,
-      datasetPath: { path: imagePath, display: suggestedPair.image },
-      maskPath: { path: maskPath, display: suggestedPair.label },
+      projectName: currentPair.projectName,
+      datasetPath: {
+        path: currentPair.imagePath,
+        display: basename(currentPair.imagePath),
+      },
+      maskPath: currentPair.maskPath
+        ? { path: currentPair.maskPath, display: basename(currentPair.maskPath) }
+        : undefined,
     });
-    onLoad(imagePath, maskPath, suggestedProject.name);
+    onLoad(currentPair.imagePath, currentPair.maskPath, currentPair.projectName);
   };
 
   return (
     <Card
-      bordered={false}
+      variant="borderless"
       style={{
         maxWidth: "720px",
         margin: "0 auto",
@@ -137,11 +149,11 @@ function DatasetLoader({ onLoad, loading }) {
 
       <div style={{ height: 16 }} />
 
-      {suggestedProject && suggestedPair && (
+      {currentPair && (
         <div
           style={{
-            border: "1px solid #d9f7be",
-            background: "#fbfff7",
+            border: "1px solid #dedbfd",
+            background: "#fafaff",
             borderRadius: 12,
             padding: 12,
             marginBottom: 16,
@@ -150,16 +162,20 @@ function DatasetLoader({ onLoad, loading }) {
           }}
         >
           <Space size="small" wrap>
-            <Tag color="green" style={{ margin: 0 }}>
-              suggested
+            <Tag color="blue" style={{ margin: 0 }}>
+              current project
             </Tag>
-            <Text strong>{suggestedProject.name}</Text>
+            <Text strong>{currentPair.projectName}</Text>
+            <Text type="secondary">
+              {basename(currentPair.imagePath)}
+              {currentPair.maskPath ? ` + ${basename(currentPair.maskPath)}` : ""}
+            </Text>
           </Space>
           <Space size="small" wrap>
-            <Button size="small" type="primary" onClick={startSuggestedPair} loading={loading}>
-              Start proofreading this pair
+            <Button size="small" type="primary" onClick={startCurrentPair} loading={loading}>
+              Start with current data
             </Button>
-            <Button size="small" onClick={fillSuggestedPair}>
+            <Button size="small" onClick={fillCurrentPair}>
               Fill form
             </Button>
           </Space>

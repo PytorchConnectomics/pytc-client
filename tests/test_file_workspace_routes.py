@@ -2,6 +2,7 @@ import pathlib
 import shutil
 import tempfile
 import unittest
+import json
 
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine
@@ -87,6 +88,10 @@ class FileWorkspaceRouteTests(unittest.TestCase):
         mount_root = pathlib.Path(self.temp_dir.name) / "project"
         mount_root.mkdir()
         (mount_root / ".DS_Store").write_text("junk", encoding="utf-8")
+        (mount_root / ".pytc_project_context.json").write_text(
+            '{"schema_version":"pytc-project-context/v1"}',
+            encoding="utf-8",
+        )
         (mount_root / "volume.tif").write_text("data", encoding="utf-8")
 
         response = self.client.post(
@@ -107,6 +112,7 @@ class FileWorkspaceRouteTests(unittest.TestCase):
         self.assertIn("project", names)
         self.assertIn("volume.tif", names)
         self.assertNotIn(".DS_Store", names)
+        self.assertNotIn(".pytc_project_context.json", names)
 
         root_response = self.client.get("/files", params={"parent": "root"})
         self.assertEqual(root_response.status_code, 200)
@@ -120,6 +126,44 @@ class FileWorkspaceRouteTests(unittest.TestCase):
         self.assertEqual(child_response.status_code, 200)
         child_names = [item["name"] for item in child_response.json()]
         self.assertEqual(child_names, ["volume.tif"])
+
+    def test_project_context_profile_is_saved_in_hidden_project_file(self):
+        project_root = pathlib.Path(self.temp_dir.name) / "profile-project"
+        project_root.mkdir()
+
+        write_response = self.client.put(
+            "/files/project-context",
+            json={
+                "directory_path": str(project_root),
+                "profile": {
+                    "project_name": "profile-project",
+                    "semantic_context": {
+                        "imaging_modality": "EM",
+                        "target_structure": "mitochondria",
+                    },
+                    "mechanistic_mapping": {"image": "data/image"},
+                },
+            },
+        )
+        self.assertEqual(write_response.status_code, 200)
+        context_path = project_root / ".pytc_project_context.json"
+        self.assertTrue(context_path.exists())
+
+        read_response = self.client.get(
+            "/files/project-context",
+            params={"directory_path": str(project_root)},
+        )
+        self.assertEqual(read_response.status_code, 200)
+        payload = read_response.json()
+        self.assertTrue(payload["exists"])
+        self.assertEqual(
+            payload["profile"]["schema_version"],
+            "pytc-project-context/v1",
+        )
+        self.assertEqual(
+            payload["profile"]["semantic_context"]["target_structure"],
+            "mitochondria",
+        )
 
     def test_reset_workspace_preserves_mounted_sources_and_clears_uploads(self):
         mount_root = pathlib.Path(self.temp_dir.name) / "mounted-project"
@@ -313,6 +357,104 @@ class FileWorkspaceRouteTests(unittest.TestCase):
             profile["schema"]["stages"]["inference"]["missing"],
             ["checkpoint"],
         )
+
+    def test_project_profile_groups_multi_volume_batches_by_directory(self):
+        project_root = pathlib.Path(self.temp_dir.name) / "batch-profile"
+        image_dir = project_root / "data" / "source" / "Image" / "train"
+        label_dir = project_root / "data" / "source" / "Label" / "train"
+        image_dir.mkdir(parents=True)
+        label_dir.mkdir(parents=True)
+        (project_root / "configs").mkdir()
+        (project_root / "checkpoints").mkdir()
+        for index in range(4):
+            (image_dir / f"crop_{index:03d}_im.h5").write_bytes(b"im")
+            (label_dir / f"crop_{index:03d}_seg.h5").write_bytes(b"seg")
+        (project_root / "configs" / "batch.yaml").write_text(
+            "SYSTEM: {}\n", encoding="utf-8"
+        )
+        (project_root / "checkpoints" / "model.pth.tar").write_bytes(b"ckpt")
+
+        profile = _scan_project_profile(str(project_root))
+
+        self.assertEqual(profile["counts"]["image"], 4)
+        self.assertEqual(profile["counts"]["label"], 4)
+        self.assertEqual(
+            profile["role_directories"]["image"][0],
+            {
+                "path": "data/source/Image/train",
+                "count": 4,
+                "examples": [
+                    "data/source/Image/train/crop_000_im.h5",
+                    "data/source/Image/train/crop_001_im.h5",
+                    "data/source/Image/train/crop_002_im.h5",
+                ],
+            },
+        )
+        self.assertEqual(
+            profile["schema"]["primary_paths"]["image_root"],
+            "data/source/Image/train",
+        )
+        self.assertEqual(
+            profile["schema"]["primary_paths"]["label_root"],
+            "data/source/Label/train",
+        )
+        self.assertEqual(profile["volume_sets"][0]["image_count"], 4)
+        self.assertEqual(profile["volume_sets"][0]["label_count"], 4)
+        self.assertEqual(profile["volume_sets"][0]["pair_count"], 4)
+
+    def test_project_profile_uses_content_for_context_hints(self):
+        project_root = pathlib.Path(self.temp_dir.name) / "content-profile"
+        (project_root / "volumes").mkdir(parents=True)
+        (project_root / "volumes" / "raw_image.h5").write_bytes(b"not-real-hdf5")
+        (project_root / "project_manifest.json").write_text(
+            json.dumps(
+                {
+                    "task": "Mitochondria semantic segmentation benchmark",
+                    "notes": [
+                        "Electron microscopy volume with expert masks.",
+                        "Prioritize segmentation accuracy.",
+                    ],
+                }
+            ),
+            encoding="utf-8",
+        )
+
+        profile = _scan_project_profile(str(project_root))
+
+        self.assertEqual(profile["content_signals"]["extension_counts"][".h5"], 1)
+        self.assertEqual(profile["content_signals"]["extension_counts"][".json"], 1)
+        self.assertEqual(
+            profile["content_signals"]["text_sources"][0]["path"],
+            "project_manifest.json",
+        )
+        self.assertEqual(profile["context_hints"]["imaging_modality"], "EM")
+        self.assertEqual(profile["context_hints"]["target_structure"], "mitochondria")
+        self.assertEqual(profile["context_hints"]["task_goal"], "segmentation")
+        self.assertEqual(profile["context_hints"]["optimization_priority"], "accuracy")
+
+    def test_project_profile_spot_checks_hdf5_dataset_keys(self):
+        try:
+            import h5py
+        except Exception:
+            self.skipTest("h5py not installed")
+
+        project_root = pathlib.Path(self.temp_dir.name) / "hdf5-profile"
+        project_root.mkdir()
+        h5_path = project_root / "sample_volume.h5"
+        with h5py.File(h5_path, "w") as handle:
+            handle.create_dataset("volumes/raw", data=[[[1, 2], [3, 4]]])
+            handle.create_dataset("volumes/labels/neuron_ids", data=[[[1, 1], [2, 2]]])
+
+        profile = _scan_project_profile(str(project_root))
+        metadata = profile["content_signals"]["volume_metadata"][0]
+
+        self.assertTrue(metadata["readable"])
+        self.assertEqual(metadata["format"], "hdf5")
+        self.assertEqual(
+            [dataset["path"] for dataset in metadata["datasets"]],
+            ["volumes/labels/neuron_ids", "volumes/raw"],
+        )
+        self.assertEqual(profile["context_hints"]["target_structure"], "neurites")
 
 
 if __name__ == "__main__":

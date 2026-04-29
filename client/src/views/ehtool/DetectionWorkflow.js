@@ -137,6 +137,7 @@ function DetectionWorkflow({
   const viewCache = useRef(new Map());
   const viewCacheOrder = useRef([]);
   const viewCacheLimit = 80;
+  const handledRuntimeActionIdsRef = useRef(new Set());
 
   const ensurePerfState = () => {
     if (typeof window === "undefined") return null;
@@ -534,6 +535,11 @@ function DetectionWorkflow({
   useEffect(() => {
     if (pendingRuntimeAction?.kind !== "start_proofreading") return;
     const action = pendingRuntimeAction;
+    const actionKey =
+      action.id ||
+      `${action.kind}:${action.created_at || action.createdAt || JSON.stringify(action.overrides || {})}`;
+    if (handledRuntimeActionIdsRef.current.has(actionKey)) return;
+    handledRuntimeActionIdsRef.current.add(actionKey);
     consumeRuntimeAction?.(action.id);
     if (sessionId) return;
 
@@ -2156,7 +2162,11 @@ function DetectionWorkflow({
   if (!sessionId) {
     return (
       <div style={{ padding: "24px 0" }}>
-        <DatasetLoader onLoad={handleDatasetLoad} loading={loadingInstances} />
+        <DatasetLoader
+          onLoad={handleDatasetLoad}
+          loading={loadingInstances}
+          workflow={activeWorkflow}
+        />
       </div>
     );
   }

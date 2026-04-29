@@ -1,4 +1,4 @@
-# Model Training
+# Train Model
 
 The normal biologist workflow is not manual YAML tuning. The user should choose
 the image/label pair or saved proofreading edits, then ask the assistant to run
@@ -6,7 +6,7 @@ training. The assistant should infer a safe preset from the current project,
 fill image, label, output, and log paths, apply conservative defaults, and ask
 for approval before launching the job.
 
-Use the **Train** tab when the user wants to inspect or override what the agent
+Use the **Train Model** tab when the user wants to inspect or override what the agent
 will run. Keep the visible explanation short:
 
 - **Input image** is the source volume.

@@ -6,6 +6,7 @@
 # - Inference Agent: Handles checkpoint listing and inference command generation
 # - RAG: Documentation search via FAISS vector store
 
+import json
 import os
 from pathlib import Path
 
@@ -98,10 +99,26 @@ def _looks_like_prompt_leak(response: str) -> bool:
     return any(marker in text for marker in _PROMPT_LEAK_MARKERS)
 
 
+def _looks_like_raw_tool_call(response: str) -> bool:
+    text = str(response or "").strip()
+    if not (text.startswith("{") and text.endswith("}")):
+        return False
+    try:
+        parsed = json.loads(text)
+    except Exception:
+        return False
+    return isinstance(parsed, dict) and isinstance(parsed.get("name"), str)
+
+
 def _sanitize_agent_response(response: str) -> str:
     text = str(response or "").strip()
     if not text:
         return text
+    if _looks_like_raw_tool_call(text):
+        return (
+            "I should not have shown an internal command.\n"
+            "Do this: tell me the workflow job in plain language, and I will offer a safe app action."
+        )
     if not _looks_like_prompt_leak(text):
         return text
     return (

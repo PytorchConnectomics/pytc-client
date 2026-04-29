@@ -5,10 +5,13 @@ from sqlalchemy.orm import Session
 from . import models, utils, database
 from jose import JWTError, jwt
 from typing import List, Optional
+from datetime import datetime, timezone
+import json
 import shutil
 import os
 import uuid
 import mimetypes
+import re
 from server_api.utils.utils import resolve_existing_path
 
 try:  # Optional preview dependencies
@@ -28,8 +31,12 @@ IGNORED_SYSTEM_FILENAMES = {
     "thumbs.db",
     ".pytc_proofreading.json",
     ".pytc_instance_labels.tif",
+    ".pytc_project_context.json",
 }
 PROJECT_PROFILE_MAX_FILES = 2500
+PROJECT_PROFILE_TEXT_MAX_BYTES = 24000
+PROJECT_PROFILE_MAX_CONTENT_FILES = 24
+PROJECT_CONTEXT_FILENAME = ".pytc_project_context.json"
 
 VOLUME_EXTENSIONS = {
     ".h5",
@@ -49,6 +56,7 @@ VOLUME_EXTENSIONS = {
 }
 CONFIG_EXTENSIONS = {".yaml", ".yml", ".json", ".toml"}
 CHECKPOINT_EXTENSIONS = {".pt", ".pth", ".pth.tar", ".ckpt", ".onnx"}
+TEXT_SIGNAL_EXTENSIONS = CONFIG_EXTENSIONS | {".md", ".txt", ".csv", ".tsv"}
 
 
 def _format_size(size_bytes: int) -> str:
@@ -179,16 +187,319 @@ def _looks_like_image_label_pair(image_path: str, label_path: str) -> bool:
         .replace("_images", "")
         .replace("_im", "")
         .replace("-image", "")
+        .replace("image_", "")
+        .replace("img_", "")
+        .replace("raw_", "")
     )
     normalized_label = (
         label_name.replace("_seg", "")
         .replace("_label", "")
         .replace("_labels", "")
         .replace("_mask", "")
+        .replace("_mito", "")
         .replace("_consensus", "")
         .replace("-seg", "")
+        .replace("seg_", "")
+        .replace("label_", "")
+        .replace("labels_", "")
+        .replace("mask_", "")
     )
     return normalized_image.split(".")[0] == normalized_label.split(".")[0]
+
+
+def _safe_text_sample(path: str) -> str:
+    try:
+        with open(path, "rb") as handle:
+            raw = handle.read(PROJECT_PROFILE_TEXT_MAX_BYTES)
+    except OSError:
+        return ""
+    return raw.decode("utf-8", errors="ignore")
+
+
+def _inspect_hdf5_container(path: str, *, max_datasets: int = 16) -> Optional[dict]:
+    try:
+        import h5py  # type: ignore
+    except Exception:  # pragma: no cover - optional dependency
+        return None
+
+    datasets = []
+    root_attrs = []
+    try:
+        with h5py.File(path, "r") as handle:
+            for key in list(handle.attrs.keys())[:8]:
+                root_attrs.append(str(key))
+
+            def visit(name, obj):
+                if len(datasets) >= max_datasets:
+                    return
+                if isinstance(obj, h5py.Dataset):
+                    datasets.append(
+                        {
+                            "path": name,
+                            "shape": list(obj.shape),
+                            "dtype": str(obj.dtype),
+                        }
+                    )
+
+            handle.visititems(visit)
+    except Exception as exc:
+        return {"format": "hdf5", "readable": False, "error": type(exc).__name__}
+
+    return {
+        "format": "hdf5",
+        "readable": True,
+        "datasets": datasets,
+        "root_attrs": root_attrs,
+    }
+
+
+def _inspect_tiff_container(path: str) -> Optional[dict]:
+    if tifffile is None:
+        return None
+    try:
+        with tifffile.TiffFile(path) as handle:
+            series = handle.series[0] if handle.series else None
+            return {
+                "format": "tiff",
+                "readable": True,
+                "shape": list(series.shape) if series is not None else [],
+                "dtype": str(series.dtype) if series is not None else None,
+                "axes": getattr(series, "axes", None) if series is not None else None,
+                "pages": len(handle.pages),
+            }
+    except Exception as exc:
+        return {"format": "tiff", "readable": False, "error": type(exc).__name__}
+
+
+def _context_terms_for_text(text: str) -> List[str]:
+    checks = {
+        "EM": r"\bEM\b|electron microscopy|electron microscope|FIB-SEM|TEM|SEM",
+        "CT": r"micro[\s-]?CT|micro.?ct|\bCT\b",
+        "fluorescence": r"fluorescen|confocal|light[\s-]?sheet",
+        "mitochondria": r"mitochond(?:ria|rion|rial)",
+        "nuclei": r"\b(?:nuclei|nucleus|nuclear)\b",
+        "neurites": r"\b(?:neurite|axon|dendrite|neuron[_\s-]?ids?)\b",
+        "synapses": r"\b(?:synapse|synaptic|presynaptic|postsynaptic|cleft)\b",
+        "segmentation": r"\bsegment(?:ation|ed|ing)?\b",
+        "proofreading": r"\b(?:proofread|curat|correct)\b",
+    }
+    return [
+        label
+        for label, pattern in checks.items()
+        if re.search(pattern, text, flags=re.IGNORECASE)
+    ]
+
+
+def _collect_project_content_signals(directory_path: str, roles: dict, extension_counts: dict):
+    text_candidates = []
+    seen_text_candidates = set()
+    volume_candidates = []
+    seen_volume_candidates = set()
+
+    def add_text_candidate(relative_path: str) -> None:
+        if relative_path in seen_text_candidates:
+            return
+        if len(text_candidates) >= PROJECT_PROFILE_MAX_CONTENT_FILES:
+            return
+        seen_text_candidates.add(relative_path)
+        text_candidates.append(relative_path)
+
+    for relative_path in (roles.get("config") or []) + (roles.get("notes") or []):
+        add_text_candidate(relative_path)
+
+    for current_dir, dirnames, filenames in os.walk(directory_path):
+        dirnames[:] = [
+            dirname for dirname in sorted(dirnames) if not _is_ignored_system_file(dirname)
+        ]
+        for filename in sorted(filenames):
+            if _is_ignored_system_file(filename):
+                continue
+            relative_path = os.path.relpath(
+                os.path.join(current_dir, filename), directory_path
+            )
+            relative_lower = relative_path.lower()
+            extension = _project_extension(filename)
+            if filename.lower() in {
+                "project_manifest.json",
+                "manifest.json",
+                "readme.md",
+                "README.md".lower(),
+            } or (
+                extension in TEXT_SIGNAL_EXTENSIONS
+                and any(
+                    token in relative_lower
+                    for token in ("manifest", "metadata", "readme", "config", "note")
+                )
+            ):
+                add_text_candidate(relative_path)
+            if len(text_candidates) >= PROJECT_PROFILE_MAX_CONTENT_FILES:
+                break
+        if len(text_candidates) >= PROJECT_PROFILE_MAX_CONTENT_FILES:
+            break
+
+    for role in ("image", "label", "prediction", "volume"):
+        for relative_path in roles.get(role) or []:
+            if relative_path in seen_volume_candidates:
+                continue
+            seen_volume_candidates.add(relative_path)
+            volume_candidates.append(relative_path)
+            if len(volume_candidates) >= PROJECT_PROFILE_MAX_CONTENT_FILES:
+                break
+        if len(volume_candidates) >= PROJECT_PROFILE_MAX_CONTENT_FILES:
+            break
+
+    text_sources = []
+    inference_text_parts = []
+    for relative_path in text_candidates:
+        absolute_path = os.path.join(directory_path, relative_path)
+        text = _safe_text_sample(absolute_path)
+        if not text:
+            continue
+        inference_text_parts.append(text)
+        text_sources.append(
+            {
+                "path": relative_path,
+                "extension": _project_extension(relative_path),
+                "bytes_checked": min(
+                    len(text.encode("utf-8", errors="ignore")),
+                    PROJECT_PROFILE_TEXT_MAX_BYTES,
+                ),
+                "matched_terms": _context_terms_for_text(text),
+            }
+        )
+
+    volume_metadata = []
+    for relative_path in volume_candidates:
+        absolute_path = os.path.join(directory_path, relative_path)
+        extension = _project_extension(relative_path)
+        metadata = None
+        if extension in {".h5", ".hdf5"}:
+            metadata = _inspect_hdf5_container(absolute_path)
+        elif extension in {".tif", ".tiff", ".ome.tif", ".ome.tiff"}:
+            metadata = _inspect_tiff_container(absolute_path)
+        elif extension in {".zarr", ".n5"}:
+            metadata = {"format": extension.lstrip("."), "readable": os.path.isdir(absolute_path)}
+        if metadata:
+            dataset_text = " ".join(
+                dataset.get("path", "")
+                for dataset in metadata.get("datasets", [])
+                if isinstance(dataset, dict)
+            )
+            if dataset_text:
+                inference_text_parts.append(dataset_text)
+            volume_metadata.append(
+                {
+                    "path": relative_path,
+                    "extension": extension,
+                    **metadata,
+                }
+            )
+
+    return {
+        "extension_counts": extension_counts,
+        "text_sources": text_sources,
+        "volume_metadata": volume_metadata,
+    }, "\n".join(inference_text_parts)
+
+
+def _best_context_hint(text: str, patterns: List[tuple]) -> tuple:
+    matches = []
+    for value, pattern in patterns:
+        count = len(re.findall(pattern, text, flags=re.IGNORECASE))
+        if count:
+            matches.append({"value": value, "count": count})
+    matches.sort(key=lambda item: item["count"], reverse=True)
+    if not matches:
+        return None, []
+    if len(matches) > 1 and matches[0]["count"] == matches[1]["count"]:
+        return None, matches
+    return matches[0]["value"], matches
+
+
+def _infer_project_context_hints(content_text: str) -> dict:
+    text = content_text or ""
+    hints = {"source": "content_spot_check"}
+
+    modality, modality_candidates = _best_context_hint(
+        text,
+        [
+            ("EM", r"\bEM\b|electron microscopy|electron microscope|FIB-SEM|TEM|SEM"),
+            ("CT", r"micro[\s-]?CT|micro.?ct|\bCT\b"),
+            ("fluorescence microscopy", r"fluorescen|confocal|light[\s-]?sheet"),
+            ("MRI", r"\bMRI\b"),
+        ],
+    )
+    target, target_candidates = _best_context_hint(
+        text,
+        [
+            ("mitochondria", r"mitochond(?:ria|rion|rial)"),
+            ("nuclei", r"\b(?:nuclei|nucleus|nuclear)\b"),
+            ("neurites", r"\b(?:neurite|axon|dendrite|neuron[_\s-]?ids?)\b"),
+            ("synapses", r"\b(?:synapse|synaptic|presynaptic|postsynaptic|cleft)\b"),
+            ("membranes", r"\bmembranes?\b"),
+            ("cells", r"\bcells?\b"),
+        ],
+    )
+    task_goal, task_candidates = _best_context_hint(
+        text,
+        [
+            ("segmentation", r"\bsegment(?:ation|ed|ing)?\b"),
+            ("proofreading", r"\b(?:proofread|curat|correct)\b"),
+            ("training", r"\b(?:train|retrain|fine[\s-]?tune)\b"),
+            ("comparison", r"\b(?:compare|metric|evaluate|evaluation)\b"),
+        ],
+    )
+    priority, priority_candidates = _best_context_hint(
+        text,
+        [
+            ("accuracy", r"\b(?:accuracy|accurate|quality|careful)\b"),
+            ("speed", r"\b(?:speed|fast|quick|smoke|rough)\b"),
+        ],
+    )
+
+    if modality:
+        hints["imaging_modality"] = modality
+    if target:
+        hints["target_structure"] = target
+    if task_goal:
+        hints["task_goal"] = task_goal
+    if priority:
+        hints["optimization_priority"] = priority
+    if modality_candidates:
+        hints["modality_candidates"] = modality_candidates[:4]
+    if target_candidates:
+        hints["target_candidates"] = target_candidates[:6]
+    if task_candidates:
+        hints["task_goal_candidates"] = task_candidates[:4]
+    if priority_candidates:
+        hints["priority_candidates"] = priority_candidates[:3]
+    return hints
+
+
+def _project_role_directories(role_paths: List[str], *, max_directories: int = 6) -> List[dict]:
+    grouped = {}
+    for role_path in role_paths:
+        directory = os.path.dirname(role_path) or "."
+        if directory not in grouped:
+            grouped[directory] = {"path": directory, "count": 0, "examples": []}
+        grouped[directory]["count"] += 1
+        if len(grouped[directory]["examples"]) < 3:
+            grouped[directory]["examples"].append(role_path)
+    return sorted(
+        grouped.values(),
+        key=lambda item: (-item["count"], item["path"]),
+    )[:max_directories]
+
+
+def _project_primary_root(role_directories: dict, role: str, counts: dict) -> Optional[str]:
+    directories = role_directories.get(role) or []
+    if not directories:
+        return None
+    # A single-file project is clearer as a file. Multi-volume projects should
+    # default to the folder that owns the batch.
+    if counts.get(role, 0) <= 1:
+        return None
+    return directories[0]["path"]
 
 
 def _first_project_path(roles: dict, role: str) -> Optional[str]:
@@ -216,6 +527,8 @@ def _build_project_workable_schema(
     roles: dict,
     counts: dict,
     paired_examples: List[dict],
+    role_directories: dict,
+    volume_sets: List[dict],
     *,
     truncated: bool,
 ) -> dict:
@@ -285,12 +598,21 @@ def _build_project_workable_schema(
         "truncated": truncated,
         "primary_paths": {
             "image": primary_image,
+            "image_root": _project_primary_root(role_directories, "image", counts)
+            or _project_primary_root(role_directories, "volume", counts),
             "label": primary_label,
+            "label_root": _project_primary_root(role_directories, "label", counts),
             "mask": primary_label or primary_prediction,
+            "mask_root": _project_primary_root(role_directories, "label", counts),
             "prediction": primary_prediction,
+            "prediction_root": _project_primary_root(
+                role_directories, "prediction", counts
+            ),
             "config": primary_config,
             "checkpoint": primary_checkpoint,
         },
+        "role_directories": role_directories,
+        "volume_sets": volume_sets,
         "stages": {
             "setup": _project_stage_status(
                 ready=has_image,
@@ -330,6 +652,108 @@ def _build_project_workable_schema(
     }
 
 
+def _infer_project_volume_sets(roles: dict, role_directories: dict) -> List[dict]:
+    image_paths = roles.get("image") or roles.get("volume") or []
+    label_paths = roles.get("label") or []
+    volume_sets = []
+
+    if not image_paths:
+        return volume_sets
+
+    labels_by_directory = {}
+    for label_path in label_paths:
+        labels_by_directory.setdefault(os.path.dirname(label_path) or ".", []).append(
+            label_path
+        )
+
+    image_directories = role_directories.get("image") or role_directories.get("volume") or []
+    for image_directory in image_directories:
+        directory = image_directory["path"]
+        images_in_directory = [
+            image_path
+            for image_path in image_paths
+            if (os.path.dirname(image_path) or ".") == directory
+        ]
+        best_label_directory = None
+        best_pairs = []
+        for label_directory in role_directories.get("label", []):
+            labels_in_directory = labels_by_directory.get(label_directory["path"], [])
+            pairs = []
+            for image_path in images_in_directory:
+                for label_path in labels_in_directory:
+                    if _looks_like_image_label_pair(image_path, label_path):
+                        pairs.append({"image": image_path, "label": label_path})
+                        break
+            if len(pairs) > len(best_pairs):
+                best_pairs = pairs
+                best_label_directory = label_directory
+
+        name = os.path.basename(directory) or directory
+        label_root = best_label_directory["path"] if best_label_directory else None
+        if label_root and os.path.basename(label_root) == name:
+            set_name = name
+        elif label_root:
+            set_name = f"{name} + {os.path.basename(label_root) or label_root}"
+        else:
+            set_name = name
+
+        if best_pairs or image_directory["count"] > 1:
+            volume_sets.append(
+                {
+                    "id": f"set-{len(volume_sets) + 1}",
+                    "name": set_name,
+                    "image_root": directory,
+                    "label_root": label_root,
+                    "image_count": image_directory["count"],
+                    "label_count": best_label_directory["count"]
+                    if best_label_directory
+                    else 0,
+                    "pair_count": len(best_pairs),
+                    "examples": best_pairs[:3],
+                }
+            )
+        if len(volume_sets) >= 6:
+            break
+
+    if not volume_sets and image_paths:
+        primary_image_directory = (
+            image_directories[0].get("path")
+            if image_directories
+            else os.path.dirname(image_paths[0]) or "."
+        )
+        primary_label_directory = (
+            role_directories.get("label", [{}])[0].get("path")
+            if role_directories.get("label")
+            else None
+        )
+        volume_sets.append(
+            {
+                "id": "set-1",
+                "name": os.path.basename(primary_image_directory)
+                or primary_image_directory,
+                "image_root": primary_image_directory,
+                "label_root": primary_label_directory,
+                "image_count": len(image_paths),
+                "label_count": len(label_paths),
+                "pair_count": 0,
+                "examples": [],
+            }
+        )
+
+    return volume_sets
+
+
+def _record_project_role_path(
+    roles: dict,
+    counts: dict,
+    role: Optional[str],
+    relative_path: str,
+) -> None:
+    if role and role in roles:
+        counts[role] += 1
+        roles[role].append(relative_path)
+
+
 def _scan_project_profile(directory_path: str) -> dict:
     roles = {
         "image": [],
@@ -341,15 +765,29 @@ def _scan_project_profile(directory_path: str) -> dict:
         "notes": [],
     }
     counts = {role: 0 for role in roles}
+    extension_counts = {}
     scanned_files = 0
     truncated = False
 
     for current_dir, dirnames, filenames in os.walk(directory_path):
-        dirnames[:] = [
-            dirname
-            for dirname in sorted(dirnames)
-            if not _is_ignored_system_file(dirname)
-        ]
+        next_dirnames = []
+        for dirname in sorted(dirnames):
+            if _is_ignored_system_file(dirname):
+                continue
+            absolute_dir = os.path.join(current_dir, dirname)
+            relative_dir = os.path.relpath(absolute_dir, directory_path)
+            if _project_extension(dirname) in {".zarr", ".n5"}:
+                extension = _project_extension(dirname)
+                extension_counts[extension] = extension_counts.get(extension, 0) + 1
+                _record_project_role_path(
+                    roles,
+                    counts,
+                    _role_for_project_file(relative_dir),
+                    relative_dir,
+                )
+                continue
+            next_dirnames.append(dirname)
+        dirnames[:] = next_dirnames
         for filename in sorted(filenames):
             if _is_ignored_system_file(filename):
                 continue
@@ -359,11 +797,14 @@ def _scan_project_profile(directory_path: str) -> dict:
                 break
             absolute_path = os.path.join(current_dir, filename)
             relative_path = os.path.relpath(absolute_path, directory_path)
-            role = _role_for_project_file(relative_path)
-            if role and role in roles:
-                counts[role] += 1
-                if len(roles[role]) < 8:
-                    roles[role].append(relative_path)
+            extension = _project_extension(filename) or "<none>"
+            extension_counts[extension] = extension_counts.get(extension, 0) + 1
+            _record_project_role_path(
+                roles,
+                counts,
+                _role_for_project_file(relative_path),
+                relative_path,
+            )
         if truncated:
             break
 
@@ -378,12 +819,26 @@ def _scan_project_profile(directory_path: str) -> dict:
         if len(paired_examples) >= 4:
             break
 
+    role_directories = {
+        role: _project_role_directories(paths) for role, paths in roles.items()
+    }
+    volume_sets = _infer_project_volume_sets(roles, role_directories)
+    examples = {role: paths[:8] for role, paths in roles.items()}
     schema = _build_project_workable_schema(
-        roles,
+        examples,
         counts,
         paired_examples,
+        role_directories,
+        volume_sets,
         truncated=truncated,
     )
+    content_signals, content_text = _collect_project_content_signals(
+        directory_path,
+        roles,
+        extension_counts,
+    )
+    context_hints = _infer_project_context_hints(content_text)
+    schema["context_hints"] = context_hints
 
     required_roles = {
         "image": counts["image"] > 0,
@@ -400,12 +855,66 @@ def _scan_project_profile(directory_path: str) -> dict:
         "scanned_files": min(scanned_files, PROJECT_PROFILE_MAX_FILES),
         "truncated": truncated,
         "counts": counts,
-        "examples": roles,
+        "examples": examples,
+        "role_directories": role_directories,
+        "volume_sets": volume_sets,
         "paired_examples": paired_examples,
+        "content_signals": content_signals,
+        "context_hints": context_hints,
         "ready_for_smoke": not missing_roles,
         "missing_roles": missing_roles,
         "schema": schema,
     }
+
+
+def _project_context_file_path(directory_path: str) -> str:
+    source_dir = os.path.abspath(os.path.expanduser(directory_path))
+    if not os.path.isdir(source_dir):
+        raise HTTPException(status_code=400, detail="Directory does not exist")
+    return os.path.join(source_dir, PROJECT_CONTEXT_FILENAME)
+
+
+def _read_project_context_profile(directory_path: str) -> Optional[dict]:
+    context_path = _project_context_file_path(directory_path)
+    if not os.path.isfile(context_path):
+        return None
+    try:
+        with open(context_path, "r", encoding="utf-8") as handle:
+            data = json.load(handle)
+    except (OSError, json.JSONDecodeError) as exc:
+        raise HTTPException(
+            status_code=500, detail="Project context file could not be read"
+        ) from exc
+    return data if isinstance(data, dict) else None
+
+
+def _write_project_context_profile(directory_path: str, profile: dict) -> dict:
+    context_path = _project_context_file_path(directory_path)
+    now = datetime.now(timezone.utc).isoformat()
+    existing = _read_project_context_profile(directory_path) or {}
+    payload = {
+        **existing,
+        **(profile or {}),
+        "schema_version": "pytc-project-context/v1",
+        "updated_at": now,
+    }
+    payload.setdefault("created_at", existing.get("created_at") or now)
+    temp_path = f"{context_path}.tmp"
+    try:
+        with open(temp_path, "w", encoding="utf-8") as handle:
+            json.dump(payload, handle, indent=2, sort_keys=True)
+            handle.write("\n")
+        os.replace(temp_path, context_path)
+    except OSError as exc:
+        try:
+            if os.path.exists(temp_path):
+                os.remove(temp_path)
+        except OSError:
+            pass
+        raise HTTPException(
+            status_code=500, detail="Project context file could not be written"
+        ) from exc
+    return payload
 
 
 def _ensure_unique_name(
@@ -1008,6 +1517,35 @@ def list_project_suggestions(
             }
         )
     return suggestions
+
+
+@router.get("/files/project-context")
+def read_project_context_profile(
+    directory_path: str,
+    current_user: models.User = Depends(get_current_user),
+):
+    # The current user dependency keeps this aligned with other file endpoints.
+    del current_user
+    profile = _read_project_context_profile(directory_path)
+    return {
+        "exists": profile is not None,
+        "filename": PROJECT_CONTEXT_FILENAME,
+        "profile": profile,
+    }
+
+
+@router.put("/files/project-context")
+def write_project_context_profile(
+    body: models.ProjectContextProfileRequest,
+    current_user: models.User = Depends(get_current_user),
+):
+    del current_user
+    profile = _write_project_context_profile(body.directory_path, body.profile)
+    return {
+        "message": "Project context saved",
+        "filename": PROJECT_CONTEXT_FILENAME,
+        "profile": profile,
+    }
 
 
 @router.put("/files/{file_id}", response_model=models.FileResponse)

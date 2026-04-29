@@ -536,6 +536,213 @@ class WorkflowRouteTests(unittest.TestCase):
             "start_proofreading",
         )
 
+    def test_agent_visualize_request_populates_viewer_paths_not_status(self):
+        workflow, _ = self._current_workflow()
+        workflow_id = workflow["id"]
+        self.client.patch(
+            f"/api/workflows/{workflow_id}",
+            json={
+                "stage": "setup",
+                "image_path": "/projects/sample/data/image/train",
+                "label_path": "/projects/sample/data/labels/train",
+            },
+        )
+
+        response = self.client.post(
+            f"/api/workflows/{workflow_id}/agent/query",
+            json={
+                "query": "can you visualize some combination of volumes in my data? "
+                "i have images and segmentations where the names should already align"
+            },
+        )
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertEqual(payload["intent"], "view_data")
+        self.assertIn("view train", payload["response"].lower())
+        self.assertEqual(payload["actions"][0]["id"], "open-visualization")
+        self.assertEqual(payload["commands"], [])
+        effects = payload["actions"][0]["client_effects"]
+        self.assertEqual(effects["navigate_to"], "visualization")
+        self.assertEqual(
+            effects["set_visualization_image_path"],
+            "/projects/sample/data/image/train",
+        )
+        self.assertEqual(
+            effects["set_visualization_label_path"],
+            "/projects/sample/data/labels/train",
+        )
+
+    def test_agent_visualize_request_discovers_directory_pairs_and_asks_for_more(self):
+        workflow, _ = self._current_workflow()
+        workflow_id = workflow["id"]
+        project_root = pathlib.Path(self.temp_dir.name) / "batch-project"
+        image_dir = project_root / "Image" / "train"
+        label_dir = project_root / "Label" / "train"
+        image_dir.mkdir(parents=True)
+        label_dir.mkdir(parents=True)
+        (image_dir / "img_000_604_576.h5").write_bytes(b"")
+        (image_dir / "img_508_604_200.h5").write_bytes(b"")
+        (label_dir / "seg_508_604_200.h5").write_bytes(b"")
+        (label_dir / "seg_000_604_576.h5").write_bytes(b"")
+        self.client.patch(
+            f"/api/workflows/{workflow_id}",
+            json={
+                "stage": "setup",
+                "image_path": str(image_dir),
+                "label_path": str(label_dir),
+            },
+        )
+
+        response = self.client.post(
+            f"/api/workflows/{workflow_id}/agent/query",
+            json={"query": "can we visualize my existing segs?"},
+        )
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertEqual(payload["intent"], "view_data")
+        self.assertIn("I found 2 clear image/seg pairs", payload["response"])
+        self.assertIn("Tell me if there are more folders", payload["response"])
+        effects = payload["actions"][0]["client_effects"]
+        self.assertEqual(
+            effects["set_visualization_image_path"],
+            str(image_dir / "img_000_604_576.h5"),
+        )
+        self.assertEqual(
+            effects["set_visualization_label_path"],
+            str(label_dir / "seg_000_604_576.h5"),
+        )
+        self.assertEqual(payload["commands"], [])
+
+    def test_agent_scale_update_persists_project_context_and_offers_reload(self):
+        workflow, _ = self._current_workflow()
+        workflow_id = workflow["id"]
+        self.client.patch(
+            f"/api/workflows/{workflow_id}",
+            json={
+                "stage": "visualization",
+                "image_path": "/projects/sample/data/image/train",
+                "label_path": "/projects/sample/data/labels/train",
+            },
+        )
+
+        response = self.client.post(
+            f"/api/workflows/{workflow_id}/agent/query",
+            json={"query": "the scales are off; can we reload with 1-1-1?"},
+        )
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertEqual(payload["intent"], "set_visualization_scales")
+        self.assertIn("1,1,1 nm", payload["response"])
+        self.assertEqual(payload["actions"][0]["id"], "reload-visualization-scales")
+        effects = payload["actions"][0]["client_effects"]
+        self.assertEqual(effects["navigate_to"], "visualization")
+        self.assertEqual(effects["set_visualization_scales"], [1.0, 1.0, 1.0])
+        self.assertEqual(effects["runtime_action"]["kind"], "load_visualization")
+        self.assertEqual(
+            effects["set_visualization_image_path"],
+            "/projects/sample/data/image/train",
+        )
+        self.assertEqual(
+            effects["set_visualization_label_path"],
+            "/projects/sample/data/labels/train",
+        )
+
+        current_workflow, _ = self._current_workflow()
+        self.assertEqual(
+            current_workflow["metadata"]["visualization_scales"],
+            [1.0, 1.0, 1.0],
+        )
+        self.assertEqual(
+            current_workflow["metadata"]["project_context"]["voxel_size_nm"],
+            [1.0, 1.0, 1.0],
+        )
+
+        events_response = self.client.get(f"/api/workflows/{workflow_id}/events")
+        event_types = [event["event_type"] for event in events_response.json()]
+        self.assertIn("visualization.scales_updated", event_types)
+
+    def test_agent_scale_update_requires_three_axis_values(self):
+        workflow, _ = self._current_workflow()
+        workflow_id = workflow["id"]
+
+        response = self.client.post(
+            f"/api/workflows/{workflow_id}/agent/query",
+            json={"query": "reload with 1-1"},
+        )
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertEqual(payload["intent"], "set_visualization_scales")
+        self.assertIn("I need three values", payload["response"])
+        self.assertEqual(payload["actions"][0]["id"], "open-visualization")
+
+    def test_agent_proofread_request_from_setup_offers_runnable_action(self):
+        workflow, _ = self._current_workflow()
+        workflow_id = workflow["id"]
+        self.client.patch(
+            f"/api/workflows/{workflow_id}",
+            json={
+                "stage": "setup",
+                "image_path": "/projects/sample/data/image/train",
+                "label_path": "/projects/sample/data/labels/train",
+                "metadata": {
+                    "project_context": {
+                        "imaging_modality": "EM",
+                        "target_structure": "mitochondria",
+                        "optimization_priority": "accuracy",
+                    }
+                },
+            },
+        )
+
+        response = self.client.post(
+            f"/api/workflows/{workflow_id}/agent/query",
+            json={
+                "query": "can you proofread my data? I have images and segmentations"
+            },
+        )
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertEqual(payload["intent"], "start_proofreading")
+        self.assertEqual(payload["actions"][0]["id"], "start-proofreading")
+        self.assertEqual(payload["commands"][0]["id"], "start-proofreading-command")
+        self.assertEqual(
+            payload["commands"][0]["client_effects"]["runtime_action"]["kind"],
+            "start_proofreading",
+        )
+
+    def test_agent_proofread_request_names_blocker_when_inputs_missing(self):
+        workflow, _ = self._current_workflow()
+        workflow_id = workflow["id"]
+        self.client.patch(
+            f"/api/workflows/{workflow_id}",
+            json={
+                "stage": "visualization",
+                "image_path": "/projects/sample/data/image/train",
+                "metadata": {
+                    "project_context": {
+                        "imaging_modality": "EM",
+                        "target_structure": "mitochondria",
+                        "optimization_priority": "accuracy",
+                    }
+                },
+            },
+        )
+
+        response = self.client.post(
+            f"/api/workflows/{workflow_id}/agent/query",
+            json={"query": "proofread this data"},
+        )
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertEqual(payload["intent"], "start_proofreading")
+        self.assertIn("I can proofread this, but I need", payload["response"])
+        self.assertIn("mask, label, or prediction", payload["response"])
+        self.assertEqual(payload["commands"], [])
+        self.assertEqual(payload["actions"][0]["id"], "open-files")
+
     def test_agent_routes_segmentation_and_capability_requests_to_app_actions(self):
         workflow, _ = self._current_workflow()
         workflow_id = workflow["id"]

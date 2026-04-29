@@ -14,6 +14,7 @@ const FILE_STATE_DEFAULTS = {
   trainingInputLabel: null,
   inferenceInputImage: null,
   inferenceInputLabel: null,
+  visualizationScales: "30,6,6",
 };
 
 const FILE_CACHE_KEYS = Object.keys(FILE_STATE_DEFAULTS);
@@ -182,6 +183,10 @@ export const ContextWrapper = (props) => {
     "currentLabel",
     null,
   );
+  const [visualizationScales, setVisualizationScales] = usePersistedState(
+    "visualizationScales",
+    FILE_STATE_DEFAULTS.visualizationScales,
+  );
   const [trainingInputImage, setTrainingInputImage] = usePersistedState(
     "trainingInputImage",
     null,
@@ -218,6 +223,7 @@ export const ContextWrapper = (props) => {
       setLabelFileList(FILE_STATE_DEFAULTS.labelFileList);
       setCurrentImage(FILE_STATE_DEFAULTS.currentImage);
       setCurrentLabel(FILE_STATE_DEFAULTS.currentLabel);
+      setVisualizationScales(FILE_STATE_DEFAULTS.visualizationScales);
       setTrainingInputImage(FILE_STATE_DEFAULTS.trainingInputImage);
       setTrainingInputLabel(FILE_STATE_DEFAULTS.trainingInputLabel);
       setInferenceInputImage(FILE_STATE_DEFAULTS.inferenceInputImage);
@@ -230,6 +236,7 @@ export const ContextWrapper = (props) => {
     setLabelFileList,
     setCurrentImage,
     setCurrentLabel,
+    setVisualizationScales,
     setTrainingInputImage,
     setTrainingInputLabel,
     setInferenceInputImage,
@@ -281,6 +288,8 @@ export const ContextWrapper = (props) => {
         setCurrentImage,
         currentLabel,
         setCurrentLabel,
+        visualizationScales,
+        setVisualizationScales,
         viewer,
         setViewer,
         trainingConfig,

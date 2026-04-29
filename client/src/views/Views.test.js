@@ -98,8 +98,8 @@ describe("Views", () => {
 
     expect(screen.getByText("Files")).toBeTruthy();
     expect(screen.getByText("Visualize")).toBeTruthy();
-    expect(screen.getByText("Train")).toBeTruthy();
-    expect(screen.getByText("Infer")).toBeTruthy();
+    expect(screen.getByText("Train Model")).toBeTruthy();
+    expect(screen.getByText("Run Model")).toBeTruthy();
     expect(screen.getByText("Monitor")).toBeTruthy();
     expect(screen.getByText("Proofread")).toBeTruthy();
     expect(screen.queryByText("What are you trying to do?")).toBeNull();

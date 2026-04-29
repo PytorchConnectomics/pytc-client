@@ -45,6 +45,19 @@ from server_api.workflows.service import (
     get_user_workflow_or_404,
     update_workflow_fields,
 )
+from server_api.workflows.volume_io import load_volume
+from server_api.workflows.volume_pairs import (
+    _is_chunked_volume_directory,
+    _is_neuroglancer_volume_file,
+    _path_has_suffix,
+    _resolve_neuroglancer_image_path,
+    _resolve_neuroglancer_label_path,
+    _volume_file_candidates,
+    _volume_pair_key,
+    discover_neuroglancer_volume_pairs,
+    NEUROGLANCER_VOLUME_DIR_SUFFIXES,
+    NEUROGLANCER_VOLUME_FILE_SUFFIXES,
+)
 
 from fastapi.staticfiles import StaticFiles
 import os
@@ -822,16 +835,69 @@ async def neuroglancer(
             scales = payload["scales"]
             workflow_id = payload.get("workflow_id") or payload.get("workflowId")
 
-        print(image, label, scales)
-
         if image is None:
             raise HTTPException(
                 status_code=400, detail="Image path or file is required."
             )
-        if not pathlib.Path(image).exists():
-            _raise_missing_volume_error(pathlib.Path(image), "image")
-        if label is not None and not pathlib.Path(label).exists():
-            _raise_missing_volume_error(pathlib.Path(label), "label")
+        original_image_path = pathlib.Path(image)
+        original_label_path = pathlib.Path(label) if label is not None else None
+        if not original_image_path.exists():
+            _raise_missing_volume_error(original_image_path, "image")
+        if original_label_path is not None and not original_label_path.exists():
+            _raise_missing_volume_error(original_label_path, "label")
+
+        pair_discovery = discover_neuroglancer_volume_pairs(
+            original_image_path,
+            original_label_path,
+        )
+        if pair_discovery["pair_count"]:
+            append_app_event(
+                component="server_api",
+                event="neuroglancer_volume_pairs_detected",
+                message="Detected image/segmentation pairs from visualization input.",
+                image_path=str(original_image_path),
+                label_path=str(original_label_path) if original_label_path else None,
+                pair_count=pair_discovery["pair_count"],
+                image_candidate_count=pair_discovery["image_candidate_count"],
+                label_candidate_count=pair_discovery["label_candidate_count"],
+                selected_pair=pair_discovery["pairs"][0],
+            )
+
+        try:
+            resolved_image_path, image_resolution_note = _resolve_neuroglancer_image_path(
+                original_image_path,
+                original_label_path,
+            )
+            resolved_label_path, label_resolution_note = _resolve_neuroglancer_label_path(
+                original_label_path,
+                resolved_image_path,
+            )
+        except ValueError as exc:
+            append_app_event(
+                component="server_api",
+                event="neuroglancer_volume_resolution_failed",
+                level="ERROR",
+                message=str(exc),
+                image_path=str(original_image_path),
+                label_path=str(original_label_path) if original_label_path else None,
+            )
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+        print(resolved_image_path, resolved_label_path, scales)
+        if image_resolution_note or label_resolution_note:
+            append_app_event(
+                component="server_api",
+                event="neuroglancer_volume_path_resolved",
+                message="Resolved folder-level visualization inputs to concrete volume files.",
+                image_path=str(original_image_path),
+                label_path=str(original_label_path) if original_label_path else None,
+                resolved_image_path=str(resolved_image_path),
+                resolved_label_path=str(resolved_label_path)
+                if resolved_label_path
+                else None,
+                image_resolution_note=image_resolution_note,
+                label_resolution_note=label_resolution_note,
+            )
 
         # neuroglancer setting -- bind to this to make accessible outside of container
         ip = "0.0.0.0"
@@ -843,13 +909,17 @@ async def neuroglancer(
             names=["z", "y", "x"], units=["nm", "nm", "nm"], scales=scales
         )
         try:
-            im = readVol(image, image_type="im")
+            im = load_volume(str(resolved_image_path), label="image")
         except Exception as e:
             raise HTTPException(
                 status_code=400, detail=f"Failed to read image volume: {str(e)}"
             )
         try:
-            gt = readVol(label, image_type="seg") if label else None
+            gt = (
+                load_volume(str(resolved_label_path), label="label")
+                if resolved_label_path
+                else None
+            )
             if gt is not None:
                 gt = _normalize_segmentation_volume_for_neuroglancer(gt)
         except Exception as e:
@@ -874,18 +944,65 @@ async def neuroglancer(
                 s.layers.append(name="gt", layer=ngLayer(gt, res, tt="segmentation"))
 
         public_url = _build_neuroglancer_public_url(str(viewer), req)
+        response_payload = {
+            "url": public_url,
+            "neuroglancer_url": public_url,
+            "image_path": str(resolved_image_path),
+            "label_path": str(resolved_label_path) if resolved_label_path else None,
+            "requested_image_path": str(original_image_path),
+            "requested_label_path": str(original_label_path)
+            if original_label_path
+            else None,
+            "image_resolution_note": image_resolution_note,
+            "label_resolution_note": label_resolution_note,
+            "scales": scales,
+            "pair_discovery": pair_discovery,
+            "pair_question": (
+                "I found "
+                f"{pair_discovery['pair_count']} clear image/segmentation pairs. "
+                "I opened the first one. Are there other folders or pairs I should include?"
+            )
+            if pair_discovery["pair_count"] > 1
+            else None,
+        }
         if workflow_id:
             workflow = get_user_workflow_or_404(
                 db, workflow_id=int(workflow_id), user_id=current_user.id
             )
+            metadata = decode_json(workflow.metadata_json)
+            metadata["active_volume_pair"] = {
+                "image_path": str(resolved_image_path),
+                "label_path": str(resolved_label_path) if resolved_label_path else None,
+                "source": "neuroglancer",
+            }
+            metadata["visualization_scales"] = scales
+            project_context = metadata.get("project_context")
+            if not isinstance(project_context, dict):
+                project_context = {}
+            project_context["voxel_size_nm"] = scales
+            project_context["voxel_size_source"] = "visualization"
+            metadata["project_context"] = project_context
+            if pair_discovery["pair_count"]:
+                metadata["volume_pair_discovery"] = {
+                    "source": "neuroglancer",
+                    "pair_count": pair_discovery["pair_count"],
+                    "image_candidate_count": pair_discovery["image_candidate_count"],
+                    "label_candidate_count": pair_discovery["label_candidate_count"],
+                    "pairs": pair_discovery["pairs"][:12],
+                    "unpaired_images": pair_discovery["unpaired_images"],
+                    "unpaired_labels": pair_discovery["unpaired_labels"],
+                    "requested_image_path": pair_discovery["requested_image_path"],
+                    "requested_label_path": pair_discovery["requested_label_path"],
+                }
             update_workflow_fields(
                 db,
                 workflow,
                 {
                     "stage": "visualization",
-                    "image_path": str(image),
-                    "label_path": str(label) if label else None,
+                    "image_path": str(resolved_image_path),
+                    "label_path": str(resolved_label_path) if resolved_label_path else None,
                     "neuroglancer_url": public_url,
+                    "metadata": metadata,
                 },
                 commit=True,
             )
@@ -897,14 +1014,22 @@ async def neuroglancer(
                 stage="visualization",
                 summary="Created Neuroglancer viewer.",
                 payload={
-                    "image_path": str(image),
-                    "label_path": str(label) if label else None,
+                    "image_path": str(resolved_image_path),
+                    "label_path": str(resolved_label_path) if resolved_label_path else None,
+                    "requested_image_path": str(original_image_path),
+                    "requested_label_path": str(original_label_path)
+                    if original_label_path
+                    else None,
+                    "image_resolution_note": image_resolution_note,
+                    "label_resolution_note": label_resolution_note,
+                    "pair_discovery": pair_discovery,
+                    "pair_question": response_payload["pair_question"],
                     "scales": scales,
                     "neuroglancer_url": public_url,
                 },
             )
         print(public_url)
-        return public_url
+        return response_payload
     finally:
         for path in cleanup_paths:
             try:

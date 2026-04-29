@@ -95,6 +95,31 @@ const WORKFLOW_AGENT_INTENT_TERMS = [
   "what data",
   "what dataset",
   "what volume",
+  "volume pair",
+  "visualize",
+  "visualization",
+  "visualise",
+  "viewer",
+  "view data",
+  "view volume",
+  "show volume",
+  "inspect volume",
+  "reload",
+  "scales",
+  "scale is",
+  "scale off",
+  "scale looks",
+  "scale seems",
+  "scale value",
+  "voxel",
+  "voxel size",
+  "spacing",
+  "resolution",
+  "nanometer",
+  "nanometers",
+  "micron",
+  "microns",
+  "µm",
   "where am i",
   "what now",
   "what's next",
@@ -184,9 +209,50 @@ const PROMPT_LEAK_MARKERS = [
   "delegate_to_inference_agent",
 ];
 
+const parseToolCallJson = (text) => {
+  try {
+    const parsed = JSON.parse(text);
+    if (!parsed || typeof parsed !== "object" || typeof parsed.name !== "string") {
+      return null;
+    }
+    return parsed;
+  } catch {
+    return null;
+  }
+};
+
+const parseRawToolCall = (content) => {
+  const text = String(content || "").trim();
+  if (text.startsWith("{") && text.endsWith("}")) {
+    const parsed = parseToolCallJson(text);
+    if (parsed) return parsed;
+  }
+  const embeddedJson = text.match(/\{[\s\S]*"name"\s*:\s*"[^"]+"[\s\S]*\}/);
+  return embeddedJson ? parseToolCallJson(embeddedJson[0]) : null;
+};
+
+const normalizeAssistantContent = (content) => {
+  const toolCall = parseRawToolCall(content);
+  if (!toolCall) return String(content || "");
+  if (toolCall.name === "visualize_volume_pair") {
+    return (
+      "I should not have shown that internal command.\n"
+      + "Do this: use the workflow action card to choose a volume pair, then open it in Visualize."
+    );
+  }
+  return (
+    "I should not have shown that internal command.\n"
+    + "Tell me the workflow job in plain language and I will offer a safe app action."
+  );
+};
+
 const sanitizeLoadedMessage = (message) => {
   if (message.role !== "assistant") return message;
   const content = String(message.content || "");
+  const normalizedContent = normalizeAssistantContent(content);
+  if (normalizedContent !== content) {
+    return { ...message, content: normalizedContent };
+  }
   const lower = content.toLowerCase();
   const leaked = PROMPT_LEAK_MARKERS.some((marker) => lower.includes(marker));
   if (!leaked) return message;
@@ -444,8 +510,9 @@ function Chatbot({
         },
       });
       const data = await queryChatBot(query, activeConvoId);
-      const response =
-        data?.response || "Sorry, I could not generate a response.";
+      const response = normalizeAssistantContent(
+        data?.response || "Sorry, I could not generate a response.",
+      );
       const returnedConvoId = data?.conversationId ?? activeConvoId;
 
       setMessages((prev) => [

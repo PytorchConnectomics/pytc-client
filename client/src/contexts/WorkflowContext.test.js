@@ -93,6 +93,19 @@ function Probe() {
       <button
         type="button"
         onClick={() =>
+          workflowContext.runClientEffects({
+            navigate_to: "visualization",
+            set_visualization_image_path: "/tmp/view-image.h5",
+            set_visualization_label_path: "/tmp/view-label.h5",
+            set_visualization_scales: [1, 1, 1],
+          })
+        }
+      >
+        View data effects
+      </button>
+      <button
+        type="button"
+        onClick={() =>
           workflowContext.executeAssistantItem({
             id: "start-inference",
             title: "Start inference in app",
@@ -329,6 +342,28 @@ describe("WorkflowProvider", () => {
 
     await waitFor(() => {
       expect(setOutputPath).toHaveBeenCalledWith("/tmp/inference-out");
+    });
+  });
+
+  it("applies agent-selected visualization paths", async () => {
+    const setCurrentImage = jest.fn();
+    const setCurrentLabel = jest.fn();
+    const setVisualizationScales = jest.fn();
+
+    renderProvider({
+      setCurrentImage,
+      setCurrentLabel,
+      setVisualizationScales,
+      trainingState: { setInputLabel: jest.fn() },
+    });
+    await screen.findByText("setup");
+
+    fireEvent.click(screen.getByText("View data effects"));
+
+    await waitFor(() => {
+      expect(setCurrentImage).toHaveBeenCalledWith("/tmp/view-image.h5");
+      expect(setCurrentLabel).toHaveBeenCalledWith("/tmp/view-label.h5");
+      expect(setVisualizationScales).toHaveBeenCalledWith("1,1,1");
     });
   });
 

@@ -107,7 +107,7 @@ describe("ModelInference", () => {
     expect(mockAppendWorkflowEvent).not.toHaveBeenCalled();
     expect(
       await screen.findByText(
-        /Inference completed and workflow synced: \/tmp\/inference-out\/result_xy.h5/,
+        /Model run completed and workflow synced: \/tmp\/inference-out\/result_xy.h5/,
       ),
     ).toBeTruthy();
   });

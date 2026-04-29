@@ -78,7 +78,7 @@ function ModelInference({ isInferring, setIsInferring }) {
                 }
               } catch (error) {
                 syncError = error;
-                console.warn("Inference runtime sync failed:", error);
+                console.warn("Model run artifact sync failed:", error);
               }
             }
             if (!terminalLoggedRef.current && appendWorkflowEvent) {
@@ -91,8 +91,8 @@ function ModelInference({ isInferring, setIsInferring }) {
                     : "inference.failed",
                   stage: "inference",
                   summary: succeeded
-                    ? "Inference completed, but runtime artifact sync did not complete."
-                    : "Inference finished without a successful exit.",
+                    ? "Model run completed, but runtime artifact sync did not complete."
+                    : "Model run finished without a successful exit.",
                   payload: {
                     exitCode: status.exitCode,
                     phase: status.phase,
@@ -105,23 +105,23 @@ function ModelInference({ isInferring, setIsInferring }) {
               }
             }
             if (status.exitCode === 0) {
-              console.log("Inference completed successfully.", status);
+              console.log("Model run completed successfully.", status);
               setInferenceStatus(
                 syncResult?.synced
-                  ? `Inference completed and workflow synced: ${syncResult.outputPath || "prediction artifact captured"} ✓`
-                  : "Inference completed successfully; workflow sync is pending. ✓",
+                  ? `Model run completed and workflow synced: ${syncResult.outputPath || "prediction artifact captured"} ✓`
+                  : "Model run completed successfully; workflow sync is pending. ✓",
               );
             } else if (status.exitCode !== null && status.exitCode !== undefined) {
-              console.error("Inference failed.", status);
+              console.error("Model run failed.", status);
               setInferenceStatus(
-                `Inference finished with exit code: ${status.exitCode}`,
+                `Model run finished with exit code: ${status.exitCode}`,
               );
             } else if (status.phase === "failed" && status.lastError) {
-              console.error("Inference failed.", status);
-              setInferenceStatus(`Inference failed: ${status.lastError}`);
+              console.error("Model run failed.", status);
+              setInferenceStatus(`Model run failed: ${status.lastError}`);
             } else {
-              console.warn("Inference stopped.", status);
-              setInferenceStatus("Inference stopped.");
+              console.warn("Model run stopped.", status);
+              setInferenceStatus("Model run stopped.");
             }
           }
         } catch (error) {
@@ -137,7 +137,7 @@ function ModelInference({ isInferring, setIsInferring }) {
               actor: "system",
               event_type: "inference.failed",
               stage: "inference",
-              summary: "Inference status polling failed.",
+              summary: "Model run status polling failed.",
               payload: {
                 error: error.message || "unknown error",
                 outputPath: getPathValue(inference.outputPath),
@@ -145,7 +145,7 @@ function ModelInference({ isInferring, setIsInferring }) {
             });
           }
           setInferenceStatus(
-            `Inference status polling failed: ${error.message || "unknown error"}`,
+            `Model run status polling failed: ${error.message || "unknown error"}`,
           );
         }
       }, 2000);
@@ -172,12 +172,12 @@ function ModelInference({ isInferring, setIsInferring }) {
   const startInferenceRun = useCallback(async (runtimeAction = null) => {
     let checkpointPath = "";
     if (isInferring) {
-      setInferenceStatus("Inference is already running.");
+      setInferenceStatus("A model run is already running.");
       return;
     }
     try {
       setIsInferring(true);
-      setInferenceStatus("Starting inference...");
+      setInferenceStatus("Starting model run...");
       terminalLoggedRef.current = false;
 
       checkpointPath = getPathValue(
@@ -191,7 +191,7 @@ function ModelInference({ isInferring, setIsInferring }) {
       );
       console.log(res);
       await refreshInferenceLogs();
-      setInferenceStatus("Inference started. Monitoring process...");
+      setInferenceStatus("Model run started. Monitoring process...");
     } catch (e) {
       console.log(e);
       setIsInferring(false);
@@ -200,7 +200,7 @@ function ModelInference({ isInferring, setIsInferring }) {
           actor: "system",
           event_type: "assistant.command_failed",
           stage: workflowStage,
-          summary: "Assistant could not start inference.",
+          summary: "Assistant could not start the model run.",
           payload: {
             error: e.message || "unknown error",
             runtime_action: runtimeAction.kind,
@@ -213,7 +213,7 @@ function ModelInference({ isInferring, setIsInferring }) {
           actor: "system",
           event_type: "inference.failed",
           stage: workflowStage,
-          summary: "Inference failed to start.",
+          summary: "Model run failed to start.",
           payload: {
             error: e.message || "unknown error",
             outputPath: getPathValue(inference.outputPath),
@@ -223,7 +223,7 @@ function ModelInference({ isInferring, setIsInferring }) {
       }
       await refreshInferenceLogs();
       setInferenceStatus(
-        `Inference error: ${e.message || "Please check console for details."}`,
+        `Model run error: ${e.message || "Please check console for details."}`,
       );
     }
   }, [
@@ -250,12 +250,12 @@ function ModelInference({ isInferring, setIsInferring }) {
 
   const handleStopButton = async () => {
     try {
-      setInferenceStatus("Stopping inference...");
+      setInferenceStatus("Stopping model run...");
       await stopModelInference();
     } catch (e) {
       console.log(e);
       setInferenceStatus(
-        `Error stopping inference: ${e.message || "Please check console for details."}`,
+        `Error stopping model run: ${e.message || "Please check console for details."}`,
       );
     } finally {
       setIsInferring(false);
@@ -271,7 +271,7 @@ function ModelInference({ isInferring, setIsInferring }) {
         <div style={{ marginBottom: 12 }}>
           <StageHeader
             stage="inference"
-            title="Model Inference"
+            title="Run Model"
             subtitle="Run prediction, register output artifacts, and route failures into proofreading."
           />
         </div>
@@ -282,18 +282,18 @@ function ModelInference({ isInferring, setIsInferring }) {
             disabled={isInferring} // Disables the button when inference is running
             style={{ marginRight: "8px" }}
           >
-            Start Inference
+            Run Model
           </Button>
           <Button
             onClick={handleStopButton}
             disabled={!isInferring} // Disables the button when inference is not running
           >
-            Stop Inference
+            Stop Run
           </Button>
         </Space>
         <p style={{ marginTop: 4 }}>{inferenceStatus}</p>
         <RuntimeLogPanel
-          title="Inference Runtime Log"
+          title="Run Model Runtime"
           runtime={inferenceRuntime}
           onRefresh={refreshInferenceLogs}
         />

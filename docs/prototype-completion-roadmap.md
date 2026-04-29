@@ -257,9 +257,31 @@ Run the first fresh app-generated before/after loop:
      suggested and manually mounted projects are profiled first, then routed
      through a compact role-confirmation modal before workflow registration.
      Confirmed config paths are persisted as workflow state and used as the
-     preferred agent training preset. Remaining hardening is multi-dataset
-     selection, batch role assignment, and browser-level blank-state rehearsal
-     on non-mito data.
+     preferred agent training preset. The profiler now reports role directories
+     and detected image/label volume sets; multi-volume projects default to
+     folder-level confirmation instead of one arbitrary file. The confirmation
+     modal now captures broad project context first, stores it in workflow
+     metadata for downstream agent use, then separately supports
+     natural-language mapping corrections before `Start project`. The setup
+     flow is now staged: semantic context must pass a deterministic completeness
+     gate, then the user confirms mechanistic file/folder roles, then the app
+     writes workflow state and a hidden `.pytc_project_context.json` memory file
+     in the project directory. Remaining hardening is true multi-set active-set
+     selection, batch operations across sets, and browser-level blank-state
+     rehearsal on non-mito data. Biological context defaults are now only taken
+     from backend content spot checks such as manifest/config snippets and
+     HDF5/TIFF container metadata, not from semantically lucky project names.
+     The workflow agent now has a stricter action consistency path: status
+     detection no longer uses unsafe raw substring matching, visualization
+     requests can populate viewer paths, proofreading requests from setup can
+     expose a runnable `start-proofreading` card when image/mask data exist, and
+     blocked requests now state the missing artifact instead of silently falling
+     back to generic cards.
+     Visualization scale corrections are now tracked as workflow/project
+     context: the agent can parse z,y,x scale updates from natural language,
+     persist them, and trigger a viewer reload. Remaining hardening is broader
+     unit handling and surfacing current scale context consistently across all
+     model/proofreading screens.
 
 10. Paper alignment
    - Maintain the paper-claim-vs-implementation matrix.

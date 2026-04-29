@@ -11,10 +11,10 @@ The Monitoring page displays a live TensorBoard dashboard embedded directly insi
 ## Requirements
 
 - TensorBoard monitoring requires an active or completed training run with logs saved to the output directory.
-- The server automatically starts a TensorBoard instance pointed at your training output directory when you launch training from the Model Training page.
+- The server automatically starts a TensorBoard instance pointed at your training output directory when you launch training from the Train Model page.
 
 ## Tips
 
-- If the TensorBoard panel appears blank, make sure a training job has been started at least once and that the output path was set correctly in the Model Training configuration.
+- If the TensorBoard panel appears blank, make sure a training job has been started at least once and that the output path was set correctly in the Train Model configuration.
 - TensorBoard updates in real time as new training data is written, so you can watch loss curves evolve during training.
 - You can interact with TensorBoard normally — zoom into charts, toggle runs on/off, and switch between the Scalars, Images, and other TensorBoard tabs within the embedded view.
