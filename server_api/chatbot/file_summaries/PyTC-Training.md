@@ -5,112 +5,138 @@ This document explains how to configure and run training jobs with PyTorch Conne
 ## Training Command
 
 ```
-python scripts/main.py --config-file <config.yaml> [OVERRIDES]
+python scripts/main.py --config <config.yaml> [key=value overrides]
 ```
 
 Example:
 ```
-python scripts/main.py --config-file configs/Lucchi-Mitochondria.yaml SOLVER.BASE_LR=0.001 SOLVER.SAMPLES_PER_BATCH=4
+python scripts/main.py --config tutorials/mito_lucchi++.yaml optimization.optimizer.lr=0.001 data.dataloader.batch_size=4
 ```
 
-Overrides use dotted YAML key paths: `SECTION.KEY=value`. Multiple overrides can be appended.
+Overrides use Hydra/OmegaConf dot-separated key paths: `section.subsection.key=value`. Multiple overrides can be appended.
 
 ## Required Configuration Sections
 
-Every training config must specify at minimum: a model architecture, dataset paths, and solver settings. The YAML files in the `configs/` directory provide complete working examples; users should start from the closest matching config and modify it rather than writing one from scratch.
+Every training config must specify at minimum: a model architecture, dataset paths, and optimization settings. The YAML files in the `tutorials/` directory provide complete working examples; users should start from the closest matching config and modify it rather than writing one from scratch. Configs use a profile-based system where base profiles (in `tutorials/bases/`) define reusable presets for architectures, optimizers, augmentations, etc.
 
-### DATASET Section
+### Data Section
+
+| Key | Description | Example |
+|-----|-------------|---------|
+| `data.train.image` | Path(s) to training image file(s) | `datasets/lucchi++/train_im.h5` |
+| `data.train.label` | Path(s) to training label file(s) | `datasets/lucchi++/train_mito.h5` |
+| `data.train.resolution` | Voxel resolution `[z, y, x]` in nm | `[5, 5, 5]` |
+| `data.dataloader.batch_size` | Number of samples per batch | `8` |
+| `data.dataloader.patch_size` | Training patch size `[z, y, x]` | `[112, 112, 112]` |
+| `data.dataloader.profile` | Dataloader profile: `cached` or `lazy` | `cached` |
+| `data.data_transform.pad_size` | Padding `[z, y, x]` for context | `[8, 128, 128]` |
+| `data.augmentation.profile` | Augmentation profile (see PyTC-Augmentation) | `aug_standard` |
+| `data.image_transform.clip_percentile_low` | Low percentile for intensity clipping | `0.0` |
+| `data.image_transform.clip_percentile_high` | High percentile for intensity clipping | `1.0` |
+
+### Optimization Section (Training Hyperparameters)
 
 | Key | Description | Default |
 |-----|-------------|---------|
-| `DATASET.INPUT_PATH` | Root directory containing images and labels | `'path/to/input'` |
-| `DATASET.IMAGE_NAME` | Image filename(s) relative to INPUT_PATH. Multiple files separated by `@` | None |
-| `DATASET.LABEL_NAME` | Label filename(s) relative to INPUT_PATH. Multiple files separated by `@` | None |
-| `DATASET.OUTPUT_PATH` | Directory where checkpoints and logs are saved | `'path/to/output'` |
-| `DATASET.PAD_SIZE` | Padding `[z, y, x]` to avoid border sampling issues | `[2, 64, 64]` |
-| `DATASET.IS_ISOTROPIC` | Whether the voxels are cubic (isotropic) | `False` |
-| `DATASET.DO_2D` | Enable 2D training mode | `False` |
-| `DATASET.LOAD_2D` | Load data as 2D slices | `False` |
-| `DATASET.DATA_SCALE` | Scale ratio `[z, y, x]` for resampling input | `[1.0, 1.0, 1.0]` |
-| `DATASET.MEAN` | Normalization mean | `0.5` |
-| `DATASET.STD` | Normalization std | `0.5` |
-| `DATASET.LABEL_BINARY` | Binarize the label volume | `False` |
-| `DATASET.LABEL_EROSION` | Erode label masks by N pixels | None |
-| `DATASET.DO_CHUNK_TITLE` | Enable tile-based (chunked) training for large datasets | `0` |
-| `DATASET.DATA_CHUNK_NUM` | Number of chunks `[z, y, x]` for tiled data | `[1, 1, 1]` |
-| `DATASET.DATA_CHUNK_ITER` | Iterations per chunk | `1000` |
-| `DATASET.REJECT_SAMPLING.SIZE_THRES` | Reject patches with foreground below this threshold (-1 = disabled) | `-1` |
-| `DATASET.REJECT_SAMPLING.P` | Probability of applying reject sampling | `0.95` |
+| `optimization.optimizer.name` | Optimizer: `"AdamW"`, `"Adam"`, `"SGD"` | `"AdamW"` |
+| `optimization.optimizer.lr` | Learning rate | `0.0003` |
+| `optimization.optimizer.weight_decay` | Weight decay | `0.01` |
+| `optimization.optimizer.betas` | Adam/AdamW beta parameters | `[0.9, 0.999]` |
+| `optimization.optimizer.eps` | Epsilon for numerical stability | `1.0e-08` |
+| `optimization.max_steps` | Total training steps (alternative to max_epochs) | varies |
+| `optimization.max_epochs` | Total training epochs | `100` |
+| `optimization.n_steps_per_epoch` | Steps per epoch | `1000` |
+| `optimization.gradient_clip_val` | Gradient clipping value | `1.0` |
+| `optimization.accumulate_grad_batches` | Gradient accumulation steps | `1` |
+| `optimization.precision` | Training precision: `bf16-mixed`, `16-mixed`, `32` | `bf16-mixed` |
+| `optimization.profile` | Optimizer profile preset (see below) | `warmup_cosine_lr` |
 
-### SOLVER Section (Training Hyperparameters)
+### Optimizer Profiles
 
-| Key | Description | Default |
-|-----|-------------|---------|
-| `SOLVER.NAME` | Optimizer name: `"SGD"`, `"Adam"`, `"AdamW"` | `"SGD"` |
-| `SOLVER.BASE_LR` | Base learning rate | `0.001` |
-| `SOLVER.MOMENTUM` | SGD momentum | `0.9` |
-| `SOLVER.BETAS` | Adam/AdamW beta parameters | `(0.9, 0.999)` |
-| `SOLVER.WEIGHT_DECAY` | Weight decay | `0.0001` |
-| `SOLVER.LR_SCHEDULER_NAME` | LR scheduler: `"MultiStepLR"`, `"WarmupMultiStepLR"`, `"WarmupCosineLR"`, `"ReduceLROnPlateau"`, `"OneCycle"` | `"MultiStepLR"` |
-| `SOLVER.STEPS` | Milestones for MultiStepLR | `(30000, 35000)` |
-| `SOLVER.GAMMA` | LR decay factor at each step | `0.1` |
-| `SOLVER.WARMUP_ITERS` | Number of warmup iterations | `1000` |
-| `SOLVER.WARMUP_FACTOR` | Initial LR multiplier during warmup | `1/1000` |
-| `SOLVER.SAMPLES_PER_BATCH` | Number of samples per GPU per batch | `2` |
-| `SOLVER.ITERATION_TOTAL` | Total training iterations | `40000` |
-| `SOLVER.ITERATION_SAVE` | Save a checkpoint every N iterations | `5000` |
-| `SOLVER.ITERATION_VAL` | Run validation every N iterations | `5000` |
-| `SOLVER.ITERATION_RESTART` | Restart iteration counter from 0 when loading a pretrained model | `False` |
-| `SOLVER.CLIP_GRADIENTS.ENABLED` | Enable gradient clipping | `False` |
-| `SOLVER.CLIP_GRADIENTS.CLIP_TYPE` | Clipping type: `"value"` or `"norm"` | `"value"` |
-| `SOLVER.CLIP_GRADIENTS.CLIP_VALUE` | Clipping threshold | `1.0` |
-| `SOLVER.SWA.ENABLED` | Enable Stochastic Weight Averaging | `False` |
-| `SOLVER.SWA.START_ITER` | Iteration to begin SWA | `90000` |
-| `SOLVER.SWA.LR_FACTOR` | SWA learning rate = BASE_LR × LR_FACTOR | `0.05` |
+Instead of configuring each optimizer/scheduler field individually, you can use a predefined profile:
 
-### MONITOR Section
+| Profile | Optimizer | Scheduler | Description |
+|---------|-----------|-----------|-------------|
+| `warmup_cosine_lr` | AdamW (lr=0.0003) | WarmupCosineLR | Warmup then cosine decay (recommended) |
+| `cosine_annealing_lr` | AdamW (lr=0.0003) | CosineAnnealingLR | Standard cosine annealing |
+| `reduce_on_plateau` | AdamW (lr=0.0003) | ReduceLROnPlateau | Reduce LR when loss plateaus |
+| `step_lr` | AdamW (lr=0.0003) | StepLR | Step decay every N epochs |
+| `multistep_lr` | AdamW (lr=0.0003) | MultiStepLR | Decay at specific epoch milestones |
+
+### Scheduler Section
 
 | Key | Description | Default |
 |-----|-------------|---------|
-| `MONITOR.LOG_OPT` | Logging options `[loss, lr, gpu_usage]` (1=on, 0=off) | `[1, 1, 0]` |
-| `MONITOR.VIS_OPT` | Visualization options `[image, feature_map]` | `[0, 16]` |
-| `MONITOR.ITERATION_NUM` | Log every N[0] iters; visualize every N[1] iters | `[20, 200]` |
+| `optimization.scheduler.name` | LR scheduler name | `WarmupCosineLR` |
+| `optimization.scheduler.interval` | Update interval: `epoch` or `step` | `epoch` |
+| `optimization.scheduler.warmup_epochs` | Number of warmup epochs | `3` |
+| `optimization.scheduler.warmup_start_lr` | LR at start of warmup | `1.0e-05` |
+| `optimization.scheduler.min_lr` | Minimum LR | `1.0e-06` |
 
-### SYSTEM Section
+### EMA (Exponential Moving Average)
 
 | Key | Description | Default |
 |-----|-------------|---------|
-| `SYSTEM.NUM_GPUS` | Number of GPUs | `4` |
-| `SYSTEM.NUM_CPUS` | Number of CPU workers for data loading | `4` |
-| `SYSTEM.DISTRIBUTED` | Use DistributedDataParallel | `False` |
-| `SYSTEM.PARALLEL` | Parallelism mode: `'DP'` (DataParallel) or `'DDP'` | `'DP'` |
+| `optimization.ema.enabled` | Enable EMA | `true` (in some configs) |
+| `optimization.ema.decay` | EMA decay rate | `0.999` |
+| `optimization.ema.warmup_steps` | Steps before EMA starts | `500` |
+| `optimization.ema.validate_with_ema` | Use EMA weights for validation | `true` |
 
-## Distributed Training
+### Monitor Section
 
-To run multi-GPU training with DDP:
-```
-python -m torch.distributed.launch --nproc_per_node=<NUM_GPUS> scripts/main.py --distributed --config-file <config.yaml>
-```
+| Key | Description | Default |
+|-----|-------------|---------|
+| `monitor.logging.scalar.loss_every_n_steps` | Log loss every N steps | `50` |
+| `monitor.logging.images.log_every_n_epochs` | Log images every N epochs | `10` |
+| `monitor.logging.images.max_images` | Max images to log | `8` |
+| `monitor.logging.images.num_slices` | Number of slices to visualize | `2` |
+| `monitor.checkpoint.save_top_k` | Keep the top K checkpoints | `3` |
+| `monitor.checkpoint.monitor` | Metric to monitor for checkpointing | `train_loss_total_epoch` |
+| `monitor.checkpoint.save_every_n_epochs` | Save checkpoint every N epochs | `10` |
+| `monitor.checkpoint.dirpath` | Directory for saving checkpoints | `outputs/<experiment>/checkpoints/` |
+| `monitor.early_stopping.enabled` | Enable early stopping | `false` |
 
-Mixed-precision training (`MODEL.MIXED_PRECESION: True`) only works with DDP.
+### System Section
+
+| Key | Description | Default |
+|-----|-------------|---------|
+| `system.num_gpus` | Number of GPUs (-1 = all available) | `-1` |
+| `system.num_workers` | Number of CPU workers (-1 = all available) | `-1` |
+| `system.seed` | Random seed for reproducibility | `42` |
+| `system.profile` | System profile: `all-gpu-cpu` or `single-gpu-cpu` | `all-gpu-cpu` |
 
 ## Resuming Training
 
 To resume from a checkpoint:
 ```
-python scripts/main.py --config-file <config.yaml> --checkpoint <path/to/checkpoint.pth.tar>
+python scripts/main.py --config <config.yaml> --checkpoint <path/to/checkpoint.ckpt>
 ```
 
-Training resumes from the saved iteration unless `SOLVER.ITERATION_RESTART: True` is set.
+To reset max_epochs when resuming:
+```
+python scripts/main.py --config <config.yaml> --checkpoint <path/to/checkpoint.ckpt> --reset-max-epochs 500
+```
 
-## Transfer Learning / Fine-tuning
+## Quick Debug Run
 
-Set `MODEL.PRE_MODEL` to the path of a pretrained checkpoint. The model will load those weights before training begins. Use `MODEL.FINETUNE` to add a suffix to saved checkpoint names so they do not overwrite the original.
+```
+python scripts/main.py --config tutorials/mito_lucchi++.yaml --fast-dev-run
+```
+
+This runs a single training batch for quick validation. Use `--fast-dev-run 2` for 2 batches.
+
+## Demo Mode
+
+```
+python scripts/main.py --demo
+```
+
+Uses `tutorials/minimal.yaml` with `--fast-dev-run` for a quick sanity check.
 
 ## Tips
 
-- Start from the closest bundled config in `configs/` and override only what you need.
-- For anisotropic EM data, use odd input sizes (e.g., `[17, 257, 257]`) when not using pooling layers to avoid feature mismatching.
-- For isotropic data, set `DATASET.IS_ISOTROPIC: True` and `AUGMENTOR.FLIP.DO_ZTRANS: 1` to enable z-axis augmentation.
-- Use `DATASET.REJECT_SAMPLING.SIZE_THRES` to avoid sampling empty patches in sparse datasets.
-- The output directory receives checkpoints (`checkpoint_NNNNN.pth.tar`) and a `config.yaml` snapshot.
+- Start from the closest bundled config in `tutorials/` and override only what you need.
+- Use optimizer profiles (e.g., `optimization.profile=warmup_cosine_lr`) instead of configuring each field manually.
+- Use augmentation profiles (e.g., `data.augmentation.profile=aug_standard`) for recommended augmentation settings.
+- For sparse datasets, enable reject sampling in the config: `data.dataloader.reject_sampling.size_thres=1000`.
+- The output directory receives checkpoints (`.ckpt` files) and a saved config snapshot.

@@ -2,152 +2,164 @@
 
 This document describes all data augmentation options available in PyTorch Connectomics. These augmentations are specifically designed for electron microscopy (EM) and biomedical volumetric data.
 
-All augmentations are controlled under the `AUGMENTOR` section of the YAML config. Set `AUGMENTOR.ENABLED: False` to disable all augmentation.
+Augmentations are controlled under the `data.augmentation` section and use a **profile-based system**. Set `data.augmentation.profile` to choose a preset, then override individual fields as needed.
+
+## Augmentation Profiles
+
+Choose ONE profile via `data.augmentation.profile`:
+
+| Profile | Description | Best For |
+|---------|-------------|----------|
+| `aug_light` | Flip + rotate + mild intensity | Quick experiments, clean data, fine-tuning |
+| `aug_standard` | Light + EM artifact simulation (misalignment, missing sections) | Most 3D EM tasks (RECOMMENDED) |
+| `aug_strong` | Maximum regularization (affine, elastic, motion blur, missing parts, cut noise) | Small datasets, overfitting prevention |
+| `aug_em_neuron` | DeepEM-matched augmentation with defect mutex | Neuron affinity learning on anisotropic EM (e.g., SNEMI3D) |
+| `aug_instance` | Standard + copy-paste + mixup | Instance segmentation |
+| `aug_superres` | CutBlur-centric for multi-scale learning | Super-resolution, denoising |
 
 ## Available Augmentations
 
-### Rotation (`AUGMENTOR.ROTATE`)
+All augmentation keys are under `data.augmentation.<augmentation_name>`:
+
+### Flip (`data.augmentation.flip`)
+Randomly flips along spatial axes.
+
+| Key | Default | Description |
+|-----|---------|-------------|
+| `enabled` | `true` | Enable flipping |
+| `prob` | `0.5` | Probability of applying |
+| `spatial_axis` | `[1, 2]` | Axes to flip. Add `0` for z-axis (isotropic data) |
+
+### Rotate (`data.augmentation.rotate`)
 Applies random 90-degree rotations.
 
 | Key | Default | Description |
 |-----|---------|-------------|
-| `ENABLED` | `True` | Enable rotation |
-| `ROT90` | `True` | Restrict to 90° increments |
-| `P` | `1.0` | Probability of applying |
+| `enabled` | `true` | Enable rotation |
+| `prob` | `0.5` | Probability |
+| `spatial_axes` | `[1, 2]` | Spatial axes for rotation |
 
-### Rescale (`AUGMENTOR.RESCALE`)
-Randomly rescales the volume.
-
-| Key | Default | Description |
-|-----|---------|-------------|
-| `ENABLED` | `True` | Enable rescaling |
-| `FIX_ASPECT` | `False` | Keep aspect ratio fixed |
-| `P` | `0.5` | Probability |
-
-### Flip (`AUGMENTOR.FLIP`)
-Randomly flips along axes. For isotropic data, enable z-axis flips.
+### Affine (`data.augmentation.affine`)
+Random affine transforms (rotation, scaling, shearing).
 
 | Key | Default | Description |
 |-----|---------|-------------|
-| `ENABLED` | `True` | Enable flipping |
-| `DO_ZTRANS` | `0` | Set to `1` to enable x-z and y-z flips (for isotropic cubic data) |
-| `P` | `1.0` | Probability |
+| `enabled` | `false` | Enable affine (only in `aug_strong`) |
+| `prob` | `0.3` | Probability |
+| `rotate_range` | `[0.1, 0.1, 0.1]` | Rotation range per axis |
+| `scale_range` | `[0.05, 0.05, 0.05]` | Scale range per axis |
+| `shear_range` | `[0.05, 0.05, 0.05]` | Shear range per axis |
 
-### Elastic Deformation (`AUGMENTOR.ELASTIC`)
-Applies smooth elastic deformation to simulate tissue warping.
-
-| Key | Default | Description |
-|-----|---------|-------------|
-| `ENABLED` | `True` | Enable elastic deformation |
-| `ALPHA` | `16.0` | Maximum pixel displacement |
-| `SIGMA` | `4.0` | Gaussian filter standard deviation |
-| `P` | `0.75` | Probability |
-
-### Grayscale Augmentation (`AUGMENTOR.GRAYSCALE`)
-Randomly adjusts brightness and contrast.
+### Elastic Deformation (`data.augmentation.elastic`)
+Smooth elastic deformation to simulate tissue warping.
 
 | Key | Default | Description |
 |-----|---------|-------------|
-| `ENABLED` | `True` | Enable grayscale augmentation |
-| `P` | `0.75` | Probability |
+| `enabled` | varies | Enable elastic deformation |
+| `prob` | `0.3` | Probability |
+| `sigma_range` | `[5.0, 8.0]` | Gaussian filter sigma range |
+| `magnitude_range` | `[50.0, 150.0]` | Displacement magnitude range |
 
-### Missing Parts (`AUGMENTOR.MISSINGPARTS`)
-Simulates missing tissue regions (common artifact in EM data).
-
-| Key | Default | Description |
-|-----|---------|-------------|
-| `ENABLED` | `True` | Enable missing parts simulation |
-| `ITER` | `64` | Number of missing region iterations |
-| `P` | `0.9` | Probability |
-
-### Missing Section (`AUGMENTOR.MISSINGSECTION`)
-Simulates entirely missing z-slices (another common EM artifact).
+### Intensity (`data.augmentation.intensity`)
+Adjusts brightness, contrast, and adds Gaussian noise.
 
 | Key | Default | Description |
 |-----|---------|-------------|
-| `ENABLED` | `True` | Enable missing section simulation |
-| `NUM_SECTION` | `2` | Number of sections to remove |
-| `P` | `0.5` | Probability |
+| `enabled` | `true` | Enable intensity augmentation |
+| `gaussian_noise_prob` | `0.3–0.5` | Probability of Gaussian noise |
+| `gaussian_noise_std` | `0.05–0.1` | Noise standard deviation |
+| `shift_intensity_prob` | `0.3–0.7` | Probability of brightness shift |
+| `shift_intensity_offset` | `0.1–0.2` | Brightness shift magnitude |
+| `contrast_prob` | `0.3–0.7` | Probability of contrast change |
+| `contrast_range` | `[0.9, 1.1]` or `[0.7, 1.4]` | Contrast scaling range |
 
-### Misalignment (`AUGMENTOR.MISALIGNMENT`)
-Simulates section-to-section misalignment (shift or rotation between z-slices).
+### Misalignment (`data.augmentation.misalignment`)
+Simulates section-to-section misalignment (common EM artifact).
 
 | Key | Default | Description |
 |-----|---------|-------------|
-| `ENABLED` | `True` | Enable misalignment simulation |
-| `DISPLACEMENT` | `16` | Maximum pixel displacement |
-| `ROTATE_RATIO` | `0.5` | Fraction of misalignments that use rotation instead of translation |
-| `P` | `0.5` | Probability |
+| `enabled` | `true` | Enable misalignment |
+| `prob` | `0.4–1.0` | Probability |
+| `displacement` | `10–17` | Maximum pixel displacement |
+| `rotate_ratio` | `0.0` | Fraction using rotation vs. translation |
 
-### Motion Blur (`AUGMENTOR.MOTIONBLUR`)
+### Missing Section (`data.augmentation.missing_section`)
+Simulates entirely missing z-slices.
+
+| Key | Default | Description |
+|-----|---------|-------------|
+| `enabled` | `true` | Enable missing section |
+| `prob` | `0.3–1.0` | Probability |
+| `num_sections` | `2` or `[0, 5]` | Number of sections to remove |
+
+### Motion Blur (`data.augmentation.motion_blur`)
 Simulates motion blur artifacts in EM sections.
 
 | Key | Default | Description |
 |-----|---------|-------------|
-| `ENABLED` | `True` | Enable motion blur |
-| `SECTIONS` | `2` | Number of sections to blur |
-| `KERNEL_SIZE` | `11` | Blur kernel size |
-| `P` | `0.5` | Probability |
+| `enabled` | varies | Enable motion blur |
+| `prob` | `0.3–1.0` | Probability |
+| `sections` | `[1, 3]` | Number of sections to blur |
+| `kernel_size` | `11` | Blur kernel size |
 
-### CutBlur (`AUGMENTOR.CUTBLUR`)
-Replaces a rectangular region with a downsampled-then-upsampled version, simulating resolution variation.
+### Missing Parts (`data.augmentation.missing_parts`)
+Simulates missing tissue regions.
 
 | Key | Default | Description |
 |-----|---------|-------------|
-| `ENABLED` | `True` | Enable CutBlur |
-| `LENGTH_RATIO` | `0.4` | Ratio of region size to volume size |
-| `DOWN_RATIO_MIN` | `2.0` | Minimum downsampling factor |
-| `DOWN_RATIO_MAX` | `8.0` | Maximum downsampling factor |
-| `DOWNSAMPLE_Z` | `False` | Also downsample along z-axis |
-| `P` | `0.5` | Probability |
+| `enabled` | varies | Enable missing parts |
+| `prob` | `0.2` | Probability |
+| `hole_range` | `[0.1, 0.25]` | Hole size range relative to volume |
 
-### CutNoise (`AUGMENTOR.CUTNOISE`)
+### Cut Noise (`data.augmentation.cut_noise`)
 Adds noise to a rectangular region.
 
 | Key | Default | Description |
 |-----|---------|-------------|
-| `ENABLED` | `True` | Enable CutNoise |
-| `LENGTH_RATIO` | `0.4` | Ratio of region size |
-| `SCALE` | `0.3` | Noise scale |
-| `P` | `0.75` | Probability |
+| `enabled` | varies | Enable cut noise |
+| `prob` | `0.3` | Probability |
+| `length_ratio` | `[0.1, 0.25]` | Region size ratio |
+| `noise_scale` | `[0.05, 0.15]` | Noise scale range |
 
-### CopyPaste (`AUGMENTOR.COPYPASTE`)
-Copy-pastes object instances for data augmentation (disabled by default).
-
-| Key | Default | Description |
-|-----|---------|-------------|
-| `ENABLED` | `False` | Enable CopyPaste (disabled by default) |
-| `AUG_THRES` | `0.7` | Augmentation threshold |
-| `P` | `0.8` | Probability |
-
-## Global Augmentation Options
+### Cut Blur (`data.augmentation.cut_blur`)
+Replaces a region with downsampled-then-upsampled version.
 
 | Key | Default | Description |
 |-----|---------|-------------|
-| `AUGMENTOR.ENABLED` | `True` | Master switch for all augmentations |
-| `AUGMENTOR.SMOOTH` | `False` | Apply Gaussian smoothing to label masks after augmentation. WARNING: can erase thin structures. |
-| `AUGMENTOR.ADDITIONAL_TARGETS_NAME` | `['label']` | Names of additional targets to augment alongside the image |
-| `AUGMENTOR.ADDITIONAL_TARGETS_TYPE` | `['mask']` | Type of each additional target (`'mask'` uses nearest-neighbor interpolation) |
+| `enabled` | varies | Enable cut blur |
+| `prob` | `0.8` | Probability |
+| `length_ratio` | `[0.3, 0.5]` | Region size ratio |
+| `down_ratio_range` | `[2.0, 8.0]` | Downsampling factor range |
+| `downsample_z` | `false` | Also downsample along z-axis |
 
-## Recommended Settings by Data Type
+### Copy-Paste (`data.augmentation.copy_paste`)
+Copy-pastes object instances for data augmentation.
 
-### Anisotropic EM data (e.g., SNEMI, CREMI)
-- `AUGMENTOR.FLIP.DO_ZTRANS: 0` (do not flip across z)
-- All other augmentations enabled by default
-- Consider disabling `CUTNOISE` for clean datasets
+| Key | Default | Description |
+|-----|---------|-------------|
+| `enabled` | `false` | Enable copy-paste (only in `aug_instance`) |
+| `prob` | `0.6` | Probability |
+| `max_obj_ratio` | `0.7` | Maximum object area ratio |
 
-### Isotropic EM data (e.g., Lucchi)
-- `AUGMENTOR.FLIP.DO_ZTRANS: 1` (enable z-axis flips)
-- `AUGMENTOR.CUTBLUR.DOWNSAMPLE_Z: True`
+### Mixup (`data.augmentation.mixup`)
+Blends two training samples together.
 
-### 2D datasets (e.g., Cellpose)
-- Disable EM-specific augmentations: `ELASTIC.ENABLED: False`, `RESCALE.ENABLED: False`, `MISSINGPARTS.ENABLED: False`
-- Keep flip, rotation, and grayscale augmentations
+| Key | Default | Description |
+|-----|---------|-------------|
+| `enabled` | `false` | Enable mixup (only in `aug_instance`) |
+| `prob` | `0.3` | Probability |
+| `alpha_range` | `[0.7, 0.9]` | Blending alpha range |
 
-### Sparse labels (e.g., Scutoid, NucMM)
-- Enable reject sampling: `DATASET.REJECT_SAMPLING.SIZE_THRES: 1000`
-- Consider disabling `CUTNOISE` to avoid corrupting sparse regions
+## Special Features
 
-## Per-Augmentation Skipping
+### Defect Mutex (`data.augmentation.defect_mutex`)
+When `true`, only one defect augmentation (misalignment, missing_section, or motion_blur) is applied per sample. Used in the `aug_em_neuron` profile to match the DeepEM augmentation strategy.
 
-Each augmentation has a `SKIP` parameter (list of sample keys to skip). This allows skipping certain augmentations for specific data channels. Default is an empty list (no skipping).
+## Recommended Profile by Data Type
+
+- **Anisotropic EM (SNEMI, CREMI)**: `aug_standard` or `aug_em_neuron`
+- **Isotropic EM (Lucchi)**: `aug_standard` with `flip.spatial_axis: [0, 1, 2]`
+- **Small datasets / overfitting**: `aug_strong`
+- **Instance segmentation**: `aug_instance`
+- **Super-resolution**: `aug_superres`
+- **Quick experiments / fine-tuning**: `aug_light`

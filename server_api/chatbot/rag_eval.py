@@ -66,7 +66,7 @@ QUESTIONS = [
         "FileManager.md",
         "hard",
     ),
-    # ── ModelTraining.md ────────────────────────────────────────────────
+    # ── ModelTraining.md (UI page) ──────────────────────────────────────
     ("How do I start a training job?", "ModelTraining.md", "easy"),
     ("What are the three steps to configure training?", "ModelTraining.md", "easy"),
     ("What inputs are required for model training?", "ModelTraining.md", "easy"),
@@ -78,14 +78,9 @@ QUESTIONS = [
     ),
     ("How do I stop a running training job?", "ModelTraining.md", "easy"),
     ("Can I edit the raw YAML for training?", "ModelTraining.md", "medium"),
-    (
-        "What model architectures are available for training?",
-        "ModelTraining.md",
-        "hard",
-    ),
     ("Do training config fields have AI help buttons?", "ModelTraining.md", "medium"),
     (
-        "I want to train a segmentation model - where do I configure that?",
+        "I want to train a segmentation model - where do I configure that in the UI?",
         "ModelTraining.md",
         "hard",
     ),
@@ -99,12 +94,12 @@ QUESTIONS = [
         "ModelTraining.md",
         "hard",
     ),
-    # ── ModelInference.md ───────────────────────────────────────────────
-    ("How do I run inference?", "ModelInference.md", "easy"),
-    ("What inputs do I need for inference?", "ModelInference.md", "easy"),
+    # ── ModelInference.md (UI page) ─────────────────────────────────────
+    ("How do I run inference from the UI?", "ModelInference.md", "easy"),
+    ("What inputs do I need for inference in the app?", "ModelInference.md", "easy"),
     ("What is the checkpoint path for inference?", "ModelInference.md", "medium"),
     ("How do I stop an inference job?", "ModelInference.md", "easy"),
-    ("What is the augmentations setting in inference?", "ModelInference.md", "medium"),
+    ("What is the augmentations slider in inference?", "ModelInference.md", "medium"),
     ("Is there an Input Label field for inference?", "ModelInference.md", "hard"),
     (
         "I have a trained model and want to run predictions on new data - which page?",
@@ -113,7 +108,7 @@ QUESTIONS = [
     ),
     ("Do I need ground truth labels to run inference?", "ModelInference.md", "hard"),
     (
-        "Where do I specify which trained weights to use for prediction?",
+        "Where do I specify which trained weights to use for prediction in the UI?",
         "ModelInference.md",
         "hard",
     ),
@@ -247,45 +242,44 @@ QUESTIONS = [
     ("What data formats does PyTC accept?", "PyTC-Overview.md", "easy"),
     ("Does PyTC support object detection?", "PyTC-Overview.md", "medium"),
     ("What is the main entry point script for PyTC?", "PyTC-Overview.md", "medium"),
+    ("Can I use PyTC for image classification?", "PyTC-Overview.md", "hard"),
+    ("What configuration system does PyTC use?", "PyTC-Overview.md", "medium"),
+    ("Does PyTC use Hydra or YACS for configs?", "PyTC-Overview.md", "medium"),
+    ("What is the --config flag for?", "PyTC-Overview.md", "medium"),
+    ("What modes does PyTC support? train, test, tune?", "PyTC-Overview.md", "medium"),
     (
-        "Can I use PyTC for image classification?",
+        "I want to do a quick test to see if PyTC is working, is there a demo mode?",
+        "PyTC-Overview.md",
+        "hard",
+    ),
+    (
+        "What is the --fast-dev-run flag?",
         "PyTC-Overview.md",
         "hard",
     ),
     # ── PyTC-Training.md ───────────────────────────────────────────────
+    # Easy: direct key/concept lookup
     ("How do I run a training job with PyTC?", "PyTC-Training.md", "easy"),
     ("What learning rate schedulers are available?", "PyTC-Training.md", "easy"),
     ("How do I resume training from a checkpoint?", "PyTC-Training.md", "easy"),
+    ("What is optimization.optimizer.lr?", "PyTC-Training.md", "easy"),
+    ("What is the training command for PyTC?", "PyTC-Training.md", "easy"),
+    # Medium: requires understanding of config structure
     ("What optimizer options does PyTC support?", "PyTC-Training.md", "medium"),
     ("How do I enable gradient clipping?", "PyTC-Training.md", "medium"),
-    ("What is reject sampling in PyTC?", "PyTC-Training.md", "medium"),
-    (
-        "How do I run distributed multi-GPU training?",
-        "PyTC-Training.md",
-        "hard",
-    ),
-    (
-        "What does SOLVER.ITERATION_TOTAL control?",
-        "PyTC-Training.md",
-        "hard",
-    ),
-    # Real-user training questions
+    ("What optimizer profiles are available?", "PyTC-Training.md", "medium"),
+    ("What is the warmup_cosine_lr profile?", "PyTC-Training.md", "medium"),
+    ("How do I set optimization.max_epochs?", "PyTC-Training.md", "medium"),
+    ("What does optimization.precision control?", "PyTC-Training.md", "medium"),
+    ("How do I change data.dataloader.batch_size?", "PyTC-Training.md", "medium"),
+    ("What is monitor.checkpoint.save_top_k?", "PyTC-Training.md", "medium"),
+    ("How do I set the system.num_gpus?", "PyTC-Training.md", "medium"),
+    ("What is the EMA feature in PyTC training?", "PyTC-Training.md", "medium"),
+    # Real-user training questions (natural language)
     ("Can I train my model for a longer period of time?", "PyTC-Training.md", "medium"),
-    ("How do I change the batch size?", "PyTC-Training.md", "medium"),
     ("How do I lower the learning rate?", "PyTC-Training.md", "easy"),
     ("How often does the model save checkpoints?", "PyTC-Training.md", "medium"),
-    ("Can I use Adam instead of SGD?", "PyTC-Training.md", "medium"),
-    ("What is stochastic weight averaging in PyTC?", "PyTC-Training.md", "medium"),
-    (
-        "I want to fine-tune a pretrained model on my own data, how?",
-        "PyTC-Training.md",
-        "hard",
-    ),
-    (
-        "My training is crashing because of NaN gradients, what should I try?",
-        "PyTC-Training.md",
-        "hard",
-    ),
+    ("Can I use AdamW instead of SGD?", "PyTC-Training.md", "medium"),
     (
         "How do I use cosine learning rate decay?",
         "PyTC-Training.md",
@@ -297,73 +291,85 @@ QUESTIONS = [
         "medium",
     ),
     (
-        "How do I set the number of GPUs for training?",
-        "PyTC-Training.md",
-        "medium",
-    ),
-    (
-        "What is mixed precision training and how do I enable it?",
-        "PyTC-Training.md",
-        "hard",
-    ),
-    (
-        "I want to train for 200K iterations instead of the default, how?",
-        "PyTC-Training.md",
-        "hard",
-    ),
-    (
         "Where are training checkpoints saved?",
         "PyTC-Training.md",
         "medium",
     ),
+    # Hard: requires synthesis or non-obvious mapping
+    (
+        "How do I train for 200 epochs instead of the default?",
+        "PyTC-Training.md",
+        "hard",
+    ),
+    (
+        "My training is crashing because of NaN gradients, what should I try?",
+        "PyTC-Training.md",
+        "hard",
+    ),
+    (
+        "What is mixed precision training and how do I enable bf16?",
+        "PyTC-Training.md",
+        "hard",
+    ),
+    (
+        "How do I use the ReduceLROnPlateau scheduler?",
+        "PyTC-Training.md",
+        "hard",
+    ),
+    (
+        "How do I enable early stopping during training?",
+        "PyTC-Training.md",
+        "hard",
+    ),
+    (
+        "What is the --reset-max-epochs flag for when resuming?",
+        "PyTC-Training.md",
+        "hard",
+    ),
+    (
+        "I want to accumulate gradients over multiple batches, how?",
+        "PyTC-Training.md",
+        "hard",
+    ),
     # ── PyTC-Inference.md ──────────────────────────────────────────────
+    # Easy
     ("How do I run inference with a trained model?", "PyTC-Inference.md", "easy"),
     ("What is test-time augmentation in PyTC?", "PyTC-Inference.md", "easy"),
-    ("How does inference stride affect results?", "PyTC-Inference.md", "medium"),
-    ("What blending modes are available for inference?", "PyTC-Inference.md", "medium"),
+    ("What does --mode test do?", "PyTC-Inference.md", "easy"),
+    ("How do I run predictions on my test data?", "PyTC-Inference.md", "easy"),
+    # Medium
+    ("What blending modes are available for sliding window inference?", "PyTC-Inference.md", "medium"),
+    ("How do I increase the sliding window overlap?", "PyTC-Inference.md", "medium"),
+    ("Can I increase inference.batch_size for faster inference?", "PyTC-Inference.md", "medium"),
+    ("What is inference.sliding_window.sw_batch_size?", "PyTC-Inference.md", "medium"),
+    ("How do I enable TTA flips during inference?", "PyTC-Inference.md", "medium"),
+    ("What is Gaussian blending in sliding window inference?", "PyTC-Inference.md", "medium"),
     (
-        "How do I run chunked inference on a large volume?",
+        "How do I specify where to save inference output?",
         "PyTC-Inference.md",
-        "hard",
-    ),
-    (
-        "What does DO_SINGLY do in PyTC inference?",
-        "PyTC-Inference.md",
-        "hard",
-    ),
-    # Real-user inference questions
-    ("How do I make my inference predictions smoother?", "PyTC-Inference.md", "medium"),
-    ("Can I increase the batch size for faster inference?", "PyTC-Inference.md", "medium"),
-    ("What output format does inference produce?", "PyTC-Inference.md", "medium"),
-    (
-        "I'm seeing tile boundary artifacts in my predictions, how do I fix that?",
-        "PyTC-Inference.md",
-        "hard",
-    ),
-    (
-        "My volume is too large to fit in memory for inference, what should I do?",
-        "PyTC-Inference.md",
-        "hard",
-    ),
-    (
-        "How do I run inference on multiple test volumes one at a time?",
-        "PyTC-Inference.md",
-        "hard",
+        "medium",
     ),
     (
         "Can I use test-time augmentation to improve accuracy?",
         "PyTC-Inference.md",
         "medium",
     ),
+    ("What output format does inference produce?", "PyTC-Inference.md", "medium"),
+    # Hard
     (
-        "What does the --inference flag do?",
+        "I'm seeing tile boundary artifacts in my predictions, how do I fix that?",
         "PyTC-Inference.md",
-        "easy",
+        "hard",
     ),
     (
-        "How do I specify where to save inference output?",
+        "How do I run sharded inference across multiple machines?",
         "PyTC-Inference.md",
-        "medium",
+        "hard",
+    ),
+    (
+        "What is cache-aware inference in PyTC?",
+        "PyTC-Inference.md",
+        "hard",
     ),
     (
         "Should I use the same config file for inference as I used for training?",
@@ -371,53 +377,157 @@ QUESTIONS = [
         "hard",
     ),
     (
-        "How do I set the output activation for inference predictions?",
+        "How do I configure postprocessing after inference?",
         "PyTC-Inference.md",
-        "medium",
+        "hard",
     ),
     (
-        "What is Gaussian blending in PyTC?",
+        "What is inference.test_time_augmentation.ensemble_mode?",
         "PyTC-Inference.md",
-        "medium",
+        "hard",
+    ),
+    (
+        "How do I use the --shard-id and --num-shards flags?",
+        "PyTC-Inference.md",
+        "hard",
+    ),
+    (
+        "What does inference.evaluation.enabled control?",
+        "PyTC-Inference.md",
+        "hard",
     ),
     # ── PyTC-Models.md ─────────────────────────────────────────────────
+    # Easy
     ("What model architectures does PyTC support?", "PyTC-Models.md", "easy"),
-    ("What is the difference between unet_3d and unet_2d?", "PyTC-Models.md", "easy"),
-    ("What block types are available?", "PyTC-Models.md", "easy"),
+    ("What is the MONAI UNet architecture?", "PyTC-Models.md", "easy"),
     ("What loss functions does PyTC support?", "PyTC-Models.md", "easy"),
-    ("What is residual_se block type?", "PyTC-Models.md", "medium"),
-    ("What backbones are available for FPN?", "PyTC-Models.md", "medium"),
-    ("What are the Swin UNETR specific options?", "PyTC-Models.md", "medium"),
-    ("What does TARGET_OPT control?", "PyTC-Models.md", "hard"),
+    ("What is the RSUNet architecture?", "PyTC-Models.md", "easy"),
+    # Medium
+    ("What is the difference between monai_unet and rsunet?", "PyTC-Models.md", "medium"),
+    ("What MedNeXt model sizes are available?", "PyTC-Models.md", "medium"),
+    ("What is the loss_binary profile?", "PyTC-Models.md", "medium"),
+    ("How do I set model.arch.profile?", "PyTC-Models.md", "medium"),
+    ("What pipeline profiles are available?", "PyTC-Models.md", "medium"),
+    ("What does the binary pipeline profile do?", "PyTC-Models.md", "medium"),
+    ("How do I combine BCE loss with Dice loss?", "PyTC-Models.md", "medium"),
+    ("What is PerChannelBCEWithLogitsLoss?", "PyTC-Models.md", "medium"),
+    # Hard
     (
-        "How do I configure a multi-class segmentation model?",
+        "What is the affinity-12 pipeline profile?",
+        "PyTC-Models.md",
+        "hard",
+    ),
+    (
+        "How do I configure loss functions with pred_slice and target_slice?",
+        "PyTC-Models.md",
+        "hard",
+    ),
+    (
+        "What label transforms are available for instance segmentation?",
+        "PyTC-Models.md",
+        "hard",
+    ),
+    (
+        "What is the ABISS decoding profile?",
+        "PyTC-Models.md",
+        "hard",
+    ),
+    (
+        "How do I set up a model with 12 output channels for affinity prediction?",
+        "PyTC-Models.md",
+        "hard",
+    ),
+    (
+        "What is the difference between DiceLoss and WeightedBCEWithLogitsLoss?",
+        "PyTC-Models.md",
+        "hard",
+    ),
+    (
+        "What activation profiles are used during TTA?",
+        "PyTC-Models.md",
+        "hard",
+    ),
+    (
+        "How does the BCD pipeline combine boundary, contour, and distance targets?",
         "PyTC-Models.md",
         "hard",
     ),
     # ── PyTC-Augmentation.md ───────────────────────────────────────────
+    # Easy
     ("What augmentations does PyTC support?", "PyTC-Augmentation.md", "easy"),
     ("What is CutBlur augmentation?", "PyTC-Augmentation.md", "easy"),
+    ("What augmentation profiles are available?", "PyTC-Augmentation.md", "easy"),
+    ("What is the aug_standard profile?", "PyTC-Augmentation.md", "easy"),
+    # Medium
     ("How do I disable elastic deformation?", "PyTC-Augmentation.md", "medium"),
     (
-        "What augmentation settings should I use for isotropic data?",
+        "What augmentation profile should I use for isotropic EM data?",
         "PyTC-Augmentation.md",
         "medium",
     ),
+    (
+        "What is the aug_em_neuron profile for?",
+        "PyTC-Augmentation.md",
+        "medium",
+    ),
+    (
+        "How do I set data.augmentation.profile?",
+        "PyTC-Augmentation.md",
+        "medium",
+    ),
+    (
+        "What is the intensity augmentation in PyTC?",
+        "PyTC-Augmentation.md",
+        "medium",
+    ),
+    (
+        "What is the difference between aug_light and aug_strong?",
+        "PyTC-Augmentation.md",
+        "medium",
+    ),
+    # Hard
     (
         "How do I simulate missing sections in my training data?",
         "PyTC-Augmentation.md",
         "hard",
     ),
     (
-        "What does AUGMENTOR.FLIP.DO_ZTRANS do?",
+        "What is the defect_mutex feature in augmentation?",
+        "PyTC-Augmentation.md",
+        "hard",
+    ),
+    (
+        "How does the copy-paste augmentation work for instance segmentation?",
+        "PyTC-Augmentation.md",
+        "hard",
+    ),
+    (
+        "What augmentation profile matches the DeepEM recipe?",
+        "PyTC-Augmentation.md",
+        "hard",
+    ),
+    (
+        "How do I add mixup augmentation to my training?",
+        "PyTC-Augmentation.md",
+        "hard",
+    ),
+    (
+        "What does data.augmentation.misalignment.displacement control?",
         "PyTC-Augmentation.md",
         "hard",
     ),
     # ── PyTC-Configs.md ────────────────────────────────────────────────
+    # Easy
     ("What bundled configs does PyTC have?", "PyTC-Configs.md", "easy"),
     ("Which config should I use for mitochondria segmentation?", "PyTC-Configs.md", "easy"),
+    ("Where are the tutorial configs located?", "PyTC-Configs.md", "easy"),
+    # Medium
     ("What config is used for CREMI synapse detection?", "PyTC-Configs.md", "medium"),
-    ("Which config uses the Swin UNETR architecture?", "PyTC-Configs.md", "medium"),
+    ("What architecture does neuron_snemi.yaml use?", "PyTC-Configs.md", "medium"),
+    ("What is the mito_lucchi++.yaml config for?", "PyTC-Configs.md", "medium"),
+    ("What base profiles do the tutorial configs inherit from?", "PyTC-Configs.md", "medium"),
+    ("Are there configs for nucleus segmentation?", "PyTC-Configs.md", "medium"),
+    # Hard
     (
         "What is the recommended config for neuron instance segmentation?",
         "PyTC-Configs.md",
@@ -428,11 +538,45 @@ QUESTIONS = [
         "PyTC-Configs.md",
         "hard",
     ),
+    (
+        "What is the profile-based inheritance system for configs?",
+        "PyTC-Configs.md",
+        "hard",
+    ),
+    (
+        "What misc configs are available for specialized tasks?",
+        "PyTC-Configs.md",
+        "hard",
+    ),
+    (
+        "How do I override data paths in a tutorial config?",
+        "PyTC-Configs.md",
+        "hard",
+    ),
     # ── PyTC-Evaluation.md ─────────────────────────────────────────────
+    # Easy
     ("How do I evaluate segmentation results in PyTC?", "PyTC-Evaluation.md", "easy"),
     ("What is adapted Rand error?", "PyTC-Evaluation.md", "easy"),
+    # Medium
     ("What evaluation metric should I use for instance segmentation?", "PyTC-Evaluation.md", "medium"),
     ("How do I compute IoU for binary segmentation?", "PyTC-Evaluation.md", "medium"),
+    ("How do I know if my model is good?", "PyTC-Evaluation.md", "medium"),
+    (
+        "How do I compare my prediction against ground truth?",
+        "PyTC-Evaluation.md",
+        "medium",
+    ),
+    (
+        "I have a binary segmentation prediction, how do I get precision and recall?",
+        "PyTC-Evaluation.md",
+        "medium",
+    ),
+    (
+        "What Python functions does PyTC provide for evaluation?",
+        "PyTC-Evaluation.md",
+        "medium",
+    ),
+    # Hard
     (
         "What is variation of information in segmentation evaluation?",
         "PyTC-Evaluation.md",
@@ -443,14 +587,7 @@ QUESTIONS = [
         "PyTC-Evaluation.md",
         "hard",
     ),
-    # Real-user evaluation questions
-    ("How do I know if my model is good?", "PyTC-Evaluation.md", "medium"),
     ("What metric should I report for the SNEMI3D challenge?", "PyTC-Evaluation.md", "hard"),
-    (
-        "How do I compare my prediction against ground truth?",
-        "PyTC-Evaluation.md",
-        "medium",
-    ),
     (
         "Is my model over-segmenting or under-segmenting? How can I tell?",
         "PyTC-Evaluation.md",
@@ -462,49 +599,18 @@ QUESTIONS = [
         "hard",
     ),
     (
-        "I have a binary segmentation prediction, how do I get precision and recall?",
-        "PyTC-Evaluation.md",
-        "medium",
-    ),
-    (
         "How do I evaluate my CREMI synapse detection results?",
         "PyTC-Evaluation.md",
         "hard",
     ),
     (
-        "What Python functions does PyTC provide for evaluation?",
+        "What is the cremi_distance metric?",
         "PyTC-Evaluation.md",
-        "medium",
-    ),
-    # ── Cross-doc / Models real-user questions ─────────────────────────
-    (
-        "Can I use a transformer-based model in PyTC?",
-        "PyTC-Models.md",
-        "medium",
-    ),
-    (
-        "How do I combine BCE loss with Dice loss?",
-        "PyTC-Models.md",
-        "medium",
-    ),
-    (
-        "What normalization options are available for my model?",
-        "PyTC-Models.md",
-        "medium",
-    ),
-    (
-        "I want to train an affinity model for neuron segmentation, what target option do I use?",
-        "PyTC-Models.md",
         "hard",
     ),
     (
-        "How do I set up a model with 12 output classes?",
-        "PyTC-Models.md",
-        "hard",
-    ),
-    (
-        "What is the difference between DiceLoss and WeightedBCEWithLogitsLoss?",
-        "PyTC-Models.md",
+        "Can I enable automatic evaluation during inference with inference.evaluation.enabled?",
+        "PyTC-Evaluation.md",
         "hard",
     ),
 ]

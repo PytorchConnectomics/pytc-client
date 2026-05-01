@@ -1,153 +1,132 @@
 # PyTC Model Zoo
 
-This document describes all model architectures, block types, backbones, loss functions, and target options available in PyTorch Connectomics.
+This document describes all model architectures, loss functions, label transforms, and pipeline profiles available in PyTorch Connectomics.
 
 ## Model Architectures
 
-Set `MODEL.ARCHITECTURE` to one of:
+Set `model.arch.profile` to use a predefined architecture, or set `model.arch.type` directly:
 
-| Architecture | Key | Description | Best For |
-|-------------|-----|-------------|----------|
-| 3D U-Net | `unet_3d` | Standard 3D encoder-decoder with skip connections. Most commonly used. | General 3D segmentation |
-| 2D U-Net | `unet_2d` | 2D variant for slice-by-slice processing. Requires `DATASET.DO_2D: True`. | 2D cell segmentation (e.g., Cellpose) |
-| 3D U-Net++ | `unet_plus_3d` | Nested U-Net with dense skip connections. | Large-scale datasets (e.g., MitoEM) |
-| 2D U-Net++ | `unet_plus_2d` | 2D variant of U-Net++. | 2D tasks with dense skip connections |
-| 3D FPN | `fpn_3d` | Feature Pyramid Network. Requires a backbone (`MODEL.BACKBONE`). | Multi-scale feature extraction |
-| DeepLabV3 | `deeplabv3a` / `deeplabv3b` / `deeplabv3c` | 2D DeepLab with atrous convolutions. Three variants with different dilation rates. | 2D semantic segmentation |
-| UNETR | `unetr` | Vision Transformer encoder with CNN decoder. | Transformer-based 3D segmentation |
-| Swin UNETR | `swinunetr` | Shifted-window Transformer encoder (MONAI-based). Supports v2. | State-of-the-art transformer segmentation |
+| Architecture | Profile / Type | Description | Best For |
+|-------------|----------------|-------------|----------|
+| MONAI UNet | `monai_unet` | MONAI-based 3D UNet with configurable filters and dropout | General 3D segmentation (recommended for beginners) |
+| Residual Symmetric UNet | `rsunet` | Custom RSUNet with group norm, ELU activation, anisotropic downsampling | Anisotropic EM data (SNEMI, CREMI) |
+| MedNeXt Small | `mednext_s` | MedNeXt architecture, size S | Efficient segmentation |
+| MedNeXt Base | `mednext_b` | MedNeXt architecture, size B | Balanced performance |
+| MedNeXt Medium | `mednext_m` | MedNeXt architecture, size M | Higher capacity |
+| MedNeXt Large | `mednext_l` | MedNeXt architecture, size L | Maximum capacity |
 
-## Block Types
+### Architecture Profile Details
 
-Set `MODEL.BLOCK_TYPE` to one of:
+**MONAI UNet (`monai_unet`)**:
+```yaml
+model:
+  arch:
+    profile: monai_unet
+  monai:
+    filters: [32, 64, 128, 256]
+    dropout: 0.1
+```
 
-| Block Type | Key | Available In | Description |
-|-----------|-----|-------------|-------------|
-| Residual | `residual` | unet_3d, unet_2d, fpn_3d | Standard residual block with two convolutions and a skip connection |
-| Residual + SE | `residual_se` | unet_3d, unet_2d, fpn_3d | Residual block with Squeeze-and-Excitation channel attention. Most popular choice. |
-| Residual PA | `residual_pa` | unet_3d | Pre-activation residual block (BN → ReLU → Conv ordering) |
-| Residual PA + SE | `residual_pa_se` | unet_3d | Pre-activation block with Squeeze-and-Excitation |
-
-## Backbones (for FPN and DeepLab)
-
-Set `MODEL.BACKBONE` to one of:
-
-| Backbone | Key | Description |
-|----------|-----|-------------|
-| ResNet | `resnet` | 3D ResNet backbone. Default for FPN. |
-| RepVGG | `repvgg` | Re-parameterizable VGG. Supports deploy mode conversion at inference time. |
-| BotNet | `botnet` | Bottleneck Transformer backbone. Requires `fmap_size` parameter. |
-| EfficientNet | `effnet` | 3D EfficientNet with inverted residual blocks. |
+**RSUNet (`rsunet`)**:
+```yaml
+model:
+  arch:
+    profile: rsunet
+  rsunet:
+    width: [18, 36, 48, 64, 80]
+    norm: group
+    activation: elu
+    num_groups: 4
+    down_factors: [[1, 2, 2], [1, 2, 2], [1, 2, 2], [1, 2, 2]]
+    depth_2d: 1
+    kernel_2d: [1, 3, 3]
+```
 
 ## Model Configuration Options
 
-| Key | Description | Default |
+| Key | Description | Example |
 |-----|-------------|---------|
-| `MODEL.FILTERS` | Number of filters at each encoder stage | `[28, 36, 48, 64, 80]` |
-| `MODEL.BLOCKS` | Number of residual blocks at each stage | `[2, 2, 2, 2]` |
-| `MODEL.IN_PLANES` | Number of input channels (1 for grayscale EM) | `1` |
-| `MODEL.OUT_PLANES` | Number of output channels | `1` |
-| `MODEL.INPUT_SIZE` | Model input patch size `[z, y, x]` | `[8, 256, 256]` |
-| `MODEL.OUTPUT_SIZE` | Model output patch size `[z, y, x]` | `[8, 256, 256]` |
-| `MODEL.ISOTROPY` | Per-stage isotropy flags for anisotropic data | `[False, False, False, True, True]` |
-| `MODEL.ATTENTION` | Attention mechanism: `'squeeze_excitation'` or None | `'squeeze_excitation'` |
-| `MODEL.PAD_MODE` | Convolution padding: `'zeros'`, `'circular'`, `'reflect'`, `'replicate'` | `'replicate'` |
-| `MODEL.NORM_MODE` | Normalization: `'bn'` (BatchNorm), `'sync_bn'`, `'in'` (Instance), `'gn'` (Group), `'none'` | `'bn'` |
-| `MODEL.ACT_MODE` | Activation: `'relu'`, `'elu'`, `'leaky'` (leaky_relu) | `'elu'` |
-| `MODEL.POOLING_LAYER` | Use pooling for downsampling (True) or strided conv (False) | `False` |
-| `MODEL.MIXED_PRECESION` | Mixed-precision training (DDP only) | `False` |
-| `MODEL.EMBEDDING` | Enable embedding head | `1` |
-| `MODEL.HEAD_DEPTH` | Depth of final decoder head | `1` |
-| `MODEL.PRE_MODEL` | Path to pretrained model for fine-tuning | `''` |
-
-### Swin UNETR-Specific Options
-
-| Key | Default | Description |
-|-----|---------|-------------|
-| `MODEL.SWIN_UNETR_FEATURE_SIZE` | `48` | Feature dimension |
-| `MODEL.DEPTHS` | `(2, 2, 2, 2)` | Layers per stage |
-| `MODEL.SWIN_UNETR_NUM_HEADS` | `(3, 6, 12, 24)` | Attention heads per stage |
-| `MODEL.SWIN_UNETR_DROPOUT_RATE` | `0.0` | Dropout rate |
-| `MODEL.ATTN_DROP_RATE` | `0.0` | Attention dropout |
-| `MODEL.USE_V2` | `False` | Use Swin UNETR v2 |
-| `MODEL.SPATIAL_DIMS` | `3` | Spatial dimensions |
-
-### UNETR-Specific Options
-
-| Key | Default | Description |
-|-----|---------|-------------|
-| `MODEL.UNETR_FEATURE_SIZE` | `16` | Feature dimension |
-| `MODEL.HIDDEN_SIZE` | `768` | Transformer hidden dimension |
-| `MODEL.MLP_DIM` | `3072` | Feedforward dimension |
-| `MODEL.UNETR_NUM_HEADS` | `12` | Number of attention heads |
-| `MODEL.POS_EMBED` | `'perceptron'` | Position embedding type |
-| `MODEL.UNETR_DROPOUT_RATE` | `0.0` | Dropout rate |
+| `model.arch.profile` | Architecture profile name | `monai_unet`, `rsunet`, `mednext_s` |
+| `model.arch.type` | Architecture type (set by profile) | `monai_unet`, `rsunet`, `mednext` |
+| `model.out_channels` | Number of output channels | `1` (binary), `3` (BCD), `12` (affinity) |
+| `model.input_size` | Model input patch size `[z, y, x]` | `[112, 112, 112]` |
+| `model.output_size` | Model output patch size `[z, y, x]` | `[112, 112, 112]` |
+| `model.monai.filters` | Filter sizes per stage (MONAI UNet) | `[32, 64, 128, 256]` |
+| `model.monai.dropout` | Dropout rate (MONAI UNet) | `0.1` |
+| `model.rsunet.width` | Channel widths per stage (RSUNet) | `[18, 36, 48, 64, 80]` |
+| `model.rsunet.norm` | Normalization type (RSUNet): `batch`, `group` | `group` |
+| `model.rsunet.activation` | Activation function (RSUNet): `elu`, `relu` | `elu` |
+| `model.rsunet.num_groups` | Number of groups for group norm | `4` |
+| `model.rsunet.down_factors` | Downsampling factors per stage | `[[1,2,2], [1,2,2], ...]` |
 
 ## Loss Functions
 
-Set `MODEL.LOSS_OPTION` (a list of lists, one per target):
+Losses are configured under `model.loss` using either a profile or explicit list:
 
-| Loss | Key | Use Case |
-|------|-----|----------|
-| Weighted Binary Cross-Entropy | `WeightedBCE` | Binary segmentation |
-| Weighted BCE with Logits | `WeightedBCEWithLogitsLoss` | Binary segmentation (numerically stable, no activation needed) |
-| Weighted BCE Focal Loss | `WeightedBCEFocalLoss` | Binary segmentation with class imbalance |
-| Dice Loss | `DiceLoss` | Binary segmentation (overlap-based) |
-| Weighted-Sample Dice Loss | `WSDiceLoss` | Per-sample weighted Dice |
-| Weighted Cross-Entropy | `WeightedCE` | Multi-class segmentation |
-| Weighted MSE | `WeightedMSE` | Regression targets (e.g., distance transforms, flow fields) |
-| Weighted MAE | `WeightedMAE` | Regression targets |
+### Loss Profiles
 
-Multiple losses can be combined for a single target:
+| Profile | Losses | Use Case |
+|---------|--------|----------|
+| `loss_binary` | WeightedBCEWithLogitsLoss + DiceLoss | Binary segmentation (mitochondria, synapse) |
+| `loss_bcd` | BCE+Dice (foreground) + BCE+Dice (boundary) + WeightedMSE (distance) | Multi-task BCD segmentation |
+| `loss_per_channel` | PerChannelBCEWithLogitsLoss (auto pos_weight) | Per-channel affinity prediction |
+| `loss_bd` | BCE+Dice (all but last channel) + WeightedMSE (last channel) | Boundary + distance multi-task |
+
+### Direct Loss Configuration
+
 ```yaml
-MODEL:
-  LOSS_OPTION: [["WeightedBCEWithLogitsLoss", "DiceLoss"]]
-  LOSS_WEIGHT: [[1.0, 1.0]]
+model:
+  loss:
+    losses:
+      - function: WeightedBCEWithLogitsLoss
+        weight: 1.0
+        kwargs: {reduction: mean}
+      - function: DiceLoss
+        weight: 1.0
+        kwargs: {sigmoid: true, smooth_nr: 1e-5, smooth_dr: 1e-5}
 ```
 
-## Regularization Options
+Available loss functions:
+- `WeightedBCEWithLogitsLoss` — Binary cross-entropy with logits
+- `DiceLoss` — Overlap-based Dice loss
+- `WeightedMSELoss` — Mean squared error (for distance/regression targets)
+- `PerChannelBCEWithLogitsLoss` — Per-channel BCE with automatic positive weight balancing
 
-Set `MODEL.REGU_OPT`:
+Loss entries support `pred_slice` and `target_slice` to apply different losses to different output channels (e.g., `"0:1"` for first channel only).
 
-| Regularization | Key | Description |
-|---------------|-----|-------------|
-| Binary | `Binary` | Encourages binary predictions |
-| Foreground-Contour Consistency | `FgContour` | Enforces consistency between foreground and contour predictions |
-| Contour-DT Consistency | `ContourDT` | Consistency between contour and distance transform |
-| Foreground-DT Consistency | `FgDT` | Consistency between foreground and distance transform |
-| Non-overlap | `Nonoverlap` | Prevents overlapping instance predictions |
+## Pipeline Profiles
 
-## Target Options (MODEL.TARGET_OPT)
+Pipeline profiles bundle model output channels, loss, label transforms, and decoding into a single preset. Set via `default.pipeline_profile`:
 
-The target option string encodes what the model is predicting:
+| Profile | Out Channels | Description |
+|---------|-------------|-------------|
+| `binary` | 1 | Binary segmentation (foreground/background) with BCE+Dice loss |
+| `bcd` | 3 | Multi-task: binary + boundary + distance transform |
+| `affinity-12` | 12 | 12-channel affinity prediction with per-channel BCE and ABISS decoding |
 
-| Code | Target Type | OUT_PLANES | Description |
-|------|-------------|-----------|-------------|
-| `"0"` | Binary mask | 1 | Standard binary segmentation (foreground/background) |
-| `"1"` | Synaptic polarity | 3 | Signed polarity prediction for synapses |
-| `"2"` | Affinity map | 3 | 3-channel affinity map for instance segmentation |
-| `"3"` | Small object mask | 1 | Optimized for small objects |
-| `"4"` | Contour map | 1 | Boundary contour prediction |
-| `"5"` | Distance transform | 1 | Quantized distance transform for watershed |
-| `"7"` | Flow field | 2 | Cellpose-style gradient flow for instance segmentation |
-| `"9-N"` | Multi-class | N | N-class semantic segmentation (e.g., `"9-12"` for 12 classes) |
+## Label Transforms
 
-## Weight Options (MODEL.WEIGHT_OPT)
+Label transforms convert raw instance labels into training targets. Configured via `data.label_transform.profile`:
 
-Controls per-voxel loss weighting:
+| Profile | Targets | Description |
+|---------|---------|-------------|
+| `label_bcd` | binary + instance_boundary + instance_edt | Multi-task BCD labels |
+| `label_affinity_12` | affinity (12 offsets) | Short and long-range affinity maps with DeepEM crop |
 
-| Code | Description |
-|------|-------------|
-| `"0"` | No weighting (uniform) |
-| `"1"` | Binary mask weighting (weight foreground vs. background) |
+## Activation Profiles
 
-## Output Activations (MODEL.OUTPUT_ACT)
+Channel activations applied during TTA and inference. Referenced by pipeline profiles:
 
-Applied to model output during loss computation:
+| Profile | Description |
+|---------|-------------|
+| `act_binary` | Sigmoid activation for binary channels |
+| `act_bcd` | Per-channel activations for BCD outputs |
 
-| Activation | When to Use |
-|-----------|-------------|
-| `"none"` | When loss handles raw logits (e.g., BCEWithLogitsLoss) |
-| `"sigmoid"` | Binary segmentation output |
-| `"softmax"` | Multi-class segmentation output |
-| `"tanh"` | Flow field / regression with [-1, 1] range |
+## Decoding Profiles
+
+Post-inference decoding to convert raw predictions into segmentation. Referenced by pipeline profiles:
+
+| Profile | Description |
+|---------|-------------|
+| `decoding_abiss` | ABISS watershed for affinity-to-instance conversion |
+| `decoding_bcd` | BCD-based instance segmentation decoding |

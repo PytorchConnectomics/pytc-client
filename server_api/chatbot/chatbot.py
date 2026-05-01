@@ -9,6 +9,15 @@
 import os
 from pathlib import Path
 
+
+def _format_admin_llm_error(error):
+    """Format an LLM connection error for display to the user."""
+    return (
+        "The AI assistant could not connect to its configured language model. "
+        "Please contact your system administrator with this error: "
+        f"{str(error).strip() or error.__class__.__name__}"
+    )
+
 from langchain_ollama import OllamaEmbeddings, ChatOllama
 from langchain_community.vectorstores import FAISS
 from langchain_core.tools import tool
@@ -30,24 +39,16 @@ RULES:
 4. Be concise. State the facts, generate the command, stop.
 
 WORKFLOW: The available configs are provided in your task message. Pick the best match, then:
-1. Call read_config on the chosen config path to see its YAML overrides.
-2. For common parameters (learning rate, batch size, iterations, optimizer, checkpoint interval), ALWAYS use the keys listed below. DO NOT search for these.
-3. For specialized parameters (augmentation settings, loss functions, architecture details), call search_documentation.
-4. Build the command with overrides using the SECTION.KEY=value format.
+1. ALWAYS call read_config on the chosen config path BEFORE generating any command. Never skip this.
+2. Use ONLY the exact key paths you see in the returned YAML to build overrides (Hydra dot-path format: key=value).
+3. For parameters not visible in the config, call search_documentation.
+4. Build the command.
 
-IMPORTANT: YAML configs only show overrides — many valid keys exist in the defaults but are not shown in read_config output.
+CRITICAL: PyTC has its own config key names — they are NOT PyTorch Lightning CLI names.
+Do NOT guess key names. You MUST read the config first to see the actual keys.
 
-Common override keys (ALWAYS use these exact keys, never search for alternatives):
-- SOLVER.BASE_LR, SOLVER.SAMPLES_PER_BATCH, SOLVER.ITERATION_TOTAL
-- SOLVER.ITERATION_SAVE (checkpoint save interval), SOLVER.ITERATION_STEP (LR decay steps)
-- SOLVER.NAME (values: SGD, Adam, AdamW)
-- SOLVER.LR_SCHEDULER_NAME (values: WarmupMultiStepLR, WarmupCosineLR)
-- SOLVER.CLIP_GRADIENTS.ENABLED (True/False), SOLVER.CLIP_GRADIENTS.CLIP_VALUE
-- MODEL.ARCHITECTURE, MODEL.BLOCK_TYPE, MODEL.FILTERS
-
-NEVER invent keys like TRAIN.MAX_ITER, TRAINING.BATCH_SIZE, or CLI flags like --batch-size, --checkpoint-interval — these do not exist.
-
-Command format: `python scripts/main.py --config-file <path> [SECTION.KEY=value ...]`
+Command format: `python scripts/main.py --config <path> [key=value ...]`
+Example: `python scripts/main.py --config tutorials/syn_cremi.yaml optimization.optimizer.lr=0.0001 optimization.max_epochs=300`
 Always generate commands for the user to run — never execute directly."""
 
 
@@ -58,26 +59,13 @@ RULES:
 2. Be concise. State the facts, generate the command, stop.
 
 WORKFLOW:
-1. If the user did NOT provide a checkpoint path, call list_checkpoints first to see available checkpoints.
-2. If the user DID provide a checkpoint path (e.g., outputs/model/checkpoint.pth.tar), skip list_checkpoints.
-3. Call read_config to see the INFERENCE section keys.
+1. If the user did NOT provide a checkpoint path, call list_checkpoints first.
+2. If the user DID provide one, skip list_checkpoints.
+3. Call read_config to see the config’s keys, then use those for overrides (Hydra dot-path format).
 4. For specialized inference parameters, call search_documentation if needed.
 
-Here is the correct override key mapping (use these exact keys):
-- Output path → INFERENCE.OUTPUT_PATH
-- TTA augmentation count → INFERENCE.AUG_NUM
-- TTA mode → INFERENCE.AUG_MODE (values: mean, max)
-- Blending → INFERENCE.BLENDING (values: gaussian, bump)
-- Stride → INFERENCE.STRIDE
-- Process volumes one at a time → INFERENCE.DO_SINGLY
-- Batch size → INFERENCE.SAMPLES_PER_BATCH
-
-Command format: `python scripts/main.py --config-file <path> --inference --checkpoint <ckpt> [SECTION.KEY=value ...]`
-
-IMPORTANT: Overrides use SECTION.KEY=value format (NO -- prefix). Example:
-  ✅ CORRECT: INFERENCE.AUG_NUM=8
-  ❌ WRONG: --inference.AUG_NUM=8
-
+Command format: `python scripts/main.py --config <path> --mode test --checkpoint <checkpoint.ckpt> [key=value ...]`
+Example: `python scripts/main.py --config tutorials/syn_cremi.yaml --mode test --checkpoint outputs/model/checkpoints/epoch=100.ckpt test.output_path=results/`
 Always generate commands for the user to run — never execute directly."""
 
 
@@ -224,12 +212,53 @@ def build_chain():
         # Auto-inject available configs so the agent doesn't need to call list_training_configs
         configs = list_training_configs.invoke({})
         config_summary = "\n".join(
-            f"- {c['name']} ({c['model']}) → {c['path']}" for c in configs if isinstance(c, dict) and 'name' in c
+            f"- {c['name']} ({c['model']}): {c.get('description', '')} → {c['path']}"
+            for c in configs if isinstance(c, dict) and 'name' in c
         )
+
+        # Auto-read a representative config and flatten grouping keys (default/train/test)
+        # so the agent sees the actual Hydra override paths, not YAML grouping structure
+        ref_config = next(
+            (c for c in configs if isinstance(c, dict) and 'lucchi' in c.get('name', '').lower()),
+            configs[0] if configs and isinstance(configs[0], dict) else None,
+        )
+        key_structure_section = ""
+        if ref_config:
+            ref_content = read_config.invoke({"config_path": ref_config['path']})
+            if isinstance(ref_content, dict) and 'error' not in ref_content:
+                import yaml as _yaml
+
+                def _deep_merge(base, override):
+                    """Merge override into base dict recursively."""
+                    for k, v in override.items():
+                        if k in base and isinstance(base[k], dict) and isinstance(v, dict):
+                            _deep_merge(base[k], v)
+                        else:
+                            base[k] = v
+
+                # Flatten: merge default, train, test into one level
+                flat = {}
+                for group_key in ("default", "train", "test"):
+                    group = ref_content.get(group_key, {})
+                    if isinstance(group, dict):
+                        _deep_merge(flat, group)
+
+                # Also include top-level non-grouping keys
+                for k, v in ref_content.items():
+                    if k not in ("default", "train", "test", "_base_", "description", "experiment_name"):
+                        flat[k] = v
+
+                key_structure_section = (
+                    f"\n\nOVERRIDE KEY PATHS (from {ref_config['name']} — all configs share this structure):\n"
+                    f"```yaml\n{_yaml.dump(flat, default_flow_style=False)[:3000]}```\n"
+                    f"These are the exact Hydra override paths. Use them as-is (e.g. optimization.max_epochs=200)."
+                )
+
         enriched_task = (
             f"{task}\n\n"
-            f"AVAILABLE CONFIGS (already fetched for you):\n{config_summary}\n\n"
-            f"Pick the best match and call read_config on its path to see the exact YAML keys before generating the command."
+            f"AVAILABLE CONFIGS (already fetched for you):\n{config_summary}"
+            f"{key_structure_section}\n\n"
+            f"Pick the best match. Use the key paths shown above for overrides — do NOT guess key names."
         )
         result = training_agent.invoke(
             {"messages": [{"role": "user", "content": enriched_task}]}
