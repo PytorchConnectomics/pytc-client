@@ -19,30 +19,6 @@ def get_pytc_root() -> Path:
     return Path(__file__).parent.parent.parent / "pytorch_connectomics"
 
 
-CONFIG_DESCRIPTIONS = {
-    "Lucchi-Mitochondria.yaml": (
-        "3D mitochondria segmentation on Lucchi EM dataset. "
-        "Good baseline for beginners learning 3D EM segmentation."
-    ),
-    "CREMI-Base.yaml": (
-        "Base config for CREMI neuronal segmentation benchmark. "
-        "Standard UNet for boundary/affinity prediction."
-    ),
-    "SNEMI-Affinity-UNet.yaml": (
-        "Affinity-based neuron segmentation on SNEMI3D. "
-        "Predicts affinity maps for instance segmentation."
-    ),
-    "MitoEM-R-Base.yaml": (
-        "Base config for MitoEM mitochondria benchmark. "
-        "Large-scale 3D mitochondria segmentation."
-    ),
-    "NucMM-Zebrafish-Base.yaml": (
-        "Nucleus segmentation on NucMM Zebrafish dataset. "
-        "Multi-task learning with boundary and distance maps."
-    ),
-}
-
-
 @tool
 def list_training_configs() -> List[Dict[str, str]]:
     """
@@ -53,40 +29,40 @@ def list_training_configs() -> List[Dict[str, str]]:
         List of configs with name, path, model info, and description
     """
     pytc_root = get_pytc_root()
-    configs_dir = pytc_root / "configs"
+    tutorials_dir = pytc_root / "tutorials"
 
-    if not configs_dir.exists():
-        return [{"error": f"Configs directory not found at {configs_dir}"}]
+    if not tutorials_dir.exists():
+        return [{"error": f"Tutorials directory not found at {tutorials_dir}"}]
 
     configs = []
 
-    for yaml_file in configs_dir.rglob("*.yaml"):
+    for yaml_file in tutorials_dir.rglob("*.yaml"):
+        # Skip base profile files — they are not standalone configs
+        if yaml_file.parent.name == "bases":
+            continue
+
         rel_path = yaml_file.relative_to(pytc_root)
         name = yaml_file.name
 
-        # Get description from known configs or try to extract from file
-        description = CONFIG_DESCRIPTIONS.get(name, "")
+        description = ""
         model_arch = "unknown"
 
         try:
             with open(yaml_file, "r") as f:
                 config_data = yaml.safe_load(f)
 
-            # Extract model architecture
             if config_data:
-                model_arch = config_data.get("MODEL", {}).get("ARCHITECTURE", "unknown")
+                # Extract model architecture from Hydra config format
+                default = config_data.get("default", {})
+                if isinstance(default, dict):
+                    model_cfg = default.get("model", {})
+                    if isinstance(model_cfg, dict):
+                        arch_cfg = model_cfg.get("arch", {})
+                        if isinstance(arch_cfg, dict):
+                            model_arch = arch_cfg.get("profile", arch_cfg.get("type", "unknown"))
 
-                # Try to get description from comments if not in known list
-                if not description:
-                    with open(yaml_file, "r") as f:
-                        for line in f:
-                            if line.startswith("#"):
-                                description = line.lstrip("# ").strip()
-                                break
-                            elif not line.strip():
-                                continue
-                            else:
-                                break
+                # Read description from the YAML's own description field
+                description = config_data.get("description", "")
         except Exception:
             pass
 
@@ -162,9 +138,9 @@ def list_checkpoints(experiment_name: Optional[str] = None) -> List[Dict[str, st
         else:
             return [{"info": f"Experiment '{experiment_name}' not found in outputs/"}]
 
-    # Search for .pth and .ckpt files
+    # Search for .ckpt (Lightning) and .pth files
     for search_dir in search_dirs:
-        for pattern in ["*.pth", "*.ckpt"]:
+        for pattern in ["*.ckpt", "*.pth"]:
             for ckpt_file in search_dir.rglob(pattern):
                 rel_path = ckpt_file.relative_to(pytc_root)
 

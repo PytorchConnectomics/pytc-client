@@ -4,12 +4,12 @@ This document explains how to evaluate segmentation results produced by PyTorch 
 
 ## Running Inference First
 
-Before evaluation, you must run inference to produce predictions. Use the `--inference` flag:
+Before evaluation, you must run inference to produce predictions. Use `--mode test`:
 ```
-python scripts/main.py --config-file <config.yaml> --inference --checkpoint <checkpoint.pth.tar>
+python scripts/main.py --config <config.yaml> --mode test --checkpoint <checkpoint.ckpt>
 ```
 
-The predictions are saved to `INFERENCE.OUTPUT_PATH` (usually as HDF5 files).
+The predictions are saved to the output directory (usually as HDF5 files). Evaluation can be run automatically during inference by setting `inference.evaluation.enabled=true` and specifying `inference.evaluation.metrics` in the config.
 
 ## Available Evaluation Metrics
 
@@ -114,6 +114,7 @@ Computes mean distance-based false positive and false negative statistics.
 
 ## Notes
 
-- PyTC does NOT automatically compute evaluation metrics after inference. You must write a separate script.
-- The `--inference` flag only generates predictions; it does not compare them to ground truth.
+- PyTC can automatically compute evaluation metrics during inference when `inference.evaluation.enabled=true` is set in the config.
+- Available built-in metrics include `jaccard`, `adapted_rand`, `cremi_distance`, and more.
+- For standalone evaluation, you can also write a separate script using `connectomics.utils.evaluate`.
 - For large volumes, load data in chunks to avoid memory issues.

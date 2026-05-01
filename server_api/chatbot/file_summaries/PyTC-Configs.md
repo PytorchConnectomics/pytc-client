@@ -1,137 +1,103 @@
 # PyTC Bundled Configuration Files
 
-This document describes every YAML configuration file bundled with PyTorch Connectomics. Users should start from the closest matching config and modify it rather than writing one from scratch.
+This document describes the YAML configuration files bundled with PyTorch Connectomics. All configs are in the `tutorials/` directory and use Hydra/OmegaConf format with a profile-based system. Users should start from the closest matching config and modify it rather than writing one from scratch.
 
-## Lucchi (Mitochondria Segmentation)
+## Config Architecture
 
-**Dataset**: Lucchi — isotropic EM volume of mitochondria in hippocampus.
-**Task**: Binary semantic segmentation (mitochondria vs. background).
+Configs use a profile-based inheritance system. Each tutorial config references base profiles from `tutorials/bases/`:
+- `arch_profiles.yaml` — Model architecture presets
+- `optimizer_profiles.yaml` — Optimizer and scheduler presets
+- `augmentation_profiles.yaml` — Data augmentation presets
+- `pipeline_profiles.yaml` — End-to-end pipeline presets (loss, labels, decoding)
+- `dataloader_profiles.yaml` — Dataloader presets
+- `system_profiles.yaml` — GPU/CPU resource presets
 
-| Config | Architecture | Key Settings |
-|--------|-------------|-------------|
-| `configs/Lucchi-Mitochondria.yaml` | `unet_3d` / `residual_se` | Input: `[112,112,112]`, LR: `0.04`, Loss: BCE+Dice, Isotropic data, 100K iterations |
+## Mitochondria Segmentation
 
-## SNEMI (Neuron Segmentation)
-
-**Dataset**: SNEMI3D — anisotropic EM serial section images of mouse cortex neurons.
-**Task**: Instance segmentation via affinity maps.
-
-| Config | Architecture | Key Settings |
-|--------|-------------|-------------|
-| `configs/SNEMI/SNEMI-Base.yaml` | `unet_3d` / `residual` | Affinity target (`"2"`), 3-channel output, GroupNorm, 150K iters |
-| `configs/SNEMI/SNEMI-Affinity-UNet.yaml` | `unet_3d` / `residual_se` | Extends SNEMI-Base with SE attention blocks |
-| `configs/SNEMI/SNEMI-Affinity-UNet-2x.yaml` | `unet_3d` | Larger model variant |
-| `configs/SNEMI/SNEMI-Affinity-UNet-LR.yaml` | `unet_3d` | Learning rate experiment variant |
-| `configs/SNEMI/SNEMI-Affinity-UNet-MER.yaml` | `unet_3d` | Model ensemble with regularization |
-| `configs/SNEMI/SNEMI-Affinity-Contour-UNet-2x.yaml` | `unet_3d` | Multi-task: affinity + contour prediction |
-| `configs/SNEMI/SNEMI-Affinity-ResNet.yaml` | `fpn_3d` / ResNet backbone | FPN architecture with ResNet backbone |
-| `configs/SNEMI/SNEMI-Affinity-EffNet.yaml` | `fpn_3d` / EfficientNet backbone | FPN with EfficientNet backbone |
-| `configs/SNEMI/SNEMI-Affinity-SwinUNETR.yaml` | `swinunetr` | Swin Transformer-based segmentation |
-| `configs/SNEMI/SNEMI-Affinity-UNETR.yaml` | `unetr` | Vision Transformer-based segmentation |
-| `configs/SNEMI/SNEMI-Base_multiGPU.yaml` | `unet_3d` | Multi-GPU (4 GPUs) distributed training variant |
-
-## CREMI (Synapse Detection)
-
-**Dataset**: CREMI — anisotropic EM volumes (A, B, C) with synaptic cleft annotations.
-**Task**: Synapse detection / binary segmentation with reject sampling for sparse labels.
+### Lucchi++ (Isotropic EM)
 
 | Config | Architecture | Key Settings |
 |--------|-------------|-------------|
-| `configs/CREMI/CREMI-Base.yaml` | `unet_3d` / `residual` | SyncBN, Reject sampling (threshold 1000), 150K iters |
-| `configs/CREMI/CREMI-Base_multiGPU.yaml` | `unet_3d` | Multi-GPU distributed variant |
-| `configs/CREMI/CREMI-Foreground-UNet.yaml` | `unet_3d` | Foreground prediction with UNet |
-| `configs/CREMI/CREMI-Foreground-DT-UNet.yaml` | `unet_3d` | Multi-task: foreground + distance transform |
-| `configs/CREMI/CREMI-Foreground-DT-Regu-UNet.yaml` | `unet_3d` | Foreground + DT with regularization |
-| `configs/CREMI/CREMI-Foreground-FPN-ResNet.yaml` | `fpn_3d` / ResNet | FPN with ResNet for foreground detection |
-| `configs/CREMI/CREMI-Foreground-FPN-RepVGG.yaml` | `fpn_3d` / RepVGG | FPN with RepVGG backbone |
+| `tutorials/mito_lucchi++.yaml` | `monai_unet` | Input: `[112,112,112]`, binary pipeline, WarmupCosineLR, batch_size=8, 100 epochs, isotropic data |
 
-## MitoEM (Large-Scale Mitochondria)
-
-**Dataset**: MitoEM — large-scale EM dataset for mitochondria instance segmentation.
-**Task**: Binary/instance segmentation with tile-based training for large volumes.
+### MitoEM (Large-Scale)
 
 | Config | Architecture | Key Settings |
 |--------|-------------|-------------|
-| `configs/MitoEM/MitoEM-R-Base.yaml` | `unet_plus_3d` / `residual_se` | Chunked training (4×8×8), 4 GPUs, SyncBN, 150K iters |
-| `configs/MitoEM/MitoEM-R-A.yaml` | variant | Architecture A experiment |
-| `configs/MitoEM/MitoEM-R-AC.yaml` | variant | Architecture AC experiment |
-| `configs/MitoEM/MitoEM-R-BC.yaml` | variant | Boundary + Contour multi-task |
-| `configs/MitoEM/MitoEM-R-BCD.yaml` | variant | Boundary + Contour + Distance Transform multi-task |
+| `tutorials/mito_mitoEM_common.yaml` | shared base | Common settings for MitoEM configs |
+| `tutorials/mito_mitoEM_H.yaml` | variant | MitoEM-H dataset variant |
+| `tutorials/mito_mitoEM_R.yaml` | variant | MitoEM-R dataset variant |
+| `tutorials/mito_mitoEM_HR.yaml` | variant | Combined H+R dataset variant |
 
-## NucMM (Nucleus Segmentation)
-
-**Dataset**: NucMM — 3D nuclei segmentation in mouse brain and zebrafish.
-**Task**: Instance segmentation of cell nuclei.
+### BetaSeg (Mitochondria)
 
 | Config | Architecture | Key Settings |
 |--------|-------------|-------------|
-| `configs/NucMM/NucMM-Mouse-Base.yaml` | `unet_3d` / `residual_se` | 4 GPUs, GroupNorm, Reject sampling, 100K iters |
-| `configs/NucMM/NucMM-Mouse-UNet-BC.yaml` | `unet_3d` | Boundary + Contour multi-task |
-| `configs/NucMM/NucMM-Mouse-UNet-BCD.yaml` | `unet_3d` | Boundary + Contour + Distance Transform |
-| `configs/NucMM/NucMM-Zebrafish-Base.yaml` | `unet_3d` / `residual_se` | Zebrafish data, similar setup |
-| `configs/NucMM/NucMM-Zebrafish-UNet-BC.yaml` | `unet_3d` | Zebrafish BC variant |
-| `configs/NucMM/NucMM-Zebrafish-UNet-BCD.yaml` | `unet_3d` | Zebrafish BCD variant |
+| `tutorials/mito_betaseg.yaml` | varies | BetaSeg mitochondria segmentation |
 
-## JWR15 (Neuron and Synapse Segmentation)
-
-**Dataset**: JWR15 — EM dataset with both neuron and synapse annotations.
-
-### Neuron configs
-| Config | Architecture | Key Settings |
-|--------|-------------|-------------|
-| `configs/JWR15/neuron/JWR15-Neuron-Base.yaml` | `unet_3d` | Neuron segmentation baseline |
-| `configs/JWR15/neuron/JWR15-Neuron-Affinity-UNet-MER.yaml` | `unet_3d` | Affinity-based with model ensemble |
-
-### Synapse configs
-| Config | Architecture | Key Settings |
-|--------|-------------|-------------|
-| `configs/JWR15/synapse/JWR15-Synapse-Base.yaml` | `unet_3d` | Synapse detection baseline |
-| `configs/JWR15/synapse/JWR15-Synapse-BCE.yaml` | `unet_3d` | BCE loss variant |
-| `configs/JWR15/synapse/JWR15-Synapse-BCE-DICE.yaml` | `unet_3d` | BCE + Dice loss |
-| `configs/JWR15/synapse/JWR15-Synapse-BCE-DICE-Regu.yaml` | `unet_3d` | BCE + Dice + Regularization |
-| `configs/JWR15/synapse/JWR15-Synapse-Semantic-CE.yaml` | `unet_3d` | Multi-class semantic variant |
-
-## Cellpose (2D Cell Segmentation)
-
-**Dataset**: Cellpose — 2D microscopy images of cells.
-**Task**: Instance segmentation using flow-field prediction.
+### MitoLab
 
 | Config | Architecture | Key Settings |
 |--------|-------------|-------------|
-| `configs/Cellpose/Cellpose-Base.yaml` | `unet_2d` / `residual_se` | 2D mode, Multi-task (mask + flow), LeakyReLU, Batch=32, 50K iters, Elastic/Rescale/MissingParts disabled |
+| `tutorials/mito_mitolab.yaml` | varies | MitoLab mitochondria segmentation |
 
-## Scutoid (Epithelial Cell Segmentation)
+## Neuron Segmentation
 
-**Dataset**: Scutoid — 3D EM volumes of epithelial cells.
-**Task**: Instance segmentation with scaled data.
-
-| Config | Architecture | Key Settings |
-|--------|-------------|-------------|
-| `configs/Scutoid/Scutoid-Base.yaml` | `unet_3d` / `residual_se` | 4 GPUs, Data scale `[1.0, 0.5, 0.5]`, Reject sampling, CutNoise disabled |
-| `configs/Scutoid/Scutoid-UNet-BCD.yaml` | `unet_3d` | Boundary + Contour + Distance Transform |
-
-## Zebrafinch (Neuron Segmentation)
-
-**Dataset**: Zebrafinch — anisotropic EM of songbird brain neurons.
-**Task**: Instance segmentation via affinity maps.
+### SNEMI3D (Anisotropic EM)
 
 | Config | Architecture | Key Settings |
 |--------|-------------|-------------|
-| `configs/Zebrafinch/Zebrafinch-Base.yaml` | `unet_3d` | Neuron segmentation baseline |
-| `configs/Zebrafinch/Zebrafinch-Affinity-UNet.yaml` | `unet_3d` / `residual_se` | Affinity-based with SE blocks |
-| `configs/Zebrafinch/Zebrafinch-Affinity-UNet-MER.yaml` | `unet_3d` | Affinity with model ensemble regularization |
+| `tutorials/neuron_snemi.yaml` | `rsunet` | 12-channel affinity maps, anisotropic, WarmupCosineLR, 100 epochs, ABISS decoding with parameter tuning |
 
-## Generic / Template Configs
+### NISB (Neuron Instance Segmentation Benchmark)
 
-| Config | Task | Description |
-|--------|------|-------------|
-| `configs/Multiclass-Semantic-Seg.yaml` | Multi-class segmentation | Template for N-class semantic segmentation. Uses `TARGET_OPT: ["9-12"]` and `WeightedCE` loss. 12 output channels. |
-| `configs/Distance-Transform-Quantized.yaml` | Distance transform | Template for quantized distance transform prediction. Uses `TARGET_OPT: ["5"]` and `WeightedCE` loss. |
+| Config | Architecture | Key Settings |
+|--------|-------------|-------------|
+| `tutorials/neuron_nisb_common.yaml` | shared base | Common NISB settings |
+| `tutorials/neuron_nisb_40nm_common.yaml` | shared base | 40nm resolution common settings |
+| `tutorials/neuron_nisb_40nm_base.yaml` | varies | 40nm baseline |
+| `tutorials/neuron_nisb_40nm_liconn.yaml` | varies | 40nm LiConn variant |
+| `tutorials/neuron_nisb_9nm_common.yaml` | shared base | 9nm resolution common settings |
+| `tutorials/neuron_nisb_9nm_base.yaml` | varies | 9nm baseline |
+| `tutorials/neuron_nisb_9nm_liconn.yaml` | varies | 9nm LiConn variant |
+
+## Synapse Detection
+
+### CREMI (Synaptic Cleft)
+
+| Config | Architecture | Key Settings |
+|--------|-------------|-------------|
+| `tutorials/syn_cremi.yaml` | `rsunet` | Binary synapse cleft detection, BCE+Dice loss, reject sampling, 150K steps, CREMI evaluation metrics |
+
+## Nucleus Segmentation
+
+| Config | Architecture | Key Settings |
+|--------|-------------|-------------|
+| `tutorials/nuc_nucmm-z.yaml` | varies | NucMM zebrafish nucleus segmentation |
+
+## Other Datasets
+
+| Config | Architecture | Key Settings |
+|--------|-------------|-------------|
+| `tutorials/vesicle_xm.yaml` | varies | Vesicle segmentation |
+| `tutorials/fiber_linghu26.yaml` | varies | Fiber segmentation |
+| `tutorials/minimal.yaml` | varies | Minimal config for demo/testing |
+
+### Misc Configs
+
+| Config | Description |
+|--------|-------------|
+| `tutorials/misc/mito_2dsem_seg.yaml` | 2D SEM mitochondria segmentation |
+| `tutorials/misc/tsai_axon.yaml` | Axon segmentation |
+| `tutorials/misc/worm2d.yaml` | 2D worm segmentation |
+| `tutorials/misc/zebrafish_neurons.yaml` | Zebrafish neuron segmentation |
+| `tutorials/misc/hydra-lv.yaml` | Hydra large-volume config |
+| `tutorials/misc/hydra-lv-finetune.yaml` | Hydra large-volume fine-tuning |
 
 ## How to Choose a Config
 
-1. **Identify your task**: binary segmentation, instance segmentation, multi-class, or cell segmentation.
-2. **Find the closest dataset**: Pick the bundled config whose dataset most resembles yours (isotropic vs. anisotropic, resolution, structure type).
-3. **Start from Base**: Use the `-Base.yaml` config as your starting point.
-4. **Override paths**: Change `DATASET.INPUT_PATH`, `DATASET.IMAGE_NAME`, `DATASET.LABEL_NAME`, and `DATASET.OUTPUT_PATH` to point to your data.
-5. **Adjust as needed**: Modify learning rate, batch size, iteration count, and model architecture based on your GPU resources and dataset size.
+1. **Identify your task**: binary segmentation (mitochondria, synapse), instance segmentation (neurons, nuclei), or other.
+2. **Find the closest dataset**: Pick the tutorial config whose dataset most resembles yours (isotropic vs. anisotropic, resolution, structure type).
+3. **Override data paths**: Set `data.train.image`, `data.train.label`, and `test.data.test.image` to point to your data.
+4. **Choose profiles**: Select appropriate `model.arch.profile`, `optimization.profile`, and `data.augmentation.profile`.
+5. **Adjust as needed**: Override learning rate, batch size, epochs, etc. using Hydra command-line overrides.
