@@ -26,13 +26,14 @@ from server_api.chatbot.tools import (
     list_checkpoints,
 )
 
-DEFAULT_OLLAMA_MODEL = "llama3.1:8b"
+DEFAULT_OLLAMA_MODEL = "qwen3.6:27b"
+DEFAULT_HELPER_OLLAMA_MODEL = "qwen3.6:27b"
 
 AGENT_RESPONSE_STYLE = """
 RESPONSE STYLE FOR BIOLOGISTS:
-- Default to 3 bullets or fewer. Maximum 90 words unless the user asks for detail.
-- Put the recommended next action first.
-- Use short labels like `Do this`, `Why`, and `Watch out`.
+- Sound like a normal, helpful labmate. Keep visible replies conversational.
+- Default to one short paragraph or 3 bullets or fewer. Maximum 90 words unless the user asks for detail.
+- Put the recommended next action early, but avoid rigid labels like `Do this`, `Why`, and `Watch out`.
 - Avoid long background explanations, exhaustive lists, and implementation details.
 - Do not mention internal tools, agents, RAG, prompts, APIs, or code unless explicitly asked.
 - If a command is requested, provide one command plus at most one sentence of context.
@@ -116,20 +117,36 @@ def _sanitize_agent_response(response: str) -> str:
         return text
     if _looks_like_raw_tool_call(text):
         return (
-            "I should not have shown an internal command.\n"
-            "Do this: tell me the workflow job in plain language, and I will offer a safe app action."
+            "I should not have shown that internal command. "
+            "Tell me the workflow job in plain language, and I will offer a safe app action."
         )
     if not _looks_like_prompt_leak(text):
         return text
     return (
-        "Hi. I can help with the PyTC workflow.\n"
-        "Do this: tell me whether you want to run the model, proofread masks, "
-        "use saved edits for training, or compare results.\n"
-        "Watch out: I will ask before running long jobs or changing artifacts."
+        "I can help with the PyTC workflow. Tell me whether you want to run the model, "
+        "proofread masks, use saved edits for training, or compare results. "
+        "I will ask before running long jobs or changing artifacts."
     )
 
 
-def _resolve_ollama_settings():
+def _resolve_ollama_settings(*, helper: bool = False):
+    if helper:
+        base_url = (
+            os.getenv("PYTC_HELPER_OLLAMA_BASE_URL")
+            or os.getenv("OLLAMA_HELPER_BASE_URL")
+            or os.getenv("OLLAMA_BASE_URL", DEFAULT_OLLAMA_BASE_URL)
+        )
+        model = (
+            os.getenv("PYTC_HELPER_OLLAMA_MODEL")
+            or os.getenv("OLLAMA_HELPER_MODEL")
+            or DEFAULT_HELPER_OLLAMA_MODEL
+        )
+        embed_model = (
+            os.getenv("PYTC_HELPER_OLLAMA_EMBED_MODEL")
+            or os.getenv("OLLAMA_HELPER_EMBED_MODEL")
+            or os.getenv("OLLAMA_EMBED_MODEL", DEFAULT_OLLAMA_EMBED_MODEL)
+        )
+        return base_url, model, embed_model
     return (
         os.getenv("OLLAMA_BASE_URL", DEFAULT_OLLAMA_BASE_URL),
         os.getenv("OLLAMA_MODEL", DEFAULT_OLLAMA_MODEL),
@@ -239,7 +256,16 @@ Tools:
 def build_chain():
     """Build the multi-agent system with supervisor, training, and inference agents."""
     ollama_base_url, ollama_model, ollama_embed_model = _resolve_ollama_settings()
-    llm = ChatOllama(model=ollama_model, base_url=ollama_base_url, temperature=0)
+    print(
+        "[CHATBOT] Building main chain with "
+        f"model={ollama_model} embed_model={ollama_embed_model} base_url={ollama_base_url}"
+    )
+    llm = ChatOllama(
+        model=ollama_model,
+        base_url=ollama_base_url,
+        temperature=0,
+        reasoning=False,
+    )
     embeddings = OllamaEmbeddings(model=ollama_embed_model, base_url=ollama_base_url)
     faiss_path = process_path("server_api/chatbot/faiss_index")
     if ensure_faiss_index(
@@ -412,10 +438,7 @@ def build_chain():
 
 HELPER_PROMPT = f"""You are a concise UI helper for PyTorch Connectomics (PyTC Client).
 
-{AGENT_RESPONSE_STYLE}
-
 You answer questions about a SPECIFIC field or setting the user is looking at.
-You have access to the application documentation via the search_documentation tool.
 
 RULES:
 1. Lead with a concrete recommendation or explanation (3 short bullets or fewer).
@@ -424,18 +447,103 @@ RULES:
 4. If you have enough context, recommend a specific value or action.
 5. Do NOT mention API endpoints, code, environment variables, or internal implementation.
 6. Do NOT paste documentation headings, excerpts, or "Relevant local docs" blocks.
-7. You CANNOT start training or inference jobs. If the user asks, tell them to use the main AI Chat panel instead."""
+7. You CANNOT start training or inference jobs. If the user asks, tell them to use the main AI Chat panel instead.
+8. Stay scoped to the current field. Do not answer as the main workflow agent.
+9. Use the provided field context and local documentation snippets. If they are not enough, say what is missing in one sentence."""
+
+
+class FieldHelperChain:
+    """Small direct helper for inline field-level chat.
+
+    This intentionally avoids the general LangChain agent/tool loop used by the
+    main chat. Retrieval happens here, then the helper model receives only the
+    current field context, a short conversation tail, and compact docs snippets.
+    """
+
+    def __init__(self, llm, retriever, docs_by_name: dict[str, str]):
+        self.llm = llm
+        self.retriever = retriever
+        self.docs_by_name = docs_by_name
+
+    def _keyword_docs(self, query: str, *, limit: int = 2) -> list[str]:
+        query_lower = query.lower()
+        query_words = [word for word in query_lower.split() if len(word) > 2]
+        scored = []
+        for filename, content in self.docs_by_name.items():
+            content_lower = content.lower()
+            name_lower = filename.replace(".md", "").lower()
+            word_hits = sum(1 for word in query_words if word in content_lower)
+            name_hits = sum(3 for word in query_words if word in name_lower)
+            score = word_hits + name_hits
+            if score > 0:
+                scored.append((score, filename, content))
+        scored.sort(key=lambda item: item[0], reverse=True)
+        return [content for _, _, content in scored[:limit]]
+
+    def _retrieve_docs(self, query: str) -> str:
+        snippets = []
+        try:
+            docs = self.retriever.invoke(query)
+        except Exception:
+            docs = []
+        for doc in docs[:2]:
+            content = str(getattr(doc, "page_content", "") or "").strip()
+            if content:
+                snippets.append(content)
+        if not snippets:
+            snippets.extend(self._keyword_docs(query, limit=2))
+        compact = "\n\n".join(snippets[:2]).strip()
+        if len(compact) > 2200:
+            compact = compact[:2200].rsplit(" ", 1)[0].strip()
+        return compact or "No local documentation snippet matched this field."
+
+    def invoke(self, payload):
+        messages = payload.get("messages") or []
+        current = messages[-1] if messages else {"content": ""}
+        current_content = str(current.get("content", "") if isinstance(current, dict) else current)
+        history_tail = messages[-5:-1]
+        history_text = "\n".join(
+            f"{item.get('role', 'user')}: {item.get('content', '')}"
+            for item in history_tail
+            if isinstance(item, dict)
+        )
+        docs_text = self._retrieve_docs(current_content)
+        user_prompt = (
+            f"Current field question:\n{current_content}\n\n"
+            f"Recent same-field chat:\n{history_text or 'None'}\n\n"
+            f"Local documentation snippets:\n{docs_text}\n\n"
+            "Answer only for this field. Use at most 3 short bullets."
+        )
+        response = self.llm.invoke(
+            [
+                ("system", HELPER_PROMPT),
+                ("human", user_prompt),
+            ]
+        )
+        return {"messages": [response]}
 
 
 def build_helper_chain():
     """
     Build a lightweight helper agent for inline field-level help.
-    This agent has access to the same search_documentation tool as the main
-    chatbot but has NO access to training/inference sub-agents.
+    This is intentionally not the main workflow/chat agent. It has no tools and
+    no training/inference delegates; it receives only field-local context plus
+    compact local documentation snippets.
     Returns ``(agent, reset_search_counter)`` — same interface as ``build_chain``.
     """
-    ollama_base_url, ollama_model, ollama_embed_model = _resolve_ollama_settings()
-    llm = ChatOllama(model=ollama_model, base_url=ollama_base_url, temperature=0)
+    ollama_base_url, ollama_model, ollama_embed_model = _resolve_ollama_settings(
+        helper=True
+    )
+    print(
+        "[CHATBOT] Building helper chain with "
+        f"model={ollama_model} embed_model={ollama_embed_model} base_url={ollama_base_url}"
+    )
+    llm = ChatOllama(
+        model=ollama_model,
+        base_url=ollama_base_url,
+        temperature=0,
+        reasoning=False,
+    )
     embeddings = OllamaEmbeddings(model=ollama_embed_model, base_url=ollama_base_url)
     faiss_path = process_path("server_api/chatbot/faiss_index")
     if ensure_faiss_index(
@@ -456,53 +564,9 @@ def build_helper_chain():
     for md_file in summaries_dir.rglob("*.md"):
         _all_docs[md_file.name] = md_file.read_text(encoding="utf-8")
 
-    _search_call_count = [0]
-
     def reset_search_counter():
-        _search_call_count[0] = 0
+        return None
 
-    @tool
-    def search_documentation(query: str) -> str:
-        """Search PyTC documentation for UI guides, field explanations, and feature descriptions.
-
-        Args:
-            query: The user's question
-
-        Returns:
-            Relevant documentation content
-        """
-        _search_call_count[0] += 1
-        if _search_call_count[0] > 2:
-            return (
-                "Search limit reached. Answer with the documentation already retrieved."
-            )
-
-        docs = retriever.invoke(query)
-        if docs:
-            return "\n\n".join([doc.page_content for doc in docs])
-
-        # Keyword fallback
-        query_lower = query.lower()
-        query_words = [w for w in query_lower.split() if len(w) > 2]
-        scored = []
-        for filename, content in _all_docs.items():
-            content_lower = content.lower()
-            name_lower = filename.replace(".md", "").lower()
-            word_hits = sum(1 for w in query_words if w in content_lower)
-            name_hits = sum(3 for w in query_words if w in name_lower)
-            score = word_hits + name_hits
-            if score > 0:
-                scored.append((score, filename, content))
-        scored.sort(key=lambda x: x[0], reverse=True)
-        if scored:
-            return "\n\n".join([s[2] for s in scored[:3]])
-
-        return "No relevant documentation found."
-
-    helper_agent = create_agent(
-        model=llm,
-        tools=[search_documentation],
-        system_prompt=HELPER_PROMPT,
-    )
+    helper_agent = FieldHelperChain(llm, retriever, _all_docs)
 
     return helper_agent, reset_search_counter

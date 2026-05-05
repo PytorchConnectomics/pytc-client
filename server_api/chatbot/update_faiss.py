@@ -5,7 +5,7 @@ from pathlib import Path
 from typing import Optional, Tuple
 
 DEFAULT_OLLAMA_BASE_URL = "http://127.0.0.1:11434"
-DEFAULT_OLLAMA_EMBED_MODEL = "nomic-embed-text:latest"
+DEFAULT_OLLAMA_EMBED_MODEL = "qwen3-embedding:8b"
 INDEX_FILENAMES = ("index.faiss", "index.pkl")
 INDEX_SETTINGS_FILENAME = "ollama_settings.json"
 

@@ -137,6 +137,35 @@ def test_agent_response_style_requires_skimmable_answers():
     assert "recommended next action first" in AGENT_RESPONSE_STYLE
 
 
+def test_helper_ollama_settings_use_small_helper_model(monkeypatch):
+    from server_api.chatbot import chatbot
+
+    monkeypatch.delenv("PYTC_HELPER_OLLAMA_MODEL", raising=False)
+    monkeypatch.delenv("OLLAMA_HELPER_MODEL", raising=False)
+    monkeypatch.setenv("OLLAMA_MODEL", "large-main-model")
+    monkeypatch.setenv("OLLAMA_EMBED_MODEL", "shared-embed-model")
+
+    base_url, model, embed_model = chatbot._resolve_ollama_settings(helper=True)
+
+    assert model == chatbot.DEFAULT_HELPER_OLLAMA_MODEL
+    assert embed_model == "shared-embed-model"
+    assert base_url == chatbot.DEFAULT_OLLAMA_BASE_URL
+
+
+def test_helper_ollama_settings_prefer_helper_env(monkeypatch):
+    from server_api.chatbot import chatbot
+
+    monkeypatch.setenv("PYTC_HELPER_OLLAMA_BASE_URL", "http://helper.test:11434")
+    monkeypatch.setenv("PYTC_HELPER_OLLAMA_MODEL", "helper-model")
+    monkeypatch.setenv("PYTC_HELPER_OLLAMA_EMBED_MODEL", "helper-embed")
+
+    base_url, model, embed_model = chatbot._resolve_ollama_settings(helper=True)
+
+    assert base_url == "http://helper.test:11434"
+    assert model == "helper-model"
+    assert embed_model == "helper-embed"
+
+
 def test_compact_agent_response_shortens_long_non_code_answers():
     response = "\n".join(
         [
