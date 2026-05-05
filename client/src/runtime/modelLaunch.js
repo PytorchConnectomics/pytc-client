@@ -142,14 +142,28 @@ function ensureObject(parent, key) {
 function applyAgentTrainingDefaults(yamlData) {
   const solver = ensureObject(yamlData, "SOLVER");
   const system = ensureObject(yamlData, "SYSTEM");
+  const model = ensureObject(yamlData, "MODEL");
+  const inference = ensureObject(yamlData, "INFERENCE");
+  const dataset = ensureObject(yamlData, "DATASET");
 
   // Memory-safe defaults: large biomedical volumes are more likely to fail from
   // over-aggressive batches than from conservative throughput.
   solver.SAMPLES_PER_BATCH = 1;
-  if (solver.ITERATION_SAVE === undefined) solver.ITERATION_SAVE = 1000;
-  if (solver.ITERATION_TOTAL === undefined) solver.ITERATION_TOTAL = 2000;
-  if (system.NUM_CPUS === undefined) system.NUM_CPUS = 4;
-  if (system.NUM_GPUS === undefined) system.NUM_GPUS = 0;
+  solver.ITERATION_SAVE = 80;
+  solver.ITERATION_TOTAL = 80;
+  solver.ITERATION_VAL = 80;
+  solver.WARMUP_ITERS = 10;
+  system.NUM_CPUS = 2;
+  system.NUM_GPUS = 1;
+  model.INPUT_SIZE = [65, 65, 65];
+  model.OUTPUT_SIZE = [65, 65, 65];
+  model.FILTERS = [8, 12, 16, 24, 32];
+  dataset.PAD_SIZE = [4, 16, 16];
+  inference.INPUT_SIZE = [65, 65, 65];
+  inference.OUTPUT_SIZE = [65, 65, 65];
+  inference.STRIDE = [32, 32, 32];
+  inference.SAMPLES_PER_BATCH = 1;
+  inference.PAD_SIZE = [4, 16, 16];
 }
 
 export function buildTrainingLaunchRequest(
@@ -220,8 +234,11 @@ export function buildTrainingLaunchRequest(
     trainingConfig: preparedTrainingConfig,
     logPath,
     outputPath,
+    inputImagePath,
+    inputLabelPath,
     configOriginPath,
     workflowId: overrides.workflowId ?? workflowId,
+    autoParameters: Boolean(overrides.autoParameters),
   };
 }
 
@@ -237,6 +254,9 @@ export async function launchTrainingFromContext(
     request.outputPath,
     request.configOriginPath,
     request.workflowId,
+    request.autoParameters,
+    request.inputImagePath,
+    request.inputLabelPath,
   );
 }
 
@@ -307,6 +327,7 @@ export function buildInferenceLaunchRequest(
     inferenceConfig: preparedInferenceConfig,
     outputPath,
     checkpointPath,
+    inputImagePath,
     configOriginPath,
     workflowId: overrides.workflowId ?? workflowId,
   };
@@ -328,5 +349,6 @@ export async function launchInferenceFromContext(
     request.checkpointPath,
     request.configOriginPath,
     request.workflowId,
+    request.inputImagePath,
   );
 }

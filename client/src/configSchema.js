@@ -196,6 +196,14 @@ export function applyInputPaths(
       ["DATASET", "IMAGE_NAME"],
       inputImagePath.replace(inputPath, ""),
     );
+    if (mode === "inference") {
+      setPathValue(configObj, ["INFERENCE", "INPUT_PATH"], inputPath || null);
+      setPathValue(
+        configObj,
+        ["INFERENCE", "IMAGE_NAME"],
+        inputImagePath.replace(inputPath, ""),
+      );
+    }
     if (hasLabelPath) {
       setPathValue(
         configObj,

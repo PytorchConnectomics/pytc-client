@@ -1,4 +1,3 @@
-//  global localStorage
 import React, { useCallback, useContext, useState, useEffect, useRef } from "react";
 import { Button, Space, Tag, Typography } from "antd";
 import {
@@ -23,6 +22,14 @@ function getBaseName(pathValue) {
   return parts[parts.length - 1] || "";
 }
 
+function firstPath(...values) {
+  for (const value of values) {
+    const path = getPathValue(value);
+    if (path) return path;
+  }
+  return "";
+}
+
 function ModelTraining() {
   const context = useContext(AppContext);
   const workflowContext = useWorkflow();
@@ -34,6 +41,10 @@ function ModelTraining() {
   const pendingRuntimeAction = workflowContext?.pendingRuntimeAction;
   const consumeRuntimeAction = workflowContext?.consumeRuntimeAction;
   const training = context.trainingState;
+  const setTrainingInputImage = training.setInputImage;
+  const setTrainingInputLabel = training.setInputLabel;
+  const setTrainingOutputPath = training.setOutputPath;
+  const setTrainingLogPath = training.setLogPath;
   const setInferenceConfig = context?.setInferenceConfig;
   const setInferenceCheckpointPath = context?.inferenceState?.setCheckpointPath;
   const setInferenceConfigOriginPath = context?.inferenceState?.setConfigOriginPath;
@@ -54,6 +65,59 @@ function ModelTraining() {
   const resolvedTrainingOutputPath = getPathValue(
     trainingRuntime?.metadata?.outputPath || training.outputPath,
   );
+
+  const applyTrainingRunPaths = useCallback(
+    (source = {}) => {
+      const overrides = source.overrides || {};
+      const effects = source.clientEffects || source.client_effects || {};
+      const metadata = source.metadata || {};
+      const inputImagePath = firstPath(
+        overrides.inputImagePath,
+        effects.set_training_image_path,
+        metadata.inputImagePath,
+        metadata.input_image_path,
+      );
+      const inputLabelPath = firstPath(
+        overrides.inputLabelPath,
+        effects.set_training_label_path,
+        metadata.inputLabelPath,
+        metadata.input_label_path,
+      );
+      const outputPath = firstPath(
+        overrides.outputPath,
+        effects.set_training_output_path,
+        metadata.outputPath,
+        metadata.output_path,
+      );
+      const logPath = firstPath(
+        overrides.logPath,
+        effects.set_training_log_path,
+        metadata.logPath,
+        metadata.log_path,
+        outputPath,
+      );
+
+      if (inputImagePath) setTrainingInputImage?.(inputImagePath);
+      if (inputLabelPath) setTrainingInputLabel?.(inputLabelPath);
+      if (outputPath) setTrainingOutputPath?.(outputPath);
+      if (logPath) setTrainingLogPath?.(logPath);
+    },
+    [
+      setTrainingInputImage,
+      setTrainingInputLabel,
+      setTrainingLogPath,
+      setTrainingOutputPath,
+    ],
+  );
+
+  useEffect(() => {
+    const metadata = trainingRuntime?.metadata || {};
+    const phase = trainingRuntime?.phase || "idle";
+    if (!["starting", "running", "finished", "failed", "stopped"].includes(phase)) {
+      return;
+    }
+    applyTrainingRunPaths({ metadata });
+  }, [applyTrainingRunPaths, trainingRuntime]);
 
   const refreshTrainingLogs = useCallback(async () => {
     try {
@@ -284,9 +348,39 @@ function ModelTraining() {
   useEffect(() => {
     if (pendingRuntimeAction?.kind !== "start_training") return;
     const action = pendingRuntimeAction;
+    applyTrainingRunPaths(action);
     consumeRuntimeAction?.(action.id);
     startTrainingRun(action);
-  }, [consumeRuntimeAction, pendingRuntimeAction, startTrainingRun]);
+  }, [
+    applyTrainingRunPaths,
+    consumeRuntimeAction,
+    pendingRuntimeAction,
+    startTrainingRun,
+  ]);
+
+  useEffect(() => {
+    if (pendingRuntimeAction?.kind !== "monitor_training") return;
+    const action = pendingRuntimeAction;
+    applyTrainingRunPaths(action);
+    consumeRuntimeAction?.(action.id);
+    terminalLoggedRef.current = false;
+    setIsTraining(true);
+    setTrainingStatus("Training started. Monitoring progress...");
+    refreshTrainingRuntime().catch(async (error) => {
+      console.error("Error monitoring approved training run:", error);
+      setIsTraining(false);
+      await recordTrainingPollingFailure(error);
+      setTrainingStatus(
+        `Training status polling failed: ${error.message || "unknown error"}`,
+      );
+    });
+  }, [
+    consumeRuntimeAction,
+    applyTrainingRunPaths,
+    pendingRuntimeAction,
+    recordTrainingPollingFailure,
+    refreshTrainingRuntime,
+  ]);
 
   const handleStartButton = async () => {
     await startTrainingRun();

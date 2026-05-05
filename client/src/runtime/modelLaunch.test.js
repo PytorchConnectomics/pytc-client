@@ -59,7 +59,7 @@ SYSTEM: {}
         inputLabelPath: "/tmp/corrected.tif",
         outputPath: "/tmp/agent-training",
         logPath: "/tmp/agent-training",
-        configOriginPath: "configs/MitoEM/Mito25-Local-Smoke-BC.yaml",
+        configOriginPath: "configs/MitoEM/Mito-CaseStudy-BC.yaml",
         autoParameters: true,
       },
     );
@@ -69,12 +69,18 @@ SYSTEM: {}
     expect(parsed.DATASET.LABEL_NAME).toBe("/tmp/corrected.tif");
     expect(parsed.DATASET.OUTPUT_PATH).toBe("/tmp/agent-training");
     expect(parsed.SOLVER.SAMPLES_PER_BATCH).toBe(1);
-    expect(parsed.SOLVER.ITERATION_SAVE).toBe(1000);
-    expect(parsed.SOLVER.ITERATION_TOTAL).toBe(2000);
-    expect(parsed.SYSTEM.NUM_CPUS).toBe(4);
-    expect(parsed.SYSTEM.NUM_GPUS).toBe(0);
+    expect(parsed.SOLVER.ITERATION_SAVE).toBe(80);
+    expect(parsed.SOLVER.ITERATION_TOTAL).toBe(80);
+    expect(parsed.SOLVER.ITERATION_VAL).toBe(80);
+    expect(parsed.SYSTEM.NUM_CPUS).toBe(2);
+    expect(parsed.SYSTEM.NUM_GPUS).toBe(1);
+    expect(parsed.MODEL.INPUT_SIZE).toEqual([65, 65, 65]);
+    expect(parsed.MODEL.OUTPUT_SIZE).toEqual([65, 65, 65]);
+    expect(parsed.MODEL.FILTERS).toEqual([8, 12, 16, 24, 32]);
+    expect(parsed.INFERENCE.STRIDE).toEqual([32, 32, 32]);
+    expect(request.autoParameters).toBe(true);
     expect(request.configOriginPath).toBe(
-      "configs/MitoEM/Mito25-Local-Smoke-BC.yaml",
+      "configs/MitoEM/Mito-CaseStudy-BC.yaml",
     );
   });
 
@@ -139,6 +145,7 @@ default:
 
     const parsed = yaml.load(request.inferenceConfig);
     expect(parsed.DATASET.IMAGE_NAME).toBe("/tmp/inference-image.h5");
+    expect(parsed.INFERENCE.IMAGE_NAME).toBe("/tmp/inference-image.h5");
     expect(request.configOriginPath).toBe(
       "configs/MitoEM/Mito25-Local-BC.yaml",
     );

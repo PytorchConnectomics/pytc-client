@@ -6,6 +6,7 @@ import unittest
 from unittest.mock import patch
 
 import requests
+from fastapi import HTTPException
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
@@ -13,6 +14,7 @@ from sqlalchemy.orm import sessionmaker
 from server_api.auth import database as auth_database
 from server_api.auth import models
 from server_api.main import app as server_api_app
+from server_api.main import _coerce_neuroglancer_scales
 from server_pytc.main import app as server_pytc_app
 from server_pytc.services import model as model_service
 
@@ -69,6 +71,17 @@ class ServerPytcRouteTests(unittest.TestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.json(), payload)
+
+    def test_neuroglancer_scale_validation_requires_finite_positive_zyx(self):
+        self.assertEqual(
+            _coerce_neuroglancer_scales(["40", 4, 4.0]),
+            [40.0, 4.0, 4.0],
+        )
+
+        for invalid_scales in (None, [1, 1], [1, 1, 0], [1, -1, 1], [1, 1, "nan"]):
+            with self.subTest(scales=invalid_scales):
+                with self.assertRaises(HTTPException):
+                    _coerce_neuroglancer_scales(invalid_scales)
 
     def test_training_logs_route_returns_worker_payload(self):
         payload = {"phase": "running", "text": "hello", "lines": ["hello"]}
@@ -147,6 +160,26 @@ class ServerApiProxyTests(unittest.TestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.json(), payload)
+
+    def test_pytc_config_route_allows_project_config_under_allowed_root(self):
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            config_root = pathlib.Path(tmp_dir) / "demo-project"
+            config_path = config_root / "configs" / "Project.yaml"
+            config_path.parent.mkdir(parents=True)
+            config_path.write_text("DATASET: {}\n", encoding="utf-8")
+
+            with patch.dict(
+                os.environ,
+                {"PYTC_ADDITIONAL_CONFIG_ROOTS": str(config_root)},
+            ):
+                response = self.client.get(
+                    "/pytc/config",
+                    params={"path": str(config_path)},
+                )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["path"], str(config_path))
+        self.assertEqual(response.json()["content"], "DATASET: {}\n")
 
     def test_start_model_training_proxy_returns_504_on_timeout(self):
         with patch(
@@ -263,6 +296,160 @@ class WorkflowInferenceRuntimeSyncTests(unittest.TestCase):
         artifacts = artifacts_response.json()
         self.assertEqual(len(artifacts), 1)
         self.assertEqual(artifacts[0]["path"], str(prediction.resolve()))
+
+    def test_start_training_uses_workflow_paths_when_explicit_paths_are_stale(self):
+        workflow_id = self._workflow_id()
+        project_root = pathlib.Path(self.temp_dir.name) / "project"
+        image_path = project_root / "data" / "image" / "test_im.h5"
+        label_path = project_root / "data" / "seg" / "test_mito.h5"
+        output_path = project_root / "outputs" / "training"
+        image_path.parent.mkdir(parents=True)
+        label_path.parent.mkdir(parents=True)
+        output_path.mkdir(parents=True)
+        image_path.write_text("image", encoding="utf-8")
+        label_path.write_text("label", encoding="utf-8")
+
+        update_response = self.client.patch(
+            f"/api/workflows/{workflow_id}",
+            json={
+                "image_path": str(image_path),
+                "label_path": str(label_path),
+            },
+        )
+        self.assertEqual(update_response.status_code, 200)
+
+        captured = {}
+
+        def fake_worker(method, endpoint, json_body=None, **_kwargs):
+            captured["method"] = method
+            captured["endpoint"] = endpoint
+            captured["json_body"] = json_body
+            return {"phase": "starting"}
+
+        with patch("server_api.main._proxy_to_worker", side_effect=fake_worker):
+            response = self.client.post(
+                "/start_model_training",
+                json={
+                    "workflowId": workflow_id,
+                    "trainingConfig": "DATASET: {}\n",
+                    "inputImagePath": str(project_root / "data" / "image" / "old.h5"),
+                    "inputLabelPath": str(
+                        project_root / "data" / "seg" / ".pytc_instance_labels.tif"
+                    ),
+                    "outputPath": str(output_path),
+                },
+            )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(captured["method"], "post")
+        self.assertEqual(captured["endpoint"], "/start_model_training")
+        self.assertEqual(
+            captured["json_body"]["inputImagePath"], str(image_path.resolve())
+        )
+        self.assertEqual(
+            captured["json_body"]["inputLabelPath"], str(label_path.resolve())
+        )
+
+    def test_durable_training_command_runner_launches_worker_and_records_state(self):
+        workflow_id = self._workflow_id()
+        project_root = pathlib.Path(self.temp_dir.name) / "project"
+        image_path = project_root / "data" / "image" / "train_im.h5"
+        label_path = project_root / "data" / "seg" / "corrected.tif"
+        output_path = project_root / "outputs" / "training"
+        image_path.parent.mkdir(parents=True)
+        label_path.parent.mkdir(parents=True)
+        output_path.mkdir(parents=True)
+        image_path.write_text("image", encoding="utf-8")
+        label_path.write_text("label", encoding="utf-8")
+
+        patch_response = self.client.patch(
+            f"/api/workflows/{workflow_id}",
+            json={
+                "stage": "retraining_staged",
+                "image_path": str(image_path),
+                "corrected_mask_path": str(label_path),
+            },
+        )
+        self.assertEqual(patch_response.status_code, 200)
+        client_effects = {
+            "runtime_action": {
+                "kind": "start_training",
+                "autopick_parameters": True,
+                "parameter_mode": "agent_default",
+            },
+            "set_training_config_preset": "configs/MitoEM/Mito-CaseStudy-BC.yaml",
+            "set_training_image_path": str(image_path),
+            "set_training_label_path": str(label_path),
+            "set_training_output_path": str(output_path),
+            "set_training_log_path": str(output_path),
+        }
+        proposal = self.client.post(
+            f"/api/workflows/{workflow_id}/agent-actions",
+            json={
+                "action": "start_training_run",
+                "payload": {
+                    "client_effects": client_effects,
+                    "config_preset": client_effects["set_training_config_preset"],
+                    "image_path": str(image_path),
+                    "label_path": str(label_path),
+                    "output_path": str(output_path),
+                },
+            },
+        )
+        self.assertEqual(proposal.status_code, 200)
+        approval = self.client.post(
+            f"/api/workflows/{workflow_id}/agent-actions/"
+            f"{proposal.json()['id']}/approve"
+        )
+        self.assertEqual(approval.status_code, 200)
+        command = approval.json()["commands"][0]
+        captured = {}
+
+        def fake_worker(method, endpoint, json_body=None, **_kwargs):
+            captured["method"] = method
+            captured["endpoint"] = endpoint
+            captured["json_body"] = json_body
+            return {"status": "started", "pid": 4242}
+
+        with patch("server_api.main._proxy_to_worker", side_effect=fake_worker):
+            run_response = self.client.post(
+                f"/api/workflows/{workflow_id}/commands/{command['id']}/run"
+            )
+
+        self.assertEqual(run_response.status_code, 200)
+        payload = run_response.json()
+        self.assertEqual(payload["command"]["status"], "submitted")
+        self.assertEqual(payload["command"]["attempt_count"], 1)
+        self.assertEqual(payload["worker"]["pid"], 4242)
+        self.assertEqual(captured["method"], "post")
+        self.assertEqual(captured["endpoint"], "/start_model_training")
+        self.assertEqual(captured["json_body"]["workflowId"], workflow_id)
+        self.assertEqual(captured["json_body"]["command_id"], command["id"])
+        self.assertEqual(
+            captured["json_body"]["run_id"],
+            f"workflow-command-{command['id']}",
+        )
+        self.assertIn("DATASET", captured["json_body"]["trainingConfig"])
+        self.assertEqual(captured["json_body"]["inputImagePath"], str(image_path))
+        self.assertEqual(captured["json_body"]["inputLabelPath"], str(label_path))
+
+        commands_response = self.client.get(f"/api/workflows/{workflow_id}/commands")
+        self.assertEqual(commands_response.status_code, 200)
+        self.assertEqual(commands_response.json()[0]["status"], "submitted")
+
+        events_response = self.client.get(f"/api/workflows/{workflow_id}/events")
+        self.assertEqual(events_response.status_code, 200)
+        started_events = [
+            event
+            for event in events_response.json()
+            if event["event_type"] == "training.started"
+        ]
+        self.assertEqual(len(started_events), 1)
+        self.assertEqual(started_events[0]["payload"]["command_id"], command["id"])
+        self.assertEqual(
+            started_events[0]["payload"]["run_id"],
+            f"workflow-command-{command['id']}",
+        )
 
 
 class ModelServiceTests(unittest.TestCase):
@@ -415,7 +602,258 @@ DATASET:
             self.assertEqual(sanitized["DATASET"]["VALID_RATIO"], 0.5)
             self.assertEqual(sanitized["DATASET"]["REJECT_SAMPLING"]["P"], 0.95)
             self.assertEqual(sanitized["INFERENCE"]["AUG_NUM"], 4)
-            self.assertGreaterEqual(len(changes), 5)
+            self.assertGreaterEqual(len(changes), 4)
+
+    def test_runtime_path_overrides_update_inference_image_section(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tmp_root = pathlib.Path(tmpdir)
+            image_path = tmp_root / "test_im.h5"
+            image_path.write_text("placeholder", encoding="utf-8")
+            output_path = tmp_root / "outputs"
+
+            config_text = "\n".join(
+                [
+                    "DATASET:",
+                    "  INPUT_PATH: ''",
+                    "  IMAGE_NAME: img/test_im.tif",
+                    "INFERENCE:",
+                    "  INPUT_PATH: null",
+                    "  IMAGE_NAME: img/test_im.tif",
+                    "  OUTPUT_PATH: outputs/Lucchi_UNet/test",
+                    "",
+                ]
+            )
+
+            rewritten_text, changes = model_service._apply_runtime_path_overrides(
+                config_text,
+                {
+                    "inputImagePath": str(image_path),
+                    "outputPath": str(output_path),
+                },
+                kind="inference",
+            )
+            rewritten = model_service._load_yaml_config(rewritten_text)
+
+            self.assertEqual(rewritten["DATASET"]["IMAGE_NAME"], str(image_path))
+            self.assertEqual(rewritten["INFERENCE"]["IMAGE_NAME"], str(image_path))
+            self.assertEqual(rewritten["INFERENCE"]["OUTPUT_PATH"], str(output_path))
+            self.assertEqual(rewritten["DATASET"]["INPUT_PATH"], "")
+            self.assertEqual(rewritten["INFERENCE"]["INPUT_PATH"], "")
+            self.assertGreaterEqual(len(changes), 4)
+
+    def test_runtime_path_overrides_resolve_mounted_project_alias(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tmp_root = pathlib.Path(tmpdir) / "prepilot_lucchi_pp"
+            image_path = tmp_root / "data" / "image" / "test_im.h5"
+            image_path.parent.mkdir(parents=True)
+            image_path.write_text("placeholder", encoding="utf-8")
+            previous_roots = model_service._DEFAULT_MOUNTED_PROJECT_ROOTS
+            model_service._DEFAULT_MOUNTED_PROJECT_ROOTS = (tmp_root,)
+            try:
+                rewritten_text, _changes = model_service._apply_runtime_path_overrides(
+                    "INFERENCE:\n  IMAGE_NAME: img/test_im.tif\n",
+                    {
+                        "inputImagePath": "prepilot_lucchi_pp/data/image/test_im.h5",
+                    },
+                    kind="inference",
+                )
+            finally:
+                model_service._DEFAULT_MOUNTED_PROJECT_ROOTS = previous_roots
+
+            rewritten = model_service._load_yaml_config(rewritten_text)
+            self.assertEqual(
+                rewritten["INFERENCE"]["IMAGE_NAME"],
+                str(image_path.resolve()),
+            )
+
+    def test_runtime_path_overrides_expand_training_subset_directories(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tmp_root = pathlib.Path(tmpdir)
+            image_dir = tmp_root / "subset" / "image"
+            label_dir = tmp_root / "subset" / "seg"
+            image_dir.mkdir(parents=True)
+            label_dir.mkdir(parents=True)
+            image_a = image_dir / "a_im.h5"
+            image_b = image_dir / "b_im.h5"
+            label_a = label_dir / "a_seg.h5"
+            label_b = label_dir / "b_seg.h5"
+            for path in (image_a, image_b, label_a, label_b):
+                path.write_text("placeholder", encoding="utf-8")
+            manifest_path = tmp_root / "subset" / "volume_subset_manifest.json"
+            manifest_path.write_text(
+                json.dumps(
+                    {
+                        "train_pairs": [
+                            {
+                                "subset_image_path": str(image_b),
+                                "subset_segmentation_path": str(label_b),
+                            },
+                            {
+                                "subset_image_path": str(image_a),
+                                "subset_segmentation_path": str(label_a),
+                            },
+                        ],
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            rewritten_text, changes = model_service._apply_runtime_path_overrides(
+                "DATASET:\n  INPUT_PATH: .\n  IMAGE_NAME: old/image\n  LABEL_NAME: old/seg\n",
+                {
+                    "inputImagePath": str(image_dir),
+                    "inputLabelPath": str(label_dir),
+                },
+                kind="training",
+            )
+            rewritten = model_service._load_yaml_config(rewritten_text)
+
+            self.assertEqual(
+                rewritten["DATASET"]["IMAGE_NAME"],
+                [str(image_b.resolve()), str(image_a.resolve())],
+            )
+            self.assertEqual(
+                rewritten["DATASET"]["LABEL_NAME"],
+                [str(label_b.resolve()), str(label_a.resolve())],
+            )
+            self.assertEqual(rewritten["DATASET"]["INPUT_PATH"], "")
+            self.assertTrue(
+                any(
+                    change["reason"] == "runtime_request_training_subset_manifest"
+                    for change in changes
+                )
+            )
+
+    def test_runtime_launch_validation_rejects_missing_training_label(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            image_path = pathlib.Path(tmpdir) / "train_im.h5"
+            image_path.write_text("placeholder", encoding="utf-8")
+            config_text = "\n".join(
+                [
+                    "DATASET:",
+                    f"  IMAGE_NAME: {image_path}",
+                    f"  LABEL_NAME: {pathlib.Path(tmpdir) / 'missing_label.tif'}",
+                    "",
+                ]
+            )
+
+            with self.assertRaises(FileNotFoundError):
+                model_service._validate_runtime_launch_inputs(
+                    config_text,
+                    kind="training",
+                )
+
+    def test_runtime_launch_validation_accepts_existing_training_inputs(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            image_path = pathlib.Path(tmpdir) / "train_im.h5"
+            label_path = pathlib.Path(tmpdir) / "train_mito.h5"
+            image_path.write_text("placeholder", encoding="utf-8")
+            label_path.write_text("placeholder", encoding="utf-8")
+            config_text = "\n".join(
+                [
+                    "DATASET:",
+                    f"  IMAGE_NAME: {image_path}",
+                    f"  LABEL_NAME: {label_path}",
+                    "",
+                ]
+            )
+
+            model_service._validate_runtime_launch_inputs(
+                config_text,
+                kind="training",
+            )
+
+    def test_runtime_launch_validation_accepts_training_input_lists(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tmp_root = pathlib.Path(tmpdir)
+            image_paths = [tmp_root / "train_a_im.h5", tmp_root / "train_b_im.h5"]
+            label_paths = [tmp_root / "train_a_seg.h5", tmp_root / "train_b_seg.h5"]
+            for path in [*image_paths, *label_paths]:
+                path.write_text("placeholder", encoding="utf-8")
+            config_text = "\n".join(
+                [
+                    "DATASET:",
+                    "  IMAGE_NAME:",
+                    *[f"    - {path}" for path in image_paths],
+                    "  LABEL_NAME:",
+                    *[f"    - {path}" for path in label_paths],
+                    "",
+                ]
+            )
+
+            model_service._validate_runtime_launch_inputs(
+                config_text,
+                kind="training",
+            )
+
+    def test_runtime_launch_validation_rejects_unexpanded_training_directory(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            image_dir = pathlib.Path(tmpdir) / "image"
+            label_dir = pathlib.Path(tmpdir) / "seg"
+            image_dir.mkdir()
+            label_dir.mkdir()
+            config_text = "\n".join(
+                [
+                    "DATASET:",
+                    f"  IMAGE_NAME: {image_dir}",
+                    f"  LABEL_NAME: {label_dir}",
+                    "",
+                ]
+            )
+
+            with self.assertRaises(FileNotFoundError):
+                model_service._validate_runtime_launch_inputs(
+                    config_text,
+                    kind="training",
+                )
+
+    def test_sanitize_runtime_config_applies_safe_training_defaults(self):
+        config_text = "\n".join(
+            [
+                "MODEL:",
+                "  INPUT_SIZE: [112, 112, 112]",
+                "  OUTPUT_SIZE: [112, 112, 112]",
+                "  FILTERS: [28, 36, 48, 64, 80]",
+                "DATASET:",
+                "  PAD_SIZE: [8, 28, 28]",
+                "INFERENCE:",
+                "  INPUT_SIZE: [112, 112, 112]",
+                "  OUTPUT_SIZE: [112, 112, 112]",
+                "  STRIDE: [56, 56, 56]",
+                "  SAMPLES_PER_BATCH: 4",
+                "  PAD_SIZE: [8, 28, 28]",
+                "SOLVER:",
+                "  SAMPLES_PER_BATCH: 2",
+                "  ITERATION_SAVE: 5000",
+                "  ITERATION_TOTAL: 100000",
+                "SYSTEM:",
+                "  NUM_CPUS: 1",
+                "  NUM_GPUS: 1",
+                "",
+            ]
+        )
+
+        sanitized_text, changes = model_service._sanitize_runtime_config_text(
+            config_text,
+            None,
+            auto_parameters=True,
+        )
+        sanitized = model_service._load_yaml_config(sanitized_text)
+
+        self.assertEqual(sanitized["SOLVER"]["SAMPLES_PER_BATCH"], 1)
+        self.assertEqual(sanitized["SOLVER"]["ITERATION_SAVE"], 80)
+        self.assertEqual(sanitized["SOLVER"]["ITERATION_TOTAL"], 80)
+        self.assertEqual(sanitized["SOLVER"]["ITERATION_VAL"], 80)
+        self.assertEqual(sanitized["SYSTEM"]["NUM_CPUS"], 2)
+        self.assertEqual(sanitized["SYSTEM"]["NUM_GPUS"], 1)
+        self.assertEqual(sanitized["MODEL"]["INPUT_SIZE"], [65, 65, 65])
+        self.assertEqual(sanitized["MODEL"]["OUTPUT_SIZE"], [65, 65, 65])
+        self.assertEqual(sanitized["MODEL"]["FILTERS"], [8, 12, 16, 24, 32])
+        self.assertEqual(sanitized["DATASET"]["PAD_SIZE"], [4, 16, 16])
+        self.assertEqual(sanitized["INFERENCE"]["STRIDE"], [32, 32, 32])
+        self.assertTrue(
+            any(change["reason"] == "agent_safe_training_default" for change in changes)
+        )
 
     def test_runtime_error_lines_update_last_error(self):
         model_service._reset_runtime_state("training", phase="running")
