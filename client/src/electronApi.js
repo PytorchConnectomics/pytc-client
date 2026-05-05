@@ -14,6 +14,10 @@ export function openLocalFile(options = {}) {
   return api.openLocalFile(options);
 }
 
+export function canOpenLocalFile() {
+  return Boolean(getElectronAPI()?.openLocalFile);
+}
+
 export function revealInFinder(targetPath) {
   const api = getElectronAPI();
   if (!api) {
