@@ -18,16 +18,23 @@ import {
   getWorkflowHotspots,
   getWorkflowImpactPreview,
   getWorkflowPreflight,
+  getWorkflowProjectProgress,
   listWorkflowArtifacts,
   listWorkflowCorrectionSets,
   listWorkflowEvents,
   listWorkflowEvaluationResults,
   listWorkflowModelRuns,
   listWorkflowModelVersions,
+  mountProjectDirectory,
   queryWorkflowAgent,
   rejectAgentAction as rejectAgentActionApi,
+  resetFileWorkspace,
+  runWorkflowCommand,
   startNewWorkflow as startNewWorkflowApi,
+  stopModelInference,
+  stopModelTraining,
   updateWorkflow as updateWorkflowApi,
+  updateWorkflowProjectProgressVolume,
 } from "../api";
 import { AppContext } from "./GlobalContext";
 import { logClientEvent } from "../logging/appEventLog";
@@ -38,6 +45,44 @@ export function useWorkflow() {
   return useContext(WorkflowContext);
 }
 
+const buildRuntimeOverridesFromEffects = (
+  effects = {},
+  {
+    resolvedTrainingConfig = "",
+    resolvedTrainingConfigOrigin = "",
+    resolvedInferenceConfig = "",
+    resolvedInferenceConfigOrigin = "",
+  } = {},
+) => ({
+  inputLabelPath:
+    effects.set_training_label_path ||
+    effects.set_inference_label_path ||
+    "",
+  inputImagePath:
+    effects.set_training_image_path ||
+    effects.set_inference_image_path ||
+    "",
+  logPath: effects.set_training_log_path || "",
+  outputPath:
+    effects.set_training_output_path ||
+    effects.set_inference_output_path ||
+    "",
+  trainingConfig: resolvedTrainingConfig || undefined,
+  configOriginPath: resolvedTrainingConfigOrigin || undefined,
+  autoParameters: Boolean(effects.runtime_action?.autopick_parameters),
+  checkpointPath: effects.set_inference_checkpoint_path || "",
+  inferenceConfig: resolvedInferenceConfig || undefined,
+  inferenceConfigOriginPath: resolvedInferenceConfigOrigin || undefined,
+  inferenceInputImagePath: effects.set_inference_image_path || "",
+  inferenceInputLabelPath: effects.set_inference_label_path || "",
+  datasetPath: effects.set_proofreading_dataset_path || "",
+  maskPath: effects.set_proofreading_mask_path || "",
+  projectName: effects.set_proofreading_project_name || "",
+  visualizationImagePath: effects.set_visualization_image_path || "",
+  visualizationLabelPath: effects.set_visualization_label_path || "",
+  visualizationScales: effects.set_visualization_scales || "",
+});
+
 export function WorkflowProvider({ children }) {
   const appContext = useContext(AppContext);
   const [workflow, setWorkflow] = useState(null);
@@ -46,6 +91,7 @@ export function WorkflowProvider({ children }) {
   const [impactPreview, setImpactPreview] = useState(null);
   const [agentRecommendation, setAgentRecommendation] = useState(null);
   const [preflight, setPreflight] = useState(null);
+  const [projectProgress, setProjectProgress] = useState(null);
   const [artifacts, setArtifacts] = useState([]);
   const [modelRuns, setModelRuns] = useState([]);
   const [modelVersions, setModelVersions] = useState([]);
@@ -54,6 +100,12 @@ export function WorkflowProvider({ children }) {
   const [loading, setLoading] = useState(true);
   const [lastClientEffects, setLastClientEffects] = useState(null);
   const [pendingRuntimeAction, setPendingRuntimeAction] = useState(null);
+
+  const clientEffectsWithoutRuntime = useCallback((effects) => {
+    if (!effects || typeof effects !== "object") return effects;
+    const { runtime_action: _runtimeAction, ...rest } = effects;
+    return rest;
+  }, []);
 
   const refreshWorkflow = useCallback(async () => {
     setLoading(true);
@@ -68,6 +120,23 @@ export function WorkflowProvider({ children }) {
     } finally {
       setLoading(false);
     }
+  }, []);
+
+  const applyWorkflowDetail = useCallback((data) => {
+    setWorkflow(data?.workflow || null);
+    setEvents(data?.events || []);
+    setHotspots([]);
+    setImpactPreview(null);
+    setAgentRecommendation(null);
+    setPreflight(null);
+    setProjectProgress(null);
+    setArtifacts([]);
+    setModelRuns([]);
+    setModelVersions([]);
+    setCorrectionSets([]);
+    setEvaluationResults([]);
+    setLastClientEffects(null);
+    setPendingRuntimeAction(null);
   }, []);
 
   const refreshEvents = useCallback(async () => {
@@ -129,6 +198,31 @@ export function WorkflowProvider({ children }) {
     }
   }, [workflow?.id]);
 
+  const refreshProjectProgress = useCallback(async () => {
+    if (!workflow?.id) {
+      setProjectProgress(null);
+      return null;
+    }
+    try {
+      const progress = await getWorkflowProjectProgress(workflow.id);
+      setProjectProgress(progress || null);
+      return progress || null;
+    } catch (error) {
+      console.warn("Workflow project progress refresh failed:", error);
+      return null;
+    }
+  }, [workflow?.id]);
+
+  const updateProjectProgressVolume = useCallback(
+    async (body) => {
+      if (!workflow?.id) return null;
+      const progress = await updateWorkflowProjectProgressVolume(workflow.id, body);
+      setProjectProgress(progress || null);
+      return progress || null;
+    },
+    [workflow?.id],
+  );
+
   const refreshEvidence = useCallback(async () => {
     if (!workflow?.id) {
       setArtifacts([]);
@@ -169,10 +263,6 @@ export function WorkflowProvider({ children }) {
       return null;
     }
   }, [workflow?.id]);
-
-  useEffect(() => {
-    refreshWorkflow();
-  }, [refreshWorkflow]);
 
   useEffect(() => {
     if (!workflow?.id) {
@@ -279,24 +369,52 @@ export function WorkflowProvider({ children }) {
   const startNewWorkflow = useCallback(
     async (body = {}) => {
       const data = await startNewWorkflowApi(body);
-      setWorkflow(data?.workflow || null);
-      setEvents(data?.events || []);
-      setHotspots([]);
-      setImpactPreview(null);
-      setAgentRecommendation(null);
-      setPreflight(null);
-      setArtifacts([]);
-      setModelRuns([]);
-      setModelVersions([]);
-      setCorrectionSets([]);
-      setEvaluationResults([]);
-      setLastClientEffects(null);
-      setPendingRuntimeAction(null);
+      applyWorkflowDetail(data);
       await clearLocalWorkflowInputs();
       return data;
     },
-    [clearLocalWorkflowInputs],
+    [applyWorkflowDetail, clearLocalWorkflowInputs],
   );
+
+  useEffect(() => {
+    let cancelled = false;
+    const bootFreshSession = async () => {
+      setLoading(true);
+      try {
+        await resetFileWorkspace();
+        await clearLocalWorkflowInputs();
+        const data = await startNewWorkflowApi({
+          metadata: { created_from: "page_reload" },
+        });
+        if (cancelled) return;
+        applyWorkflowDetail(data);
+
+        const mountedProjectPath = data?.workflow?.dataset_path;
+        if (mountedProjectPath) {
+          try {
+            await mountProjectDirectory({
+              directoryPath: mountedProjectPath,
+              mountName: data?.workflow?.title || "",
+              destinationPath: "root",
+            });
+          } catch (mountError) {
+            console.warn("Initial project remount failed:", mountError);
+          }
+        }
+      } catch (error) {
+        console.warn("Fresh workflow boot failed:", error);
+        if (!cancelled) {
+          message.error("Failed to initialize a fresh workflow session.");
+        }
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    };
+    bootFreshSession();
+    return () => {
+      cancelled = true;
+    };
+  }, [applyWorkflowDetail, clearLocalWorkflowInputs]);
 
   const proposeAgentAction = useCallback(
     async (action) => {
@@ -365,10 +483,53 @@ export function WorkflowProvider({ children }) {
           effects.set_inference_checkpoint_path,
         );
       }
+      if (effects.set_inference_image_path && appContext?.inferenceState) {
+        appContext.inferenceState.setInputImage?.(
+          effects.set_inference_image_path,
+        );
+      }
+      if (effects.set_inference_label_path && appContext?.inferenceState) {
+        appContext.inferenceState.setInputLabel?.(
+          effects.set_inference_label_path,
+        );
+      }
       if (effects.set_inference_output_path && appContext?.inferenceState) {
         appContext.inferenceState.setOutputPath(
           effects.set_inference_output_path,
         );
+      }
+      let resolvedInferenceConfig = "";
+      let resolvedInferenceConfigOrigin = "";
+      if (effects.set_inference_config_preset && appContext?.inferenceState) {
+        try {
+          const preset = await getConfigPresetContent(
+            effects.set_inference_config_preset,
+          );
+          resolvedInferenceConfig = preset?.content || "";
+          resolvedInferenceConfigOrigin =
+            preset?.path || effects.set_inference_config_preset;
+          if (resolvedInferenceConfig) {
+            appContext.setInferenceConfig?.(resolvedInferenceConfig);
+            appContext.inferenceState.setConfigOriginPath?.(
+              resolvedInferenceConfigOrigin,
+            );
+            appContext.inferenceState.setSelectedYamlPreset?.(
+              resolvedInferenceConfigOrigin,
+            );
+            appContext.inferenceState.setUploadedYamlFile?.("");
+          }
+        } catch (error) {
+          logClientEvent("workflow_action_inference_preset_load_failed", {
+            level: "ERROR",
+            source: "workflow_context",
+            message: error.message || "Inference preset load failed",
+            data: {
+              workflowId: workflow?.id || null,
+              preset: effects.set_inference_config_preset,
+            },
+          });
+          throw error;
+        }
       }
       if (effects.set_visualization_image_path && appContext?.setCurrentImage) {
         appContext.setCurrentImage(effects.set_visualization_image_path);
@@ -386,31 +547,63 @@ export function WorkflowProvider({ children }) {
         appContext.setVisualizationScales(nextScales);
       }
       if (effects.runtime_action?.kind) {
+        if (effects.runtime_action.kind === "stop_inference") {
+          await stopModelInference();
+          message.info("Inference stop requested.");
+        } else if (effects.runtime_action.kind === "stop_training") {
+          await stopModelTraining();
+          message.info("Training stop requested.");
+        }
         setPendingRuntimeAction({
           id: `${effects.runtime_action.kind}:${Date.now()}`,
           ...effects.runtime_action,
-          overrides: {
-            inputLabelPath: effects.set_training_label_path || "",
-            inputImagePath: effects.set_training_image_path || "",
-            logPath: effects.set_training_log_path || "",
-            outputPath:
-              effects.set_training_output_path ||
-              effects.set_inference_output_path ||
-              "",
-            trainingConfig: resolvedTrainingConfig || undefined,
-            configOriginPath: resolvedTrainingConfigOrigin || undefined,
-            autoParameters: Boolean(
-              effects.runtime_action?.autopick_parameters,
-            ),
-            checkpointPath: effects.set_inference_checkpoint_path || "",
-            datasetPath: effects.set_proofreading_dataset_path || "",
-            maskPath: effects.set_proofreading_mask_path || "",
-            projectName: effects.set_proofreading_project_name || "",
-            visualizationImagePath: effects.set_visualization_image_path || "",
-            visualizationLabelPath: effects.set_visualization_label_path || "",
-            visualizationScales: effects.set_visualization_scales || "",
-          },
+          overrides: buildRuntimeOverridesFromEffects(effects, {
+            resolvedTrainingConfig,
+            resolvedTrainingConfigOrigin,
+            resolvedInferenceConfig,
+            resolvedInferenceConfigOrigin,
+          }),
         });
+      }
+      if (effects.reset_workspace) {
+        const resetResult = await resetFileWorkspace();
+        await appContext?.resetFileState?.();
+        if (workflow?.id) {
+          await updateWorkflowApi(workflow.id, {
+            metadata: {
+              project_context: null,
+              visualization_scales: null,
+              visualization_scales_source: null,
+              active_volume_pair: null,
+              needs_project_context: true,
+            },
+          });
+          await refreshWorkflow();
+        }
+        message.success(
+          `Workspace reset. Removed ${resetResult?.deleted_count ?? 0} indexed item(s).`,
+        );
+      }
+      if (effects.start_new_workflow) {
+        const resetBody =
+          typeof effects.start_new_workflow === "object"
+            ? effects.start_new_workflow
+            : {};
+        await startNewWorkflowApi(resetBody);
+        await clearLocalWorkflowInputs();
+        await refreshWorkflow();
+      }
+      if (effects.mount_project?.directory_path) {
+        const mountResult = await mountProjectDirectory({
+          directoryPath: effects.mount_project.directory_path,
+          mountName: effects.mount_project.mount_name || "",
+          destinationPath: effects.mount_project.destination_path || "root",
+        });
+        message.success(mountResult?.message || "Project mounted.");
+        if (effects.mount_project.workflow_patch && workflow?.id) {
+          await updateWorkflowApi(workflow.id, effects.mount_project.workflow_patch);
+        }
+        await refreshWorkflow();
       }
       if (effects.workflow_action?.kind === "propose_retraining_stage") {
         const correctedMaskPath =
@@ -515,15 +708,21 @@ export function WorkflowProvider({ children }) {
       if (effects.refresh_insights) {
         await refreshInsights();
       }
+      if (effects.refresh_project_progress) {
+        await refreshProjectProgress();
+      }
       await refreshAgentRecommendation();
       setLastClientEffects({ ...effects });
     },
     [
       appContext,
+      clearLocalWorkflowInputs,
       refreshAgentRecommendation,
       refreshEvidence,
       refreshEvents,
+      refreshWorkflow,
       refreshInsights,
+      refreshProjectProgress,
       workflow?.corrected_mask_path,
       workflow?.id,
     ],
@@ -572,12 +771,51 @@ export function WorkflowProvider({ children }) {
       if (result?.workflow) {
         setWorkflow(result.workflow);
       }
-      await runClientEffects(result?.client_effects);
+      const durableCommand = result?.commands?.find?.(
+        (command) => Number.isFinite(Number(command?.id)),
+      );
+      if (durableCommand) {
+        const approvedEffects = result?.client_effects || {};
+        await runClientEffects(clientEffectsWithoutRuntime(approvedEffects));
+        const commandResult = await runWorkflowCommand(workflow.id, durableCommand.id);
+        if (
+          (approvedEffects?.runtime_action || {}).kind === "start_training"
+        ) {
+          setPendingRuntimeAction({
+            id: `monitor_training:${Date.now()}`,
+            kind: "monitor_training",
+            commandId: durableCommand.id,
+            commandResult,
+            clientEffects: approvedEffects,
+            overrides: buildRuntimeOverridesFromEffects(approvedEffects),
+          });
+        }
+        await Promise.allSettled([
+          refreshWorkflow(),
+          refreshEvents(),
+          refreshEvidence(),
+          refreshAgentRecommendation(),
+          refreshPreflight(),
+          refreshProjectProgress(),
+        ]);
+      } else {
+        await runClientEffects(result?.client_effects);
+      }
       await refreshEvents();
       message.success("Agent proposal approved.");
       return result;
     },
-    [workflow?.id, refreshEvents, runClientEffects],
+    [
+      clientEffectsWithoutRuntime,
+      refreshAgentRecommendation,
+      refreshEvents,
+      refreshEvidence,
+      refreshPreflight,
+      refreshProjectProgress,
+      refreshWorkflow,
+      runClientEffects,
+      workflow?.id,
+    ],
   );
 
   const rejectAgentAction = useCallback(
@@ -602,9 +840,20 @@ export function WorkflowProvider({ children }) {
       if (result?.proposals?.length) {
         await refreshEvents();
       }
+      await Promise.allSettled([
+        refreshWorkflow(),
+        refreshAgentRecommendation(),
+        refreshProjectProgress(),
+      ]);
       return result;
     },
-    [workflow?.id, refreshEvents],
+    [
+      workflow?.id,
+      refreshEvents,
+      refreshWorkflow,
+      refreshAgentRecommendation,
+      refreshProjectProgress,
+    ],
   );
 
   const consumeClientEffects = useCallback(() => {
@@ -622,6 +871,7 @@ export function WorkflowProvider({ children }) {
         impactPreview,
         agentRecommendation,
         preflight,
+        projectProgress,
         artifacts,
         modelRuns,
         modelVersions,
@@ -635,6 +885,8 @@ export function WorkflowProvider({ children }) {
         refreshInsights,
         refreshAgentRecommendation,
         refreshPreflight,
+        refreshProjectProgress,
+        updateProjectProgressVolume,
         refreshEvidence,
         startNewWorkflow,
         updateWorkflow,

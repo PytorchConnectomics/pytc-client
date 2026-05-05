@@ -59,6 +59,7 @@ jest.mock("antd", () => {
     ),
     Space: ({ children }) => <span>{children}</span>,
     Tag: ({ children }) => <span>{children}</span>,
+    Tooltip: ({ children }) => <>{children}</>,
     Typography: {
       Text: ({ children }) => <span>{children}</span>,
     },
@@ -123,7 +124,7 @@ describe("WorkflowTimeline", () => {
       ],
     });
 
-    expect(screen.getByText("Proofreading")).toBeTruthy();
+    expect(screen.getByText("Test Workflow")).toBeTruthy();
     expect(screen.getByText("Loaded dataset.")).toBeTruthy();
     expect(screen.getByText("dataset.loaded")).toBeTruthy();
   });

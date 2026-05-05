@@ -10,6 +10,7 @@ from .db_models import (
     WorkflowAgentPlan,
     WorkflowAgentStep,
     WorkflowArtifact,
+    WorkflowCommand,
     WorkflowCorrectionSet,
     WorkflowEvaluationResult,
     WorkflowEvent,
@@ -30,6 +31,60 @@ ALLOWED_STAGES = {
 
 ALLOWED_ACTORS = {"user", "agent", "system"}
 ALLOWED_APPROVAL_STATUSES = {"not_required", "pending", "approved", "rejected"}
+ALLOWED_COMMAND_STATUSES = {
+    "queued",
+    "claimed",
+    "running",
+    "submitted",
+    "completed",
+    "failed",
+    "canceled",
+    "retry_pending",
+}
+DEFAULT_EVENT_SCHEMA_VERSION = 1
+
+INITIAL_PROJECT_ROOT = os.getenv("PYTC_INITIAL_PROJECT_ROOT", "").rstrip("/")
+
+
+def _initial_project_defaults() -> Dict[str, Any]:
+    if not INITIAL_PROJECT_ROOT:
+        return {}
+    return {
+        "title": os.getenv("PYTC_INITIAL_PROJECT_TITLE", "MitoEM2.0 Progress Demo"),
+        "dataset_path": INITIAL_PROJECT_ROOT,
+        "image_path": os.getenv(
+            "PYTC_INITIAL_IMAGE_PATH",
+            os.path.join(INITIAL_PROJECT_ROOT, "data/image"),
+        ),
+        "label_path": os.getenv(
+            "PYTC_INITIAL_LABEL_PATH",
+            os.path.join(INITIAL_PROJECT_ROOT, "data/seg"),
+        ),
+        "mask_path": os.getenv(
+            "PYTC_INITIAL_MASK_PATH",
+            os.path.join(INITIAL_PROJECT_ROOT, "data/seg"),
+        ),
+        "config_path": os.getenv(
+            "PYTC_INITIAL_CONFIG_PATH",
+            os.path.join(
+                INITIAL_PROJECT_ROOT,
+                "configs/MitoEM2-Pyra-Demo-BC.yaml",
+            ),
+        ),
+        "metadata": {
+            "created_from": "initial_project_default",
+            "project_context": {
+                "imaging_modality": "EM / ssSEM",
+                "target_structure": "mitochondria",
+                "task_goal": "segmentation",
+                "optimization_priority": "accuracy",
+                "voxel_size_nm": [30, 8, 8],
+                "voxel_size_source": "MitoEM2.0 Dataset006_ME2-Pyra metadata",
+            },
+            "visualization_scales": [30, 8, 8],
+            "visualization_scales_source": "initial_project_default",
+        },
+    }
 
 
 def encode_json(value: Optional[Dict[str, Any]]) -> Optional[str]:
@@ -50,6 +105,16 @@ def decode_json(value: Optional[str]) -> Dict[str, Any]:
 
 def _now() -> datetime:
     return datetime.now(timezone.utc)
+
+
+def _merge_dicts(base: Optional[Dict[str, Any]], patch: Optional[Dict[str, Any]]) -> Dict[str, Any]:
+    merged: Dict[str, Any] = dict(base or {})
+    for key, value in (patch or {}).items():
+        if isinstance(value, dict) and isinstance(merged.get(key), dict):
+            merged[key] = _merge_dicts(merged[key], value)
+        else:
+            merged[key] = value
+    return merged
 
 
 def _basename(value: Optional[str]) -> Optional[str]:
@@ -99,6 +164,18 @@ def validate_approval_status(status: str) -> str:
     return status
 
 
+def validate_command_status(status: str) -> str:
+    if status not in ALLOWED_COMMAND_STATUSES:
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                "command status must be one of: "
+                f"{', '.join(sorted(ALLOWED_COMMAND_STATUSES))}"
+            ),
+        )
+    return status
+
+
 def event_to_dict(event: WorkflowEvent) -> Dict[str, Any]:
     return {
         "id": event.id,
@@ -109,6 +186,8 @@ def event_to_dict(event: WorkflowEvent) -> Dict[str, Any]:
         "summary": event.summary,
         "payload_json": event.payload_json,
         "payload": decode_json(event.payload_json),
+        "schema_version": getattr(event, "schema_version", DEFAULT_EVENT_SCHEMA_VERSION),
+        "idempotency_key": getattr(event, "idempotency_key", None),
         "approval_status": event.approval_status,
         "created_at": event.created_at,
     }
@@ -137,6 +216,7 @@ def model_run_to_dict(run: WorkflowModelRun) -> Dict[str, Any]:
     return {
         "id": run.id,
         "workflow_id": run.workflow_id,
+        "run_id": getattr(run, "run_id", None),
         "run_type": run.run_type,
         "status": run.status,
         "name": run.name,
@@ -268,6 +348,32 @@ def agent_plan_to_dict(plan: WorkflowAgentPlan) -> Dict[str, Any]:
     }
 
 
+def command_to_dict(command: WorkflowCommand) -> Dict[str, Any]:
+    return {
+        "id": command.id,
+        "workflow_id": command.workflow_id,
+        "command_type": command.command_type,
+        "status": command.status,
+        "idempotency_key": command.idempotency_key,
+        "actor": command.actor,
+        "source_event_id": command.source_event_id,
+        "approval_event_id": command.approval_event_id,
+        "input_json": command.input_json,
+        "input": decode_json(command.input_json),
+        "result_json": command.result_json,
+        "result": decode_json(command.result_json),
+        "error_json": command.error_json,
+        "error": decode_json(command.error_json),
+        "attempt_count": command.attempt_count,
+        "lease_owner": command.lease_owner,
+        "lease_expires_at": command.lease_expires_at,
+        "started_at": command.started_at,
+        "completed_at": command.completed_at,
+        "created_at": command.created_at,
+        "updated_at": command.updated_at,
+    }
+
+
 def workflow_to_dict(workflow: WorkflowSession) -> Dict[str, Any]:
     return {
         "id": workflow.id,
@@ -323,7 +429,7 @@ def create_workflow_artifact(
     if existing:
         changed = False
         if metadata:
-            merged = {**decode_json(existing.metadata_json), **metadata}
+            merged = _merge_dicts(decode_json(existing.metadata_json), metadata)
             existing.metadata_json = encode_json(merged)
             changed = True
         if source_event_id and not existing.source_event_id:
@@ -467,7 +573,7 @@ def create_or_update_correction_set(
         existing.edit_count = correction_stats["edit_count"]
         existing.region_count = correction_stats["region_count"]
         existing.metadata_json = encode_json(
-            {**decode_json(existing.metadata_json), **(metadata or {})}
+            _merge_dicts(decode_json(existing.metadata_json), metadata)
         )
         db.flush()
         if commit:
@@ -509,6 +615,53 @@ def _latest_incomplete_run(
     )
 
 
+def _payload_run_id(payload: Dict[str, Any]) -> Optional[str]:
+    for key in ("run_id", "runId", "job_id", "jobId", "execution_id", "executionId"):
+        value = payload.get(key)
+        if value is not None:
+            return str(value)
+    return None
+
+
+def _find_model_run_for_event(
+    db: Session,
+    *,
+    workflow_id: int,
+    run_type: str,
+    run_id: Optional[str],
+    output_path: Optional[str],
+    fallback_latest: bool = True,
+) -> Optional[WorkflowModelRun]:
+    if run_id:
+        run = (
+            db.query(WorkflowModelRun)
+            .filter(
+                WorkflowModelRun.workflow_id == workflow_id,
+                WorkflowModelRun.run_id == run_id,
+            )
+            .first()
+        )
+        if run:
+            return run
+    if output_path:
+        run = (
+            db.query(WorkflowModelRun)
+            .filter(
+                WorkflowModelRun.workflow_id == workflow_id,
+                WorkflowModelRun.run_type == run_type,
+                WorkflowModelRun.status.in_(["pending", "running"]),
+                WorkflowModelRun.output_path == output_path,
+            )
+            .order_by(WorkflowModelRun.created_at.desc(), WorkflowModelRun.id.desc())
+            .first()
+        )
+        if run:
+            return run
+    if not fallback_latest:
+        return None
+    return _latest_incomplete_run(db, workflow_id=workflow_id, run_type=run_type)
+
+
 def create_or_update_model_run_from_event(
     db: Session,
     *,
@@ -548,21 +701,46 @@ def create_or_update_model_run_from_event(
     config_path = payload.get("configOriginPath") or payload.get("config_path")
     log_path = payload.get("logPath") or payload.get("log_path")
     now = _now()
+    run_id = _payload_run_id(payload)
 
     run = (
-        _latest_incomplete_run(db, workflow_id=workflow.id, run_type=run_type)
+        _find_model_run_for_event(
+            db,
+            workflow_id=workflow.id,
+            run_type=run_type,
+            run_id=run_id,
+            output_path=output_path,
+            fallback_latest=not bool(run_id),
+        )
         if status in {"completed", "failed"}
         else None
     )
+    if status == "running" and run_id:
+        run = _find_model_run_for_event(
+            db,
+            workflow_id=workflow.id,
+            run_type=run_type,
+            run_id=run_id,
+            output_path=output_path,
+            fallback_latest=False,
+        )
     if run is None:
+        run_id = run_id or f"{run_type}-{event.id}"
         run = WorkflowModelRun(
             workflow_id=workflow.id,
+            run_id=run_id,
             run_type=run_type,
             status=status,
             source_event_id=event.id,
             started_at=now if status == "running" else None,
         )
         db.add(run)
+    elif run_id and not getattr(run, "run_id", None):
+        run.run_id = run_id
+    run_id = getattr(run, "run_id", None) or run_id
+    if run_id and payload.get("run_id") != run_id:
+        payload["run_id"] = run_id
+        event.payload_json = encode_json(payload)
 
     run.status = status
     run.config_path = config_path or run.config_path
@@ -571,7 +749,14 @@ def create_or_update_model_run_from_event(
     run.checkpoint_path = checkpoint_path or run.checkpoint_path
     run.source_event_id = run.source_event_id or event.id
     run.metadata_json = encode_json(
-        {**decode_json(run.metadata_json), "last_event_type": event_type}
+        _merge_dicts(
+            decode_json(run.metadata_json),
+            {
+                "last_event_type": event_type,
+                "last_event_id": event.id,
+                "run_id": run_id,
+            },
+        )
     )
     if status == "running" and not run.started_at:
         run.started_at = now
@@ -745,11 +930,25 @@ def create_workflow_session(
     title: str = "Segmentation Workflow",
     metadata: Optional[Dict[str, Any]] = None,
 ) -> WorkflowSession:
+    initial_defaults = _initial_project_defaults()
+    initial_metadata = {
+        **initial_defaults.get("metadata", {}),
+        **(metadata or {}),
+    }
+    workflow_title = title or "Segmentation Workflow"
+    if initial_defaults and workflow_title == "Segmentation Workflow":
+        workflow_title = initial_defaults.get("title") or workflow_title
+
     workflow = WorkflowSession(
         user_id=user_id,
-        title=title or "Segmentation Workflow",
+        title=workflow_title,
         stage="setup",
-        metadata_json=encode_json(metadata or {}),
+        dataset_path=initial_defaults.get("dataset_path"),
+        image_path=initial_defaults.get("image_path"),
+        label_path=initial_defaults.get("label_path"),
+        mask_path=initial_defaults.get("mask_path"),
+        config_path=initial_defaults.get("config_path"),
+        metadata_json=encode_json(initial_metadata),
     )
     db.add(workflow)
     db.commit()
@@ -793,8 +992,9 @@ def update_workflow_fields(
 ) -> WorkflowSession:
     for key, value in updates.items():
         if key == "metadata":
+            patch = value if isinstance(value, dict) else {}
             workflow.metadata_json = encode_json(
-                value if isinstance(value, dict) else {}
+                _merge_dicts(decode_json(workflow.metadata_json), patch)
             )
             continue
         if key == "metadata_json":
@@ -814,6 +1014,138 @@ def update_workflow_fields(
     return workflow
 
 
+def create_workflow_command(
+    db: Session,
+    *,
+    workflow_id: int,
+    command_type: str,
+    idempotency_key: str,
+    actor: str = "agent",
+    source_event_id: Optional[int] = None,
+    approval_event_id: Optional[int] = None,
+    input_payload: Optional[Dict[str, Any]] = None,
+    status: str = "queued",
+    commit: bool = False,
+) -> WorkflowCommand:
+    actor = validate_actor(actor)
+    status = validate_command_status(status)
+    existing = (
+        db.query(WorkflowCommand)
+        .filter(
+            WorkflowCommand.workflow_id == workflow_id,
+            WorkflowCommand.idempotency_key == idempotency_key,
+        )
+        .first()
+    )
+    if existing:
+        return existing
+    command = WorkflowCommand(
+        workflow_id=workflow_id,
+        command_type=command_type,
+        status=status,
+        idempotency_key=idempotency_key,
+        actor=actor,
+        source_event_id=source_event_id,
+        approval_event_id=approval_event_id,
+        input_json=encode_json(input_payload or {}),
+    )
+    db.add(command)
+    db.flush()
+    if commit:
+        db.commit()
+        db.refresh(command)
+    return command
+
+
+def mark_workflow_command_running(
+    db: Session,
+    command: WorkflowCommand,
+    *,
+    lease_owner: str = "server_api",
+    input_payload: Optional[Dict[str, Any]] = None,
+    commit: bool = False,
+) -> WorkflowCommand:
+    if command.status not in {"queued", "claimed", "retry_pending", "failed"}:
+        raise HTTPException(
+            status_code=409,
+            detail=f"Command cannot be run from status: {command.status}",
+        )
+    now = _now()
+    command.status = "running"
+    command.attempt_count = int(command.attempt_count or 0) + 1
+    command.lease_owner = lease_owner
+    command.started_at = now
+    command.completed_at = None
+    command.error_json = None
+    if input_payload is not None:
+        command.input_json = encode_json(input_payload)
+    db.flush()
+    if commit:
+        db.commit()
+        db.refresh(command)
+    return command
+
+
+def complete_workflow_command(
+    db: Session,
+    command: WorkflowCommand,
+    *,
+    result_payload: Optional[Dict[str, Any]] = None,
+    commit: bool = False,
+) -> WorkflowCommand:
+    command.status = "completed"
+    command.result_json = encode_json(result_payload or {})
+    command.error_json = None
+    command.lease_owner = None
+    command.lease_expires_at = None
+    command.completed_at = _now()
+    db.flush()
+    if commit:
+        db.commit()
+        db.refresh(command)
+    return command
+
+
+def submit_workflow_command(
+    db: Session,
+    command: WorkflowCommand,
+    *,
+    result_payload: Optional[Dict[str, Any]] = None,
+    commit: bool = False,
+) -> WorkflowCommand:
+    command.status = "submitted"
+    command.result_json = encode_json(result_payload or {})
+    command.error_json = None
+    command.lease_owner = None
+    command.lease_expires_at = None
+    command.completed_at = None
+    db.flush()
+    if commit:
+        db.commit()
+        db.refresh(command)
+    return command
+
+
+def fail_workflow_command(
+    db: Session,
+    command: WorkflowCommand,
+    *,
+    error_payload: Optional[Dict[str, Any]] = None,
+    retryable: bool = False,
+    commit: bool = False,
+) -> WorkflowCommand:
+    command.status = "retry_pending" if retryable else "failed"
+    command.error_json = encode_json(error_payload or {})
+    command.lease_owner = None
+    command.lease_expires_at = None
+    command.completed_at = _now()
+    db.flush()
+    if commit:
+        db.commit()
+        db.refresh(command)
+    return command
+
+
 def append_workflow_event(
     db: Session,
     *,
@@ -823,6 +1155,8 @@ def append_workflow_event(
     summary: str,
     stage: Optional[str] = None,
     payload: Optional[Dict[str, Any]] = None,
+    schema_version: int = DEFAULT_EVENT_SCHEMA_VERSION,
+    idempotency_key: Optional[str] = None,
     approval_status: str = "not_required",
     commit: bool = True,
 ) -> Optional[WorkflowEvent]:
@@ -831,6 +1165,18 @@ def append_workflow_event(
     actor = validate_actor(actor)
     approval_status = validate_approval_status(approval_status)
     stage = validate_stage(stage) if stage else stage
+    if idempotency_key:
+        existing = (
+            db.query(WorkflowEvent)
+            .filter(
+                WorkflowEvent.workflow_id == workflow_id,
+                WorkflowEvent.idempotency_key == idempotency_key,
+            )
+            .order_by(WorkflowEvent.id.desc())
+            .first()
+        )
+        if existing:
+            return existing
     event = WorkflowEvent(
         workflow_id=workflow_id,
         actor=actor,
@@ -838,6 +1184,8 @@ def append_workflow_event(
         stage=stage,
         summary=summary,
         payload_json=encode_json(payload),
+        schema_version=schema_version or DEFAULT_EVENT_SCHEMA_VERSION,
+        idempotency_key=idempotency_key,
         approval_status=approval_status,
     )
     db.add(event)
@@ -867,6 +1215,8 @@ def append_event_for_workflow_if_present(
     summary: str,
     stage: Optional[str] = None,
     payload: Optional[Dict[str, Any]] = None,
+    schema_version: int = DEFAULT_EVENT_SCHEMA_VERSION,
+    idempotency_key: Optional[str] = None,
 ) -> Optional[WorkflowEvent]:
     if not workflow_id:
         return None
@@ -878,5 +1228,7 @@ def append_event_for_workflow_if_present(
         summary=summary,
         stage=stage,
         payload=payload,
+        schema_version=schema_version,
+        idempotency_key=idempotency_key,
         commit=True,
     )

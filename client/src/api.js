@@ -11,7 +11,19 @@ import {
   setTrainingOutputPath,
 } from "./configSchema";
 
-const BASE_URL = `${process.env.REACT_APP_SERVER_PROTOCOL || "http"}://${process.env.REACT_APP_SERVER_URL || "localhost:4242"}`;
+const getDefaultBaseUrl = () => {
+  if (
+    typeof window !== "undefined" &&
+    window.location?.origin &&
+    !window.location.hostname.match(/^(localhost|127\.0\.0\.1)$/)
+  ) {
+    return `${window.location.origin}/api`;
+  }
+
+  return `${process.env.REACT_APP_SERVER_PROTOCOL || "http"}://${process.env.REACT_APP_SERVER_URL || "localhost:4242"}`;
+};
+
+const BASE_URL = process.env.REACT_APP_API_BASE_URL || getDefaultBaseUrl();
 
 // Create axios instance without auth headers—app runs as guest by default.
 export const apiClient = axios.create({
@@ -193,6 +205,73 @@ export async function getNeuroglancerViewer(image, label, scales, workflowId = n
   }
 }
 
+export async function getNeuroglancerProofreadingViewer({
+  image,
+  label,
+  scales,
+  workflowId = null,
+  sessionId = null,
+  activeInstanceId = null,
+  initialVoxel = null,
+} = {}) {
+  try {
+    const url = `${BASE_URL}/neuroglancer/proofread`;
+    const res = await axios.post(
+      url,
+      JSON.stringify({
+        image: buildFilePath(image),
+        label: buildFilePath(label),
+        scales,
+        workflow_id: workflowId,
+        session_id: sessionId,
+        active_instance_id: activeInstanceId,
+        initial_voxel: initialVoxel,
+      }),
+    );
+    return res.data;
+  } catch (error) {
+    handleError(error);
+  }
+}
+
+export async function getInstanceVolumePreview(
+  sessionId,
+  instanceId,
+  maxPoints = 30000,
+) {
+  try {
+    const res = await apiClient.get("/eh/detection/instance-volume-preview", {
+      params: {
+        session_id: sessionId,
+        instance_id: instanceId,
+        max_points: maxPoints,
+      },
+    });
+    return res.data;
+  } catch (error) {
+    handleError(error);
+  }
+}
+
+export async function getInstanceMeshPreview(
+  sessionId,
+  instanceId,
+  maxFaces = 60000,
+) {
+  try {
+    const res = await apiClient.get("/eh/detection/instance-mesh-preview", {
+      params: {
+        session_id: sessionId,
+        instance_id: instanceId,
+        max_faces: maxFaces,
+      },
+    });
+    return res.data;
+  } catch (error) {
+    handleError(error);
+  }
+}
+
 export async function checkFile(file) {
   try {
     const url = `${BASE_URL}/check_files`;
@@ -247,6 +326,9 @@ export async function startModelTraining(
   outputPath,
   configOriginPath = "",
   workflowId = null,
+  autoParameters = false,
+  inputImagePath = "",
+  inputLabelPath = "",
 ) {
   try {
     console.log("[API] ===== Starting Training Configuration =====");
@@ -297,6 +379,10 @@ export async function startModelTraining(
       trainingConfig: configToSend,
       configOriginPath,
       workflow_id: workflowId,
+      autoParameters: Boolean(autoParameters),
+      auto_parameters: Boolean(autoParameters),
+      inputImagePath,
+      inputLabelPath,
     });
 
     console.log("[API] Request payload size:", data.length, "bytes");
@@ -314,6 +400,9 @@ export async function startModelTraining(
         configOriginPath,
         outputPath,
         logPath,
+        inputImagePath,
+        inputLabelPath,
+        autoParameters: Boolean(autoParameters),
         requestBytes: data.length,
         configSummary,
         diagnostics,
@@ -373,6 +462,7 @@ export async function startModelInference(
   checkpointPath,
   configOriginPath = "",
   workflowId = null,
+  inputImagePath = "",
 ) {
   console.log("\n========== API.JS: START_MODEL_INFERENCE CALLED ==========");
   console.log("[API] Function arguments:");
@@ -444,6 +534,7 @@ export async function startModelInference(
         checkpoint: checkpointPath,
       },
       outputPath,
+      inputImagePath,
       inferenceConfig: configToSend,
       configOriginPath,
       workflow_id: workflowId,
@@ -612,12 +703,13 @@ export async function updateConversationTitle(convoId, title) {
   }
 }
 
-export async function queryHelperChat(taskKey, query, fieldContext) {
+export async function queryHelperChat(taskKey, query, fieldContext, history = []) {
   try {
     const res = await axios.post(`${BASE_URL}/chat/helper/query`, {
       taskKey,
       query,
       fieldContext,
+      history,
     });
     return res.data?.response;
   } catch (error) {
@@ -644,6 +736,32 @@ export async function getConfigPresetContent(path) {
 
 export async function getModelArchitectures() {
   return makeApiRequest("pytc/architectures", "get");
+}
+
+export async function mountProjectDirectory({
+  directoryPath,
+  mountName = "",
+  destinationPath = "root",
+}) {
+  try {
+    const res = await apiClient.post("/files/mount", {
+      directory_path: directoryPath,
+      mount_name: mountName,
+      destination_path: destinationPath,
+    });
+    return res.data;
+  } catch (error) {
+    handleError(error);
+  }
+}
+
+export async function resetFileWorkspace() {
+  try {
+    const res = await apiClient.delete("/files/workspace");
+    return res.data;
+  } catch (error) {
+    handleError(error);
+  }
 }
 
 // ── Workflow spine ───────────────────────────────────────────────────────────
@@ -696,6 +814,27 @@ export async function getWorkflowImpactPreview(workflowId) {
 export async function getWorkflowMetrics(workflowId) {
   try {
     const res = await apiClient.get(`/api/workflows/${workflowId}/metrics`);
+    return res.data;
+  } catch (error) {
+    handleError(error);
+  }
+}
+
+export async function getWorkflowProjectProgress(workflowId) {
+  try {
+    const res = await apiClient.get(`/api/workflows/${workflowId}/project-progress`);
+    return res.data;
+  } catch (error) {
+    handleError(error);
+  }
+}
+
+export async function updateWorkflowProjectProgressVolume(workflowId, body) {
+  try {
+    const res = await apiClient.post(
+      `/api/workflows/${workflowId}/project-progress/volume-status`,
+      body,
+    );
     return res.data;
   } catch (error) {
     handleError(error);
@@ -824,6 +963,17 @@ export async function approveAgentAction(workflowId, eventId) {
   try {
     const res = await apiClient.post(
       `/api/workflows/${workflowId}/agent-actions/${eventId}/approve`,
+    );
+    return res.data;
+  } catch (error) {
+    handleError(error);
+  }
+}
+
+export async function runWorkflowCommand(workflowId, commandId) {
+  try {
+    const res = await apiClient.post(
+      `/api/workflows/${workflowId}/commands/${commandId}/run`,
     );
     return res.data;
   } catch (error) {

@@ -90,6 +90,66 @@ class WorkflowRouteTests(unittest.TestCase):
         event_types = [event["event_type"] for event in events_response.json()]
         self.assertEqual(event_types, ["workflow.created", "dataset.loaded"])
 
+    def test_metadata_patches_merge_and_event_idempotency_is_stable(self):
+        workflow, _ = self._current_workflow()
+        workflow_id = workflow["id"]
+
+        first_patch = self.client.patch(
+            f"/api/workflows/{workflow_id}",
+            json={
+                "metadata": {
+                    "project_context": {
+                        "imaging_modality": "EM",
+                        "target_structure": "mitochondria",
+                    },
+                    "session_onboarding": {"goals": "draft"},
+                },
+            },
+        )
+        self.assertEqual(first_patch.status_code, 200)
+        second_patch = self.client.patch(
+            f"/api/workflows/{workflow_id}",
+            json={
+                "metadata": {
+                    "project_context": {"optimization_priority": "accuracy"}
+                },
+            },
+        )
+        self.assertEqual(second_patch.status_code, 200)
+        metadata = second_patch.json()["metadata"]
+        self.assertEqual(metadata["project_context"]["imaging_modality"], "EM")
+        self.assertEqual(metadata["project_context"]["target_structure"], "mitochondria")
+        self.assertEqual(
+            metadata["project_context"]["optimization_priority"],
+            "accuracy",
+        )
+        self.assertEqual(metadata["session_onboarding"]["goals"], "draft")
+
+        event_body = {
+            "actor": "system",
+            "event_type": "training.started",
+            "stage": "retraining_staged",
+            "summary": "Started once.",
+            "payload": {"outputPath": "/tmp/training-run"},
+            "idempotency_key": "runtime:start-training:abc",
+        }
+        first_event = self.client.post(
+            f"/api/workflows/{workflow_id}/events",
+            json=event_body,
+        )
+        self.assertEqual(first_event.status_code, 200)
+        second_event = self.client.post(
+            f"/api/workflows/{workflow_id}/events",
+            json={**event_body, "summary": "Retried request."},
+        )
+        self.assertEqual(second_event.status_code, 200)
+        self.assertEqual(first_event.json()["id"], second_event.json()["id"])
+        self.assertEqual(first_event.json()["schema_version"], 1)
+        self.assertEqual(
+            first_event.json()["idempotency_key"],
+            "runtime:start-training:abc",
+        )
+
     def test_current_workflow_reset_starts_clean_session(self):
         workflow, _ = self._current_workflow()
         patch_response = self.client.patch(
@@ -220,7 +280,7 @@ class WorkflowRouteTests(unittest.TestCase):
             json={"query": "train the model"},
         )
         self.assertEqual(response.status_code, 200)
-        effects = response.json()["commands"][0]["client_effects"]
+        effects = response.json()["actions"][0]["client_effects"]
         self.assertEqual(
             effects["set_training_config_preset"],
             "/projects/custom/configs/custom-training.yaml",
@@ -313,10 +373,46 @@ class WorkflowRouteTests(unittest.TestCase):
             "/tmp/corrected.tif",
         )
 
+        effects_proposal = self.client.post(
+            f"/api/workflows/{workflow_id}/agent-actions",
+            json={
+                "action": "run_client_effects",
+                "summary": "Approve in-app inference run.",
+                "payload": {
+                    "item_id": "run-inference",
+                    "item_label": "Run inference",
+                    "risk_level": "runs_job",
+                    "client_effects": {
+                        "navigate_to": "inference",
+                        "set_inference_output_path": "/tmp/inference-out",
+                        "runtime_action": {"kind": "start_inference"},
+                    },
+                },
+            },
+        )
+        self.assertEqual(effects_proposal.status_code, 200)
+
+        effects_approval = self.client.post(
+            f"/api/workflows/{workflow_id}/agent-actions/"
+            f"{effects_proposal.json()['id']}/approve"
+        )
+        self.assertEqual(effects_approval.status_code, 200)
+        effects_payload = effects_approval.json()
+        self.assertEqual(effects_payload["commands"], [])
+        self.assertEqual(
+            effects_payload["client_effects"]["set_inference_output_path"],
+            "/tmp/inference-out",
+        )
+        self.assertEqual(
+            effects_payload["client_effects"]["runtime_action"]["kind"],
+            "start_inference",
+        )
+
         events_response = self.client.get(f"/api/workflows/{workflow_id}/events")
         event_types = [event["event_type"] for event in events_response.json()]
         self.assertIn("agent.proposal_approved", event_types)
         self.assertIn("agent.proposal_rejected", event_types)
+        self.assertIn("agent.client_effects_approved", event_types)
         self.assertIn("retraining.staged", event_types)
 
     def test_agent_plan_preview_control_and_bundle_export(self):
@@ -531,10 +627,8 @@ class WorkflowRouteTests(unittest.TestCase):
         self.assertEqual(query_response.status_code, 200)
         query_payload = query_response.json()
         self.assertIn("proofread this data", query_payload["response"].lower())
-        self.assertEqual(
-            query_payload["commands"][0]["client_effects"]["runtime_action"]["kind"],
-            "start_proofreading",
-        )
+        self.assertEqual(query_payload["actions"][0]["id"], "start-proofreading")
+        self.assertEqual(query_payload["commands"], [])
 
     def test_agent_visualize_request_populates_viewer_paths_not_status(self):
         workflow, _ = self._current_workflow()
@@ -563,6 +657,7 @@ class WorkflowRouteTests(unittest.TestCase):
         self.assertEqual(payload["commands"], [])
         effects = payload["actions"][0]["client_effects"]
         self.assertEqual(effects["navigate_to"], "visualization")
+        self.assertEqual(effects["runtime_action"]["kind"], "load_visualization")
         self.assertEqual(
             effects["set_visualization_image_path"],
             "/projects/sample/data/image/train",
@@ -570,6 +665,27 @@ class WorkflowRouteTests(unittest.TestCase):
         self.assertEqual(
             effects["set_visualization_label_path"],
             "/projects/sample/data/labels/train",
+        )
+
+        casual_response = self.client.post(
+            f"/api/workflows/{workflow_id}/agent/query",
+            json={"query": "can i look at my labels real quick?"},
+        )
+        self.assertEqual(casual_response.status_code, 200)
+        casual_payload = casual_response.json()
+        self.assertEqual(casual_payload["intent"], "view_data")
+        self.assertNotIn("did not understand", casual_payload["response"].lower())
+        self.assertEqual(casual_payload["actions"][0]["id"], "open-visualization")
+
+        abbreviated_response = self.client.post(
+            f"/api/workflows/{workflow_id}/agent/query",
+            json={"query": "can we vis some data"},
+        )
+        self.assertEqual(abbreviated_response.status_code, 200)
+        abbreviated_payload = abbreviated_response.json()
+        self.assertEqual(abbreviated_payload["intent"], "view_data")
+        self.assertEqual(
+            abbreviated_payload["actions"][0]["id"], "open-visualization"
         )
 
     def test_agent_visualize_request_discovers_directory_pairs_and_asks_for_more(self):
@@ -613,6 +729,202 @@ class WorkflowRouteTests(unittest.TestCase):
             str(label_dir / "seg_000_604_576.h5"),
         )
         self.assertEqual(payload["commands"], [])
+
+    def test_agent_inspects_project_tree_for_alternate_volume_set(self):
+        workflow, _ = self._current_workflow()
+        workflow_id = workflow["id"]
+        project_root = pathlib.Path(self.temp_dir.name) / "lucchi-project"
+        image_dir = project_root / "data" / "image"
+        source_dir = project_root / "data" / "source" / "Lucchi++"
+        label_dir = project_root / "data" / "seg"
+        image_dir.mkdir(parents=True)
+        source_dir.mkdir(parents=True)
+        label_dir.mkdir(parents=True)
+        for stem in ["test", "train"]:
+            (image_dir / f"{stem}_im.h5").write_bytes(b"")
+            (source_dir / f"{stem}_im.h5").write_bytes(b"")
+            (label_dir / f"{stem}_mito.h5").write_bytes(b"")
+
+        self.client.patch(
+            f"/api/workflows/{workflow_id}",
+            json={
+                "stage": "visualization",
+                "dataset_path": str(project_root),
+                "image_path": str(image_dir / "test_im.h5"),
+                "label_path": str(label_dir / "test_mito.h5"),
+            },
+        )
+
+        response = self.client.post(
+            f"/api/workflows/{workflow_id}/agent/query",
+            json={
+                "query": (
+                    "can't you look for another aptly named pair of image and seg? "
+                    "there IS another pair in the project"
+                )
+            },
+        )
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertEqual(payload["intent"], "view_data")
+        self.assertIn("I inspected the project tree", payload["response"])
+        self.assertIn("another image/seg set", payload["response"])
+        self.assertNotIn("Before I choose", payload["response"])
+        effects = payload["actions"][0]["client_effects"]
+        self.assertEqual(effects["navigate_to"], "visualization")
+        self.assertEqual(effects["runtime_action"]["kind"], "load_visualization")
+        self.assertEqual(
+            effects["set_visualization_image_path"],
+            str(source_dir / "test_im.h5"),
+        )
+        self.assertEqual(
+            effects["set_visualization_label_path"],
+            str(label_dir / "test_mito.h5"),
+        )
+
+        current_response = self.client.get("/api/workflows/current")
+        self.assertEqual(current_response.status_code, 200)
+        observation = current_response.json()["workflow"]["metadata"][
+            "project_observation"
+        ]
+        self.assertGreaterEqual(len(observation["volume_sets"]), 2)
+
+    def test_agent_answers_project_file_overview_from_observation(self):
+        workflow, _ = self._current_workflow()
+        workflow_id = workflow["id"]
+        project_root = pathlib.Path(self.temp_dir.name) / "overview-project"
+        image_dir = project_root / "data" / "image"
+        label_dir = project_root / "data" / "seg"
+        config_dir = project_root / "configs"
+        output_dir = project_root / "outputs"
+        image_dir.mkdir(parents=True)
+        label_dir.mkdir(parents=True)
+        config_dir.mkdir(parents=True)
+        output_dir.mkdir(parents=True)
+        (image_dir / "test_im.h5").write_bytes(b"")
+        (label_dir / "test_mito.h5").write_bytes(b"")
+        (config_dir / "mito.yaml").write_text("MODEL: mito\n")
+
+        self.client.patch(
+            f"/api/workflows/{workflow_id}",
+            json={
+                "stage": "visualization",
+                "dataset_path": str(project_root),
+                "image_path": str(image_dir / "test_im.h5"),
+                "label_path": str(label_dir / "test_mito.h5"),
+            },
+        )
+
+        response = self.client.post(
+            f"/api/workflows/{workflow_id}/agent/query",
+            json={"query": "what exactly are the files in my lovely directory here?"},
+        )
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertEqual(payload["intent"], "project_files")
+        self.assertIn("I checked", payload["response"])
+        self.assertIn("At the top level", payload["response"])
+        self.assertIn("data/", payload["response"])
+        self.assertNotIn("Current read:", payload["response"])
+        self.assertNotIn("Do this:", payload["response"])
+        self.assertEqual(payload["actions"], [])
+        self.assertTrue(
+            any(item["label"] == "Checked project files" for item in payload["trace"])
+        )
+
+    def test_project_progress_counts_ground_truth_unproofread_and_missing_volumes(self):
+        workflow, _ = self._current_workflow()
+        workflow_id = workflow["id"]
+        project_root = pathlib.Path(self.temp_dir.name) / "progress-project"
+        image_dir = project_root / "data" / "image"
+        label_dir = project_root / "data" / "seg"
+        image_dir.mkdir(parents=True)
+        label_dir.mkdir(parents=True)
+        for stem in ["vol_a", "vol_b", "vol_c"]:
+            (image_dir / f"{stem}_im.h5").write_bytes(b"")
+        (label_dir / "vol_a_ground_truth.h5").write_bytes(b"")
+        (label_dir / "vol_b_seg.h5").write_bytes(b"")
+
+        self.client.patch(
+            f"/api/workflows/{workflow_id}",
+            json={
+                "title": "Progress smoke",
+                "stage": "visualization",
+                "dataset_path": str(project_root),
+                "image_path": str(image_dir / "vol_a_im.h5"),
+                "label_path": str(label_dir / "vol_a_ground_truth.h5"),
+            },
+        )
+
+        response = self.client.get(
+            f"/api/workflows/{workflow_id}/project-progress"
+        )
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertEqual(payload["summary"]["total"], 3)
+        self.assertEqual(payload["summary"]["ground_truth"], 1)
+        self.assertEqual(payload["summary"]["needs_proofreading"], 1)
+        self.assertEqual(payload["summary"]["missing_segmentation"], 1)
+        self.assertEqual(payload["summary"]["remaining"], 2)
+        rows = {row["name"]: row for row in payload["volumes"]}
+        self.assertEqual(rows["vol_a_im.h5"]["status"], "ground_truth")
+        self.assertEqual(rows["vol_b_im.h5"]["status"], "needs_proofreading")
+        self.assertEqual(rows["vol_c_im.h5"]["status"], "missing_segmentation")
+
+        update_response = self.client.post(
+            f"/api/workflows/{workflow_id}/project-progress/volume-status",
+            json={
+                "volume_id": rows["vol_b_im.h5"]["id"],
+                "status": "ground_truth",
+                "note": "Reviewed by expert.",
+            },
+        )
+        self.assertEqual(update_response.status_code, 200)
+        updated = update_response.json()
+        self.assertEqual(updated["summary"]["ground_truth"], 2)
+        updated_rows = {row["name"]: row for row in updated["volumes"]}
+        self.assertEqual(updated_rows["vol_b_im.h5"]["status_source"], "manual_override")
+        self.assertEqual(updated_rows["vol_b_im.h5"]["note"], "Reviewed by expert.")
+
+    def test_agent_opens_project_progress_tracker_with_counts(self):
+        workflow, _ = self._current_workflow()
+        workflow_id = workflow["id"]
+        project_root = pathlib.Path(self.temp_dir.name) / "agent-progress-project"
+        image_dir = project_root / "data" / "image"
+        label_dir = project_root / "data" / "seg"
+        image_dir.mkdir(parents=True)
+        label_dir.mkdir(parents=True)
+        (image_dir / "vol_a_im.h5").write_bytes(b"")
+        (image_dir / "vol_b_im.h5").write_bytes(b"")
+        (label_dir / "vol_a_gt.h5").write_bytes(b"")
+
+        self.client.patch(
+            f"/api/workflows/{workflow_id}",
+            json={
+                "stage": "visualization",
+                "dataset_path": str(project_root),
+                "image_path": str(image_dir / "vol_a_im.h5"),
+                "label_path": str(label_dir / "vol_a_gt.h5"),
+            },
+        )
+
+        response = self.client.post(
+            f"/api/workflows/{workflow_id}/agent/query",
+            json={"query": "open the project progress tracker"},
+        )
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertEqual(payload["intent"], "project_progress")
+        self.assertIn("tracked image volume", payload["response"])
+        self.assertEqual(payload["actions"][0]["id"], "open-project-progress")
+        self.assertEqual(
+            payload["actions"][0]["client_effects"]["navigate_to"],
+            "project-progress",
+        )
 
     def test_agent_scale_update_persists_project_context_and_offers_reload(self):
         workflow, _ = self._current_workflow()
@@ -707,9 +1019,9 @@ class WorkflowRouteTests(unittest.TestCase):
         payload = response.json()
         self.assertEqual(payload["intent"], "start_proofreading")
         self.assertEqual(payload["actions"][0]["id"], "start-proofreading")
-        self.assertEqual(payload["commands"][0]["id"], "start-proofreading-command")
+        self.assertEqual(payload["commands"], [])
         self.assertEqual(
-            payload["commands"][0]["client_effects"]["runtime_action"]["kind"],
+            payload["actions"][0]["client_effects"]["runtime_action"]["kind"],
             "start_proofreading",
         )
 
@@ -773,10 +1085,7 @@ class WorkflowRouteTests(unittest.TestCase):
         conversation_id = segment_payload["conversationId"]
         self.assertIsInstance(conversation_id, int)
         self.assertEqual(segment_payload["actions"][0]["label"], "Run model")
-        self.assertEqual(
-            segment_payload["commands"][0]["client_effects"]["runtime_action"]["kind"],
-            "start_inference",
-        )
+        self.assertEqual(segment_payload["commands"], [])
         conversation_response = self.client.get(
             f"/chat/conversations/{conversation_id}"
         )
@@ -789,10 +1098,7 @@ class WorkflowRouteTests(unittest.TestCase):
         self.assertIn("run the model", messages[1]["content"].lower())
         self.assertEqual(messages[1]["source"], "workflow_orchestrator")
         self.assertEqual(messages[1]["actions"][0]["label"], "Run model")
-        self.assertEqual(
-            messages[1]["commands"][0]["client_effects"]["runtime_action"]["kind"],
-            "start_inference",
-        )
+        self.assertEqual(messages[1]["commands"], [])
 
         capabilities_response = self.client.post(
             f"/api/workflows/{workflow_id}/agent/query",
@@ -812,6 +1118,178 @@ class WorkflowRouteTests(unittest.TestCase):
         )
         self.assertEqual(updated_conversation_response.status_code, 200)
         self.assertEqual(len(updated_conversation_response.json()["messages"]), 4)
+
+    def test_agent_exposes_workspace_configuration_and_runtime_control_actions(self):
+        workflow, _ = self._current_workflow()
+        workflow_id = workflow["id"]
+        self.client.patch(
+            f"/api/workflows/{workflow_id}",
+            json={
+                "title": "Lucchi case study",
+                "dataset_path": "/projects/lucchi",
+                "image_path": "/projects/lucchi/data/image/test_im.h5",
+                "label_path": "/projects/lucchi/data/seg/test_mito.h5",
+                "mask_path": "/projects/lucchi/data/seg/test_mito.h5",
+                "checkpoint_path": "/projects/lucchi/checkpoints/checkpoint.pth.tar",
+                "metadata": {
+                    "project_context": {
+                        "imaging_modality": "EM",
+                        "target_structure": "mitochondria",
+                        "optimization_priority": "accuracy",
+                    }
+                },
+            },
+        )
+
+        mount_response = self.client.post(
+            f"/api/workflows/{workflow_id}/agent/query",
+            json={"query": "remount the lucchi project"},
+        )
+        self.assertEqual(mount_response.status_code, 200)
+        mount_payload = mount_response.json()
+        self.assertEqual(mount_payload["intent"], "mount_project")
+        self.assertEqual(mount_payload["actions"][0]["id"], "mount-project")
+        self.assertEqual(
+            mount_payload["actions"][0]["client_effects"]["mount_project"][
+                "directory_path"
+            ],
+            "/projects/lucchi",
+        )
+
+        configure_response = self.client.post(
+            f"/api/workflows/{workflow_id}/agent/query",
+            json={"query": "configure inference settings before running"},
+        )
+        self.assertEqual(configure_response.status_code, 200)
+        configure_payload = configure_response.json()
+        self.assertEqual(configure_payload["intent"], "configure_inference")
+        configure_effects = configure_payload["actions"][0]["client_effects"]
+        self.assertEqual(configure_effects["navigate_to"], "inference")
+        self.assertNotIn("runtime_action", configure_effects)
+        self.assertEqual(
+            configure_effects["set_inference_image_path"],
+            "/projects/lucchi/data/image/test_im.h5",
+        )
+        self.assertEqual(
+            configure_effects["set_inference_checkpoint_path"],
+            "/projects/lucchi/checkpoints/checkpoint.pth.tar",
+        )
+
+        reset_response = self.client.post(
+            f"/api/workflows/{workflow_id}/agent/query",
+            json={"query": "clear cached workspace state and remount"},
+        )
+        self.assertEqual(reset_response.status_code, 200)
+        reset_payload = reset_response.json()
+        self.assertEqual(reset_payload["intent"], "reset_workspace")
+        reset_effects = reset_payload["actions"][0]["client_effects"]
+        self.assertTrue(reset_effects["reset_workspace"])
+        self.assertEqual(
+            reset_effects["mount_project"]["directory_path"],
+            "/projects/lucchi",
+        )
+
+        stop_response = self.client.post(
+            f"/api/workflows/{workflow_id}/agent/query",
+            json={"query": "stop the training job"},
+        )
+        self.assertEqual(stop_response.status_code, 200)
+        stop_payload = stop_response.json()
+        self.assertEqual(stop_payload["intent"], "stop_runtime")
+        action_ids = [action["id"] for action in stop_payload["actions"]]
+        self.assertIn("stop-inference", action_ids)
+        self.assertEqual(len(action_ids), 1)
+
+    def test_agent_understands_casual_segmentation_language(self):
+        workflow, _ = self._current_workflow()
+        workflow_id = workflow["id"]
+        self.client.patch(
+            f"/api/workflows/{workflow_id}",
+            json={
+                "stage": "visualization",
+                "image_path": "/projects/lucchi/data/image/test_im.h5",
+                "label_path": "/projects/lucchi/data/seg/test_mito.h5",
+                "mask_path": "/projects/lucchi/data/seg/test_mito.h5",
+                "metadata": {
+                    "project_context": {
+                        "imaging_modality": "EM",
+                        "target_structure": "mitochondria",
+                        "optimization_priority": "accuracy",
+                    }
+                },
+            },
+        )
+
+        response = self.client.post(
+            f"/api/workflows/{workflow_id}/agent/query",
+            json={"query": "i wanna segment some dattaaaaaaaaaaa"},
+        )
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertEqual(payload["intent"], "start_segmentation")
+        self.assertNotIn("did not understand", payload["response"].lower())
+        self.assertIn("checkpoint", payload["response"].lower())
+        action_ids = [action["id"] for action in payload["actions"]]
+        self.assertIn("start-proofreading", action_ids)
+        self.assertEqual(len(action_ids), 1)
+
+    def test_agent_returns_one_app_suggestion_for_segmentation_blockers(self):
+        workflow, _ = self._current_workflow()
+        workflow_id = workflow["id"]
+        self.client.patch(
+            f"/api/workflows/{workflow_id}",
+            json={
+                "stage": "visualization",
+                "image_path": "/projects/lucchi/data/image/test_im.h5",
+                "label_path": "/projects/lucchi/data/seg/test_mito.h5",
+                "mask_path": "/projects/lucchi/data/seg/test_mito.h5",
+                "metadata": {
+                    "project_context": {
+                        "imaging_modality": "EM",
+                        "target_structure": "mitochondria",
+                        "optimization_priority": "accuracy",
+                    }
+                },
+            },
+        )
+
+        response = self.client.post(
+            f"/api/workflows/{workflow_id}/agent/query",
+            json={"query": "can we segment my data with a model?"},
+        )
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertEqual(payload["intent"], "start_segmentation")
+        self.assertIn("because", payload["response"].lower())
+        self.assertEqual(len(payload["actions"]), 1)
+        self.assertEqual(payload["commands"], [])
+
+    def test_agent_context_followup_updates_without_action_cards(self):
+        workflow, _ = self._current_workflow()
+        workflow_id = workflow["id"]
+        self.client.patch(
+            f"/api/workflows/{workflow_id}",
+            json={
+                "stage": "visualization",
+                "image_path": "/projects/lucchi/data/image/test_im.h5",
+            },
+        )
+
+        response = self.client.post(
+            f"/api/workflows/{workflow_id}/agent/query",
+            json={"query": "what if this is EM mitochondria and we care about speed?"},
+        )
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertEqual(payload["intent"], "project_context_updated")
+        self.assertEqual(payload["actions"], [])
+        self.assertEqual(payload["commands"], [])
+
+        current_workflow, _ = self._current_workflow()
+        project_context = current_workflow["metadata"]["project_context"]
+        self.assertEqual(project_context["imaging_modality"], "EM")
+        self.assertEqual(project_context["target_structure"], "mitochondria")
+        self.assertEqual(project_context["optimization_priority"], "speed")
 
     def test_agent_handles_repair_language_without_repeating_recommendation_cards(self):
         workflow, _ = self._current_workflow()
@@ -855,7 +1333,8 @@ class WorkflowRouteTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         payload = response.json()
         self.assertEqual(payload["intent"], "clarify_next_job")
-        self.assertIn("did not understand", payload["response"])
+        self.assertIn("not sure which app step", payload["response"])
+        self.assertNotIn("did not understand", payload["response"].lower())
         self.assertEqual(payload["actions"], [])
         self.assertEqual(payload["commands"], [])
 
@@ -975,7 +1454,7 @@ class WorkflowRouteTests(unittest.TestCase):
         payload = response.json()
         self.assertEqual(payload["intent"], "start_training")
         self.assertIn("safe defaults", payload["response"])
-        effects = payload["commands"][0]["client_effects"]
+        effects = payload["actions"][0]["client_effects"]
         self.assertEqual(effects["navigate_to"], "training")
         self.assertEqual(
             effects["set_training_image_path"],
@@ -987,13 +1466,88 @@ class WorkflowRouteTests(unittest.TestCase):
         )
         self.assertEqual(
             effects["set_training_config_preset"],
-            "configs/MitoEM/Mito25-Local-Smoke-BC.yaml",
+            "configs/MitoEM/Mito-CaseStudy-BC.yaml",
         )
         self.assertTrue(effects["runtime_action"]["autopick_parameters"])
         self.assertEqual(
             effects["runtime_action"]["parameter_mode"],
             "agent_default",
         )
+
+    def test_approved_training_run_proposal_returns_runtime_launch_effects(self):
+        workflow, _ = self._current_workflow()
+        workflow_id = workflow["id"]
+        self.client.patch(
+            f"/api/workflows/{workflow_id}",
+            json={
+                "stage": "retraining_staged",
+                "image_path": "/projects/mito25/data/image/mito25_im.h5",
+                "corrected_mask_path": "/projects/mito25/data/seg/corrected.tif",
+            },
+        )
+        client_effects = {
+            "navigate_to": "training",
+            "runtime_action": {
+                "kind": "start_training",
+                "autopick_parameters": True,
+                "parameter_mode": "agent_default",
+            },
+            "set_training_config_preset": "configs/MitoEM/Mito-CaseStudy-BC.yaml",
+            "set_training_image_path": "/projects/mito25/data/image/mito25_im.h5",
+            "set_training_label_path": "/projects/mito25/data/seg/corrected.tif",
+            "set_training_output_path": "/projects/mito25/outputs/training",
+            "set_training_log_path": "/projects/mito25/outputs/training",
+        }
+
+        proposal = self.client.post(
+            f"/api/workflows/{workflow_id}/agent-actions",
+            json={
+                "action": "start_training_run",
+                "summary": "Approve training run.",
+                "payload": {
+                    "client_effects": client_effects,
+                    "config_preset": client_effects["set_training_config_preset"],
+                    "image_path": client_effects["set_training_image_path"],
+                    "label_path": client_effects["set_training_label_path"],
+                    "output_path": client_effects["set_training_output_path"],
+                    "parameter_mode": "agent_default",
+                    "autopick_parameters": True,
+                },
+            },
+        )
+        self.assertEqual(proposal.status_code, 200)
+
+        approval = self.client.post(
+            f"/api/workflows/{workflow_id}/agent-actions/"
+            f"{proposal.json()['id']}/approve"
+        )
+        self.assertEqual(approval.status_code, 200)
+        payload = approval.json()
+        self.assertEqual(payload["workflow"]["stage"], "retraining_staged")
+        self.assertEqual(payload["client_effects"]["runtime_action"]["kind"], "start_training")
+        self.assertEqual(len(payload["commands"]), 1)
+        self.assertEqual(payload["commands"][0]["command_type"], "start_training")
+        self.assertEqual(payload["commands"][0]["status"], "queued")
+        self.assertEqual(
+            payload["commands"][0]["input"]["client_effects"]["runtime_action"]["kind"],
+            "start_training",
+        )
+        self.assertTrue(
+            payload["client_effects"]["runtime_action"]["autopick_parameters"]
+        )
+        self.assertEqual(
+            payload["client_effects"]["set_training_config_preset"],
+            "configs/MitoEM/Mito-CaseStudy-BC.yaml",
+        )
+        self.assertEqual(
+            payload["client_effects"]["set_training_output_path"],
+            "/projects/mito25/outputs/training",
+        )
+
+        command_list = self.client.get(f"/api/workflows/{workflow_id}/commands")
+        self.assertEqual(command_list.status_code, 200)
+        self.assertEqual(len(command_list.json()), 1)
+        self.assertEqual(command_list.json()[0]["id"], payload["commands"][0]["id"])
 
     def test_agent_train_short_phrases_do_not_fall_to_unknown(self):
         workflow, _ = self._current_workflow()
@@ -1043,6 +1597,71 @@ class WorkflowRouteTests(unittest.TestCase):
         )
         self.assertEqual(effects["runtime_action"]["kind"], "start_training")
 
+    def test_agent_train_model_uses_ground_truth_progress_subset(self):
+        workflow, _ = self._current_workflow()
+        workflow_id = workflow["id"]
+        project_root = pathlib.Path(self.temp_dir.name) / "progress-training-project"
+        image_dir = project_root / "data" / "image"
+        label_dir = project_root / "data" / "seg"
+        config_path = project_root / "configs" / "MitoEM2-Pyra-Demo-BC.yaml"
+        image_dir.mkdir(parents=True)
+        label_dir.mkdir(parents=True)
+        config_path.parent.mkdir(parents=True)
+        config_path.write_text("SYSTEM: PyTC\n", encoding="utf-8")
+        for stem in ["vol_a", "vol_b", "vol_c"]:
+            (image_dir / f"{stem}_im.h5").write_bytes(b"")
+        (label_dir / "vol_a_curated_seg.h5").write_bytes(b"")
+        (label_dir / "vol_b_seg.h5").write_bytes(b"")
+
+        self.client.patch(
+            f"/api/workflows/{workflow_id}",
+            json={
+                "stage": "setup",
+                "dataset_path": str(project_root),
+                "image_path": str(image_dir),
+                "label_path": str(label_dir),
+                "config_path": str(config_path),
+                "metadata": {
+                    "project_context": {
+                        "imaging_modality": "EM",
+                        "target_structure": "mitochondria",
+                        "optimization_priority": "accuracy",
+                    }
+                },
+            },
+        )
+
+        response = self.client.post(
+            f"/api/workflows/{workflow_id}/agent/query",
+            json={
+                "query": "can we train a model on my ground truth to segment the rest"
+            },
+        )
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertEqual(payload["intent"], "start_training")
+        self.assertIn("ground-truth", payload["response"])
+        self.assertNotEqual(payload["intent"], "project_progress")
+        effects = payload["actions"][0]["client_effects"]
+        subset = effects["training_volume_subset"]
+        self.assertEqual(subset["train_volume_count"], 1)
+        self.assertEqual(subset["target_volume_count"], 1)
+        self.assertEqual(subset["review_volume_count"], 1)
+        self.assertEqual(subset["training_statuses"], ["ground_truth"])
+        self.assertEqual(effects["set_training_config_preset"], str(config_path))
+        self.assertTrue(pathlib.Path(effects["set_training_image_path"]).is_dir())
+        self.assertTrue(pathlib.Path(effects["set_training_label_path"]).is_dir())
+        self.assertTrue(pathlib.Path(subset["manifest_path"]).is_file())
+        self.assertIn(
+            "volume_subset",
+            effects["runtime_action"],
+        )
+        self.assertEqual(
+            effects["runtime_action"]["volume_subset"]["train_volume_count"],
+            1,
+        )
+
     def test_agent_train_model_names_missing_label_blocker(self):
         workflow, _ = self._current_workflow()
         workflow_id = workflow["id"]
@@ -1064,6 +1683,12 @@ class WorkflowRouteTests(unittest.TestCase):
         self.assertEqual(payload["intent"], "start_training")
         self.assertIn("need labels or saved proofreading edits", payload["response"])
         self.assertEqual(payload["commands"], [])
+        self.assertEqual(payload["actions"][0]["risk_level"], "prefills_form")
+        self.assertFalse(payload["actions"][0]["requires_approval"])
+        self.assertEqual(
+            payload["actions"][0]["client_effects"]["runtime_action"]["kind"],
+            "choose_project_data",
+        )
 
     def test_general_chat_direct_guard_answers_meta_run_questions(self):
         with patch("server_api.main._ensure_chatbot") as ensure_chatbot:
@@ -1101,6 +1726,55 @@ class WorkflowRouteTests(unittest.TestCase):
         self.assertIn("did not understand", payload["response"])
         ensure_chatbot.assert_not_called()
 
+    def test_general_chat_llm_unavailable_returns_degraded_response(self):
+        import server_api.main as server_api_main
+
+        original_error = server_api_main._chatbot_error
+        server_api_main._chatbot_error = RuntimeError(
+            'model "missing-model" not found'
+        )
+        try:
+            with patch("server_api.main._ensure_chatbot", return_value=False):
+                response = self.client.post(
+                    "/chat/query",
+                    json={"query": "how do I configure the docs assistant?"},
+                )
+        finally:
+            server_api_main._chatbot_error = original_error
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertEqual(payload["source"], "llm_unavailable")
+        self.assertIn("documentation assistant", payload["response"])
+        self.assertNotIn("missing-model", payload["response"])
+
+        conversation_response = self.client.get(
+            f"/chat/conversations/{payload['conversationId']}"
+        )
+        self.assertEqual(conversation_response.status_code, 200)
+        messages = conversation_response.json()["messages"]
+        self.assertEqual(messages[1]["source"], "llm_unavailable")
+
+    def test_clear_chat_does_not_initialize_llm(self):
+        import server_api.main as server_api_main
+
+        original_history = list(server_api_main._chat_history)
+        original_active_convo_id = server_api_main._active_convo_id
+        server_api_main._chat_history[:] = [{"role": "user", "content": "status"}]
+        server_api_main._active_convo_id = 123
+        try:
+            with patch(
+                "server_api.main._ensure_chatbot",
+                side_effect=AssertionError("clear should not initialize chat"),
+            ) as ensure_chatbot:
+                response = self.client.post("/chat/clear")
+        finally:
+            server_api_main._chat_history[:] = original_history
+            server_api_main._active_convo_id = original_active_convo_id
+
+        self.assertEqual(response.status_code, 200)
+        ensure_chatbot.assert_not_called()
+
     def test_agent_handles_greetings_without_prompt_leakage(self):
         workflow, _ = self._current_workflow()
         workflow_id = workflow["id"]
@@ -1119,13 +1793,50 @@ class WorkflowRouteTests(unittest.TestCase):
         )
         self.assertEqual(response.status_code, 200)
         payload = response.json()
-        self.assertIn("Hi.", payload["response"])
-        self.assertIn("Next:", payload["response"])
+        self.assertIn("Hey", payload["response"])
+        self.assertIn("next useful move", payload["response"])
+        self.assertNotIn("Next:", payload["response"])
+        self.assertNotIn("Tell me the job", payload["response"])
         self.assertNotIn("Supervisor Agent", payload["response"])
         self.assertNotIn("RESPONSE STYLE", payload["response"])
         self.assertEqual(payload["actions"], [])
         self.assertEqual(payload["commands"], [])
         self.assertEqual(payload["intent"], "greeting")
+
+    def test_agent_acknowledges_chat_tone_feedback_without_status_template(self):
+        workflow, _ = self._current_workflow()
+        workflow_id = workflow["id"]
+        self.client.patch(
+            f"/api/workflows/{workflow_id}",
+            json={
+                "stage": "setup",
+                "image_path": "/tmp/image.h5",
+                "mask_path": "/tmp/mask.h5",
+                "metadata": {
+                    "project_context": {
+                        "imaging_modality": "EM",
+                        "target_structure": "mitochondria",
+                    }
+                },
+            },
+        )
+
+        response = self.client.post(
+            f"/api/workflows/{workflow_id}/agent/query",
+            json={"query": "ok cool, a bit of a robotic response though"},
+        )
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertEqual(payload["intent"], "style_feedback")
+        self.assertIn("Yeah, agreed", payload["response"])
+        self.assertIn("more conversational", payload["response"])
+        self.assertIn("EM", payload["response"])
+        self.assertIn("mitochondria", payload["response"])
+        self.assertNotIn("My read:", payload["response"])
+        self.assertNotIn("Current read:", payload["response"])
+        self.assertNotIn("Why this fits:", payload["response"])
+        self.assertEqual(payload["actions"], [])
+        self.assertEqual(payload["commands"], [])
 
     def test_agent_can_offer_evaluation_and_export_actions(self):
         workflow, _ = self._current_workflow()

@@ -15,12 +15,20 @@ import {
   getWorkflowHotspots,
   getWorkflowImpactPreview,
   getWorkflowPreflight,
+  getWorkflowProjectProgress,
   listWorkflowArtifacts,
   listWorkflowCorrectionSets,
   listWorkflowEvents,
   listWorkflowEvaluationResults,
   listWorkflowModelRuns,
   listWorkflowModelVersions,
+  mountProjectDirectory,
+  resetFileWorkspace,
+  runWorkflowCommand,
+  startNewWorkflow,
+  stopModelInference,
+  stopModelTraining,
+  updateWorkflowProjectProgressVolume,
 } from "../api";
 
 jest.mock("../api", () => ({
@@ -35,16 +43,23 @@ jest.mock("../api", () => ({
   getWorkflowHotspots: jest.fn(),
   getWorkflowImpactPreview: jest.fn(),
   getWorkflowPreflight: jest.fn(),
+  getWorkflowProjectProgress: jest.fn(),
   listWorkflowArtifacts: jest.fn(),
   listWorkflowCorrectionSets: jest.fn(),
   listWorkflowEvents: jest.fn(),
   listWorkflowEvaluationResults: jest.fn(),
   listWorkflowModelRuns: jest.fn(),
   listWorkflowModelVersions: jest.fn(),
+  mountProjectDirectory: jest.fn(),
   queryWorkflowAgent: jest.fn(),
   rejectAgentAction: jest.fn(),
+  resetFileWorkspace: jest.fn(),
+  runWorkflowCommand: jest.fn(),
   startNewWorkflow: jest.fn(),
+  stopModelInference: jest.fn(),
+  stopModelTraining: jest.fn(),
   updateWorkflow: jest.fn(),
+  updateWorkflowProjectProgressVolume: jest.fn(),
 }));
 
 jest.mock("../logging/appEventLog", () => ({
@@ -106,12 +121,53 @@ function Probe() {
       <button
         type="button"
         onClick={() =>
+          workflowContext.runClientEffects({
+            navigate_to: "inference",
+            set_inference_config_preset:
+              "configs/MitoEM/Mito-CaseStudy-BC.yaml",
+            set_inference_image_path: "/tmp/image.h5",
+            set_inference_label_path: "/tmp/mask.h5",
+            set_inference_checkpoint_path: "/tmp/checkpoint.pth.tar",
+            set_inference_output_path: "/tmp/out",
+          })
+        }
+      >
+        Configure inference
+      </button>
+      <button
+        type="button"
+        onClick={() =>
+          workflowContext.runClientEffects({
+            reset_workspace: true,
+            mount_project: {
+              directory_path: "/tmp/project",
+              mount_name: "project",
+            },
+          })
+        }
+      >
+        Reset remount
+      </button>
+      <button
+        type="button"
+        onClick={() =>
+          workflowContext.runClientEffects({
+            runtime_action: { kind: "stop_inference" },
+          })
+        }
+      >
+        Stop inference
+      </button>
+      <button
+        type="button"
+        onClick={() =>
           workflowContext.executeAssistantItem({
             id: "start-inference",
             title: "Start inference in app",
             command: "app inference run",
             client_effects: {
               navigate_to: "inference",
+              set_inference_image_path: "/tmp/runtime-image.h5",
               set_inference_output_path: "/tmp/runtime-out",
               runtime_action: { kind: "start_inference" },
             },
@@ -154,7 +210,7 @@ function Probe() {
           workflowContext.runClientEffects({
             navigate_to: "training",
             set_training_config_preset:
-              "configs/MitoEM/Mito25-Local-Smoke-BC.yaml",
+              "configs/MitoEM/Mito-CaseStudy-BC.yaml",
             set_training_image_path: "/tmp/image.h5",
             set_training_label_path: "/tmp/corrected.tif",
             set_training_output_path: "/tmp/output",
@@ -192,6 +248,18 @@ function Probe() {
           "no-training-image-override"}
       </div>
       <div>
+        {workflowContext.pendingRuntimeAction?.overrides?.inputLabelPath ||
+          "no-training-label-override"}
+      </div>
+      <div>
+        {workflowContext.pendingRuntimeAction?.overrides?.outputPath ||
+          "no-training-output-override"}
+      </div>
+      <div>
+        {workflowContext.pendingRuntimeAction?.overrides?.logPath ||
+          "no-training-log-override"}
+      </div>
+      <div>
         {workflowContext.pendingRuntimeAction?.overrides?.autoParameters
           ? "auto-parameters"
           : "manual-parameters"}
@@ -214,6 +282,10 @@ describe("WorkflowProvider", () => {
   beforeEach(() => {
     jest.clearAllMocks();
     getCurrentWorkflow.mockResolvedValue({
+      workflow: baseWorkflow,
+      events: [{ id: 1, event_type: "workflow.created" }],
+    });
+    startNewWorkflow.mockResolvedValue({
       workflow: baseWorkflow,
       events: [{ id: 1, event_type: "workflow.created" }],
     });
@@ -247,6 +319,16 @@ describe("WorkflowProvider", () => {
       summary: "Image volume is loaded; add a checkpoint or mask/label next.",
       items: [],
     });
+    getWorkflowProjectProgress.mockResolvedValue({
+      workflow_id: 1,
+      summary: { total: 0, tracked_total: 0 },
+      volumes: [],
+    });
+    updateWorkflowProjectProgressVolume.mockResolvedValue({
+      workflow_id: 1,
+      summary: { total: 1, tracked_total: 1, ground_truth: 1 },
+      volumes: [],
+    });
     createAgentAction.mockResolvedValue({
       id: 8,
       event_type: "agent.proposal_created",
@@ -259,8 +341,19 @@ describe("WorkflowProvider", () => {
       artifacts: [{ id: 1 }],
       artifact_paths: [],
     });
+    mountProjectDirectory.mockResolvedValue({
+      mounted_root_id: 5,
+      message: "Project mounted.",
+    });
+    resetFileWorkspace.mockResolvedValue({
+      deleted_count: 2,
+      mounted_root_count: 1,
+    });
+    runWorkflowCommand.mockResolvedValue({ submitted: true });
+    stopModelInference.mockResolvedValue();
+    stopModelTraining.mockResolvedValue();
     getConfigPresetContent.mockResolvedValue({
-      path: "configs/MitoEM/Mito25-Local-Smoke-BC.yaml",
+      path: "configs/MitoEM/Mito-CaseStudy-BC.yaml",
       content: "DATASET: {}\nSOLVER: {}\n",
     });
     listWorkflowArtifacts.mockResolvedValue([
@@ -276,8 +369,13 @@ describe("WorkflowProvider", () => {
     ]);
   });
 
-  it("loads the current workflow and events on startup", async () => {
-    renderProvider({ trainingState: { setInputLabel: jest.fn() } });
+  it("starts a fresh workflow and remounts the boot project on startup", async () => {
+    const resetFileState = jest.fn();
+    startNewWorkflow.mockResolvedValueOnce({
+      workflow: { ...baseWorkflow, dataset_path: "/tmp/boot-project" },
+      events: [{ id: 1, event_type: "workflow.created" }],
+    });
+    renderProvider({ resetFileState, trainingState: { setInputLabel: jest.fn() } });
 
     expect(await screen.findByText("setup")).toBeTruthy();
     expect(screen.getByText("workflow.created")).toBeTruthy();
@@ -301,7 +399,17 @@ describe("WorkflowProvider", () => {
     });
     expect(listWorkflowArtifacts).toHaveBeenCalledWith(1);
     expect(listWorkflowEvaluationResults).toHaveBeenCalledWith(1);
-    expect(getCurrentWorkflow).toHaveBeenCalledTimes(1);
+    expect(resetFileWorkspace).toHaveBeenCalledTimes(1);
+    expect(resetFileState).toHaveBeenCalled();
+    expect(startNewWorkflow).toHaveBeenCalledWith({
+      metadata: { created_from: "page_reload" },
+    });
+    expect(mountProjectDirectory).toHaveBeenCalledWith({
+      directoryPath: "/tmp/boot-project",
+      mountName: baseWorkflow.title,
+      destinationPath: "root",
+    });
+    expect(getCurrentWorkflow).not.toHaveBeenCalled();
     expect(getWorkflowAgentRecommendation).toHaveBeenCalledWith(1);
     expect(getWorkflowPreflight).toHaveBeenCalledWith(1);
   });
@@ -326,6 +434,58 @@ describe("WorkflowProvider", () => {
     });
     await waitFor(() => {
       expect(screen.getByText("retraining_staged")).toBeTruthy();
+    });
+  });
+
+  it("submits durable commands after approval without queueing runtime effects locally", async () => {
+    const setInputLabel = jest.fn();
+    const setInputImage = jest.fn();
+    const setOutputPath = jest.fn();
+    const setLogPath = jest.fn();
+    approveAgentAction.mockResolvedValue({
+      workflow: { ...baseWorkflow, stage: "training_ready" },
+      client_effects: {
+        navigate_to: "training",
+        set_training_image_path: "/tmp/image.h5",
+        set_training_label_path: "/tmp/corrected.tif",
+        set_training_output_path: "/tmp/training-output",
+        set_training_log_path: "/tmp/training-log",
+        runtime_action: { kind: "start_training" },
+      },
+      commands: [
+        {
+          id: 22,
+          title: "Start training",
+          command: "pytc train",
+        },
+      ],
+    });
+
+    renderProvider({
+      trainingState: {
+        setInputImage,
+        setInputLabel,
+        setOutputPath,
+        setLogPath,
+      },
+    });
+    await screen.findByText("setup");
+
+    fireEvent.click(screen.getByText("Approve proposal"));
+
+    await waitFor(() => {
+      expect(setInputImage).toHaveBeenCalledWith("/tmp/image.h5");
+      expect(setInputLabel).toHaveBeenCalledWith("/tmp/corrected.tif");
+      expect(setOutputPath).toHaveBeenCalledWith("/tmp/training-output");
+      expect(setLogPath).toHaveBeenCalledWith("/tmp/training-log");
+      expect(runWorkflowCommand).toHaveBeenCalledWith(1, 22);
+    });
+    await waitFor(() => {
+      expect(screen.getByText("monitor_training")).toBeTruthy();
+      expect(screen.getByText("/tmp/image.h5")).toBeTruthy();
+      expect(screen.getByText("/tmp/corrected.tif")).toBeTruthy();
+      expect(screen.getByText("/tmp/training-output")).toBeTruthy();
+      expect(screen.getByText("/tmp/training-log")).toBeTruthy();
     });
   });
 
@@ -367,6 +527,72 @@ describe("WorkflowProvider", () => {
     });
   });
 
+  it("prefills inference config, inputs, checkpoint, and output", async () => {
+    const setInputImage = jest.fn();
+    const setInputLabel = jest.fn();
+    const setCheckpointPath = jest.fn();
+    const setOutputPath = jest.fn();
+    const setConfigOriginPath = jest.fn();
+    const setSelectedYamlPreset = jest.fn();
+    const setUploadedYamlFile = jest.fn();
+    const setInferenceConfig = jest.fn();
+
+    renderProvider({
+      setInferenceConfig,
+      inferenceState: {
+        setInputImage,
+        setInputLabel,
+        setCheckpointPath,
+        setOutputPath,
+        setConfigOriginPath,
+        setSelectedYamlPreset,
+        setUploadedYamlFile,
+      },
+    });
+    await screen.findByText("setup");
+
+    fireEvent.click(screen.getByText("Configure inference"));
+
+    await waitFor(() => {
+      expect(setInferenceConfig).toHaveBeenCalledWith(
+        "DATASET: {}\nSOLVER: {}\n",
+      );
+      expect(setInputImage).toHaveBeenCalledWith("/tmp/image.h5");
+      expect(setInputLabel).toHaveBeenCalledWith("/tmp/mask.h5");
+      expect(setCheckpointPath).toHaveBeenCalledWith("/tmp/checkpoint.pth.tar");
+      expect(setOutputPath).toHaveBeenCalledWith("/tmp/out");
+    });
+  });
+
+  it("resets cached file state, remounts a project, and stops inference", async () => {
+    const resetFileState = jest.fn();
+
+    renderProvider({
+      resetFileState,
+      inferenceState: { setOutputPath: jest.fn(), setCheckpointPath: jest.fn() },
+    });
+    await screen.findByText("setup");
+
+    fireEvent.click(screen.getByText("Reset remount"));
+
+    await waitFor(() => {
+      expect(resetFileWorkspace).toHaveBeenCalled();
+      expect(resetFileState).toHaveBeenCalled();
+      expect(mountProjectDirectory).toHaveBeenCalledWith({
+        directoryPath: "/tmp/project",
+        mountName: "project",
+        destinationPath: "root",
+      });
+    });
+
+    fireEvent.click(screen.getByText("Stop inference"));
+
+    await waitFor(() => {
+      expect(stopModelInference).toHaveBeenCalled();
+      expect(screen.getByText("stop_inference")).toBeTruthy();
+    });
+  });
+
   it("queues runtime actions and logs assistant command execution", async () => {
     const setOutputPath = jest.fn();
 
@@ -384,6 +610,7 @@ describe("WorkflowProvider", () => {
     await waitFor(() => {
       expect(screen.getByText("start_inference")).toBeTruthy();
     });
+    expect(screen.getByText("/tmp/runtime-image.h5")).toBeTruthy();
     expect(appendWorkflowEvent).toHaveBeenCalledWith(
       1,
       expect.objectContaining({
@@ -424,7 +651,7 @@ describe("WorkflowProvider", () => {
 
     await waitFor(() => {
       expect(getConfigPresetContent).toHaveBeenCalledWith(
-        "configs/MitoEM/Mito25-Local-Smoke-BC.yaml",
+        "configs/MitoEM/Mito-CaseStudy-BC.yaml",
       );
       expect(setTrainingConfig).toHaveBeenCalledWith(
         "DATASET: {}\nSOLVER: {}\n",

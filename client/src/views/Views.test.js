@@ -57,6 +57,7 @@ jest.mock("@ant-design/icons", () => {
     ThunderboltOutlined: Icon,
     DashboardOutlined: Icon,
     BugOutlined: Icon,
+    ProjectOutlined: Icon,
   MessageOutlined: Icon,
   };
 });
@@ -66,6 +67,7 @@ jest.mock("./Visualization", () => () => <div>Visualization Content</div>);
 jest.mock("./ModelTraining", () => () => <div>Training Content</div>);
 jest.mock("./ModelInference", () => () => <div>Inference Content</div>);
 jest.mock("./Monitoring", () => () => <div>Monitoring Content</div>);
+jest.mock("./ProjectProgress", () => () => <div>Project Progress Content</div>);
 jest.mock("./MaskProofreading", () => () => (
   <div>Mask Proofreading Content</div>
 ));
@@ -101,6 +103,7 @@ describe("Views", () => {
     expect(screen.getByText("Train Model")).toBeTruthy();
     expect(screen.getByText("Run Model")).toBeTruthy();
     expect(screen.getByText("Monitor")).toBeTruthy();
+    expect(screen.getByText("Progress")).toBeTruthy();
     expect(screen.getByText("Proofread")).toBeTruthy();
     expect(screen.queryByText("What are you trying to do?")).toBeNull();
     expect(screen.queryByText("Confirm project folders")).toBeNull();
@@ -115,6 +118,14 @@ describe("Views", () => {
     fireEvent.click(screen.getByText("Visualize"));
 
     expect(screen.getByText("Visualization Content")).toBeTruthy();
+  });
+
+  it("opens the project progress tracker tab", () => {
+    render(<Views />);
+
+    fireEvent.click(screen.getByText("Progress"));
+
+    expect(screen.getByText("Project Progress Content")).toBeTruthy();
   });
 
   it("starts a fresh workflow from the app shell", async () => {

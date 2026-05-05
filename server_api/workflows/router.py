@@ -1,11 +1,14 @@
 from __future__ import annotations
 
 import json
+import os
 import pathlib
 import re
+import shutil
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 
+import requests
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
@@ -13,12 +16,19 @@ from sqlalchemy.orm import Session
 from app_event_logger import append_app_event
 from server_api.auth import models as auth_models
 from server_api.auth.database import get_db
-from server_api.auth.router import get_current_user
+from server_api.auth.router import (
+    get_current_user,
+    _looks_like_image_label_pair,
+    _project_extension,
+    _role_for_project_file,
+    _scan_project_profile,
+)
 
 from .db_models import (
     WorkflowAgentPlan,
     WorkflowAgentStep,
     WorkflowArtifact,
+    WorkflowCommand,
     WorkflowCorrectionSet,
     WorkflowEvaluationResult,
     WorkflowEvent,
@@ -32,7 +42,9 @@ from .service import (
     agent_step_to_dict,
     append_workflow_event,
     artifact_to_dict,
+    command_to_dict,
     correction_set_to_dict,
+    create_workflow_command,
     create_workflow_session,
     create_workflow_artifact,
     decode_json,
@@ -88,6 +100,8 @@ class WorkflowEventResponse(BaseModel):
     summary: str
     payload_json: Optional[str] = None
     payload: Dict[str, Any] = Field(default_factory=dict)
+    schema_version: int = 1
+    idempotency_key: Optional[str] = None
     approval_status: str
     created_at: Any
 
@@ -125,6 +139,8 @@ class WorkflowEventCreateRequest(BaseModel):
     stage: Optional[str] = None
     summary: str
     payload: Optional[Dict[str, Any]] = None
+    schema_version: int = 1
+    idempotency_key: Optional[str] = None
     approval_status: str = "not_required"
 
 
@@ -145,6 +161,7 @@ class AgentChatAction(BaseModel):
     label: str
     description: str
     variant: str = "default"
+    run_label: str = "Run in app"
     risk_level: str = "read_only"
     requires_approval: bool = False
     disabled_reason: Optional[str] = None
@@ -170,6 +187,12 @@ class AgentTaskItem(BaseModel):
     priority: str = "normal"
 
 
+class AgentTraceItem(BaseModel):
+    label: str
+    detail: str
+    status: str = "checked"
+
+
 class AgentQueryResponse(BaseModel):
     response: str
     source: str = "workflow_orchestrator"
@@ -181,6 +204,31 @@ class AgentQueryResponse(BaseModel):
     actions: List[AgentChatAction] = Field(default_factory=list)
     commands: List[AgentCommandBlock] = Field(default_factory=list)
     tasks: List[AgentTaskItem] = Field(default_factory=list)
+    trace: List[AgentTraceItem] = Field(default_factory=list)
+
+
+class WorkflowCommandResponse(BaseModel):
+    id: int
+    workflow_id: int
+    command_type: str
+    status: str
+    idempotency_key: str
+    actor: str
+    source_event_id: Optional[int] = None
+    approval_event_id: Optional[int] = None
+    input_json: Optional[str] = None
+    input: Dict[str, Any] = Field(default_factory=dict)
+    result_json: Optional[str] = None
+    result: Dict[str, Any] = Field(default_factory=dict)
+    error_json: Optional[str] = None
+    error: Dict[str, Any] = Field(default_factory=dict)
+    attempt_count: int = 0
+    lease_owner: Optional[str] = None
+    lease_expires_at: Any = None
+    started_at: Any = None
+    completed_at: Any = None
+    created_at: Any
+    updated_at: Any
 
 
 class AgentActionResult(BaseModel):
@@ -188,6 +236,7 @@ class AgentActionResult(BaseModel):
     proposal: WorkflowEventResponse
     events: List[WorkflowEventResponse]
     client_effects: Dict[str, Any] = Field(default_factory=dict)
+    commands: List[WorkflowCommandResponse] = Field(default_factory=list)
 
 
 class WorkflowHotspotItem(BaseModel):
@@ -267,6 +316,38 @@ class WorkflowMetricsResponse(BaseModel):
     metrics: Dict[str, Any] = Field(default_factory=dict)
 
 
+class WorkflowProjectProgressVolume(BaseModel):
+    id: str
+    name: str
+    status: str
+    status_label: str
+    status_source: str
+    project_root: Optional[str] = None
+    volume_set_id: Optional[str] = None
+    volume_set_name: Optional[str] = None
+    image_path: Optional[str] = None
+    segmentation_path: Optional[str] = None
+    segmentation_kind: Optional[str] = None
+    evidence: List[str] = Field(default_factory=list)
+    note: Optional[str] = None
+
+
+class WorkflowProjectProgressResponse(BaseModel):
+    workflow_id: int
+    generated_at: str
+    project_name: Optional[str] = None
+    project_roots: List[Dict[str, Any]] = Field(default_factory=list)
+    summary: Dict[str, Any] = Field(default_factory=dict)
+    status_definitions: Dict[str, str] = Field(default_factory=dict)
+    volumes: List[WorkflowProjectProgressVolume] = Field(default_factory=list)
+
+
+class WorkflowProjectProgressVolumeUpdate(BaseModel):
+    volume_id: str
+    status: Optional[str] = None
+    note: Optional[str] = None
+
+
 class WorkflowExportBundleResponse(BaseModel):
     schema_version: str
     exported_at: str
@@ -315,6 +396,7 @@ class WorkflowArtifactResponse(BaseModel):
 
 
 class WorkflowModelRunCreateRequest(BaseModel):
+    run_id: Optional[str] = None
     run_type: str
     status: str = "pending"
     name: Optional[str] = None
@@ -331,6 +413,7 @@ class WorkflowModelRunCreateRequest(BaseModel):
 class WorkflowModelRunResponse(BaseModel):
     id: int
     workflow_id: int
+    run_id: Optional[str] = None
     run_type: str
     status: str
     name: Optional[str] = None
@@ -555,6 +638,10 @@ def _agent_step_response(step: WorkflowAgentStep) -> WorkflowAgentStepResponse:
 
 def _agent_plan_response(plan: WorkflowAgentPlan) -> WorkflowAgentPlanResponse:
     return WorkflowAgentPlanResponse(**agent_plan_to_dict(plan))
+
+
+def _command_response(command: WorkflowCommand) -> WorkflowCommandResponse:
+    return WorkflowCommandResponse(**command_to_dict(command))
 
 
 def _event_list(db: Session, workflow_id: int) -> List[WorkflowEventResponse]:
@@ -1002,6 +1089,19 @@ def _recommendation_for_workflow(
 
 def _client_effects_to_command(client_effects: Dict[str, Any]) -> str:
     lines: List[str] = []
+    if client_effects.get("reset_workspace"):
+        lines.append("app workspace reset")
+
+    if client_effects.get("start_new_workflow"):
+        lines.append("workflow reset current session")
+
+    mount_project = client_effects.get("mount_project") or {}
+    if mount_project.get("directory_path"):
+        lines.append(
+            "app files mount "
+            f"{json.dumps(str(mount_project.get('directory_path')))}"
+        )
+
     navigate_to = client_effects.get("navigate_to")
     if navigate_to:
         lines.append(f"app open {navigate_to}")
@@ -1040,6 +1140,20 @@ def _client_effects_to_command(client_effects: Dict[str, Any]) -> str:
             f"app inference checkpoint set {json.dumps(str(inference_checkpoint_path))}"
         )
 
+    inference_config_preset = client_effects.get("set_inference_config_preset")
+    if inference_config_preset:
+        lines.append(
+            f"app inference config auto-select {json.dumps(str(inference_config_preset))}"
+        )
+
+    inference_image_path = client_effects.get("set_inference_image_path")
+    if inference_image_path:
+        lines.append(f"app inference image set {json.dumps(str(inference_image_path))}")
+
+    inference_label_path = client_effects.get("set_inference_label_path")
+    if inference_label_path:
+        lines.append(f"app inference labels set {json.dumps(str(inference_label_path))}")
+
     runtime_action = client_effects.get("runtime_action") or {}
     runtime_kind = runtime_action.get("kind")
     if runtime_kind == "start_inference":
@@ -1048,6 +1162,10 @@ def _client_effects_to_command(client_effects: Dict[str, Any]) -> str:
         lines.append("app training run")
     elif runtime_kind == "start_proofreading":
         lines.append("app proofreading start")
+    elif runtime_kind == "stop_inference":
+        lines.append("app inference stop")
+    elif runtime_kind == "stop_training":
+        lines.append("app training stop")
 
     workflow_action = client_effects.get("workflow_action") or {}
     workflow_action_kind = workflow_action.get("kind")
@@ -1073,8 +1191,16 @@ def _infer_action_risk(client_effects: Optional[Dict[str, Any]]) -> str:
     workflow_action_kind = (effects.get("workflow_action") or {}).get("kind")
     if runtime_kind in {"start_inference", "start_training"}:
         return "runs_job"
+    if runtime_kind in {"stop_inference", "stop_training"}:
+        return "controls_job"
     if runtime_kind == "start_proofreading":
         return "loads_editor"
+    if runtime_kind == "choose_project_data":
+        return "prefills_form"
+    if effects.get("mount_project") or effects.get("reset_workspace"):
+        return "modifies_workspace"
+    if effects.get("start_new_workflow"):
+        return "writes_workflow_record"
     if workflow_action_kind == "export_bundle":
         return "exports_evidence"
     if workflow_action_kind in {"compute_evaluation", "propose_retraining_stage"}:
@@ -1092,10 +1218,65 @@ def _requires_action_approval(client_effects: Optional[Dict[str, Any]]) -> bool:
     risk = _infer_action_risk(client_effects)
     return risk in {
         "runs_job",
+        "controls_job",
         "loads_editor",
         "exports_evidence",
         "writes_workflow_record",
+        "modifies_workspace",
     }
+
+
+def _one_app_suggestion(
+    actions: List[AgentChatAction],
+    commands: List[AgentCommandBlock],
+) -> tuple[List[AgentChatAction], List[AgentCommandBlock]]:
+    if actions:
+        primary = next(
+            (action for action in actions if action.variant == "primary"),
+            actions[0],
+        )
+        return [primary], []
+    if commands:
+        return [], [commands[0]]
+    return actions, commands
+
+
+def _query_is_informational_followup(lower_query: str) -> bool:
+    stripped = lower_query.strip()
+    if not stripped:
+        return False
+    question_like = (
+        "?" in stripped
+        or stripped.startswith(
+            (
+                "why ",
+                "what ",
+                "which ",
+                "how ",
+                "can you explain",
+                "explain ",
+                "tell me more",
+            )
+        )
+    )
+    if not question_like:
+        return False
+    imperative_terms = [
+        "start ",
+        "run ",
+        "launch ",
+        "open ",
+        "show ",
+        "go to ",
+        "take me ",
+        "proofread",
+        "train now",
+        "start training",
+        "run training",
+        "segment now",
+        "run segmentation",
+    ]
+    return not any(term in stripped for term in imperative_terms)
 
 
 def _build_agent_chat_action(
@@ -1106,6 +1287,7 @@ def _build_agent_chat_action(
     variant: str = "default",
     client_effects: Optional[Dict[str, Any]] = None,
     risk_level: Optional[str] = None,
+    run_label: str = "Run in app",
     requires_approval: Optional[bool] = None,
     disabled_reason: Optional[str] = None,
 ) -> AgentChatAction:
@@ -1116,6 +1298,7 @@ def _build_agent_chat_action(
         label=label,
         description=description,
         variant=variant,
+        run_label=run_label,
         risk_level=inferred_risk,
         requires_approval=(
             _requires_action_approval(effects)
@@ -1164,11 +1347,70 @@ def _build_start_inference_effects(workflow: WorkflowSession) -> Dict[str, Any]:
         "navigate_to": "inference",
         "runtime_action": {"kind": "start_inference"},
     }
+    if workflow.image_path or workflow.dataset_path:
+        effects["set_inference_image_path"] = workflow.image_path or workflow.dataset_path
+    if workflow.label_path or workflow.mask_path:
+        effects["set_inference_label_path"] = workflow.label_path or workflow.mask_path
+    config_preset = _choose_training_config_preset(workflow)
+    if config_preset:
+        effects["set_inference_config_preset"] = config_preset
     if workflow.inference_output_path:
         effects["set_inference_output_path"] = workflow.inference_output_path
     if workflow.checkpoint_path:
         effects["set_inference_checkpoint_path"] = workflow.checkpoint_path
     return effects
+
+
+def _default_mount_project_path() -> str:
+    return os.getenv(
+        "PYTC_INITIAL_PROJECT_ROOT",
+        "/home/weidf/demo_data/mitoem2_progress_demo",
+    )
+
+
+def _build_mount_project_effects(
+    *,
+    directory_path: Optional[str] = None,
+    mount_name: Optional[str] = None,
+) -> Dict[str, Any]:
+    project_path = directory_path or _default_mount_project_path()
+    project_name = mount_name or os.path.basename(project_path.rstrip(os.sep))
+    return {
+        "navigate_to": "files",
+        "mount_project": {
+            "directory_path": project_path,
+            "mount_name": project_name or "Mounted project",
+            "destination_path": "root",
+            "workflow_patch": {
+                "title": project_name or "Mounted project",
+                "dataset_path": project_path,
+                "stage": "setup",
+                "metadata": {
+                    "project_context": {
+                        "project_directory": project_path,
+                        "task_goal": "segmentation",
+                    }
+                },
+            },
+        },
+        "refresh_insights": True,
+    }
+
+
+def _build_reset_workspace_effects() -> Dict[str, Any]:
+    return {
+        "navigate_to": "files",
+        "reset_workspace": True,
+        "refresh_insights": True,
+    }
+
+
+def _build_choose_data_effects() -> Dict[str, Any]:
+    return {
+        "navigate_to": "files",
+        "runtime_action": {"kind": "choose_project_data"},
+        "refresh_insights": True,
+    }
 
 
 def _split_path_parent(path: Optional[str]) -> str:
@@ -1203,6 +1445,13 @@ def _derive_workflow_root_path(workflow: WorkflowSession) -> str:
     return ""
 
 
+def _derive_mount_project_path(workflow: WorkflowSession) -> str:
+    dataset_path = str(workflow.dataset_path or "").replace("\\", "/").rstrip("/")
+    if dataset_path and not pathlib.PurePosixPath(dataset_path).suffix:
+        return dataset_path
+    return _derive_workflow_root_path(workflow) or dataset_path
+
+
 def _derive_training_output_path(workflow: WorkflowSession) -> str:
     if workflow.training_output_path:
         return workflow.training_output_path
@@ -1231,35 +1480,111 @@ def _choose_training_config_preset(workflow: WorkflowSession) -> str:
         ]
     ).lower()
     if "mito" in haystack:
-        return "configs/MitoEM/Mito25-Local-Smoke-BC.yaml"
+        return "configs/MitoEM/Mito-CaseStudy-BC.yaml"
     if "snemi" in haystack:
         return "configs/SNEMI/SNEMI-Affinity-UNet.yaml"
     if "cremi" in haystack:
         return "configs/CREMI/CREMI-Foreground-UNet.yaml"
-    return "configs/Lucchi-Mitochondria.yaml"
+    return "configs/Lucchi-Mitochondria-CaseStudy.yaml"
 
 
 def _build_start_training_effects(
-    workflow: WorkflowSession, corrected_mask_path: Optional[str]
+    workflow: WorkflowSession,
+    corrected_mask_path: Optional[str],
+    *,
+    volume_subset_plan: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
-    output_path = _derive_training_output_path(workflow)
-    image_path = workflow.image_path or workflow.dataset_path or ""
+    output_path = (
+        str(volume_subset_plan.get("output_path") or "")
+        if isinstance(volume_subset_plan, dict)
+        else ""
+    ) or _derive_training_output_path(workflow)
+    image_path = (
+        str(volume_subset_plan.get("image_path") or "")
+        if isinstance(volume_subset_plan, dict)
+        else ""
+    ) or workflow.image_path or workflow.dataset_path or ""
+    label_path = (
+        str(volume_subset_plan.get("label_path") or "")
+        if isinstance(volume_subset_plan, dict)
+        else ""
+    ) or corrected_mask_path or ""
+    runtime_action: Dict[str, Any] = {
+        "kind": "start_training",
+        "autopick_parameters": True,
+        "parameter_mode": "agent_default",
+    }
+    if isinstance(volume_subset_plan, dict):
+        runtime_action["volume_subset"] = {
+            key: volume_subset_plan.get(key)
+            for key in [
+                "selection_basis",
+                "training_statuses",
+                "train_volume_count",
+                "target_volume_count",
+                "review_volume_count",
+                "manifest_path",
+            ]
+            if volume_subset_plan.get(key) is not None
+        }
     effects: Dict[str, Any] = {
         "navigate_to": "training",
-        "runtime_action": {
-            "kind": "start_training",
-            "autopick_parameters": True,
-            "parameter_mode": "agent_default",
-        },
+        "runtime_action": runtime_action,
         "set_training_config_preset": _choose_training_config_preset(workflow),
     }
     if image_path:
         effects["set_training_image_path"] = image_path
-    if corrected_mask_path:
-        effects["set_training_label_path"] = corrected_mask_path
+    if label_path:
+        effects["set_training_label_path"] = label_path
     if output_path:
         effects["set_training_output_path"] = output_path
         effects["set_training_log_path"] = output_path
+    if isinstance(volume_subset_plan, dict):
+        effects["training_volume_subset"] = {
+            key: volume_subset_plan.get(key)
+            for key in [
+                "run_slug",
+                "selection_basis",
+                "training_statuses",
+                "train_volume_count",
+                "target_volume_count",
+                "review_volume_count",
+                "manifest_path",
+                "train_pairs",
+                "target_images",
+                "review_pairs",
+            ]
+            if volume_subset_plan.get(key) is not None
+        }
+        effects["refresh_project_progress"] = True
+    return effects
+
+
+def _training_run_effects_from_proposal(
+    workflow: WorkflowSession,
+    params: Dict[str, Any],
+) -> Dict[str, Any]:
+    client_effects = params.get("client_effects")
+    if isinstance(client_effects, dict) and (
+        client_effects.get("runtime_action") or {}
+    ).get("kind") == "start_training":
+        return client_effects
+
+    corrected_mask_path = (
+        params.get("label_path")
+        or params.get("corrected_mask_path")
+        or workflow.corrected_mask_path
+        or workflow.label_path
+        or workflow.mask_path
+    )
+    effects = _build_start_training_effects(workflow, corrected_mask_path)
+    if params.get("config_preset"):
+        effects["set_training_config_preset"] = params["config_preset"]
+    if params.get("image_path"):
+        effects["set_training_image_path"] = params["image_path"]
+    if params.get("output_path"):
+        effects["set_training_output_path"] = params["output_path"]
+        effects["set_training_log_path"] = params["output_path"]
     return effects
 
 
@@ -1319,6 +1644,15 @@ def _proofreading_input_blockers(workflow: WorkflowSession) -> List[str]:
     return blockers
 
 
+def _inference_input_blockers(workflow: WorkflowSession) -> List[str]:
+    blockers = []
+    if not (workflow.image_path or workflow.dataset_path):
+        blockers.append("image volume")
+    if not workflow.checkpoint_path:
+        blockers.append("model checkpoint")
+    return blockers
+
+
 def _build_view_data_effects(
     workflow: WorkflowSession,
     *,
@@ -1333,7 +1667,10 @@ def _build_view_data_effects(
         or workflow.corrected_mask_path
         or ""
     )
-    effects: Dict[str, Any] = {"navigate_to": "visualization"}
+    effects: Dict[str, Any] = {
+        "navigate_to": "visualization",
+        "runtime_action": {"kind": "load_visualization"},
+    }
     if image_path:
         effects["set_visualization_image_path"] = image_path
     if label_path:
@@ -1386,7 +1723,7 @@ def _build_default_agent_actions(
                 "Choose data",
                 "Pick the image and mask for this segmentation loop.",
                 variant="primary",
-                client_effects={"navigate_to": "files"},
+                client_effects=_build_choose_data_effects(),
             ),
             _build_agent_chat_action(
                 "open-visualization",
@@ -1405,13 +1742,13 @@ def _build_default_agent_actions(
     if workflow.stage == "visualization":
         if not can_start_proofreading:
             return [
-                _build_agent_chat_action(
-                    "open-files",
-                    "Choose data",
-                    f"Proofreading needs {', '.join(proofreading_blockers)}.",
-                    variant="primary",
-                    client_effects={"navigate_to": "files"},
-                ),
+            _build_agent_chat_action(
+                "open-files",
+                "Choose data",
+                f"Proofreading needs {', '.join(proofreading_blockers)}.",
+                variant="primary",
+                client_effects=_build_choose_data_effects(),
+            ),
                 _build_agent_chat_action(
                     "open-inference",
                     "Run Model",
@@ -1514,6 +1851,7 @@ def _build_default_agent_actions(
                 "Train on edits",
                 "Start training with the saved mask edits.",
                 variant="primary",
+                run_label="Review run",
                 client_effects=training_effects,
             ),
             _build_agent_chat_action(
@@ -1578,6 +1916,146 @@ def _query_has(lower_query: str, terms: List[str]) -> bool:
         ):
             return True
     return False
+
+
+def _casual_query_variant(lower_query: str) -> str:
+    squashed = re.sub(r"([a-z])\1{2,}", r"\1\1", lower_query)
+    return squashed.replace("datta", "data")
+
+
+def _query_has_relaxed(lower_query: str, terms: List[str]) -> bool:
+    return _query_has(lower_query, terms) or _query_has(
+        _casual_query_variant(lower_query),
+        terms,
+    )
+
+
+def _query_wants_inference_launch(lower_query: str) -> bool:
+    normalized = _casual_query_variant(lower_query)
+    if _query_has_relaxed(
+        lower_query,
+        [
+            "start inference",
+            "run inference",
+            "launch inference",
+            "infer",
+            "run model",
+            "run the model",
+            "start model",
+            "launch model",
+            "predict",
+            "prediction",
+            "make a prediction",
+            "make predictions",
+            "generate predictions",
+        ],
+    ):
+        return True
+    return bool(
+        re.search(
+            r"\b(make|create|generate|predict|produce)\b.{0,32}\b(mask|masks|label|labels|prediction|predictions)\b",
+            normalized,
+        )
+    )
+
+
+def _query_wants_segmentation_launch(lower_query: str) -> bool:
+    normalized = _casual_query_variant(lower_query)
+    if _query_has_relaxed(
+        lower_query,
+        [
+            "run segmentation",
+            "start segmentation",
+            "launch segmentation",
+            "segment this",
+            "segment my",
+            "segment volume",
+            "segment the volume",
+            "get my volume segmented",
+            "process volume",
+            "run this volume",
+            "predict masks",
+            "make a prediction",
+            "make predictions",
+            "segment data",
+            "segment some data",
+            "segment the data",
+            "segment my data",
+            "segment images",
+            "segment volume",
+            "make masks",
+            "create masks",
+            "generate masks",
+            "find mitochondria",
+            "detect mitochondria",
+            "label mitochondria",
+        ],
+    ):
+        return True
+    if re.search(r"\bseg+(?:ment(?:ation|ed|ing|s)?|mentation|s?)\b", normalized):
+        return True
+    return bool(
+        re.search(
+            r"\b(segment|find|detect|label)\b.{0,40}\b(data|volume|image|images|mitochondria|mito|mask|masks)\b",
+            normalized,
+        )
+    )
+
+
+def _query_wants_visualization_launch(lower_query: str) -> bool:
+    normalized = _casual_query_variant(lower_query)
+    if _query_has_relaxed(
+        lower_query,
+        [
+            "visualize",
+            "visualise",
+            "vis data",
+            "vis volume",
+            "vis volumes",
+            "vis labels",
+            "vis masks",
+            "viz data",
+            "viz volume",
+            "viz volumes",
+            "viz labels",
+            "viz masks",
+            "visualization",
+            "view data",
+            "view volume",
+            "view volumes",
+            "view labels",
+            "view masks",
+            "view segmentations",
+            "look at labels",
+            "look at my labels",
+            "look at masks",
+            "look at my masks",
+            "look at segmentations",
+            "show data",
+            "show volume",
+            "show labels",
+            "show masks",
+            "show segs",
+            "show segmentations",
+            "inspect data",
+            "inspect volume",
+            "inspect labels",
+            "inspect masks",
+            "look at data",
+            "look at volume",
+            "look at labels",
+            "look at masks",
+            "look at segs",
+            "open viewer",
+        ],
+    ):
+        return True
+    return bool(
+        re.search(
+            r"\b(show|see|view|vis|viz|visuali[sz]e|look at|inspect|open)\b.{0,36}\b(data|volume|volumes|image|images|label|labels|mask|masks|seg|segs|segmentation|segmentations)\b",
+            normalized,
+        )
+    )
 
 
 def _is_greeting_query(lower_query: str) -> bool:
@@ -1659,6 +2137,14 @@ def _build_navigation_action(
 def _target_tab_from_query(lower_query: str) -> Optional[Dict[str, str]]:
     targets = [
         (
+            ["project progress", "progress tracker", "project tracker", "volume tracker", "progress"],
+            {
+                "tab": "project-progress",
+                "label": "Open Progress",
+                "description": "Open the volume-level project progress tracker.",
+            },
+        ),
+        (
             [
                 "files",
                 "file management",
@@ -1731,6 +2217,271 @@ def _target_tab_from_query(lower_query: str) -> Optional[Dict[str, str]]:
     return None
 
 
+SEMANTIC_WORKFLOW_INTENTS = {
+    "greeting",
+    "status",
+    "capabilities",
+    "project_context",
+    "project_context_update",
+    "needed_from_user",
+    "navigate",
+    "export_evidence",
+    "compute_evaluation",
+    "view_data",
+    "set_visualization_scales",
+    "start_training",
+    "start_inference",
+    "start_segmentation",
+    "start_proofreading",
+    "stage_retraining",
+    "inspect_failure",
+    "mount_project",
+    "reset_workspace",
+    "validate_project",
+    "prepare_data",
+    "configure_training",
+    "configure_inference",
+    "monitor_jobs",
+    "stop_runtime",
+    "repair",
+    "clarify_next_job",
+}
+
+
+def _semantic_intent_enabled() -> bool:
+    if os.getenv("PYTC_WORKFLOW_SEMANTIC_ROUTER", "1").strip().lower() in {
+        "0",
+        "false",
+        "off",
+        "no",
+    }:
+        return False
+    if os.getenv("PYTEST_CURRENT_TEST"):
+        return False
+    return True
+
+
+def _semantic_workflow_state(workflow: WorkflowSession) -> Dict[str, Any]:
+    project_context = _workflow_project_context(workflow)
+    metadata = decode_json(workflow.metadata_json)
+    project_observation = (
+        metadata.get("project_observation") if isinstance(metadata, dict) else {}
+    )
+    if not isinstance(project_observation, dict):
+        project_observation = {}
+    return {
+        "stage": workflow.stage,
+        "title": workflow.title,
+        "has_image": bool(workflow.image_path or workflow.dataset_path),
+        "has_label_or_mask": bool(workflow.label_path or workflow.mask_path),
+        "has_checkpoint": bool(workflow.checkpoint_path),
+        "has_prediction": bool(workflow.inference_output_path),
+        "has_corrected_mask": bool(workflow.corrected_mask_path),
+        "project_context": {
+            "imaging_modality": project_context.get("imaging_modality"),
+            "target_structure": project_context.get("target_structure"),
+            "optimization_priority": project_context.get("optimization_priority"),
+            "voxel_size_nm": project_context.get("voxel_size_nm"),
+        },
+        "project_observation": {
+            "root_count": len(project_observation.get("roots") or []),
+            "volume_set_count": len(project_observation.get("volume_sets") or []),
+            "volume_sets": [
+                {
+                    "name": item.get("name"),
+                    "image_root": item.get("image_root"),
+                    "label_root": item.get("label_root"),
+                    "pair_count": item.get("pair_count"),
+                    "is_current": item.get("is_current"),
+                }
+                for item in (project_observation.get("volume_sets") or [])[:6]
+                if isinstance(item, dict)
+            ],
+        },
+    }
+
+
+def _extract_json_object(text: str) -> Dict[str, Any]:
+    raw = str(text or "").strip()
+    if raw.startswith("```"):
+        raw = re.sub(r"^```(?:json)?\s*", "", raw, flags=re.IGNORECASE)
+        raw = re.sub(r"\s*```$", "", raw)
+    try:
+        parsed = json.loads(raw)
+        return parsed if isinstance(parsed, dict) else {}
+    except json.JSONDecodeError:
+        match = re.search(r"\{[\s\S]*\}", raw)
+        if not match:
+            return {}
+        try:
+            parsed = json.loads(match.group(0))
+            return parsed if isinstance(parsed, dict) else {}
+        except json.JSONDecodeError:
+            return {}
+
+
+def _semantic_intent_payload(query: str, workflow: WorkflowSession) -> Dict[str, Any]:
+    if not _semantic_intent_enabled():
+        return {}
+
+    base_url = os.getenv("OLLAMA_BASE_URL", "http://127.0.0.1:11434").rstrip("/")
+    model = os.getenv(
+        "PYTC_WORKFLOW_INTENT_MODEL",
+        os.getenv("OLLAMA_MODEL", "qwen3.6:27b"),
+    )
+    timeout = float(os.getenv("PYTC_WORKFLOW_INTENT_TIMEOUT", "8"))
+    workflow_state = _semantic_workflow_state(workflow)
+    prompt = f"""
+Classify a PyTC Client workflow chat message by meaning. Return ONLY JSON.
+
+Valid intents:
+greeting, status, capabilities, style_feedback, project_context, project_context_update,
+project_files, project_progress, needed_from_user, navigate, export_evidence, compute_evaluation, view_data,
+set_visualization_scales, start_training, start_inference, start_segmentation,
+start_proofreading, stage_retraining, inspect_failure, mount_project,
+reset_workspace, validate_project, prepare_data, configure_training,
+configure_inference, monitor_jobs, stop_runtime, repair, clarify_next_job.
+
+Rules:
+- Interpret casual language semantically, not by exact wording.
+- "segment my data", "make mitochondria masks", "find cells", "label this volume"
+  mean start_segmentation.
+- "show/view/look at/see my labels/masks/segs/data" means view_data.
+- "fix/clean/check/proofread/review labels or masks" means start_proofreading.
+- "train/learn from labels/fit a model/use labels or edits" means start_training.
+- "train from ground truth", "use the fully good volumes", or
+  "train on good masks to segment the rest" means start_training, not project_progress.
+- If training and "segment the rest/remaining/no segmentation" appear together, choose
+  start_training and leave the segmentation targets in the reason.
+- "run model/infer/predict outputs" means start_inference.
+- "did it improve/compare/check metrics/report score" means compute_evaluation.
+- "package/export/report/evidence bundle" means export_evidence.
+- "mount/remount/open project/lucchi/prepilot/suggested project" means mount_project.
+- "what files/folders are here" or "list this directory" means project_files.
+- "project progress", "progress tracker", "how many volumes are done", "ground truth vs unproofread vs missing segmentation" means project_progress.
+- "reset/clear cached state/workspace/cache/context" means reset_workspace.
+- "validate/check folder/inspect project structure" means validate_project.
+- "prepare/convert/crop/split/normalize/downsample data" means prepare_data.
+- "configure training/training settings/augmentation/batch size" means configure_training.
+- "configure inference/inference settings/tiling/threshold" means configure_inference.
+- "logs/tensorboard/gpu/job status/monitor" means monitor_jobs.
+- "stop/cancel/kill the run/job/training/inference" means stop_runtime.
+- "too robotic", "less robotic", "sound more human", or feedback about chat tone
+  means style_feedback.
+- "go/open/switch to a screen" means navigate and set tab.
+- "what next/where are we/status/what is missing" means status.
+- If the user is only providing domain/context like "EM mitochondria accuracy",
+  use project_context_update and fill context.
+- Words like "quick" in "look at labels real quick" do NOT mean speed priority.
+- If the message is gibberish or truly unrelated, use clarify_next_job.
+
+Tabs for navigate: files, visualization, inference, training, monitoring, project-progress, mask-proofreading.
+Context fields can be null: imaging_modality, target_structure, optimization_priority, voxel_size_nm, use_defaults.
+Voxel size is z,y,x nanometers, for example [40,4,4].
+
+Workflow state:
+{json.dumps(workflow_state, sort_keys=True)}
+
+User message:
+{query[:1000]!r}
+
+JSON schema:
+{{"intent":"...", "confidence":0.0, "tab":null, "context":{{"imaging_modality":null,"target_structure":null,"optimization_priority":null,"voxel_size_nm":null,"use_defaults":null}}, "reason":"short"}}
+""".strip()
+    try:
+        response = requests.post(
+            f"{base_url}/api/generate",
+            json={
+                "model": model,
+                "prompt": prompt,
+                "stream": False,
+                "think": False,
+                "format": "json",
+                "options": {"temperature": 0, "num_predict": 180},
+            },
+            timeout=timeout,
+        )
+        response.raise_for_status()
+        response_payload = response.json()
+        parsed = _extract_json_object(str(response_payload.get("response") or ""))
+    except Exception as exc:
+        append_app_event(
+            component="workflow_agent",
+            event="semantic_intent_failed",
+            level="WARNING",
+            message=str(exc),
+            workflow_id=workflow.id,
+            model=model,
+            query_preview=query[:160],
+        )
+        return {}
+
+    intent = str(parsed.get("intent") or "").strip().lower()
+    if intent not in SEMANTIC_WORKFLOW_INTENTS:
+        return {}
+    try:
+        confidence = float(parsed.get("confidence") or 0.0)
+    except (TypeError, ValueError):
+        confidence = 0.0
+    if confidence < float(os.getenv("PYTC_WORKFLOW_INTENT_MIN_CONFIDENCE", "0.45")):
+        return {}
+    context = parsed.get("context")
+    if not isinstance(context, dict):
+        context = {}
+    return {
+        "intent": intent,
+        "confidence": confidence,
+        "tab": parsed.get("tab"),
+        "context": {
+            key: value
+            for key, value in context.items()
+            if key
+            in {
+                "imaging_modality",
+                "target_structure",
+                "optimization_priority",
+                "voxel_size_nm",
+                "use_defaults",
+            }
+            and value is not None
+            and value != ""
+            and value != "null"
+        },
+        "reason": str(parsed.get("reason") or "")[:240],
+    }
+
+
+def _target_tab_from_semantic(
+    semantic_intent: Optional[str],
+    semantic_tab: Any,
+) -> Optional[Dict[str, str]]:
+    if semantic_intent != "navigate":
+        return None
+    tab = str(semantic_tab or "").strip().lower()
+    tab_specs = {
+        "files": ("Open Files", "Open project files and mounted datasets."),
+        "visualization": ("Open Visualize", "Open the image/label viewer."),
+        "inference": ("Open Run Model", "Open model inference setup."),
+        "training": ("Open Train Model", "Open model training setup."),
+        "monitoring": ("Open Monitor", "Open runtime and training monitoring."),
+        "project-progress": ("Open Progress", "Open the volume-level project progress tracker."),
+        "progress": ("Open Progress", "Open the volume-level project progress tracker."),
+        "mask-proofreading": ("Open Proofread", "Open the mask proofreading workbench."),
+        "proofreading": ("Open Proofread", "Open the mask proofreading workbench."),
+    }
+    if tab not in tab_specs:
+        return None
+    normalized_tab = (
+        "mask-proofreading"
+        if tab == "proofreading"
+        else "project-progress"
+        if tab == "progress"
+        else tab
+    )
+    label, description = tab_specs[tab]
+    return {"tab": normalized_tab, "label": label, "description": description}
+
+
 def _latest_completed_inference_runs(
     db: Session, workflow_id: int
 ) -> List[WorkflowModelRun]:
@@ -1800,10 +2551,12 @@ def _build_export_bundle_effects() -> Dict[str, Any]:
 def _format_greeting_response(
     recommendation: WorkflowAgentRecommendationResponse,
 ) -> str:
+    stage = recommendation.stage.replace("_", " ")
+    decision = _strip_sentence_period(recommendation.decision)
     return (
-        f"Hi. You are in {recommendation.stage.replace('_', ' ')}.\n"
-        f"Next: {recommendation.decision}\n"
-        "Tell me the job when you want me to act."
+        f"Hey, this workflow is in {stage}. "
+        f"The next useful move looks like: {decision}. "
+        "Ask me what I see here, or tell me what you want to open or run."
     )
 
 
@@ -2377,15 +3130,90 @@ def _format_workflow_agent_response(
 ) -> str:
     ready_count = sum(1 for item in recommendation.readiness if item.complete)
     total_count = len(recommendation.readiness)
-    lines = [
-        f"Do this: {recommendation.decision}",
-        f"Why: {recommendation.rationale}",
-    ]
+    decision = _strip_sentence_period(recommendation.decision)
+    rationale = _lower_first(_strip_sentence_period(recommendation.rationale))
+    lines = [f"I would start here: {decision}."]
+    if rationale:
+        lines.append(f"That fits because {rationale}.")
     if total_count:
-        lines.append(f"Ready: {ready_count}/{total_count} loop checks pass.")
+        lines.append(f"{ready_count}/{total_count} workflow checks are ready.")
     if recommendation.blockers:
-        lines.append(f"Watch out: {recommendation.blockers[0]}")
-    return "\n".join(lines)
+        lines.append(
+            f"The only catch is {_lower_first(_strip_sentence_period(recommendation.blockers[0]))}."
+        )
+    return " ".join(lines)
+
+
+def _strip_sentence_period(text: str) -> str:
+    return str(text or "").strip().rstrip(".")
+
+
+def _lower_first(text: str) -> str:
+    text = str(text or "").strip()
+    if not text:
+        return text
+    return text[:1].lower() + text[1:]
+
+
+def _humanize_agent_response(response: str) -> str:
+    lines = [line.strip() for line in str(response or "").splitlines() if line.strip()]
+    if not lines:
+        return response
+
+    buckets: Dict[str, List[str]] = {
+        "action": [],
+        "why": [],
+        "current": [],
+        "blocker": [],
+        "watch": [],
+        "ready": [],
+        "other": [],
+    }
+    for line in lines:
+        lowered = line.lower()
+        if lowered.startswith("do this:"):
+            buckets["action"].append(line.split(":", 1)[1].strip())
+        elif lowered.startswith("why:"):
+            buckets["why"].append(line.split(":", 1)[1].strip())
+        elif lowered.startswith("current read:"):
+            buckets["current"].append(line.split(":", 1)[1].strip())
+        elif lowered.startswith("blocker:") or lowered.startswith("current gap:"):
+            buckets["blocker"].append(line.split(":", 1)[1].strip())
+        elif lowered.startswith("watch out:"):
+            buckets["watch"].append(line.split(":", 1)[1].strip())
+        elif lowered.startswith("ready:"):
+            buckets["ready"].append(line)
+        else:
+            buckets["other"].append(line)
+
+    if not any(buckets[key] for key in ("action", "why", "current", "blocker", "watch", "ready")):
+        return response
+
+    parts: List[str] = []
+    if buckets["current"]:
+        current = _lower_first(_strip_sentence_period(buckets["current"][0]))
+        parts.append(f"Right now I would treat this as the next step: {current}.")
+    if buckets["action"]:
+        action = _strip_sentence_period(buckets["action"][0])
+        if action.lower().startswith(("open ", "show ", "view ", "run ", "proofread ", "train ", "compute ", "export ", "stop ")):
+            parts.append(f"I can {_lower_first(action)}.")
+        else:
+            parts.append(f"I would start here: {action}.")
+    if buckets["why"]:
+        parts.append(
+            f"That fits because {_lower_first(_strip_sentence_period(buckets['why'][0]))}."
+        )
+    if buckets["watch"]:
+        parts.append(f"One caveat: {_strip_sentence_period(buckets['watch'][0])}.")
+    if buckets["blocker"]:
+        parts.append(
+            f"The thing blocking that is {_lower_first(_strip_sentence_period(buckets['blocker'][0]))}."
+        )
+    if buckets["ready"]:
+        ready = buckets["ready"][0].split(":", 1)[-1].strip()
+        parts.append(f"Readiness: {ready}")
+    parts.extend(buckets["other"])
+    return " ".join(parts)
 
 
 def _short_path_label(path: Optional[str]) -> str:
@@ -2443,6 +3271,1170 @@ def _workflow_volume_pair_discovery(workflow: WorkflowSession) -> Dict[str, Any]
         )
 
 
+def _normalize_absolute_path(value: Optional[str]) -> str:
+    if not value:
+        return ""
+    return os.path.abspath(os.path.expanduser(str(value)))
+
+
+def _absolute_project_path(root_path: str, path_value: Optional[str]) -> str:
+    if not path_value:
+        return ""
+    text = str(path_value)
+    if os.path.isabs(text):
+        return _normalize_absolute_path(text)
+    return _normalize_absolute_path(os.path.join(root_path, text))
+
+
+def _path_is_within(path_value: Optional[str], root_value: Optional[str]) -> bool:
+    path = _normalize_absolute_path(path_value)
+    root = _normalize_absolute_path(root_value)
+    if not path or not root:
+        return False
+    try:
+        return os.path.commonpath([path, root]) == root
+    except ValueError:
+        return False
+
+
+def _workflow_path_values(workflow: WorkflowSession) -> List[str]:
+    return [
+        str(value)
+        for value in [
+            workflow.dataset_path,
+            workflow.image_path,
+            workflow.label_path,
+            workflow.mask_path,
+            workflow.inference_output_path,
+            workflow.corrected_mask_path,
+            workflow.checkpoint_path,
+            workflow.config_path,
+        ]
+        if value
+    ]
+
+
+def _mounted_project_roots(
+    db: Session, user_id: int
+) -> List[Dict[str, Any]]:
+    rows = (
+        db.query(auth_models.File)
+        .filter(
+            auth_models.File.user_id == user_id,
+            auth_models.File.path == "root",
+            auth_models.File.is_folder.is_(True),
+            auth_models.File.physical_path.isnot(None),
+        )
+        .order_by(auth_models.File.name.asc())
+        .all()
+    )
+    roots = []
+    for row in rows:
+        root_path = _normalize_absolute_path(row.physical_path)
+        if root_path and os.path.isdir(root_path):
+            roots.append(
+                {
+                    "path": root_path,
+                    "name": row.name,
+                    "mounted_root_id": row.id,
+                    "source": "mounted_root",
+                }
+            )
+    return roots
+
+
+def _workflow_project_root_candidates(
+    db: Session, workflow: WorkflowSession, user_id: int
+) -> List[Dict[str, Any]]:
+    candidates: List[Dict[str, Any]] = []
+    seen_paths: set[str] = set()
+
+    def add_candidate(path_value: Optional[str], source: str, **extra: Any) -> None:
+        root_path = _normalize_absolute_path(path_value)
+        if not root_path or root_path in seen_paths or not os.path.isdir(root_path):
+            return
+        seen_paths.add(root_path)
+        candidates.append({"path": root_path, "source": source, **extra})
+
+    if workflow.dataset_path and os.path.isdir(_normalize_absolute_path(workflow.dataset_path)):
+        add_candidate(workflow.dataset_path, "workflow_dataset_path")
+
+    derived_root = _derive_mount_project_path(workflow)
+    if derived_root and os.path.isdir(_normalize_absolute_path(derived_root)):
+        add_candidate(derived_root, "derived_workflow_root")
+
+    mounted_roots = _mounted_project_roots(db, user_id)
+    workflow_paths = [_normalize_absolute_path(path) for path in _workflow_path_values(workflow)]
+    for root in mounted_roots:
+        root_path = root["path"]
+        if any(_path_is_within(path, root_path) for path in workflow_paths):
+            add_candidate(
+                root_path,
+                "mounted_root_match",
+                name=root.get("name"),
+                mounted_root_id=root.get("mounted_root_id"),
+            )
+
+    if not candidates and len(mounted_roots) == 1:
+        root = mounted_roots[0]
+        add_candidate(
+            root["path"],
+            "single_mounted_root",
+            name=root.get("name"),
+            mounted_root_id=root.get("mounted_root_id"),
+        )
+
+    return candidates[:3]
+
+
+def _observed_volume_sets_from_profile(
+    root_path: str, profile: Dict[str, Any]
+) -> List[Dict[str, Any]]:
+    volume_sets = profile.get("volume_sets") or profile.get("schema", {}).get(
+        "volume_sets"
+    )
+    if not isinstance(volume_sets, list):
+        return []
+
+    observed_sets: List[Dict[str, Any]] = []
+    for item in volume_sets[:8]:
+        if not isinstance(item, dict):
+            continue
+        examples = []
+        for example in item.get("examples") or []:
+            if not isinstance(example, dict):
+                continue
+            image_path = _absolute_project_path(root_path, example.get("image"))
+            label_path = _absolute_project_path(root_path, example.get("label"))
+            examples.append(
+                {
+                    "image": example.get("image"),
+                    "label": example.get("label"),
+                    "image_path": image_path,
+                    "label_path": label_path,
+                }
+            )
+        image_root_path = _absolute_project_path(root_path, item.get("image_root"))
+        label_root_path = _absolute_project_path(root_path, item.get("label_root"))
+        primary_example = examples[0] if examples else {}
+        observed_sets.append(
+            {
+                "id": item.get("id") or f"set-{len(observed_sets) + 1}",
+                "name": item.get("name") or item.get("image_root") or "volume set",
+                "project_root": root_path,
+                "image_root": item.get("image_root"),
+                "label_root": item.get("label_root"),
+                "image_root_path": image_root_path,
+                "label_root_path": label_root_path,
+                "image_path": primary_example.get("image_path") or image_root_path,
+                "label_path": primary_example.get("label_path") or label_root_path,
+                "image_count": int(item.get("image_count") or 0),
+                "label_count": int(item.get("label_count") or 0),
+                "pair_count": int(item.get("pair_count") or 0),
+                "examples": examples[:3],
+            }
+        )
+    return observed_sets
+
+
+def _project_top_level_entries(root_path: str, *, max_entries: int = 12) -> List[Dict[str, Any]]:
+    try:
+        children = sorted(
+            pathlib.Path(root_path).iterdir(),
+            key=lambda item: (not item.is_dir(), item.name.lower()),
+        )
+    except OSError:
+        return []
+    entries = []
+    for child in children[:max_entries]:
+        entries.append(
+            {
+                "name": child.name,
+                "kind": "folder" if child.is_dir() else "file",
+            }
+        )
+    return entries
+
+
+def _is_current_observed_volume_set(
+    workflow: WorkflowSession, volume_set: Dict[str, Any]
+) -> bool:
+    image_path = workflow.image_path or workflow.dataset_path
+    label_path = workflow.label_path or workflow.mask_path
+    if image_path:
+        return (
+            _path_is_within(image_path, volume_set.get("image_root_path"))
+            or _normalize_absolute_path(image_path)
+            == _normalize_absolute_path(volume_set.get("image_path"))
+        )
+    if label_path and volume_set.get("label_root_path"):
+        return _path_is_within(label_path, volume_set.get("label_root_path"))
+    return False
+
+
+def _observe_workflow_project(
+    db: Session, workflow: WorkflowSession, user_id: int
+) -> Dict[str, Any]:
+    roots = _workflow_project_root_candidates(db, workflow, user_id)
+    observed_roots: List[Dict[str, Any]] = []
+    observed_sets: List[Dict[str, Any]] = []
+    errors: List[Dict[str, str]] = []
+
+    for root in roots:
+        root_path = root["path"]
+        try:
+            profile = _scan_project_profile(root_path)
+        except Exception as exc:
+            errors.append({"path": root_path, "error": type(exc).__name__})
+            append_app_event(
+                component="workflow_agent",
+                event="project_observation_scan_failed",
+                level="WARNING",
+                message=str(exc),
+                workflow_id=workflow.id,
+                project_root=root_path,
+            )
+            continue
+
+        root_sets = _observed_volume_sets_from_profile(root_path, profile)
+        for volume_set in root_sets:
+            volume_set["is_current"] = _is_current_observed_volume_set(
+                workflow, volume_set
+            )
+        observed_sets.extend(root_sets)
+        observed_roots.append(
+            {
+                "path": root_path,
+                "name": root.get("name") or pathlib.Path(root_path).name,
+                "source": root.get("source"),
+                "mounted_root_id": root.get("mounted_root_id"),
+                "counts": profile.get("counts") or {},
+                "volume_set_count": len(root_sets),
+                "top_level_entries": _project_top_level_entries(root_path),
+                "context_hints": profile.get("context_hints") or {},
+            }
+        )
+
+    observation = {
+        "observed_at": datetime.now(timezone.utc).isoformat(),
+        "roots": observed_roots,
+        "volume_sets": observed_sets,
+        "errors": errors,
+    }
+    metadata = decode_json(workflow.metadata_json)
+    metadata["project_observation"] = {
+        "observed_at": observation["observed_at"],
+        "roots": observed_roots,
+        "volume_sets": [
+            {
+                key: volume_set.get(key)
+                for key in [
+                    "id",
+                    "name",
+                    "project_root",
+                    "image_root",
+                    "label_root",
+                    "image_path",
+                    "label_path",
+                    "image_count",
+                    "label_count",
+                    "pair_count",
+                    "is_current",
+                ]
+            }
+            for volume_set in observed_sets[:8]
+        ],
+        "errors": errors,
+    }
+    workflow.metadata_json = encode_json(metadata)
+    append_app_event(
+        component="workflow_agent",
+        event="project_observed",
+        level="INFO",
+        message="Workflow agent refreshed read-only project observation.",
+        workflow_id=workflow.id,
+        root_count=len(observed_roots),
+        volume_set_count=len(observed_sets),
+        roots=[root.get("path") for root in observed_roots],
+    )
+    return observation
+
+
+def _query_wants_alternate_volume_set(lower_query: str) -> bool:
+    if re.search(
+        r"\b(?:another|other|different|alternate|next|second)\b.{0,48}\b(?:set|pair|volume set|image/seg|image and seg)\b",
+        lower_query,
+    ):
+        return True
+    return _query_has_relaxed(
+        lower_query,
+        [
+            "another set",
+            "another pair",
+            "other set",
+            "other pair",
+            "different set",
+            "different pair",
+            "alternate set",
+            "alternate pair",
+            "next set",
+            "next pair",
+            "second set",
+            "second pair",
+            "look for another",
+            "find another",
+        ],
+    )
+
+
+def _select_observed_volume_set(
+    observation: Dict[str, Any],
+    *,
+    prefer_alternate: bool = False,
+) -> Optional[Dict[str, Any]]:
+    volume_sets = [
+        item for item in observation.get("volume_sets") or [] if isinstance(item, dict)
+    ]
+    if not volume_sets:
+        return None
+    if prefer_alternate:
+        for volume_set in volume_sets:
+            if not volume_set.get("is_current"):
+                return volume_set
+        return None
+    for volume_set in volume_sets:
+        if volume_set.get("is_current"):
+            return volume_set
+    return volume_sets[0]
+
+
+def _query_wants_project_file_overview(lower_query: str) -> bool:
+    return bool(
+        re.search(r"\bwhat\b.{0,40}\bfiles?\b", lower_query)
+        or re.search(r"\bwhat\b.{0,40}\b(?:folder|directory)\b", lower_query)
+        or re.search(r"\b(?:list|show|describe|explain)\b.{0,40}\bfiles?\b", lower_query)
+        or re.search(r"\b(?:inside|in)\b.{0,24}\b(?:folder|directory)\b", lower_query)
+    )
+
+
+def _format_project_files_response(observation: Dict[str, Any]) -> str:
+    roots = observation.get("roots") or []
+    volume_sets = observation.get("volume_sets") or []
+    if not roots:
+        return (
+            "I do not see a mounted project folder yet. Mount or choose a project "
+            "directory and I can inspect the files from there."
+        )
+
+    root = roots[0]
+    root_name = root.get("name") or pathlib.Path(str(root.get("path") or "")).name
+    entries = root.get("top_level_entries") or []
+    entry_names = [
+        f"{entry.get('name')}/" if entry.get("kind") == "folder" else str(entry.get("name"))
+        for entry in entries[:8]
+        if entry.get("name")
+    ]
+    counts = root.get("counts") or {}
+
+    lines = [f"I checked `{root_name}`. At the top level I see {', '.join(entry_names) or 'no indexed files yet'}."]
+    useful_bits = []
+    if counts.get("image"):
+        useful_bits.append(f"{counts.get('image')} image volume(s)")
+    if counts.get("label"):
+        useful_bits.append(f"{counts.get('label')} mask/label volume(s)")
+    if counts.get("prediction"):
+        useful_bits.append(f"{counts.get('prediction')} prediction/output file(s)")
+    if counts.get("config"):
+        useful_bits.append(f"{counts.get('config')} config file(s)")
+    if counts.get("checkpoint"):
+        useful_bits.append(f"{counts.get('checkpoint')} checkpoint(s)")
+    if useful_bits:
+        lines.append("The useful workflow pieces look like " + ", ".join(useful_bits) + ".")
+
+    if volume_sets:
+        set_summaries = []
+        for item in volume_sets[:3]:
+            set_summaries.append(
+                f"{item.get('name') or 'volume set'}"
+                f" ({item.get('image_count') or 0} images, {item.get('label_count') or 0} labels)"
+            )
+        lines.append("I also found " + "; ".join(set_summaries) + ".")
+    lines.append("Ask me to open one of those sets and I can route it straight into Visualize.")
+    return "\n".join(lines)
+
+
+PROJECT_PROGRESS_STATUS_DEFINITIONS = {
+    "ground_truth": "Fully good: has a proofread, corrected, curated, or ground-truth segmentation.",
+    "needs_proofreading": "Has a segmentation or mask, but it is not confirmed as proofread ground truth.",
+    "missing_segmentation": "Has image data, but no matching segmentation was found.",
+    "ignored": "Excluded from the active progress denominator.",
+}
+PROJECT_PROGRESS_GROUND_TRUTH_MARKERS = {
+    "corrected",
+    "curated",
+    "expert",
+    "ground",
+    "groundtruth",
+    "gt",
+    "proofread",
+    "proofreaded",
+    "truth",
+    "verified",
+}
+
+
+def _project_progress_pair_key(path_value: Optional[str]) -> str:
+    name = pathlib.Path(str(path_value or "")).name.lower()
+    extension = _project_extension(name)
+    if extension:
+        name = name[: -len(extension)]
+    replacements = (
+        "ground_truth",
+        "groundtruth",
+        "proofread",
+        "corrected",
+        "curated",
+        "expert",
+        "consensus",
+        "image",
+        "images",
+        "im",
+        "img",
+        "raw",
+        "volume",
+        "vol",
+        "label",
+        "labels",
+        "mask",
+        "masks",
+        "segmentation",
+        "seg",
+        "mito",
+        "gt",
+    )
+    for token in replacements:
+        name = re.sub(rf"(^|[_\-\s]){re.escape(token)}([_\-\s]|$)", "_", name)
+    return re.sub(r"[^a-z0-9]+", "_", name).strip("_")
+
+
+def _project_progress_relpath(path_value: str, root_path: str) -> str:
+    try:
+        return os.path.relpath(path_value, root_path)
+    except ValueError:
+        return path_value
+
+
+def _project_progress_volume_id(image_path: str, root_path: str) -> str:
+    return _project_progress_relpath(image_path, root_path).replace(os.sep, "/")
+
+
+def _project_progress_tokens(path_value: Optional[str]) -> set[str]:
+    return {
+        token
+        for token in re.split(r"[^a-z0-9]+", str(path_value or "").lower())
+        if token
+    }
+
+
+def _project_progress_has_ground_truth_marker(path_value: Optional[str]) -> bool:
+    tokens = _project_progress_tokens(path_value)
+    normalized = re.sub(r"[^a-z0-9]+", "_", str(path_value or "").lower())
+    return bool(
+        tokens & PROJECT_PROGRESS_GROUND_TRUTH_MARKERS
+        or "ground_truth" in normalized
+        or "groundtruth" in normalized
+    )
+
+
+def _project_progress_volume_candidates(
+    path_value: Optional[str],
+    *,
+    project_root: str,
+    roles: set[str],
+    max_candidates: int = 500,
+) -> List[str]:
+    if not path_value:
+        return []
+    absolute = pathlib.Path(path_value)
+    if not absolute.is_absolute():
+        absolute = pathlib.Path(project_root) / absolute
+    try:
+        absolute = absolute.expanduser().resolve()
+    except OSError:
+        absolute = absolute.expanduser()
+    if absolute.is_file() or (
+        absolute.is_dir() and _project_extension(absolute.name) in {".zarr", ".n5"}
+    ):
+        relative = _project_progress_relpath(str(absolute), project_root)
+        role = _role_for_project_file(relative)
+        return [str(absolute)] if role in roles or role == "volume" else []
+    if not absolute.is_dir():
+        return []
+
+    def is_candidate(child: pathlib.Path) -> bool:
+        if any(part.startswith(".") or part == "__pycache__" for part in child.parts):
+            return False
+        if not child.is_file() and not (
+            child.is_dir() and _project_extension(child.name) in {".zarr", ".n5"}
+        ):
+            return False
+        relative = _project_progress_relpath(str(child), project_root)
+        role = _role_for_project_file(relative)
+        return role in roles or role == "volume"
+
+    direct = [
+        str(child)
+        for child in sorted(absolute.iterdir(), key=lambda item: item.name.lower())
+        if is_candidate(child)
+    ]
+    if direct:
+        return direct[:max_candidates]
+
+    candidates: List[str] = []
+    for child in sorted(absolute.rglob("*"), key=lambda item: str(item).lower()):
+        if is_candidate(child):
+            candidates.append(str(child))
+            if len(candidates) >= max_candidates:
+                break
+    return candidates
+
+
+def _project_progress_match_segmentation(
+    image_path: str,
+    segmentation_paths: List[str],
+    *,
+    project_root: str,
+    single_image: bool,
+) -> Optional[str]:
+    if not segmentation_paths:
+        return None
+    image_relative = _project_progress_relpath(image_path, project_root)
+    image_key = _project_progress_pair_key(image_path)
+    by_key = {
+        _project_progress_pair_key(segmentation_path): segmentation_path
+        for segmentation_path in segmentation_paths
+    }
+    if image_key and image_key in by_key:
+        return by_key[image_key]
+    for segmentation_path in segmentation_paths:
+        segmentation_relative = _project_progress_relpath(
+            segmentation_path,
+            project_root,
+        )
+        if _looks_like_image_label_pair(image_relative, segmentation_relative):
+            return segmentation_path
+    if single_image and len(segmentation_paths) == 1:
+        return segmentation_paths[0]
+    return None
+
+
+def _project_progress_correction_evidence(
+    db: Session,
+    workflow: WorkflowSession,
+) -> Dict[str, Any]:
+    paths = {
+        _normalize_absolute_path(path)
+        for path in [workflow.corrected_mask_path]
+        if path
+    }
+    correction_sets = (
+        db.query(WorkflowCorrectionSet)
+        .filter(WorkflowCorrectionSet.workflow_id == workflow.id)
+        .all()
+    )
+    for correction_set in correction_sets:
+        for value in [
+            correction_set.corrected_mask_path,
+            correction_set.source_mask_path,
+        ]:
+            if value:
+                paths.add(_normalize_absolute_path(value))
+    keys = {_project_progress_pair_key(path) for path in paths if path}
+    return {"paths": paths, "keys": {key for key in keys if key}}
+
+
+def _project_progress_status_for_volume(
+    *,
+    image_path: str,
+    segmentation_path: Optional[str],
+    correction_evidence: Dict[str, Any],
+) -> tuple[str, str, List[str]]:
+    evidence: List[str] = []
+    if not segmentation_path:
+        return "missing_segmentation", "derived", ["No matching segmentation found."]
+
+    normalized_segmentation = _normalize_absolute_path(segmentation_path)
+    segmentation_key = _project_progress_pair_key(segmentation_path)
+    image_key = _project_progress_pair_key(image_path)
+    correction_paths = correction_evidence.get("paths") or set()
+    correction_keys = correction_evidence.get("keys") or set()
+    if normalized_segmentation in correction_paths or segmentation_key in correction_keys:
+        evidence.append("Matches a saved proofreading correction set.")
+        return "ground_truth", "correction_set", evidence
+    if image_key and image_key in correction_keys:
+        evidence.append("Image volume has a saved correction-set key.")
+        return "ground_truth", "correction_set", evidence
+    if _project_progress_has_ground_truth_marker(segmentation_path):
+        evidence.append("Segmentation path looks like ground truth or proofread data.")
+        return "ground_truth", "path_marker", evidence
+    evidence.append("Segmentation exists, but it is not marked as proofread ground truth.")
+    return "needs_proofreading", "derived", evidence
+
+
+def _project_progress_status_label(status: str) -> str:
+    return {
+        "ground_truth": "Fully good",
+        "needs_proofreading": "Needs proofreading",
+        "missing_segmentation": "No segmentation",
+        "ignored": "Ignored",
+    }.get(status, status.replace("_", " ").title())
+
+
+def _apply_project_progress_overrides(
+    volume: Dict[str, Any],
+    overrides: Dict[str, Any],
+) -> Dict[str, Any]:
+    override = overrides.get(volume["id"])
+    if not isinstance(override, dict):
+        return volume
+    status = override.get("status")
+    if status in PROJECT_PROGRESS_STATUS_DEFINITIONS:
+        volume["status"] = status
+        volume["status_label"] = _project_progress_status_label(status)
+        volume["status_source"] = "manual_override"
+    if "note" in override:
+        volume["note"] = str(override.get("note") or "")
+    return volume
+
+
+def _build_workflow_project_progress(
+    db: Session,
+    workflow: WorkflowSession,
+    *,
+    user_id: int,
+    project_observation: Optional[Dict[str, Any]] = None,
+    persist_snapshot: bool = True,
+) -> Dict[str, Any]:
+    observation = project_observation or _observe_workflow_project(db, workflow, user_id)
+    metadata = decode_json(workflow.metadata_json)
+    overrides = metadata.get("project_progress_overrides")
+    overrides = overrides if isinstance(overrides, dict) else {}
+    correction_evidence = _project_progress_correction_evidence(db, workflow)
+    volumes: List[Dict[str, Any]] = []
+    seen_volume_ids: set[str] = set()
+
+    for volume_set in observation.get("volume_sets") or []:
+        if not isinstance(volume_set, dict):
+            continue
+        project_root = _normalize_absolute_path(volume_set.get("project_root"))
+        if not project_root:
+            continue
+        image_candidates = _project_progress_volume_candidates(
+            volume_set.get("image_root_path") or volume_set.get("image_path"),
+            project_root=project_root,
+            roles={"image", "volume"},
+        )
+        segmentation_candidates = _project_progress_volume_candidates(
+            volume_set.get("label_root_path") or volume_set.get("label_path"),
+            project_root=project_root,
+            roles={"label", "prediction"},
+        )
+        if not image_candidates and volume_set.get("image_path"):
+            image_candidates = [volume_set["image_path"]]
+        if not segmentation_candidates and volume_set.get("label_path"):
+            segmentation_candidates = [volume_set["label_path"]]
+
+        for image_path in image_candidates:
+            volume_id = _project_progress_volume_id(image_path, project_root)
+            if volume_id in seen_volume_ids:
+                continue
+            seen_volume_ids.add(volume_id)
+            segmentation_path = _project_progress_match_segmentation(
+                image_path,
+                segmentation_candidates,
+                project_root=project_root,
+                single_image=len(image_candidates) == 1,
+            )
+            status, status_source, evidence = _project_progress_status_for_volume(
+                image_path=image_path,
+                segmentation_path=segmentation_path,
+                correction_evidence=correction_evidence,
+            )
+            segmentation_kind = (
+                _role_for_project_file(
+                    _project_progress_relpath(segmentation_path, project_root)
+                )
+                if segmentation_path
+                else None
+            )
+            volume = {
+                "id": volume_id,
+                "name": pathlib.Path(image_path).name,
+                "status": status,
+                "status_label": _project_progress_status_label(status),
+                "status_source": status_source,
+                "project_root": project_root,
+                "volume_set_id": volume_set.get("id"),
+                "volume_set_name": volume_set.get("name"),
+                "image_path": image_path,
+                "segmentation_path": segmentation_path,
+                "segmentation_kind": segmentation_kind,
+                "evidence": evidence,
+                "note": None,
+            }
+            volumes.append(_apply_project_progress_overrides(volume, overrides))
+
+    if not volumes and (workflow.image_path or workflow.dataset_path):
+        image_path = _normalize_absolute_path(workflow.image_path or workflow.dataset_path)
+        project_root = _normalize_absolute_path(workflow.dataset_path) or str(
+            pathlib.Path(image_path).parent
+        )
+        segmentation_path = workflow.label_path or workflow.mask_path or workflow.inference_output_path
+        segmentation_path = (
+            _normalize_absolute_path(segmentation_path) if segmentation_path else None
+        )
+        status, status_source, evidence = _project_progress_status_for_volume(
+            image_path=image_path,
+            segmentation_path=segmentation_path,
+            correction_evidence=correction_evidence,
+        )
+        fallback = {
+            "id": _project_progress_volume_id(image_path, project_root),
+            "name": pathlib.Path(image_path).name,
+            "status": status,
+            "status_label": _project_progress_status_label(status),
+            "status_source": status_source,
+            "project_root": project_root,
+            "volume_set_id": "workflow-current",
+            "volume_set_name": "Current workflow",
+            "image_path": image_path,
+            "segmentation_path": segmentation_path,
+            "segmentation_kind": "label" if segmentation_path else None,
+            "evidence": evidence,
+            "note": None,
+        }
+        volumes.append(_apply_project_progress_overrides(fallback, overrides))
+
+    counts = {status: 0 for status in PROJECT_PROGRESS_STATUS_DEFINITIONS}
+    for volume in volumes:
+        counts[volume["status"]] = counts.get(volume["status"], 0) + 1
+    tracked_total = len(volumes) - counts.get("ignored", 0)
+    good_count = counts.get("ground_truth", 0)
+    segmented_count = good_count + counts.get("needs_proofreading", 0)
+    summary = {
+        "total": len(volumes),
+        "tracked_total": tracked_total,
+        "ground_truth": good_count,
+        "needs_proofreading": counts.get("needs_proofreading", 0),
+        "missing_segmentation": counts.get("missing_segmentation", 0),
+        "ignored": counts.get("ignored", 0),
+        "remaining": counts.get("needs_proofreading", 0)
+        + counts.get("missing_segmentation", 0),
+        "completion_pct": round((good_count / tracked_total) * 100, 1)
+        if tracked_total
+        else 0,
+        "segmentation_coverage_pct": round((segmented_count / tracked_total) * 100, 1)
+        if tracked_total
+        else 0,
+    }
+    project_name = workflow.title
+    roots = observation.get("roots") or []
+    if roots:
+        project_name = project_name or roots[0].get("name")
+    generated_at = datetime.now(timezone.utc).isoformat()
+    progress = {
+        "workflow_id": workflow.id,
+        "generated_at": generated_at,
+        "project_name": project_name,
+        "project_roots": roots,
+        "summary": summary,
+        "status_definitions": PROJECT_PROGRESS_STATUS_DEFINITIONS,
+        "volumes": volumes,
+    }
+    if persist_snapshot:
+        metadata["project_progress_snapshot"] = {
+            "generated_at": generated_at,
+            "summary": summary,
+            "volume_count": len(volumes),
+            "volumes": [
+                {
+                    key: volume.get(key)
+                    for key in [
+                        "id",
+                        "name",
+                        "status",
+                        "image_path",
+                        "segmentation_path",
+                        "volume_set_name",
+                    ]
+                }
+                for volume in volumes[:100]
+            ],
+        }
+        workflow.metadata_json = encode_json(metadata)
+    return progress
+
+
+def _format_project_progress_response(progress: Dict[str, Any]) -> str:
+    summary = progress.get("summary") or {}
+    total = int(summary.get("tracked_total") or summary.get("total") or 0)
+    if not total:
+        return (
+            "I do not see tracked image volumes yet. Mount a project or choose data, "
+            "then this tracker can count proofread, unproofread, and missing segmentations."
+        )
+    return (
+        "I checked the project progress tracker. "
+        f"It has {total} tracked image volume(s): "
+        f"{summary.get('ground_truth', 0)} fully good ground-truth volume(s), "
+        f"{summary.get('needs_proofreading', 0)} with segmentations that still need proofreading, "
+        f"and {summary.get('missing_segmentation', 0)} with no segmentation yet. "
+        f"Completion is {summary.get('completion_pct', 0)}%."
+    )
+
+
+def _query_wants_progress_based_training(lower_query: str) -> bool:
+    if not _query_has_relaxed(
+        lower_query,
+        [
+            "train",
+            "training",
+            "fit model",
+            "learn from",
+            "use labels",
+            "use masks",
+            "ground truth",
+            "ground-truth",
+        ],
+    ):
+        return False
+    return _query_has_relaxed(
+        lower_query,
+        [
+            "ground truth",
+            "ground-truth",
+            "fully good",
+            "good masks",
+            "good labels",
+            "good volumes",
+            "done volumes",
+            "proofread",
+            "proofreaded",
+            "curated",
+            "verified",
+            "segment the rest",
+            "segment rest",
+            "remaining volumes",
+            "rest of",
+            "unsegmented",
+            "no segmentation",
+            "missing segmentation",
+        ],
+    )
+
+
+def _query_wants_train_all_available_labels(lower_query: str) -> bool:
+    return _query_has_relaxed(
+        lower_query,
+        [
+            "all labels",
+            "all masks",
+            "all segmentations",
+            "all labeled",
+            "include unproofread",
+            "include draft",
+            "draft masks",
+            "draft labels",
+            "use every label",
+            "use all labels",
+        ],
+    )
+
+
+def _query_wants_segment_remaining_after_training(lower_query: str) -> bool:
+    return _query_has_relaxed(
+        lower_query,
+        [
+            "segment the rest",
+            "segment rest",
+            "segment remaining",
+            "rest of the volumes",
+            "remaining volumes",
+            "the rest",
+            "unsegmented",
+            "no segmentation",
+            "missing segmentation",
+        ],
+    )
+
+
+def _safe_subset_token(value: Any, *, fallback: str = "item") -> str:
+    token = re.sub(r"[^A-Za-z0-9_.-]+", "_", str(value or "")).strip("._-")
+    return (token or fallback)[:96]
+
+
+def _training_subset_base_dir(project_root: str) -> pathlib.Path:
+    configured = os.getenv(
+        "PYTC_TRAINING_SUBSET_ROOT",
+        "/home/weidf/demo_data/.pytc_training_subsets",
+    )
+    project_token = _safe_subset_token(
+        pathlib.Path(project_root).name,
+        fallback="project",
+    )
+    return pathlib.Path(configured).expanduser() / project_token
+
+
+def _link_or_copy_subset_file(source_path: str, destination_path: pathlib.Path) -> str:
+    destination_path.parent.mkdir(parents=True, exist_ok=True)
+    if destination_path.exists() or destination_path.is_symlink():
+        return str(destination_path)
+    try:
+        os.symlink(source_path, destination_path)
+    except OSError:
+        shutil.copy2(source_path, destination_path)
+    return str(destination_path)
+
+
+def _subset_public_volume(volume: Dict[str, Any]) -> Dict[str, Any]:
+    return {
+        "id": volume.get("id"),
+        "name": volume.get("name"),
+        "status": volume.get("status"),
+        "image_path": volume.get("image_path"),
+        "segmentation_path": volume.get("segmentation_path"),
+    }
+
+
+def _build_progress_training_subset_plan(
+    workflow: WorkflowSession,
+    progress: Dict[str, Any],
+    *,
+    lower_query: str,
+) -> Optional[Dict[str, Any]]:
+    volumes = [
+        volume
+        for volume in progress.get("volumes") or []
+        if isinstance(volume, dict) and volume.get("status") != "ignored"
+    ]
+    if not volumes:
+        return None
+
+    include_draft_labels = _query_wants_train_all_available_labels(lower_query)
+    training_statuses = ["ground_truth"]
+    if include_draft_labels:
+        training_statuses.append("needs_proofreading")
+
+    train_volumes = [
+        volume
+        for volume in volumes
+        if volume.get("status") in training_statuses
+        and volume.get("image_path")
+        and volume.get("segmentation_path")
+    ]
+    if not train_volumes and include_draft_labels:
+        train_volumes = [
+            volume
+            for volume in volumes
+            if volume.get("status") == "needs_proofreading"
+            and volume.get("image_path")
+            and volume.get("segmentation_path")
+        ]
+        training_statuses = ["needs_proofreading"]
+    if not train_volumes:
+        return None
+
+    target_volumes = [
+        volume
+        for volume in volumes
+        if volume.get("status") == "missing_segmentation" and volume.get("image_path")
+    ]
+    review_volumes = [
+        volume
+        for volume in volumes
+        if volume.get("status") == "needs_proofreading"
+        and volume.get("image_path")
+        and volume.get("segmentation_path")
+    ]
+    if include_draft_labels:
+        review_volumes = []
+
+    project_root = (
+        _normalize_absolute_path(train_volumes[0].get("project_root"))
+        or _derive_workflow_root_path(workflow)
+        or _normalize_absolute_path(workflow.dataset_path)
+    )
+    if not project_root:
+        return None
+
+    run_slug = (
+        f"workflow_{workflow.id}_"
+        f"{datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%S%fZ')}"
+    )
+    subset_root = _training_subset_base_dir(project_root) / run_slug
+    image_dir = subset_root / "image"
+    label_dir = subset_root / "seg"
+    linked_pairs: List[Dict[str, Any]] = []
+    used_image_names: set[str] = set()
+    used_label_names: set[str] = set()
+
+    for index, volume in enumerate(train_volumes, start=1):
+        image_source = _normalize_absolute_path(volume.get("image_path"))
+        label_source = _normalize_absolute_path(volume.get("segmentation_path"))
+        if not image_source or not label_source:
+            continue
+        image_name = pathlib.Path(image_source).name
+        label_name = pathlib.Path(label_source).name
+        if image_name in used_image_names:
+            image_name = f"{index:03d}_{image_name}"
+        if label_name in used_label_names:
+            label_name = f"{index:03d}_{label_name}"
+        used_image_names.add(image_name)
+        used_label_names.add(label_name)
+        linked_image = _link_or_copy_subset_file(image_source, image_dir / image_name)
+        linked_label = _link_or_copy_subset_file(label_source, label_dir / label_name)
+        linked_pairs.append(
+            {
+                **_subset_public_volume(volume),
+                "subset_image_path": linked_image,
+                "subset_segmentation_path": linked_label,
+            }
+        )
+
+    if not linked_pairs:
+        return None
+
+    output_path = pathlib.Path(project_root) / "outputs" / "training" / run_slug
+    manifest_path = subset_root / "volume_subset_manifest.json"
+    manifest = {
+        "schema_version": 1,
+        "created_at": datetime.now(timezone.utc).isoformat(),
+        "workflow_id": workflow.id,
+        "project_root": project_root,
+        "selection_basis": "project_progress",
+        "training_statuses": training_statuses,
+        "train_pairs": linked_pairs,
+        "target_images": [_subset_public_volume(volume) for volume in target_volumes],
+        "review_pairs": [_subset_public_volume(volume) for volume in review_volumes],
+        "source_progress_summary": progress.get("summary") or {},
+    }
+    manifest_path.parent.mkdir(parents=True, exist_ok=True)
+    manifest_path.write_text(
+        json.dumps(manifest, indent=2, sort_keys=True),
+        encoding="utf-8",
+    )
+
+    return {
+        "run_slug": run_slug,
+        "selection_basis": "project_progress",
+        "training_statuses": training_statuses,
+        "image_path": str(image_dir),
+        "label_path": str(label_dir),
+        "output_path": str(output_path),
+        "manifest_path": str(manifest_path),
+        "train_volume_count": len(linked_pairs),
+        "target_volume_count": len(target_volumes),
+        "review_volume_count": len(review_volumes),
+        "train_pairs": linked_pairs[:20],
+        "target_images": [
+            _subset_public_volume(volume) for volume in target_volumes[:20]
+        ],
+        "review_pairs": [
+            _subset_public_volume(volume) for volume in review_volumes[:20]
+        ],
+    }
+
+
+def _format_progress_training_response(
+    subset_plan: Dict[str, Any],
+    *,
+    include_segment_rest: bool,
+) -> str:
+    train_count = int(subset_plan.get("train_volume_count") or 0)
+    target_count = int(subset_plan.get("target_volume_count") or 0)
+    review_count = int(subset_plan.get("review_volume_count") or 0)
+    statuses = subset_plan.get("training_statuses") or []
+    source = (
+        "fully good ground-truth volume"
+        if statuses == ["ground_truth"]
+        else "labeled volume"
+    )
+    response = (
+        f"Yes. I found {train_count} {source}{'' if train_count == 1 else 's'} "
+        "that can be used for this training run, and I staged them as a clean subset "
+        "so draft or missing masks do not leak into the labels."
+    )
+    if include_segment_rest and target_count:
+        response += (
+            f" After training, the {target_count} image-only volume"
+            f"{'' if target_count == 1 else 's'} should be the first inference target."
+        )
+    if review_count:
+        response += (
+            f" I left {review_count} draft segmentation volume"
+            f"{'' if review_count == 1 else 's'} out of training until you mark them good."
+        )
+    response += " Review the run card before launching it."
+    return response
+
+
+def _build_agent_trace(
+    *,
+    workflow: WorkflowSession,
+    project_observation: Dict[str, Any],
+    intent: str,
+    actions: List[AgentChatAction],
+) -> List[AgentTraceItem]:
+    trace: List[AgentTraceItem] = [
+        AgentTraceItem(
+            label="Read workflow state",
+            detail=(
+                f"Stage: {workflow.stage}; "
+                f"image {'set' if workflow.image_path or workflow.dataset_path else 'missing'}; "
+                f"mask/label {'set' if workflow.label_path or workflow.mask_path else 'missing'}."
+            ),
+        )
+    ]
+    roots = project_observation.get("roots") or []
+    volume_sets = project_observation.get("volume_sets") or []
+    if roots:
+        root_names = ", ".join(str(root.get("name") or root.get("path")) for root in roots[:2])
+        trace.append(
+            AgentTraceItem(
+                label="Checked project files",
+                detail=(
+                    f"Scanned {root_names}; found {len(volume_sets)} image/seg set(s)."
+                ),
+            )
+        )
+    elif project_observation.get("errors"):
+        trace.append(
+            AgentTraceItem(
+                label="Checked project files",
+                detail="Tried to inspect the project folder, but the scan failed.",
+                status="warning",
+            )
+        )
+    else:
+        trace.append(
+            AgentTraceItem(
+                label="Checked project files",
+                detail="No mounted project root was available to scan.",
+                status="missing",
+            )
+        )
+    trace.append(
+        AgentTraceItem(
+            label="Prepared response",
+            detail=(
+                f"Intent: {intent}; "
+                f"{len(actions)} runnable app card(s) prepared."
+            ),
+        )
+    )
+    return trace
+
+
 def _workflow_project_context(workflow: WorkflowSession) -> Dict[str, Any]:
     metadata = decode_json(workflow.metadata_json)
     context = metadata.get("project_context") if isinstance(metadata, dict) else {}
@@ -2455,6 +4447,15 @@ def _format_scale_number(value: float) -> str:
 
 def _format_scales(scales: List[float]) -> str:
     return ",".join(_format_scale_number(value) for value in scales)
+
+
+def _format_voxel_size_nm(value: Any) -> str:
+    if not isinstance(value, list) or len(value) < 3:
+        return ""
+    try:
+        return " x ".join(_format_scale_number(float(item)) for item in value[:3]) + " nm"
+    except (TypeError, ValueError):
+        return ""
 
 
 def _parse_visualization_scales_from_query(query: str) -> Optional[List[float]]:
@@ -2476,6 +4477,26 @@ def _parse_visualization_scales_from_query(query: str) -> Optional[List[float]]:
 
 
 def _query_wants_visualization_scales(lower_query: str) -> bool:
+    if not any(
+        term in lower_query
+        for term in [
+            "reload",
+            "load",
+            "open",
+            "show",
+            "view",
+            "visualize",
+            "visualise",
+            "set",
+            "change",
+            "update viewer",
+            "use scales",
+            "with scales",
+            "with voxel",
+            "viewer",
+        ]
+    ):
+        return False
     explicit_scale_language = _query_has(
         lower_query,
         [
@@ -2513,12 +4534,6 @@ def _store_visualization_scales(
         metadata = {}
     metadata["visualization_scales"] = scales_nm
     metadata["visualization_scales_source"] = "workflow_agent"
-    project_context = metadata.get("project_context")
-    if not isinstance(project_context, dict):
-        project_context = {}
-    project_context["voxel_size_nm"] = scales_nm
-    project_context["voxel_size_source"] = "workflow_agent"
-    metadata["project_context"] = project_context
     update_workflow_fields(db, workflow, {"metadata": metadata}, commit=True)
     append_workflow_event(
         db,
@@ -2570,10 +4585,18 @@ def _extract_project_context_from_query(query: str) -> Dict[str, Any]:
             context["target_structure"] = label
             break
 
-    if any(term in lower for term in ["fast", "quick", "smoke", "prototype"]):
+    if any(
+        term in lower
+        for term in ["fast", "quick", "smoke", "prototype", "speed", "care about speed"]
+    ):
         context["optimization_priority"] = "speed"
     elif any(term in lower for term in ["accurate", "accuracy", "quality", "best"]):
         context["optimization_priority"] = "accuracy"
+
+    voxel_size_nm = _parse_visualization_scales_from_query(query)
+    if voxel_size_nm:
+        context["voxel_size_nm"] = voxel_size_nm
+        context["voxel_size_source"] = "workflow_agent_context"
 
     if context:
         context["freeform_note"] = query[:500]
@@ -2598,6 +4621,13 @@ def _merge_project_context(
         "source": "workflow_agent_context",
     }
     metadata["project_context"] = project_context
+    voxel_size_nm = project_context.get("voxel_size_nm")
+    if isinstance(voxel_size_nm, list) and len(voxel_size_nm) >= 3:
+        metadata["visualization_scales"] = voxel_size_nm[:3]
+        metadata["visualization_scales_source"] = project_context.get(
+            "voxel_size_source",
+            "workflow_agent_context",
+        )
     update_workflow_fields(db, workflow, {"metadata": metadata}, commit=False)
 
 
@@ -2626,12 +4656,11 @@ def _format_project_context_prompt(
             "target structure",
             "speed vs accuracy preference",
         ]
-    return "\n".join(
-        [
-            f"Before I {action_label}, I need project context.",
-            f"Tell me: {', '.join(missing[:3])}.",
-            "Example: EM mitochondria; prioritize accuracy. Or say: use defaults.",
-        ]
+    return (
+        f"Before I {action_label}, I need a little project context: "
+        f"{', '.join(missing[:3])}. "
+        "You can answer casually, like: EM mitochondria, prioritize accuracy. "
+        "Or just say to use defaults."
     )
 
 
@@ -2647,21 +4676,18 @@ def _format_project_context_saved_response(
         summary.append(context["target_structure"])
     if context.get("optimization_priority"):
         summary.append(f"{context['optimization_priority']} priority")
+    voxel_size = _format_voxel_size_nm(context.get("voxel_size_nm"))
+    if voxel_size:
+        summary.append(f"{voxel_size} resolution")
     missing = _project_context_missing_fields(workflow)
     if missing:
-        return "\n".join(
-            [
-                f"Saved context: {', '.join(summary) or 'partial'}.",
-                f"Still need: {', '.join(missing)}.",
-                "Then I can choose the model/preset and run the next app step.",
-            ]
+        return (
+            f"Got it, I saved {', '.join(summary) or 'that partial context'}. "
+            f"I still need {', '.join(missing)} before I choose a model or preset."
         )
-    return "\n".join(
-        [
-            f"Saved context: {', '.join(summary)}.",
-            f"Next: {recommendation.decision}",
-            "Tell me the workflow job when you want me to act.",
-        ]
+    return (
+        f"Got it, I saved {', '.join(summary)}. "
+        f"The next useful move looks like: {_lower_first(_strip_sentence_period(recommendation.decision))}."
     )
 
 
@@ -2687,6 +4713,7 @@ def _format_project_context_response(
             project_context.get("imaging_modality"),
             project_context.get("target_structure"),
             project_context.get("optimization_priority"),
+            _format_voxel_size_nm(project_context.get("voxel_size_nm")),
         ]
         lines.append(
             "Context: " + ", ".join(str(bit) for bit in context_bits if bit) + "."
@@ -2695,35 +4722,81 @@ def _format_project_context_response(
     return "\n".join(lines)
 
 
+def _format_informational_followup_response(
+    workflow: WorkflowSession,
+    recommendation: WorkflowAgentRecommendationResponse,
+) -> str:
+    context = _workflow_project_context(workflow)
+    lines = [
+        f"I would probably start here: {_lower_first(_strip_sentence_period(recommendation.decision))}.",
+    ]
+    if recommendation.rationale:
+        lines.append(
+            f"That makes sense because {_lower_first(_strip_sentence_period(recommendation.rationale))}."
+        )
+    context_bits = [
+        context.get("imaging_modality"),
+        context.get("target_structure"),
+        context.get("optimization_priority"),
+        _format_voxel_size_nm(context.get("voxel_size_nm")),
+    ]
+    if any(context_bits):
+        lines.append(
+            "I am using the context we have: "
+            + ", ".join(str(bit) for bit in context_bits if bit)
+            + "."
+        )
+    if recommendation.blockers:
+        lines.append(
+            f"The thing still missing is {_lower_first(_strip_sentence_period(recommendation.blockers[0]))}."
+        )
+    lines.append("I will not launch an app step unless you ask me to open or run it.")
+    return " ".join(lines)
+
+
+def _format_style_feedback_response(
+    workflow: WorkflowSession,
+    recommendation: WorkflowAgentRecommendationResponse,
+) -> str:
+    context = _workflow_project_context(workflow)
+    context_bits = [
+        context.get("imaging_modality"),
+        context.get("target_structure"),
+    ]
+    context_text = ", ".join(str(bit) for bit in context_bits if bit)
+    next_step = _lower_first(_strip_sentence_period(recommendation.decision))
+    if context_text:
+        return (
+            f"Yeah, agreed. I will keep the visible answer more conversational and leave the mechanical details in What I checked. "
+            f"Right now I am treating this as a {context_text} workflow, and the next useful move looks like: {next_step}."
+        )
+    return (
+        "Yeah, agreed. I will keep the visible answer more conversational and leave the mechanical details in What I checked. "
+        f"Right now the next useful move looks like: {next_step}."
+    )
+
+
 
 def _format_needed_from_user_response(
     recommendation: WorkflowAgentRecommendationResponse,
 ) -> str:
     if recommendation.stage == "proofreading":
         gap = recommendation.blockers[0] if recommendation.blockers else "Save edits."
-        return "\n".join(
-            [
-                "I need your mask judgment.",
-                "Do this: proofread likely mistakes, save fixes, then export masks.",
-                f"Current gap: {gap}",
-            ]
+        return (
+            "I need your mask judgment here. "
+            "Proofread the likely mistakes, save the fixes, then export masks. "
+            f"The current gap is {_lower_first(_strip_sentence_period(gap))}."
         )
 
     blocker = recommendation.blockers[0] if recommendation.blockers else None
     if blocker:
-        return "\n".join(
-            [
-                "I need one missing workflow input.",
-                f"Do this: {recommendation.decision}",
-                f"Current gap: {blocker}",
-            ]
+        return (
+            f"I am missing one workflow input: {_lower_first(_strip_sentence_period(blocker))}. "
+            f"After that, the next useful move is {_lower_first(_strip_sentence_period(recommendation.decision))}."
         )
-    return "\n".join(
-        [
-            "I need your approval before changing artifacts.",
-            f"Do this: {recommendation.decision}",
-            "I can run the in-app step when you approve it.",
-        ]
+    return (
+        "I need your approval before changing artifacts. "
+        f"The app step I would run is {_lower_first(_strip_sentence_period(recommendation.decision))}."
     )
 
 
@@ -2731,7 +4804,7 @@ def _format_capabilities_response() -> str:
     return "\n".join(
         [
             "I can run approved app steps: infer, proofread, train on saved edits, compare metrics, export evidence, and move screens.",
-            "Ask for a concrete job, e.g. 'run inference', 'proofread this result', or 'compare results'.",
+            "Ask naturally, e.g. 'segment this data', 'proofread this result', or 'compare results'.",
             "I will ask approval before long runs or artifact changes.",
         ]
     )
@@ -2742,18 +4815,21 @@ def _format_repair_response(
 ) -> str:
     return "\n".join(
         [
-            "That was too generic.",
-            "Tell me the workflow job you want, or ask 'status' for what is ready.",
+            "That was too generic; I need a little more detail.",
+            "Say what you want to do next, or ask 'status' for what is ready.",
             f"Current next step: {recommendation.decision}",
         ]
     )
 
 
-def _format_unknown_workflow_query_response() -> str:
+def _format_unknown_workflow_query_response(
+    recommendation: WorkflowAgentRecommendationResponse,
+) -> str:
     return "\n".join(
         [
-            "I did not understand that as a workflow job.",
-            "Try: run inference, proofread, train on saved edits, compare metrics, export evidence, or status.",
+            "I am not sure which app step that maps to.",
+            f"Current next step: {recommendation.decision}",
+            "You can say it casually, e.g. 'segment this data', 'show my labels', 'proofread this', or 'train a model'.",
         ]
     )
 
@@ -2835,6 +4911,22 @@ def list_workflow_events(
     return _event_list(db, workflow_id)
 
 
+@router.get("/{workflow_id}/commands", response_model=List[WorkflowCommandResponse])
+def list_workflow_commands(
+    workflow_id: int,
+    user: auth_models.User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    get_user_workflow_or_404(db, workflow_id=workflow_id, user_id=user.id)
+    commands = (
+        db.query(WorkflowCommand)
+        .filter(WorkflowCommand.workflow_id == workflow_id)
+        .order_by(WorkflowCommand.created_at.asc(), WorkflowCommand.id.asc())
+        .all()
+    )
+    return [_command_response(command) for command in commands]
+
+
 @router.get("/{workflow_id}/hotspots", response_model=WorkflowHotspotsResponse)
 def get_workflow_hotspots(
     workflow_id: int,
@@ -2882,6 +4974,86 @@ def get_workflow_metrics(
         workflow_id=workflow.id,
         metrics=compute_workflow_metrics(events),
     )
+
+
+@router.get(
+    "/{workflow_id}/project-progress",
+    response_model=WorkflowProjectProgressResponse,
+)
+def get_workflow_project_progress(
+    workflow_id: int,
+    user: auth_models.User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    workflow = get_user_workflow_or_404(db, workflow_id=workflow_id, user_id=user.id)
+    progress = _build_workflow_project_progress(db, workflow, user_id=user.id)
+    db.commit()
+    append_app_event(
+        component="workflow_project_progress",
+        event="project_progress_refreshed",
+        level="INFO",
+        message="Workflow project progress tracker refreshed.",
+        workflow_id=workflow.id,
+        user_id=user.id,
+        total=progress["summary"].get("total"),
+        ground_truth=progress["summary"].get("ground_truth"),
+        needs_proofreading=progress["summary"].get("needs_proofreading"),
+        missing_segmentation=progress["summary"].get("missing_segmentation"),
+    )
+    return progress
+
+
+@router.post(
+    "/{workflow_id}/project-progress/volume-status",
+    response_model=WorkflowProjectProgressResponse,
+)
+def update_workflow_project_progress_volume_status(
+    workflow_id: int,
+    body: WorkflowProjectProgressVolumeUpdate,
+    user: auth_models.User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    workflow = get_user_workflow_or_404(db, workflow_id=workflow_id, user_id=user.id)
+    provided_fields = getattr(body, "model_fields_set", set()) or getattr(
+        body,
+        "__fields_set__",
+        set(),
+    )
+    if not body.volume_id:
+        raise HTTPException(status_code=400, detail="volume_id is required")
+    if "status" in provided_fields and body.status not in PROJECT_PROGRESS_STATUS_DEFINITIONS:
+        raise HTTPException(
+            status_code=400,
+            detail=f"status must be one of {sorted(PROJECT_PROGRESS_STATUS_DEFINITIONS)}",
+        )
+    metadata = decode_json(workflow.metadata_json)
+    overrides = metadata.get("project_progress_overrides")
+    overrides = overrides if isinstance(overrides, dict) else {}
+    current = overrides.get(body.volume_id)
+    current = current if isinstance(current, dict) else {}
+    if "status" in provided_fields:
+        current["status"] = body.status
+    if "note" in provided_fields:
+        current["note"] = body.note or ""
+    if not current.get("status") and not current.get("note"):
+        overrides.pop(body.volume_id, None)
+    else:
+        overrides[body.volume_id] = current
+    metadata["project_progress_overrides"] = overrides
+    workflow.metadata_json = encode_json(metadata)
+    progress = _build_workflow_project_progress(db, workflow, user_id=user.id)
+    db.commit()
+    append_app_event(
+        component="workflow_project_progress",
+        event="project_progress_volume_status_updated",
+        level="INFO",
+        message="Workflow project progress volume status override updated.",
+        workflow_id=workflow.id,
+        user_id=user.id,
+        volume_id=body.volume_id,
+        status=current.get("status"),
+    )
+    return progress
 
 
 @router.get(
@@ -2993,6 +5165,7 @@ def create_model_run(
     workflow = get_user_workflow_or_404(db, workflow_id=workflow_id, user_id=user.id)
     run = WorkflowModelRun(
         workflow_id=workflow.id,
+        run_id=body.run_id,
         run_type=body.run_type,
         status=body.status,
         name=body.name,
@@ -3818,6 +5991,8 @@ async def create_workflow_event(
         stage=stage,
         summary=body.summary,
         payload=body.payload,
+        schema_version=body.schema_version,
+        idempotency_key=body.idempotency_key,
         approval_status=body.approval_status,
         commit=True,
     )
@@ -3865,8 +6040,131 @@ async def approve_agent_action(
     action = action_payload.get("action")
     params = action_payload.get("params", {})
 
-    if action != "stage_retraining_from_corrections":
+    if action not in {
+        "stage_retraining_from_corrections",
+        "start_training_run",
+        "run_client_effects",
+    }:
         raise HTTPException(status_code=400, detail=f"Unsupported action: {action}")
+
+    if action == "start_training_run":
+        client_effects = _training_run_effects_from_proposal(workflow, params)
+        corrected_mask_path = (
+            client_effects.get("set_training_label_path")
+            or params.get("label_path")
+            or workflow.corrected_mask_path
+            or workflow.label_path
+            or workflow.mask_path
+            or _latest_exported_mask_path(db, workflow.id)
+        )
+        proposal.approval_status = "approved"
+        update_payload: Dict[str, Any] = {"stage": "retraining_staged"}
+        if corrected_mask_path:
+            update_payload["corrected_mask_path"] = corrected_mask_path
+        if client_effects.get("set_training_output_path"):
+            update_payload["training_output_path"] = client_effects[
+                "set_training_output_path"
+            ]
+        update_workflow_fields(db, workflow, update_payload, commit=False)
+        db.commit()
+        db.refresh(workflow)
+        db.refresh(proposal)
+
+        approved = append_workflow_event(
+            db,
+            workflow_id=workflow.id,
+            actor="user",
+            event_type="agent.proposal_approved",
+            stage=workflow.stage,
+            summary=f"Approved agent proposal: {proposal.summary}",
+            payload={"proposal_event_id": proposal.id, "action": action},
+            commit=True,
+        )
+        staged = append_workflow_event(
+            db,
+            workflow_id=workflow.id,
+            actor="system",
+            event_type="training.run_approved",
+            stage=workflow.stage,
+            summary="Training run approved from chat.",
+            payload={
+                "proposal_event_id": proposal.id,
+                "config_preset": client_effects.get("set_training_config_preset"),
+                "image_path": client_effects.get("set_training_image_path"),
+                "label_path": client_effects.get("set_training_label_path"),
+                "output_path": client_effects.get("set_training_output_path"),
+                "runtime_action": client_effects.get("runtime_action"),
+            },
+            commit=True,
+        )
+        command = create_workflow_command(
+            db,
+            workflow_id=workflow.id,
+            command_type="start_training",
+            idempotency_key=f"agent-proposal:{proposal.id}:start_training",
+            actor="agent",
+            source_event_id=proposal.id,
+            approval_event_id=approved.id,
+            input_payload={
+                "client_effects": client_effects,
+                "workflow_stage": workflow.stage,
+                "proposal_event_id": proposal.id,
+            },
+            commit=True,
+        )
+        return AgentActionResult(
+            workflow=_workflow_response(workflow),
+            proposal=_event_response(proposal),
+            events=[_event_response(approved), _event_response(staged)],
+            client_effects={**client_effects, "workflow_stage": workflow.stage},
+            commands=[_command_response(command)],
+        )
+
+    if action == "run_client_effects":
+        client_effects = params.get("client_effects")
+        if not isinstance(client_effects, dict) or not client_effects:
+            raise HTTPException(
+                status_code=400,
+                detail="Approved client-effect action is missing client_effects.",
+            )
+        proposal.approval_status = "approved"
+        db.commit()
+        db.refresh(proposal)
+
+        approved = append_workflow_event(
+            db,
+            workflow_id=workflow.id,
+            actor="user",
+            event_type="agent.proposal_approved",
+            stage=workflow.stage,
+            summary=f"Approved agent proposal: {proposal.summary}",
+            payload={"proposal_event_id": proposal.id, "action": action},
+            commit=True,
+        )
+        staged = append_workflow_event(
+            db,
+            workflow_id=workflow.id,
+            actor="system",
+            event_type="agent.client_effects_approved",
+            stage=workflow.stage,
+            summary="Approved in-app assistant action for client execution.",
+            payload={
+                "proposal_event_id": proposal.id,
+                "item_id": params.get("item_id"),
+                "item_label": params.get("item_label"),
+                "risk_level": params.get("risk_level"),
+                "runtime_action": client_effects.get("runtime_action"),
+                "workflow_action": client_effects.get("workflow_action"),
+            },
+            commit=True,
+        )
+        return AgentActionResult(
+            workflow=_workflow_response(workflow),
+            proposal=_event_response(proposal),
+            events=[_event_response(approved), _event_response(staged)],
+            client_effects={**client_effects, "workflow_stage": workflow.stage},
+            commands=[],
+        )
 
     corrected_mask_path = (
         params.get("corrected_mask_path")
@@ -4006,17 +6304,20 @@ def _jsonable_agent_items(items: List[Any]) -> str:
 def _persist_workflow_agent_chat_exchange(
     db: Session,
     *,
+    workflow_id: int,
     conversation: auth_models.Conversation,
     query: str,
     response: str,
     actions: List[AgentChatAction],
     commands: List[AgentCommandBlock],
     proposals: List[WorkflowEventResponse],
+    trace: List[AgentTraceItem],
 ) -> None:
     conversation.updated_at = datetime.now(timezone.utc)
     db.add(
         auth_models.ChatMessage(
             conversation_id=conversation.id,
+            workflow_id=workflow_id,
             role="user",
             content=query,
         )
@@ -4024,12 +6325,14 @@ def _persist_workflow_agent_chat_exchange(
     db.add(
         auth_models.ChatMessage(
             conversation_id=conversation.id,
+            workflow_id=workflow_id,
             role="assistant",
             content=response,
             source="workflow_orchestrator",
             actions_json=_jsonable_agent_items(actions),
             commands_json=_jsonable_agent_items(commands),
             proposals_json=_jsonable_agent_items(proposals),
+            trace_json=_jsonable_agent_items(trace),
         )
     )
 
@@ -4061,10 +6364,42 @@ async def query_workflow_agent(
     tasks = _workflow_agent_tasks_from_readiness(agent_recommendation.readiness)
     intent = "recommendation"
     lower_query = query.lower()
-    wants_greeting = _is_greeting_query(lower_query)
-    wants_repair = _is_repair_query(lower_query)
-    wants_incomplete_intent = _is_incomplete_work_intent(lower_query)
-    target_tab = _target_tab_from_query(lower_query)
+    project_observation = _observe_workflow_project(db, workflow, user.id)
+    semantic_intent = (
+        {}
+        if command_alias
+        else _semantic_intent_payload(query, workflow)
+    )
+    semantic_name = semantic_intent.get("intent")
+    semantic_tab = semantic_intent.get("tab")
+    wants_greeting = _is_greeting_query(lower_query) or semantic_name == "greeting"
+    wants_style_feedback = _query_has(
+        lower_query,
+        [
+            "robotic",
+            "less robot",
+            "less robotic",
+            "too formal",
+            "more human",
+            "normal chatbot",
+            "normal human",
+            "sound human",
+            "frontfacing language",
+            "front-facing language",
+            "stiff response",
+            "stiff",
+        ],
+    ) or semantic_name == "style_feedback"
+    wants_repair = _is_repair_query(lower_query) or semantic_name == "repair"
+    wants_informational_followup = _query_is_informational_followup(lower_query)
+    wants_incomplete_intent = (
+        _is_incomplete_work_intent(lower_query)
+        or semantic_name == "clarify_next_job"
+    )
+    target_tab = _target_tab_from_query(lower_query) or _target_tab_from_semantic(
+        semantic_name,
+        semantic_tab,
+    )
     wants_capabilities = any(
         phrase in lower_query
         for phrase in [
@@ -4076,7 +6411,7 @@ async def query_workflow_agent(
             "run things",
             "guide me",
         ]
-    )
+    ) or semantic_name == "capabilities"
     wants_project_context = any(
         phrase in lower_query
         for phrase in [
@@ -4089,7 +6424,33 @@ async def query_workflow_agent(
             "what dataset",
             "what volume",
         ]
+    ) or semantic_name == "project_context"
+    wants_project_files = (
+        _query_wants_project_file_overview(lower_query)
+        or semantic_name == "project_files"
     )
+    wants_project_progress = _query_has(
+        lower_query,
+        [
+            "project progress",
+            "progress tracker",
+            "project tracker",
+            "project manager",
+            "volume tracker",
+            "open progress",
+            "show progress",
+            "how many volumes",
+            "volumes are done",
+            "volumes are fully good",
+            "fully proofread",
+            "ground truth",
+            "ground-truth",
+            "unproofread",
+            "without segmentation",
+            "no segmentation",
+            "missing segmentation",
+        ],
+    ) or semantic_name == "project_progress"
     wants_user_need = any(
         phrase in lower_query
         for phrase in [
@@ -4100,7 +6461,7 @@ async def query_workflow_agent(
             "what should i provide",
             "what should i do for you",
         ]
-    )
+    ) or semantic_name == "needed_from_user"
     wants_status = _query_has(
         lower_query,
         [
@@ -4116,7 +6477,7 @@ async def query_workflow_agent(
             "blocker",
             "ready",
         ],
-    )
+    ) or semantic_name == "status"
     wants_evaluation = _query_has(
         lower_query,
         [
@@ -4131,7 +6492,7 @@ async def query_workflow_agent(
             "before after",
             "before/after",
         ],
-    )
+    ) or semantic_name == "compute_evaluation"
     wants_export = _query_has(
         lower_query,
         [
@@ -4142,27 +6503,21 @@ async def query_workflow_agent(
             "research bundle",
             "download bundle",
         ],
+    ) or semantic_name == "export_evidence"
+    wants_visualization_launch = (
+        _query_wants_visualization_launch(lower_query)
+        or semantic_name == "view_data"
     )
-    wants_visualization_launch = _query_has(
-        lower_query,
-        [
-            "visualize",
-            "visualization",
-            "view data",
-            "view volume",
-            "view volumes",
-            "show data",
-            "show volume",
-            "inspect data",
-            "inspect volume",
-            "look at data",
-            "look at volume",
-        ],
+    wants_alternate_volume_set = _query_wants_alternate_volume_set(lower_query)
+    if wants_alternate_volume_set:
+        wants_visualization_launch = True
+    wants_visualization_scales = (
+        _query_wants_visualization_scales(lower_query)
+        or semantic_name == "set_visualization_scales"
     )
-    wants_visualization_scales = _query_wants_visualization_scales(lower_query)
     wants_retraining = any(
         term in lower_query for term in ["retrain", "training", "stage", "corrected"]
-    )
+    ) or semantic_name == "stage_retraining"
     wants_training_launch = _query_has(
         lower_query,
         [
@@ -4179,36 +6534,30 @@ async def query_workflow_agent(
             "run a training job",
             "run training job",
         ],
+    ) or semantic_name == "start_training"
+    wants_inference_launch = (
+        _query_wants_inference_launch(lower_query)
+        or semantic_name == "start_inference"
     )
-    wants_inference_launch = any(
-        term in lower_query
-        for term in [
-            "start inference",
-            "run inference",
-            "launch inference",
-            "run model",
-            "start model",
-            "launch model",
-        ]
+    wants_segmentation_launch = (
+        _query_wants_segmentation_launch(lower_query)
+        or semantic_name == "start_segmentation"
     )
-    wants_segmentation_launch = _query_has(
-        lower_query,
-        [
-            "run segmentation",
-            "start segmentation",
-            "launch segmentation",
-            "segment this",
-            "segment my",
-            "segment volume",
-            "segment the volume",
-            "get my volume segmented",
-            "process volume",
-            "run this volume",
-            "predict masks",
-            "make a prediction",
-            "make predictions",
-        ],
+    if wants_visualization_launch and semantic_name != "start_segmentation":
+        wants_segmentation_launch = False
+        wants_inference_launch = False
+    if wants_alternate_volume_set:
+        wants_segmentation_launch = False
+        wants_inference_launch = False
+        wants_training_launch = False
+    if wants_segmentation_launch and semantic_name != "start_inference":
+        wants_inference_launch = False
+    wants_progress_based_training = wants_training_launch and (
+        _query_wants_progress_based_training(lower_query)
+        or _query_wants_segment_remaining_after_training(lower_query)
     )
+    if wants_training_launch:
+        wants_project_progress = False
     wants_proofreading_launch = _query_has(
         lower_query,
         [
@@ -4228,10 +6577,128 @@ async def query_workflow_agent(
             "curate segmentations",
             "human review",
         ],
-    )
+    ) or semantic_name == "start_proofreading"
     wants_failure_analysis = any(
         term in lower_query for term in ["fail", "failure", "error", "hotspot", "where"]
-    )
+    ) or semantic_name == "inspect_failure"
+    wants_mount_project = _query_has(
+        lower_query,
+        [
+            "mount project",
+            "remount",
+            "remount project",
+            "open project",
+            "use suggested project",
+            "mount lucchi",
+            "open lucchi",
+            "prepilot lucchi",
+            "lucchi directory",
+            "project directory",
+        ],
+    ) or semantic_name == "mount_project"
+    wants_reset_workspace = _query_has(
+        lower_query,
+        [
+            "reset workspace",
+            "clear workspace",
+            "clear cache",
+            "reset cache",
+            "clear cached",
+            "reset cached",
+            "clean state",
+            "fresh state",
+            "start over",
+            "new workflow",
+        ],
+    ) or semantic_name == "reset_workspace"
+    if wants_reset_workspace:
+        wants_mount_project = False
+    wants_validate_project = _query_has(
+        lower_query,
+        [
+            "validate project",
+            "check project",
+            "inspect project",
+            "project structure",
+            "detect roles",
+            "role mapping",
+            "what files",
+            "what volumes",
+        ],
+    ) or semantic_name == "validate_project"
+    if wants_project_files and semantic_name != "validate_project":
+        wants_validate_project = False
+    wants_prepare_data = _query_has(
+        lower_query,
+        [
+            "prepare data",
+            "convert data",
+            "normalize",
+            "normalise",
+            "crop",
+            "downsample",
+            "split train",
+            "train val split",
+            "preprocess",
+            "pre-process",
+        ],
+    ) or semantic_name == "prepare_data"
+    wants_configure_training = _query_has(
+        lower_query,
+        [
+            "configure training",
+            "training settings",
+            "training config",
+            "batch size",
+            "augmentation",
+            "epochs",
+            "learning rate",
+            "pick architecture",
+        ],
+    ) or semantic_name == "configure_training"
+    wants_configure_inference = _query_has(
+        lower_query,
+        [
+            "configure inference",
+            "inference settings",
+            "inference config",
+            "tiling",
+            "threshold",
+            "checkpoint",
+            "set checkpoint",
+        ],
+    ) or semantic_name == "configure_inference"
+    wants_monitor_jobs = _query_has(
+        lower_query,
+        [
+            "monitor",
+            "logs",
+            "tensorboard",
+            "job status",
+            "runtime status",
+            "gpu",
+            "memory",
+            "training log",
+        ],
+    ) or semantic_name == "monitor_jobs"
+    wants_stop_runtime = _query_has(
+        lower_query,
+        [
+            "stop",
+            "cancel",
+            "kill",
+            "stop run",
+            "stop job",
+            "cancel run",
+            "cancel job",
+            "kill run",
+            "kill job",
+            "stop training",
+            "stop inference",
+            "cancel training",
+            "cancel inference",
+        ],
+    ) or semantic_name == "stop_runtime"
     wants_use_defaults = any(
         phrase in lower_query
         for phrase in [
@@ -4241,18 +6708,51 @@ async def query_workflow_agent(
             "safe defaults",
         ]
     )
-    context_update = _extract_project_context_from_query(query)
+    action_needs_context = (
+        wants_training_launch or wants_inference_launch or wants_segmentation_launch
+    )
+    workflow_action_requested = any(
+        [
+            action_needs_context,
+            wants_visualization_launch,
+            wants_visualization_scales,
+            wants_proofreading_launch,
+            wants_evaluation,
+            wants_export,
+            wants_status,
+            wants_capabilities,
+            wants_project_context,
+            wants_project_files,
+            wants_project_progress,
+            wants_user_need,
+            wants_incomplete_intent,
+            wants_failure_analysis,
+            wants_mount_project,
+            wants_reset_workspace,
+            wants_validate_project,
+            wants_prepare_data,
+            wants_configure_training,
+            wants_configure_inference,
+            wants_monitor_jobs,
+            wants_stop_runtime,
+            bool(target_tab),
+        ]
+    )
+    context_update = {
+        **_extract_project_context_from_query(query),
+        **(semantic_intent.get("context") or {}),
+    }
     if wants_use_defaults:
         context_update = {
             **context_update,
             "use_defaults": True,
             "freeform_note": query[:500],
         }
-    if context_update:
-        _merge_project_context(db, workflow, context_update)
-    action_needs_context = (
-        wants_training_launch or wants_inference_launch or wants_segmentation_launch
+    context_should_update = bool(context_update) and (
+        not command_alias
     )
+    if context_should_update:
+        _merge_project_context(db, workflow, context_update)
     if wants_training_launch:
         context_action_label = "choose a training preset"
     elif wants_inference_launch or wants_segmentation_launch:
@@ -4319,21 +6819,62 @@ async def query_workflow_agent(
                         "choose-data",
                         "Choose data",
                         "Pick an image and mask before loading the viewer.",
-                        client_effects={"navigate_to": "files"},
+                        client_effects=_build_choose_data_effects(),
                     )
                 )
             commands = []
+    elif (
+        wants_informational_followup
+        and not command_alias
+        and not action_needs_context
+        and not any(
+            [
+                wants_status,
+                wants_style_feedback,
+                wants_capabilities,
+                wants_project_context,
+                wants_project_files,
+                wants_project_progress,
+                wants_user_need,
+                wants_visualization_launch,
+                wants_visualization_scales,
+                wants_evaluation,
+                wants_export,
+                wants_mount_project,
+                wants_reset_workspace,
+                wants_validate_project,
+                wants_prepare_data,
+                wants_configure_training,
+                wants_configure_inference,
+                wants_monitor_jobs,
+                wants_stop_runtime,
+            ]
+        )
+    ):
+        intent = "project_context_updated" if context_should_update else "followup"
+        response = (
+            _format_project_context_saved_response(workflow, agent_recommendation)
+            if context_should_update
+            else _format_informational_followup_response(workflow, agent_recommendation)
+        )
+        actions = []
+        commands = []
     elif action_needs_context and _project_context_missing_fields(workflow):
         intent = "collect_project_context"
         response = _format_project_context_prompt(workflow, context_action_label)
         actions = []
         commands = []
-    elif context_update and not action_needs_context:
+    elif context_should_update and not action_needs_context and not workflow_action_requested:
         intent = "project_context_updated"
         response = _format_project_context_saved_response(
             workflow,
             agent_recommendation,
         )
+        actions = []
+        commands = []
+    elif wants_style_feedback:
+        intent = "style_feedback"
+        response = _format_style_feedback_response(workflow, agent_recommendation)
         actions = []
         commands = []
     elif wants_greeting:
@@ -4344,6 +6885,262 @@ async def query_workflow_agent(
     elif wants_repair:
         intent = "repair"
         response = _format_repair_response(agent_recommendation)
+        actions = []
+        commands = []
+    elif wants_mount_project:
+        intent = "mount_project"
+        effects = _build_mount_project_effects(
+            directory_path=_derive_mount_project_path(workflow)
+            or _default_mount_project_path(),
+            mount_name=workflow.title,
+        )
+        response = (
+            "Do this: mount the project directory.\n"
+            "Why: remote browser access needs the server to mount the project path, then the app can inspect files and roles."
+        )
+        actions = [
+            _build_agent_chat_action(
+                "mount-project",
+                "Mount project",
+                "Mount the current or suggested server-side project directory.",
+                variant="primary",
+                client_effects=effects,
+            ),
+            _build_agent_chat_action(
+                "open-files",
+                "Open Files",
+                "Inspect mounted project files.",
+                client_effects={"navigate_to": "files"},
+            ),
+        ]
+        commands = [
+            _build_agent_command_block(
+                "mount-project-command",
+                "Mount project in app",
+                "Mount the project directory from chat.",
+                effects,
+            )
+        ]
+    elif wants_reset_workspace:
+        intent = "reset_workspace"
+        effects = _build_mount_project_effects(
+            directory_path=_derive_mount_project_path(workflow)
+            or _default_mount_project_path(),
+            mount_name=workflow.title,
+        )
+        effects["reset_workspace"] = True
+        response = (
+            "Do this: clear cached workspace file state, then remount the current project.\n"
+            "Why: this resets stale client/file indexes while preserving the project directory on disk."
+        )
+        actions = [
+            _build_agent_chat_action(
+                "reset-workspace-remount-project",
+                "Reset and remount",
+                "Clear indexed workspace state and remount the current project directory.",
+                variant="primary",
+                client_effects=effects,
+            ),
+            _build_agent_chat_action(
+                "show-status",
+                "Show status",
+                "Inspect workflow state after the reset.",
+                client_effects={"show_workflow_context": True},
+            ),
+        ]
+        commands = [
+            _build_agent_command_block(
+                "reset-workspace-remount-command",
+                "Reset workspace in app",
+                "Clear cached file state and remount the current project.",
+                effects,
+            )
+        ]
+    elif wants_validate_project:
+        intent = "validate_project"
+        response = (
+            "Do this: inspect the mounted project and detected file roles.\n"
+            "Why: project validation checks whether image, label/mask, config, checkpoint, and output paths are ready."
+        )
+        actions = [
+            _build_agent_chat_action(
+                "open-files",
+                "Inspect files",
+                "Open Files to review detected project structure and role mapping.",
+                variant="primary",
+                client_effects={"navigate_to": "files"},
+            ),
+            _build_agent_chat_action(
+                "show-workflow-status",
+                "Show status",
+                "Open the workflow readiness panel.",
+                client_effects={
+                    "show_workflow_context": True,
+                    "refresh_insights": True,
+                },
+            ),
+        ]
+        if workflow.image_path or workflow.dataset_path:
+            actions.append(
+                _build_agent_chat_action(
+                    "open-visualization",
+                    "View data",
+                    "Open the detected image and mask pair.",
+                    client_effects=_build_view_data_effects(workflow),
+                )
+            )
+        commands = []
+    elif wants_prepare_data:
+        intent = "prepare_data"
+        response = (
+            "Do this: open Files and verify the data mapping before preprocessing.\n"
+            "Why: conversion, cropping, normalization, and train/val splits need explicit source and output choices."
+        )
+        actions = [
+            _build_agent_chat_action(
+                "open-files",
+                "Prepare data",
+                "Open Files to choose sources and inspect project structure.",
+                variant="primary",
+                client_effects={"navigate_to": "files"},
+            ),
+            _build_agent_chat_action(
+                "show-workflow-status",
+                "Show status",
+                "Show the current data readiness and blockers.",
+                client_effects={
+                    "show_workflow_context": True,
+                    "refresh_insights": True,
+                },
+            ),
+        ]
+        commands = []
+    elif wants_configure_training:
+        intent = "configure_training"
+        training_label_path = corrected_mask_path or workflow.label_path or workflow.mask_path
+        effects = _build_start_training_effects(workflow, training_label_path)
+        effects.pop("runtime_action", None)
+        response = (
+            "Do this: open training with inferred defaults filled in.\n"
+            "Why: you can review config, image, labels, output, batch settings, and augmentation before launching."
+        )
+        actions = [
+            _build_agent_chat_action(
+                "configure-training",
+                "Configure training",
+                "Prefill training inputs and open the training screen without starting a job.",
+                variant="primary",
+                client_effects=effects,
+            )
+        ]
+        commands = [
+            _build_agent_command_block(
+                "configure-training-command",
+                "Configure training in app",
+                "Open training with agent-inferred paths and preset.",
+                effects,
+            )
+        ]
+    elif wants_configure_inference:
+        intent = "configure_inference"
+        effects = _build_start_inference_effects(workflow)
+        effects.pop("runtime_action", None)
+        response = (
+            "Do this: open Run Model with inferred inputs filled in.\n"
+            "Why: you can review checkpoint, config, image, and output settings before launching inference."
+        )
+        actions = [
+            _build_agent_chat_action(
+                "configure-inference",
+                "Configure inference",
+                "Prefill inference settings and open Run Model without starting a job.",
+                variant="primary",
+                client_effects=effects,
+            )
+        ]
+        commands = [
+            _build_agent_command_block(
+                "configure-inference-command",
+                "Configure inference in app",
+                "Open Run Model with agent-inferred paths and preset.",
+                effects,
+            )
+        ]
+    elif wants_monitor_jobs:
+        intent = "monitor_jobs"
+        response = (
+            "Do this: open Monitor.\n"
+            "Why: logs, TensorBoard, runtime status, and job health belong there."
+        )
+        actions = [
+            _build_agent_chat_action(
+                "open-monitoring",
+                "Open Monitor",
+                "Open runtime and training monitoring.",
+                variant="primary",
+                client_effects={"navigate_to": "monitoring"},
+            ),
+            _build_agent_chat_action(
+                "show-status",
+                "Show status",
+                "Show workflow readiness and recent events.",
+                client_effects={"show_workflow_context": True},
+            ),
+        ]
+        commands = []
+    elif wants_stop_runtime:
+        intent = "stop_runtime"
+        response = (
+            "Do this: stop the active runtime.\n"
+            "Why: stopping a run is explicit because it interrupts compute work."
+        )
+        actions = [
+            _build_agent_chat_action(
+                "stop-inference",
+                "Stop inference",
+                "Request cancellation of the current inference process.",
+                variant="primary",
+                client_effects={"runtime_action": {"kind": "stop_inference"}},
+            ),
+            _build_agent_chat_action(
+                "stop-training",
+                "Stop training",
+                "Request cancellation of the current training process.",
+                client_effects={"runtime_action": {"kind": "stop_training"}},
+            ),
+            _build_agent_chat_action(
+                "open-monitoring",
+                "Open Monitor",
+                "Check runtime state after stopping.",
+                client_effects={"navigate_to": "monitoring"},
+            ),
+        ]
+        commands = []
+    elif wants_project_progress:
+        intent = "project_progress"
+        progress = _build_workflow_project_progress(
+            db,
+            workflow,
+            user_id=user.id,
+            project_observation=project_observation,
+        )
+        response = _format_project_progress_response(progress)
+        actions = [
+            _build_agent_chat_action(
+                "open-project-progress",
+                "Open progress",
+                "Open the project progress tracker for volume-level ground-truth status.",
+                variant="primary",
+                client_effects={
+                    "navigate_to": "project-progress",
+                    "refresh_project_progress": True,
+                },
+            )
+        ]
+        commands = []
+    elif wants_project_files:
+        intent = "project_files"
+        response = _format_project_files_response(project_observation)
         actions = []
         commands = []
     elif wants_project_context:
@@ -4369,7 +7166,7 @@ async def query_workflow_agent(
     elif wants_incomplete_intent:
         intent = "clarify_next_job"
         response = (
-            "Do this: choose one workflow job.\n"
+            "Tell me what you want to do next.\n"
             "Options: run model, proofread, use edits for training, or compare results.\n"
             f"Current suggestion: {agent_recommendation.decision}"
         )
@@ -4480,6 +7277,10 @@ async def query_workflow_agent(
             ]
     elif wants_visualization_launch:
         intent = "view_data"
+        observed_volume_set = _select_observed_volume_set(
+            project_observation,
+            prefer_alternate=wants_alternate_volume_set,
+        )
         image_path = workflow.image_path or workflow.dataset_path or ""
         label_path = (
             workflow.label_path
@@ -4488,6 +7289,11 @@ async def query_workflow_agent(
             or workflow.corrected_mask_path
             or ""
         )
+        if observed_volume_set and (
+            wants_alternate_volume_set or not image_path
+        ):
+            image_path = observed_volume_set.get("image_path") or image_path
+            label_path = observed_volume_set.get("label_path") or label_path
         if not image_path:
             response = (
                 "I can visualize this, but I need the image volume first.\n"
@@ -4499,7 +7305,7 @@ async def query_workflow_agent(
                     "Choose data",
                     "Confirm the image and mask/label paths before viewing.",
                     variant="primary",
-                    client_effects={"navigate_to": "files"},
+                    client_effects=_build_choose_data_effects(),
                 )
             ]
             commands = []
@@ -4507,20 +7313,44 @@ async def query_workflow_agent(
             pair_discovery = _workflow_volume_pair_discovery(workflow)
             detected_pairs = pair_discovery.get("pairs") or []
             selected_pair = detected_pairs[0] if detected_pairs else None
-            selected_image_path = (
-                selected_pair.get("image_path") if selected_pair else image_path
-            )
-            selected_label_path = (
-                selected_pair.get("label_path") if selected_pair else label_path
-            )
+            selected_image_path = image_path
+            selected_label_path = label_path
+            if observed_volume_set and (
+                wants_alternate_volume_set or not selected_pair
+            ):
+                selected_image_path = (
+                    observed_volume_set.get("image_path") or selected_image_path
+                )
+                selected_label_path = (
+                    observed_volume_set.get("label_path") or selected_label_path
+                )
+            elif selected_pair:
+                selected_image_path = selected_pair.get("image_path") or image_path
+                selected_label_path = selected_pair.get("label_path") or label_path
             view_effects = _build_view_data_effects(
                 workflow,
                 image_path=selected_image_path,
                 label_path=selected_label_path,
             )
+            observed_set_count = len(project_observation.get("volume_sets") or [])
             pair_count = int(pair_discovery.get("pair_count") or 0)
+            if observed_volume_set:
+                pair_count = max(pair_count, int(observed_volume_set.get("pair_count") or 0))
             pair_line = ""
-            if pair_count > 1:
+            if wants_alternate_volume_set and observed_volume_set:
+                pair_line = (
+                    f"\nI inspected the project tree and found another image/seg set: "
+                    f"{observed_volume_set.get('name') or 'volume set'} "
+                    f"({observed_volume_set.get('image_count') or 0} images, "
+                    f"{observed_volume_set.get('label_count') or 0} labels"
+                    f"{'; ' + str(observed_volume_set.get('pair_count')) + ' matched pairs' if observed_volume_set.get('pair_count') else ''})."
+                )
+            elif observed_set_count > 1:
+                pair_line = (
+                    f"\nI inspected the project tree and found {observed_set_count} image/seg sets. "
+                    f"I will open {observed_volume_set.get('name') if observed_volume_set else 'the current set'} first."
+                )
+            elif pair_count > 1:
                 pair_line = (
                     f"\nI found {pair_count} clear image/seg pairs and will open "
                     f"{_short_path_label(selected_image_path)} first. "
@@ -4582,16 +7412,40 @@ async def query_workflow_agent(
     elif wants_training_launch and workflow.stage == "retraining_staged":
         intent = "start_training"
         training_label_path = corrected_mask_path or workflow.label_path or workflow.mask_path
-        training_effects = _build_start_training_effects(workflow, training_label_path)
+        subset_plan = None
+        if wants_progress_based_training:
+            progress = _build_workflow_project_progress(
+                db,
+                workflow,
+                user_id=user.id,
+                project_observation=project_observation,
+            )
+            subset_plan = _build_progress_training_subset_plan(
+                workflow,
+                progress,
+                lower_query=lower_query,
+            )
+        training_effects = _build_start_training_effects(
+            workflow,
+            training_label_path,
+            volume_subset_plan=subset_plan,
+        )
         response = (
-            "Do this: train on the saved edits.\n"
-            "Why: I can choose the preset and safe defaults from the current image/mask paths."
+            _format_progress_training_response(
+                subset_plan,
+                include_segment_rest=_query_wants_segment_remaining_after_training(lower_query),
+            )
+            if subset_plan
+            else (
+                "Yes. I can train from the saved edits with the current image and mask paths. "
+                "I’ll use the project config and safe defaults, then you can review the run before it launches."
+            )
         )
         actions = [
             _build_agent_chat_action(
                 "start-training",
                 "Train on edits",
-                "Start training with the saved mask edits.",
+                "Start training with the selected labels and safe defaults.",
                 variant="primary",
                 client_effects=training_effects,
             ),
@@ -4606,8 +7460,9 @@ async def query_workflow_agent(
             _build_agent_command_block(
                 "start-training-command",
                 "Start training in app",
-                "Run this in-app command block to launch retraining from chat.",
+                "Review the proposed preset, inputs, and safe defaults before launching retraining from chat.",
                 training_effects,
+                run_label="Review run",
             )
         ]
     elif wants_training_launch:
@@ -4625,7 +7480,7 @@ async def query_workflow_agent(
                     "Choose data",
                     "Select the image and label data needed for training.",
                     variant="primary",
-                    client_effects={"navigate_to": "files"},
+                    client_effects=_build_choose_data_effects(),
                 )
             ]
             commands = []
@@ -4640,7 +7495,7 @@ async def query_workflow_agent(
                     "Choose labels",
                     "Select label data or saved edits for training.",
                     variant="primary",
-                    client_effects={"navigate_to": "files"},
+                    client_effects=_build_choose_data_effects(),
                 ),
                 _build_agent_chat_action(
                     "open-proofreading",
@@ -4651,13 +7506,34 @@ async def query_workflow_agent(
             ]
             commands = []
         else:
+            subset_plan = None
+            if wants_progress_based_training or project_observation.get("volume_sets"):
+                progress = _build_workflow_project_progress(
+                    db,
+                    workflow,
+                    user_id=user.id,
+                    project_observation=project_observation,
+                )
+                subset_plan = _build_progress_training_subset_plan(
+                    workflow,
+                    progress,
+                    lower_query=lower_query,
+                )
             training_effects = _build_start_training_effects(
                 workflow,
                 training_label_path,
+                volume_subset_plan=subset_plan,
             )
             response = (
-                "Do this: train a model from the current image and label data.\n"
-                "Why: I found the training inputs and can choose safe defaults."
+                _format_progress_training_response(
+                    subset_plan,
+                    include_segment_rest=_query_wants_segment_remaining_after_training(lower_query),
+                )
+                if subset_plan
+                else (
+                    "Yes. I found image and label data, so I can train a model "
+                    "with the project config and safe defaults. Review the inputs before it launches."
+                )
             )
             actions = [
                 _build_agent_chat_action(
@@ -4665,6 +7541,7 @@ async def query_workflow_agent(
                     "Train model",
                     "Start training with the current image and label data.",
                     variant="primary",
+                    run_label="Review run",
                     client_effects=training_effects,
                 )
             ]
@@ -4672,40 +7549,70 @@ async def query_workflow_agent(
                 _build_agent_command_block(
                     "start-training-command",
                     "Start training in app",
-                    "Run this in-app command block to launch training from chat.",
+                    "Review the proposed preset, inputs, and safe defaults before launching training from chat.",
                     training_effects,
+                    run_label="Review run",
                 )
             ]
     elif wants_inference_launch:
         intent = "start_inference"
-        inference_effects = _build_start_inference_effects(workflow)
-        response = (
-            "Do this: run the model.\n"
-            "Why: this creates the mask result you can inspect and fix."
-        )
-        actions = [
-            _build_agent_chat_action(
-                "start-inference",
-                "Run model",
-                "Start the model run with the current settings.",
-                variant="primary",
-                client_effects=inference_effects,
-            ),
-            _build_agent_chat_action(
-                "start-proofreading",
-                "Proofread this data",
-                "Open the image and mask in the proofreading workbench.",
-                client_effects=_build_start_proofreading_effects(workflow),
-            ),
-        ]
-        commands = [
-            _build_agent_command_block(
-                "start-inference-command",
-                "Start inference in app",
-                "Run this in-app command block to launch inference from chat.",
-                inference_effects,
+        inference_blockers = _inference_input_blockers(workflow)
+        if inference_blockers:
+            missing = ", ".join(inference_blockers)
+            response = (
+                f"I can run a model, but I need {missing} first.\n"
+                "Do this: confirm the input image and checkpoint, or use the existing labels for proofreading/training."
             )
-        ]
+            actions = [
+                _build_agent_chat_action(
+                    "open-inference",
+                    "Check Run Model",
+                    f"Inference needs {missing}.",
+                    variant="primary",
+                    client_effects={"navigate_to": "inference"},
+                )
+            ]
+            if not (workflow.image_path or workflow.dataset_path):
+                actions.append(
+                    _build_agent_chat_action(
+                        "open-files",
+                        "Choose data",
+                        "Pick an image volume before running a model.",
+                        client_effects=_build_choose_data_effects(),
+                    )
+                )
+            if not proofreading_blockers:
+                actions.append(_build_proofreading_action(workflow, variant="default"))
+            commands = []
+        else:
+            inference_effects = _build_start_inference_effects(workflow)
+            response = (
+                "Do this: run the model.\n"
+                "Why: this creates the mask result you can inspect and fix."
+            )
+            actions = [
+                _build_agent_chat_action(
+                    "start-inference",
+                    "Run model",
+                    "Start the model run with the current settings.",
+                    variant="primary",
+                    client_effects=inference_effects,
+                ),
+                _build_agent_chat_action(
+                    "start-proofreading",
+                    "Proofread this data",
+                    "Open the image and mask in the proofreading workbench.",
+                    client_effects=_build_start_proofreading_effects(workflow),
+                ),
+            ]
+            commands = [
+                _build_agent_command_block(
+                    "start-inference-command",
+                    "Start inference in app",
+                    "Run this in-app command block to launch inference from chat.",
+                    inference_effects,
+                )
+            ]
     elif wants_proofreading_launch:
         intent = "start_proofreading"
         if proofreading_blockers:
@@ -4720,7 +7627,7 @@ async def query_workflow_agent(
                     "Choose data",
                     f"Proofreading needs {missing}.",
                     variant="primary",
-                    client_effects={"navigate_to": "files"},
+                    client_effects=_build_choose_data_effects(),
                 )
             ]
             if "mask, label, or prediction" in proofreading_blockers:
@@ -4758,35 +7665,84 @@ async def query_workflow_agent(
             ]
     elif wants_segmentation_launch:
         intent = "start_segmentation"
-        inference_effects = _build_start_inference_effects(workflow)
-        proofreading_effects = _build_start_proofreading_effects(workflow)
-        response = (
-            "Do this: run the model to segment the volume.\n"
-            "Why: inference creates the mask result; proofreading is for fixing it afterward."
-        )
-        actions = [
-            _build_agent_chat_action(
-                "start-inference",
-                "Run model",
-                "Start segmentation from the current inference settings.",
-                variant="primary",
-                client_effects=inference_effects,
-            ),
-            _build_agent_chat_action(
-                "start-proofreading",
-                "Proofread this data",
-                "Open the current image/mask pair in proofreading.",
-                client_effects=proofreading_effects,
-            ),
-        ]
-        commands = [
-            _build_agent_command_block(
-                "start-segmentation-command",
-                "Run model in app",
-                "Run segmentation from chat using the current app settings.",
-                inference_effects,
+        inference_blockers = _inference_input_blockers(workflow)
+        if inference_blockers:
+            missing = ", ".join(inference_blockers)
+            response = (
+                f"I can help segment this data, but running inference needs {missing}.\n"
+                "Why: a checkpoint is required to produce a new model prediction. Useful next step: use the existing labels for proofreading or training, or add a checkpoint before running inference."
             )
-        ]
+            actions = []
+            if not proofreading_blockers:
+                actions.append(_build_proofreading_action(workflow, variant="primary"))
+            training_label_path = (
+                corrected_mask_path
+                or workflow.label_path
+                or workflow.mask_path
+                or workflow.inference_output_path
+            )
+            if (workflow.image_path or workflow.dataset_path) and training_label_path:
+                training_effects = _build_start_training_effects(
+                    workflow,
+                    training_label_path,
+                )
+                actions.append(
+                    _build_agent_chat_action(
+                        "start-training",
+                        "Train model",
+                        "Train from the current image and label data.",
+                        client_effects=training_effects,
+                    )
+                )
+            actions.append(
+                _build_agent_chat_action(
+                    "open-inference",
+                    "Check Run Model",
+                    f"Running segmentation needs {missing}.",
+                    variant="primary" if not actions else "default",
+                    client_effects={"navigate_to": "inference"},
+                )
+            )
+            if not (workflow.image_path or workflow.dataset_path):
+                actions.append(
+                    _build_agent_chat_action(
+                        "open-files",
+                        "Choose data",
+                        "Pick an image volume before segmenting.",
+                        client_effects=_build_choose_data_effects(),
+                    )
+                )
+            commands = []
+        else:
+            inference_effects = _build_start_inference_effects(workflow)
+            proofreading_effects = _build_start_proofreading_effects(workflow)
+            response = (
+                "Do this: run the model to segment the volume.\n"
+                "Why: inference creates the mask result; proofreading is for fixing it afterward."
+            )
+            actions = [
+                _build_agent_chat_action(
+                    "start-inference",
+                    "Run model",
+                    "Start segmentation from the current inference settings.",
+                    variant="primary",
+                    client_effects=inference_effects,
+                ),
+                _build_agent_chat_action(
+                    "start-proofreading",
+                    "Proofread this data",
+                    "Open the current image/mask pair in proofreading.",
+                    client_effects=proofreading_effects,
+                ),
+            ]
+            commands = [
+                _build_agent_command_block(
+                    "start-segmentation-command",
+                    "Run model in app",
+                    "Run segmentation from chat using the current app settings.",
+                    inference_effects,
+                )
+            ]
     elif wants_retraining and corrected_mask_path:
         intent = "stage_retraining"
         proposal = append_workflow_event(
@@ -4870,18 +7826,29 @@ async def query_workflow_agent(
         ]
     else:
         intent = "clarify_next_job"
-        response = _format_unknown_workflow_query_response()
+        response = _format_unknown_workflow_query_response(agent_recommendation)
         actions = []
         commands = []
 
+    actions, commands = _one_app_suggestion(actions, commands)
+    response = _humanize_agent_response(response)
+    trace = _build_agent_trace(
+        workflow=workflow,
+        project_observation=project_observation,
+        intent=intent,
+        actions=actions,
+    )
+
     _persist_workflow_agent_chat_exchange(
         db,
+        workflow_id=workflow.id,
         conversation=conversation,
         query=raw_query,
         response=response,
         actions=actions,
         commands=commands,
         proposals=proposals,
+        trace=trace,
     )
     db.commit()
     append_app_event(
@@ -4899,6 +7866,9 @@ async def query_workflow_agent(
         response_len=len(response),
         response_source="workflow_orchestrator",
         intent=intent,
+        semantic_intent=semantic_name,
+        semantic_confidence=semantic_intent.get("confidence"),
+        semantic_reason=semantic_intent.get("reason"),
         recommendation_decision=agent_recommendation.decision,
         recommendation_stage=agent_recommendation.next_stage,
         action_ids=[action.id for action in actions],
@@ -4910,6 +7880,7 @@ async def query_workflow_agent(
         command_count=len(commands),
         proposal_count=len(proposals),
         task_count=len(tasks),
+        trace_count=len(trace),
     )
 
     return AgentQueryResponse(
@@ -4923,4 +7894,5 @@ async def query_workflow_agent(
         actions=actions,
         commands=commands,
         tasks=tasks,
+        trace=trace,
     )

@@ -63,6 +63,13 @@ class WorkflowSpineSmokeTests(unittest.TestCase):
                 "stage": "proofreading",
                 "image_path": "/projects/mito25/data/image/mito25_im.h5",
                 "corrected_mask_path": str(export_path),
+                "metadata": {
+                    "project_context": {
+                        "imaging_modality": "EM",
+                        "target_structure": "mitochondria",
+                        "optimization_priority": "speed",
+                    }
+                },
             },
         )
         self.client.post(
@@ -85,7 +92,7 @@ class WorkflowSpineSmokeTests(unittest.TestCase):
         proposals = query_payload["proposals"]
         self.assertEqual(len(proposals), 1)
         self.assertGreaterEqual(len(query_payload["actions"]), 1)
-        self.assertGreaterEqual(len(query_payload["commands"]), 1)
+        self.assertEqual(query_payload["commands"], [])
         self.assertEqual(
             query_payload["actions"][0]["client_effects"]["navigate_to"],
             "training",
@@ -107,15 +114,15 @@ class WorkflowSpineSmokeTests(unittest.TestCase):
         self.assertEqual(launch_query_response.status_code, 200)
         launch_query_payload = launch_query_response.json()
         self.assertEqual(
-            launch_query_payload["commands"][0]["client_effects"]["runtime_action"][
+            launch_query_payload["actions"][0]["client_effects"]["runtime_action"][
                 "kind"
             ],
             "start_training",
         )
-        training_effects = launch_query_payload["commands"][0]["client_effects"]
+        training_effects = launch_query_payload["actions"][0]["client_effects"]
         self.assertEqual(
             training_effects["set_training_config_preset"],
-            "configs/MitoEM/Mito25-Local-Smoke-BC.yaml",
+            "configs/MitoEM/Mito-CaseStudy-BC.yaml",
         )
         self.assertEqual(
             training_effects["set_training_image_path"],
@@ -125,7 +132,7 @@ class WorkflowSpineSmokeTests(unittest.TestCase):
             training_effects["runtime_action"]["autopick_parameters"],
         )
         self.assertEqual(
-            launch_query_payload["commands"][0]["client_effects"]["navigate_to"],
+            launch_query_payload["actions"][0]["client_effects"]["navigate_to"],
             "training",
         )
 

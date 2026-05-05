@@ -1,4 +1,14 @@
-from sqlalchemy import Boolean, Column, DateTime, Float, ForeignKey, Integer, String, Text
+from sqlalchemy import (
+    Boolean,
+    Column,
+    DateTime,
+    Float,
+    ForeignKey,
+    Integer,
+    String,
+    Text,
+    UniqueConstraint,
+)
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
 
@@ -77,10 +87,23 @@ class WorkflowSession(Base):
         cascade="all, delete-orphan",
         order_by="WorkflowAgentPlan.updated_at",
     )
+    commands = relationship(
+        "WorkflowCommand",
+        back_populates="workflow",
+        cascade="all, delete-orphan",
+        order_by="WorkflowCommand.created_at",
+    )
 
 
 class WorkflowEvent(Base):
     __tablename__ = "workflow_events"
+    __table_args__ = (
+        UniqueConstraint(
+            "workflow_id",
+            "idempotency_key",
+            name="uq_workflow_events_workflow_id_idempotency_key",
+        ),
+    )
 
     id = Column(Integer, primary_key=True, index=True)
     workflow_id = Column(
@@ -91,14 +114,63 @@ class WorkflowEvent(Base):
     stage = Column(String, nullable=True, index=True)
     summary = Column(Text, nullable=False)
     payload_json = Column(Text, nullable=True)
+    schema_version = Column(Integer, default=1, nullable=False)
+    idempotency_key = Column(String, nullable=True, index=True)
     approval_status = Column(String, default="not_required", index=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
     workflow = relationship("WorkflowSession", back_populates="events")
 
 
+class WorkflowCommand(Base):
+    __tablename__ = "workflow_commands"
+    __table_args__ = (
+        UniqueConstraint(
+            "workflow_id",
+            "idempotency_key",
+            name="uq_workflow_commands_workflow_id_idempotency_key",
+        ),
+    )
+
+    id = Column(Integer, primary_key=True, index=True)
+    workflow_id = Column(
+        Integer, ForeignKey("workflow_sessions.id"), nullable=False, index=True
+    )
+    command_type = Column(String, nullable=False, index=True)
+    status = Column(String, default="queued", nullable=False, index=True)
+    idempotency_key = Column(String, nullable=False, index=True)
+    actor = Column(String, default="agent", nullable=False, index=True)
+    source_event_id = Column(Integer, ForeignKey("workflow_events.id"), nullable=True)
+    approval_event_id = Column(Integer, ForeignKey("workflow_events.id"), nullable=True)
+    input_json = Column(Text, nullable=True)
+    result_json = Column(Text, nullable=True)
+    error_json = Column(Text, nullable=True)
+    attempt_count = Column(Integer, default=0, nullable=False)
+    lease_owner = Column(String, nullable=True, index=True)
+    lease_expires_at = Column(DateTime(timezone=True), nullable=True)
+    started_at = Column(DateTime(timezone=True), nullable=True)
+    completed_at = Column(DateTime(timezone=True), nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )
+
+    workflow = relationship("WorkflowSession", back_populates="commands")
+    source_event = relationship("WorkflowEvent", foreign_keys=[source_event_id])
+    approval_event = relationship("WorkflowEvent", foreign_keys=[approval_event_id])
+
+
 class WorkflowArtifact(Base):
     __tablename__ = "workflow_artifacts"
+    __table_args__ = (
+        UniqueConstraint(
+            "workflow_id",
+            "artifact_type",
+            "role",
+            "path",
+            name="uq_workflow_artifacts_identity",
+        ),
+    )
 
     id = Column(Integer, primary_key=True, index=True)
     workflow_id = Column(
@@ -121,11 +193,19 @@ class WorkflowArtifact(Base):
 
 class WorkflowModelRun(Base):
     __tablename__ = "workflow_model_runs"
+    __table_args__ = (
+        UniqueConstraint(
+            "workflow_id",
+            "run_id",
+            name="uq_workflow_model_runs_workflow_id_run_id",
+        ),
+    )
 
     id = Column(Integer, primary_key=True, index=True)
     workflow_id = Column(
         Integer, ForeignKey("workflow_sessions.id"), nullable=False, index=True
     )
+    run_id = Column(String, nullable=True, index=True)
     run_type = Column(String, nullable=False, index=True)
     status = Column(String, default="pending", index=True)
     name = Column(String, nullable=True)

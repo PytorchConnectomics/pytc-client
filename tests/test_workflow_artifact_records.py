@@ -162,6 +162,7 @@ class WorkflowArtifactRecordTests(unittest.TestCase):
         self.assertEqual(model_runs[0]["run_type"], "training")
         self.assertEqual(model_runs[0]["status"], "completed")
         self.assertEqual(model_runs[0]["checkpoint_path"], checkpoint_path)
+        self.assertTrue(model_runs[0]["run_id"].startswith("training-"))
 
         model_versions = self.client.get(
             f"/api/workflows/{workflow_id}/model-versions"
@@ -180,6 +181,65 @@ class WorkflowArtifactRecordTests(unittest.TestCase):
             "workflow.bundle_exported",
             {event["event_type"] for event in events},
         )
+
+    def test_model_run_events_pair_by_explicit_run_id(self):
+        workflow_id = self._workflow_id()
+        first_output = self._write_file("training-output-a")
+        second_output = self._write_file("training-output-b")
+        first_checkpoint = self._write_file("checkpoint-a.pth")
+        second_checkpoint = self._write_file("checkpoint-b.pth")
+
+        for run_id, output in (
+            ("train-run-a", first_output),
+            ("train-run-b", second_output),
+        ):
+            response = self.client.post(
+                f"/api/workflows/{workflow_id}/events",
+                json={
+                    "actor": "system",
+                    "event_type": "training.started",
+                    "stage": "retraining_staged",
+                    "summary": f"Started {run_id}.",
+                    "payload": {"run_id": run_id, "outputPath": output},
+                },
+            )
+            self.assertEqual(response.status_code, 200)
+
+        complete_second = self.client.post(
+            f"/api/workflows/{workflow_id}/events",
+            json={
+                "actor": "system",
+                "event_type": "training.completed",
+                "stage": "evaluation",
+                "summary": "Second training completed first.",
+                "payload": {
+                    "run_id": "train-run-b",
+                    "outputPath": second_output,
+                    "checkpointPath": second_checkpoint,
+                },
+            },
+        )
+        self.assertEqual(complete_second.status_code, 200)
+        complete_first = self.client.post(
+            f"/api/workflows/{workflow_id}/events",
+            json={
+                "actor": "system",
+                "event_type": "training.completed",
+                "stage": "evaluation",
+                "summary": "First training completed second.",
+                "payload": {
+                    "run_id": "train-run-a",
+                    "outputPath": first_output,
+                    "checkpointPath": first_checkpoint,
+                },
+            },
+        )
+        self.assertEqual(complete_first.status_code, 200)
+
+        model_runs = self.client.get(f"/api/workflows/{workflow_id}/model-runs").json()
+        runs_by_id = {run["run_id"]: run for run in model_runs}
+        self.assertEqual(runs_by_id["train-run-a"]["checkpoint_path"], first_checkpoint)
+        self.assertEqual(runs_by_id["train-run-b"]["checkpoint_path"], second_checkpoint)
 
     def test_manual_evaluation_records_and_readiness_endpoint(self):
         workflow_id = self._workflow_id()

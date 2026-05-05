@@ -8,6 +8,7 @@ import {
   DashboardOutlined,
   BugOutlined,
   MessageOutlined,
+  ProjectOutlined,
 } from "@ant-design/icons";
 import FilesManager from "./FilesManager";
 import Visualization from "./Visualization";
@@ -15,6 +16,7 @@ import ModelTraining from "./ModelTraining";
 import ModelInference from "./ModelInference";
 import Monitoring from "./Monitoring";
 import MaskProofreading from "./MaskProofreading";
+import ProjectProgress from "./ProjectProgress";
 import Chatbot from "../components/Chatbot";
 import { useWorkflow } from "../contexts/WorkflowContext";
 import { logClientEvent } from "../logging/appEventLog";
@@ -32,6 +34,11 @@ const MODULE_ITEMS = [
   },
   { label: "Monitor", key: "monitoring", icon: <DashboardOutlined /> },
   {
+    label: "Progress",
+    key: "project-progress",
+    icon: <ProjectOutlined />,
+  },
+  {
     label: "Proofread",
     key: "mask-proofreading",
     icon: <BugOutlined />,
@@ -44,6 +51,7 @@ function Views() {
   const workflowContext = useWorkflow();
   const lastClientEffects = workflowContext?.lastClientEffects;
   const consumeClientEffects = workflowContext?.consumeClientEffects;
+  const refreshProjectProgress = workflowContext?.refreshProjectProgress;
   const [isChatOpen, setIsChatOpen] = useState(false);
   const [assistantContextOpen, setAssistantContextOpen] = useState(false);
   const [quickAgentRequest, setQuickAgentRequest] = useState(null);
@@ -100,8 +108,11 @@ function Views() {
     if (lastClientEffects.show_workflow_context) {
       setAssistantContextOpen(true);
     }
+    if (lastClientEffects.refresh_project_progress) {
+      refreshProjectProgress?.();
+    }
     consumeClientEffects?.();
-  }, [lastClientEffects, consumeClientEffects]);
+  }, [lastClientEffects, consumeClientEffects, refreshProjectProgress]);
 
   useEffect(() => {
     logClientEvent("view_changed", {
@@ -255,6 +266,7 @@ function Views() {
         )}
         {renderTabContent("training", <ModelTraining />)}
         {renderTabContent("monitoring", <Monitoring />)}
+        {renderTabContent("project-progress", <ProjectProgress />)}
         {renderTabContent(
           "inference",
           <ModelInference

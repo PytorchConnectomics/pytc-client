@@ -39,13 +39,13 @@ function App() {
   return (
     <ContextWrapper>
       <YamlContextWrapper>
-        <WorkflowProvider>
-          <CacheBootstrapper>
+        <CacheBootstrapper>
+          <WorkflowProvider>
             <div className="App">
               <MainContent />
             </div>
-          </CacheBootstrapper>
-        </WorkflowProvider>
+          </WorkflowProvider>
+        </CacheBootstrapper>
       </YamlContextWrapper>
     </ContextWrapper>
   );
