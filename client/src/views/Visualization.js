@@ -5,7 +5,7 @@ import React, {
   useRef,
   useState,
 } from "react";
-import { Button, Tabs, Input, Space, Typography, message } from "antd";
+import { Button, Tabs, Input, Space, Typography, message, notification } from "antd";
 import {
   ArrowRightOutlined,
   InboxOutlined,
@@ -16,6 +16,7 @@ import UnifiedFileInput from "../components/UnifiedFileInput";
 import StageHeader from "../components/workflow/StageHeader";
 import { AppContext } from "../contexts/GlobalContext";
 import { useWorkflow } from "../contexts/WorkflowContext";
+import { logClientEvent } from "../logging/appEventLog";
 
 const { Title } = Typography;
 
@@ -50,6 +51,35 @@ const getViewerTitle = (imageValue, labelValue) => {
   );
 };
 
+const waitForViewerLayout = () =>
+  new Promise((resolve) => {
+    window.requestAnimationFrame(() => {
+      window.requestAnimationFrame(() => {
+        window.setTimeout(resolve, 250);
+      });
+    });
+  });
+
+const appendRefreshParam = (url) => {
+  if (!url) return url;
+  const hashIndex = url.indexOf("#");
+  const base = hashIndex >= 0 ? url.slice(0, hashIndex) : url;
+  const hash = hashIndex >= 0 ? url.slice(hashIndex) : "";
+  const separator = base.includes("?") ? "&" : "?";
+  return `${base}${separator}refresh=${Date.now()}${hash}`;
+};
+
+const isMixedContentUrl = (url) => {
+  if (typeof window === "undefined" || window.location.protocol !== "https:") {
+    return false;
+  }
+  try {
+    return new URL(url, window.location.href).protocol === "http:";
+  } catch {
+    return false;
+  }
+};
+
 function Visualization(props) {
   const { viewers, setViewers } = props;
   const workflowContext = useWorkflow();
@@ -62,6 +92,7 @@ function Visualization(props) {
     workflowContext?.workflow?.metadata?.project_context?.voxel_size_nm ||
     null;
   const handledRuntimeActionRef = useRef(null);
+  const viewerRefreshTimersRef = useRef([]);
   const [activeKey, setActiveKey] = useState(
     viewers.length > 0 ? viewers[0].key : null,
   );
@@ -70,18 +101,25 @@ function Visualization(props) {
   const [currentImage, setCurrentImage] = useState(globalImage);
   const [currentLabel, setCurrentLabel] = useState(globalLabel);
   const [scales, setScales] = useState(
-    formatScales(globalScales) || formatScales(workflowScales) || "30,6,6",
+    formatScales(globalScales) || formatScales(workflowScales) || "",
   );
   const [isLoading, setIsLoading] = useState(false);
 
+  useEffect(() => {
+    return () => {
+      viewerRefreshTimersRef.current.forEach((timerId) => {
+        window.clearTimeout(timerId);
+      });
+      viewerRefreshTimersRef.current = [];
+    };
+  }, []);
+
   const handleImageChange = (value) => {
-    console.log(`selected image:`, value);
     setCurrentImage(value);
     appContext?.setCurrentImage?.(value);
   };
 
   const handleLabelChange = (value) => {
-    console.log(`selected label:`, value);
     setCurrentLabel(value);
     appContext?.setCurrentLabel?.(value);
   };
@@ -100,7 +138,7 @@ function Visualization(props) {
 
   useEffect(() => {
     const nextScales = formatScales(globalScales || workflowScales);
-    if (nextScales && nextScales !== scales) {
+    if (nextScales !== scales) {
       setScales(nextScales);
     }
   }, [globalScales, workflowScales, scales]);
@@ -110,6 +148,19 @@ function Visualization(props) {
     setScales(nextScales);
     appContext?.setVisualizationScales?.(nextScales);
   };
+
+  const parseScalesInput = useCallback((value) => {
+    const parts = (String(value || "").match(/-?\d+(?:\.\d+)?/g) || []).map(
+      Number,
+    );
+    if (
+      parts.length < 3 ||
+      parts.slice(0, 3).some((part) => !Number.isFinite(part) || part <= 0)
+    ) {
+      return null;
+    }
+    return parts.slice(0, 3);
+  }, []);
 
   const validateManagedUploadSelection = useCallback(async (value, role) => {
     const selectedPath = getPath(value);
@@ -136,7 +187,12 @@ function Visualization(props) {
     return false;
   }, []);
 
-  const loadViewer = useCallback(async (imageValue, labelValue, scalesValue) => {
+  const loadViewer = useCallback(async (
+    imageValue,
+    labelValue,
+    scalesValue,
+    options = {},
+  ) => {
     const imagePath = getPath(imageValue);
     const labelPath = getPath(labelValue);
 
@@ -162,7 +218,11 @@ function Visualization(props) {
         return;
       }
 
-      const scalesArray = scalesValue.split(",").map(Number);
+      const scalesArray = parseScalesInput(scalesValue);
+      if (!scalesArray) {
+        message.error("Enter voxel scales as z,y,x nanometers before opening the viewer.");
+        return;
+      }
       const viewerId =
         imagePath + (labelPath || "") + JSON.stringify(scalesArray);
 
@@ -187,6 +247,40 @@ function Visualization(props) {
       if (!viewerUrl) {
         throw new Error("Viewer did not return a Neuroglancer URL.");
       }
+      logClientEvent("visualization_viewer_url_received", {
+        level: "INFO",
+        message: "Received Neuroglancer viewer URL",
+        source: "visualization",
+        data: {
+          viewerUrl,
+          imagePath,
+          labelPath,
+          scales: scalesArray,
+          workflowId: workflowContext?.workflow?.id || null,
+          requestedImagePath: viewerResult?.requested_image_path || imagePath,
+          requestedLabelPath: viewerResult?.requested_label_path || labelPath,
+          resolvedImagePath: viewerResult?.image_path || null,
+          resolvedLabelPath: viewerResult?.label_path || null,
+        },
+      });
+      if (isMixedContentUrl(viewerUrl)) {
+        logClientEvent("visualization_viewer_mixed_content_blocked", {
+          level: "ERROR",
+          message: "Blocked insecure Neuroglancer viewer URL on HTTPS page",
+          source: "visualization",
+          data: {
+            viewerUrl,
+            pageUrl: window.location.href,
+            imagePath,
+            labelPath,
+            scales: scalesArray,
+            workflowId: workflowContext?.workflow?.id || null,
+          },
+        });
+        throw new Error(
+          "Viewer URL is insecure for this HTTPS page. The server must expose Neuroglancer through HTTPS.",
+        );
+      }
 
       const resolvedImagePath = viewerResult?.image_path;
       const resolvedLabelPath = viewerResult?.label_path;
@@ -200,7 +294,41 @@ function Visualization(props) {
         appContext?.setCurrentLabel?.(resolvedLabelPath);
       }
       if (pairQuestion) {
-        message.info(pairQuestion, 8);
+        const pairCount = viewerResult?.pair_discovery?.pair_count || 0;
+        const notificationKey = `volume-pairs-${viewerId}`;
+        notification.info({
+          key: notificationKey,
+          message: `Found ${pairCount} image/segmentation pairs`,
+          description:
+            "I opened the first pair. You can use the progress tracker to review which volumes are proofread, draft, or missing masks.",
+          duration: 12,
+          btn: (
+            <Space size={8}>
+              <Button
+                size="small"
+                type="primary"
+                onClick={() => {
+                  notification.close(notificationKey);
+                  workflowContext?.runClientEffects?.({
+                    navigate_to: "project-progress",
+                    refresh_project_progress: true,
+                  });
+                }}
+              >
+                Open Progress
+              </Button>
+              <Button
+                size="small"
+                onClick={() => {
+                  notification.close(notificationKey);
+                  workflowContext?.runClientEffects?.({ navigate_to: "files" });
+                }}
+              >
+                Show Files
+              </Button>
+            </Space>
+          ),
+        });
       }
 
       const newViewers = [
@@ -217,18 +345,60 @@ function Visualization(props) {
 
       setViewers(newViewers);
       setActiveKey(viewerId);
-    } catch (e) {
-      console.log(e);
-      message.error(e?.message || "Failed to load viewer");
+      logClientEvent("visualization_viewer_mounted", {
+        level: "INFO",
+        message: "Mounted Neuroglancer iframe",
+        source: "visualization",
+        data: {
+          viewerId,
+          viewerUrl,
+          title: getViewerTitle(
+            resolvedImagePath || imageValue,
+            resolvedLabelPath || labelValue,
+          ),
+          imagePath: resolvedImagePath || imagePath,
+          labelPath: resolvedLabelPath || labelPath,
+          scales: scalesArray,
+          workflowId: workflowContext?.workflow?.id || null,
+        },
+      });
+      if (options.refreshAfterMount) {
+        const timerId = window.setTimeout(() => {
+          setViewers((currentViewers) =>
+            currentViewers.map((viewer) =>
+              viewer.key === viewerId
+                ? { ...viewer, viewer: appendRefreshParam(viewer.viewer) }
+                : viewer,
+            ),
+          );
+        }, options.refreshAfterMount);
+        viewerRefreshTimersRef.current.push(timerId);
+      }
+    } catch (error) {
+      console.error("Failed to load Neuroglancer viewer", error);
+      logClientEvent("visualization_viewer_load_failed", {
+        level: "ERROR",
+        message: error?.message || "Failed to load Neuroglancer viewer",
+        source: "visualization",
+        data: {
+          imagePath,
+          labelPath,
+          scalesValue,
+          workflowId: workflowContext?.workflow?.id || null,
+          error,
+        },
+      });
+      message.error(error?.message || "Failed to load viewer");
     } finally {
       setIsLoading(false);
     }
   }, [
     appContext,
+    parseScalesInput,
     setViewers,
     validateManagedUploadSelection,
     viewers,
-    workflowContext?.workflow?.id,
+    workflowContext,
   ]);
 
   const fetchNeuroglancerViewer = async () => {
@@ -260,9 +430,15 @@ function Visualization(props) {
       appContext?.setCurrentLabel?.(labelValue);
     }
 
-    loadViewer(imageValue, labelValue, scalesValue).finally(() => {
-      workflowContext?.consumeRuntimeAction?.(action.id);
-    });
+    waitForViewerLayout()
+      .then(() => {
+        return loadViewer(imageValue, labelValue, scalesValue, {
+          refreshAfterMount: 800,
+        });
+      })
+      .finally(() => {
+        workflowContext?.consumeRuntimeAction?.(action.id);
+      });
   }, [
     appContext,
     currentImage,
@@ -309,7 +485,7 @@ function Visualization(props) {
       if (viewer.key === key) {
         return {
           ...viewer,
-          viewer: viewer.viewer + "?refresh=" + new Date().getTime(),
+          viewer: appendRefreshParam(viewer.viewer),
         };
       }
       return viewer;
@@ -365,7 +541,7 @@ function Visualization(props) {
               Scales (z,y,x)
             </Title>
             <Input
-              placeholder="30,6,6"
+              placeholder="z,y,x nm"
               value={scales}
               onChange={handleInputScales}
               style={{ width: "150px" }}
@@ -435,6 +611,31 @@ function Visualization(props) {
                       frameBorder="0"
                       scrolling="no"
                       src={viewer.viewer}
+                      onLoad={() =>
+                        logClientEvent("visualization_iframe_loaded", {
+                          level: "INFO",
+                          message: "Neuroglancer iframe load event",
+                          source: "visualization",
+                          data: {
+                            viewerKey: viewer.key,
+                            viewerUrl: viewer.viewer,
+                            activeKey,
+                          },
+                        })
+                      }
+                      onError={(event) =>
+                        logClientEvent("visualization_iframe_error", {
+                          level: "ERROR",
+                          message: "Neuroglancer iframe error event",
+                          source: "visualization",
+                          data: {
+                            viewerKey: viewer.key,
+                            viewerUrl: viewer.viewer,
+                            activeKey,
+                            eventType: event?.type,
+                          },
+                        })
+                      }
                       style={{
                         width: "100%",
                         height: "100%",

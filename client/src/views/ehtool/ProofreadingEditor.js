@@ -16,7 +16,6 @@ import {
   message,
   Tooltip,
   Collapse,
-  Segmented,
   Spin,
   Typography,
 } from "antd";
@@ -51,11 +50,10 @@ const ProofreadingEditor = forwardRef(
       overlayAllAlpha = 0.08,
       overlayActiveAlpha = 0.8,
       axis,
-      axisOptions,
-      onAxisChange,
       loading,
       activeInstanceId,
       onSave,
+      onMaskDraftChange,
       onNext,
       onPrevious,
       currentLayer,
@@ -65,6 +63,10 @@ const ProofreadingEditor = forwardRef(
       saveDisabledReason = "Editable mask is not ready yet.",
       minimalChrome = true,
       hideLayerToolbar = false,
+      editorHeightOverride = null,
+      keyboardEnabled = true,
+      hideToolPanel = false,
+      onToolStateChange,
     },
     ref,
   ) => {
@@ -92,6 +94,8 @@ const ProofreadingEditor = forwardRef(
     const originalMaskRef = useRef(null);
     const overlayAllRef = useRef(null);
     const overlayActiveRef = useRef(null);
+    const overlayAllContextRef = useRef(null);
+    const overlayAllContextDirtyRef = useRef(true);
 
     // Undo/Redo stacks
     const [undoStack, setUndoStack] = useState([]);
@@ -114,6 +118,12 @@ const ProofreadingEditor = forwardRef(
     const minimapRafRef = useRef(null);
     const axisViewStateRef = useRef({});
     const mousePosRafRef = useRef(null);
+    const shortcutHandlersRef = useRef({
+      handleRedo: null,
+      handleSave: null,
+      handleUndo: null,
+    });
+    const maskDraftRafRef = useRef(null);
     const pendingMousePosRef = useRef(null);
     const minimapLayoutRef = useRef(null);
     const minimapSourceRef = useRef(null);
@@ -122,11 +132,61 @@ const ProofreadingEditor = forwardRef(
     const minimapComposedRef = useRef(null);
     const activeOverlayDirtyRef = useRef(true);
     const minimapSourceDirtyRef = useRef(true);
+    const activeBrushSize =
+      tool === "erase" ? eraseBrushSize : paintBrushSize;
+    const setBrushSize =
+      tool === "erase" ? setEraseBrushSize : setPaintBrushSize;
+    const normalizeBrushSize = (value) => {
+      const numeric = Number(value);
+      if (!Number.isFinite(numeric)) return activeBrushSize;
+      return Math.max(1, Math.min(50, Math.round(numeric)));
+    };
 
     // Expose handleSave to parent
     useImperativeHandle(ref, () => ({
       save: handleSave,
+      setTool,
+      setBrushSize: (value) => {
+        const nextSize = normalizeBrushSize(value);
+        if (tool === "erase") {
+          setEraseBrushSize(nextSize);
+        } else {
+          setPaintBrushSize(nextSize);
+        }
+      },
+      toggleMask: () => setShowMask((prev) => !prev),
+      zoomIn: () => setZoom((prev) => Math.min(10.0, prev + 0.1)),
+      zoomOut: () => {
+        setZoom((prev) => {
+          const nextZoom = Math.max(1, prev - 0.1);
+          setOffset((current) => clampOffsetToViewport(current, nextZoom));
+          return nextZoom;
+        });
+      },
+      resetZoom: () => {
+        setZoom(1.0);
+        setOffset({ x: 0, y: 0 });
+      },
     }));
+
+    useEffect(() => {
+      onToolStateChange?.({
+        tool,
+        showMask,
+        hasUnsavedEdits,
+        zoom,
+        canEdit,
+        activeBrushSize,
+      });
+    }, [
+      activeBrushSize,
+      canEdit,
+      hasUnsavedEdits,
+      onToolStateChange,
+      showMask,
+      tool,
+      zoom,
+    ]);
 
     useEffect(() => {
       if (!axis) return;
@@ -182,6 +242,9 @@ const ProofreadingEditor = forwardRef(
         }
         if (mousePosRafRef.current) {
           cancelAnimationFrame(mousePosRafRef.current);
+        }
+        if (maskDraftRafRef.current) {
+          cancelAnimationFrame(maskDraftRafRef.current);
         }
       };
     }, []);
@@ -296,6 +359,66 @@ const ProofreadingEditor = forwardRef(
       minimapSourceDirtyRef.current = true;
     };
 
+    const markContextOverlayDirty = () => {
+      overlayAllContextDirtyRef.current = true;
+      minimapSourceDirtyRef.current = true;
+    };
+
+    const getContextOverlayCanvas = () => {
+      if (!overlayAllRef.current || canvasDimensions.width === 0) return null;
+      if (
+        !originalMaskRef.current ||
+        originalMaskRef.current.width !== canvasDimensions.width ||
+        originalMaskRef.current.height !== canvasDimensions.height
+      ) {
+        return overlayAllRef.current;
+      }
+
+      if (!overlayAllContextRef.current) {
+        overlayAllContextRef.current = document.createElement("canvas");
+        overlayAllContextDirtyRef.current = true;
+      }
+      const contextCanvas = overlayAllContextRef.current;
+      if (
+        contextCanvas.width !== canvasDimensions.width ||
+        contextCanvas.height !== canvasDimensions.height
+      ) {
+        contextCanvas.width = canvasDimensions.width;
+        contextCanvas.height = canvasDimensions.height;
+        overlayAllContextDirtyRef.current = true;
+      }
+      if (!overlayAllContextDirtyRef.current) return contextCanvas;
+
+      const context = contextCanvas.getContext("2d");
+      context.clearRect(0, 0, contextCanvas.width, contextCanvas.height);
+      context.drawImage(
+        overlayAllRef.current,
+        0,
+        0,
+        contextCanvas.width,
+        contextCanvas.height,
+      );
+
+      const overlayData = context.getImageData(
+        0,
+        0,
+        contextCanvas.width,
+        contextCanvas.height,
+      );
+      const originalMask = originalMaskRef.current.data;
+      for (let i = 0; i < overlayData.data.length; i += 4) {
+        if (originalMask[i] > 0) {
+          overlayData.data[i] = 0;
+          overlayData.data[i + 1] = 0;
+          overlayData.data[i + 2] = 0;
+          overlayData.data[i + 3] = 0;
+        }
+      }
+      context.putImageData(overlayData, 0, 0);
+      overlayAllContextDirtyRef.current = false;
+      return contextCanvas;
+    };
+
     const getActiveOverlayCanvas = () => {
       if (!maskDataRef.current || canvasDimensions.width === 0) return null;
       if (!activeOverlayCanvasRef.current) {
@@ -397,9 +520,11 @@ const ProofreadingEditor = forwardRef(
         }
 
         markOverlayDirty();
+        markContextOverlayDirty();
         setUndoStack([]);
         setRedoStack([]);
         setHasUnsavedEdits(false);
+        scheduleMaskDraftChange();
         drawCanvas();
         drawMinimap();
       } catch (error) {
@@ -416,10 +541,11 @@ const ProofreadingEditor = forwardRef(
       ctx.imageSmoothingEnabled = false;
       ctx.putImageData(imageDataRef.current, 0, 0);
 
-      if (showMask && overlayAllRef.current && overlayAllAlpha > 0.001) {
+      const contextOverlay = getContextOverlayCanvas();
+      if (showMask && contextOverlay && overlayAllAlpha > 0.001) {
         ctx.save();
         ctx.globalAlpha = overlayAllAlpha;
-        ctx.drawImage(overlayAllRef.current, 0, 0, canvas.width, canvas.height);
+        ctx.drawImage(contextOverlay, 0, 0, canvas.width, canvas.height);
         ctx.restore();
       }
 
@@ -448,6 +574,9 @@ const ProofreadingEditor = forwardRef(
     const loadOverlayImage = (source, targetRef) => {
       if (!source) {
         targetRef.current = null;
+        if (targetRef === overlayAllRef) {
+          markContextOverlayDirty();
+        }
         minimapSourceDirtyRef.current = true;
         drawCanvas();
         drawMinimap();
@@ -456,12 +585,18 @@ const ProofreadingEditor = forwardRef(
       const overlay = new Image();
       overlay.onload = () => {
         targetRef.current = overlay;
+        if (targetRef === overlayAllRef) {
+          markContextOverlayDirty();
+        }
         minimapSourceDirtyRef.current = true;
         drawCanvas();
         drawMinimap();
       };
       overlay.onerror = () => {
         targetRef.current = null;
+        if (targetRef === overlayAllRef) {
+          markContextOverlayDirty();
+        }
         minimapSourceDirtyRef.current = true;
         drawCanvas();
         drawMinimap();
@@ -568,11 +703,12 @@ const ProofreadingEditor = forwardRef(
         sourceCtx.clearRect(0, 0, sourceCanvas.width, sourceCanvas.height);
         sourceCtx.putImageData(imageDataRef.current, 0, 0);
 
-        if (showMask && overlayAllRef.current && overlayAllAlpha > 0.001) {
+        const contextOverlay = getContextOverlayCanvas();
+        if (showMask && contextOverlay && overlayAllAlpha > 0.001) {
           sourceCtx.save();
           sourceCtx.globalAlpha = overlayAllAlpha;
           sourceCtx.drawImage(
-            overlayAllRef.current,
+            contextOverlay,
             0,
             0,
             sourceCanvas.width,
@@ -767,6 +903,48 @@ const ProofreadingEditor = forwardRef(
       return overlay;
     };
 
+    const buildMaskDraftPayload = () => {
+      if (!maskDataRef.current) return null;
+      const maskData = maskDataRef.current;
+      const positivePoints = [];
+      let positiveCount = 0;
+      for (let i = 0; i < maskData.data.length; i += 4) {
+        if (maskData.data[i] > 0) positiveCount += 1;
+      }
+      const targetPoints = 5200;
+      const stride = Math.max(1, Math.ceil(Math.sqrt(positiveCount / targetPoints)));
+      for (let y = 0; y < maskData.height; y += stride) {
+        for (let x = 0; x < maskData.width; x += stride) {
+          const idx = (y * maskData.width + x) * 4;
+          if (maskData.data[idx] > 0) {
+            positivePoints.push([x, y]);
+          }
+        }
+      }
+      return {
+        axis,
+        layerIndex: currentLayer,
+        width: maskData.width,
+        height: maskData.height,
+        positiveCount,
+        stride,
+        points: positivePoints,
+      };
+    };
+
+    const emitMaskDraftChange = () => {
+      if (!onMaskDraftChange) return;
+      onMaskDraftChange(buildMaskDraftPayload());
+    };
+
+    const scheduleMaskDraftChange = () => {
+      if (!onMaskDraftChange || maskDraftRafRef.current) return;
+      maskDraftRafRef.current = requestAnimationFrame(() => {
+        maskDraftRafRef.current = null;
+        emitMaskDraftChange();
+      });
+    };
+
     const saveToUndoStack = () => {
       if (!canEdit || !maskDataRef.current) return;
       const maskCopy = new ImageData(
@@ -797,6 +975,7 @@ const ProofreadingEditor = forwardRef(
       markOverlayDirty();
       drawCanvas();
       drawMinimap();
+      scheduleMaskDraftChange();
     };
 
     const handleRedo = () => {
@@ -818,6 +997,7 @@ const ProofreadingEditor = forwardRef(
       markOverlayDirty();
       drawCanvas();
       drawMinimap();
+      scheduleMaskDraftChange();
     };
 
     const getCanvasCoordinates = (e) => {
@@ -909,6 +1089,7 @@ const ProofreadingEditor = forwardRef(
       markOverlayDirty();
       drawCanvas();
       scheduleMinimap();
+      scheduleMaskDraftChange();
     };
 
     const handleMouseMove = (e) => {
@@ -947,6 +1128,7 @@ const ProofreadingEditor = forwardRef(
         markOverlayDirty();
         drawCanvas();
         scheduleMinimap();
+        scheduleMaskDraftChange();
       }
     };
 
@@ -956,6 +1138,7 @@ const ProofreadingEditor = forwardRef(
       lastDrawRef.current = null;
       setMousePos(null);
       drawMinimap();
+      scheduleMaskDraftChange();
     };
 
     const handleWheel = (e) => {
@@ -999,6 +1182,7 @@ const ProofreadingEditor = forwardRef(
         return;
       }
       const saveResult = onSave(mBase64);
+      scheduleMaskDraftChange();
       if (saveResult && typeof saveResult.then === "function") {
         saveResult
           .then(() => setHasUnsavedEdits(false))
@@ -1007,8 +1191,14 @@ const ProofreadingEditor = forwardRef(
       }
       setHasUnsavedEdits(false);
     };
+    shortcutHandlersRef.current = {
+      handleRedo,
+      handleSave,
+      handleUndo,
+    };
 
     useEffect(() => {
+      if (!keyboardEnabled) return undefined;
       const handleKeyDown = (e) => {
         const target = e.target;
         if (
@@ -1031,26 +1221,26 @@ const ProofreadingEditor = forwardRef(
           case "z":
             if (e.ctrlKey || e.metaKey) {
               e.preventDefault();
-              if (e.shiftKey) handleRedo();
-              else handleUndo();
+              if (e.shiftKey) shortcutHandlersRef.current.handleRedo?.();
+              else shortcutHandlersRef.current.handleUndo?.();
             }
             break;
           case "y":
             if (e.ctrlKey || e.metaKey) {
               e.preventDefault();
-              handleRedo();
+              shortcutHandlersRef.current.handleRedo?.();
             }
             break;
           case "s":
             if (e.ctrlKey || e.metaKey) {
               e.preventDefault();
-              handleSave();
+              shortcutHandlersRef.current.handleSave?.();
             }
             break;
           case "enter":
             if (e.ctrlKey || e.metaKey) {
               e.preventDefault();
-              handleSave();
+              shortcutHandlersRef.current.handleSave?.();
             }
             break;
           case "a":
@@ -1061,35 +1251,20 @@ const ProofreadingEditor = forwardRef(
           case "arrowright":
             if (onNext) onNext();
             break;
+          default:
+            break;
         }
       };
       window.addEventListener("keydown", handleKeyDown);
       return () => window.removeEventListener("keydown", handleKeyDown);
-    }, [
-      undoStack,
-      redoStack,
-      onNext,
-      onPrevious,
-      tool,
-      paintBrushSize,
-      eraseBrushSize,
-      zoom,
-      offset,
-      canEdit,
-    ]);
+    }, [keyboardEnabled, onNext, onPrevious]);
 
-    const activeBrushSize = tool === "erase" ? eraseBrushSize : paintBrushSize;
-    const setBrushSize =
-      tool === "erase" ? setEraseBrushSize : setPaintBrushSize;
     const axisLabel = axis ? axis.toUpperCase() : "XY";
-    const axisCursorLabel = () => {
-      if (axis === "zx") return { h: "X", v: "Z" };
-      if (axis === "zy") return { h: "Y", v: "Z" };
-      return { h: "X", v: "Y" };
-    };
-    const editorHeight = minimalChrome
-      ? "clamp(420px, calc(100vh - 520px), 720px)"
-      : "clamp(560px, 74vh, 900px)";
+    const editorHeight =
+      editorHeightOverride ||
+      (minimalChrome
+        ? "clamp(420px, calc(100vh - 520px), 720px)"
+        : "clamp(560px, 74vh, 900px)");
     const collapsedToolWidth = minimalChrome ? "60px" : "84px";
     const expandedToolWidth = minimalChrome ? "232px" : "260px";
     const fittedCanvasSize = getFittedCanvasSize();
@@ -1099,12 +1274,13 @@ const ProofreadingEditor = forwardRef(
         style={{
           display: "flex",
           height: editorHeight,
-          gap: "12px",
+          gap: hideToolPanel ? 0 : "12px",
           overflow: "hidden",
           alignItems: "stretch",
         }}
       >
         {/* Left Panel - Tools */}
+        {!hideToolPanel && (
         <Card
           title={
             <div
@@ -1414,6 +1590,7 @@ const ProofreadingEditor = forwardRef(
             />
           )}
         </Card>
+        )}
 
         {/* Center - Canvas */}
         <div
@@ -1432,14 +1609,6 @@ const ProofreadingEditor = forwardRef(
                 align="center"
               >
                 <Space size="middle" align="center">
-                  {axisOptions && onAxisChange && (
-                    <Segmented
-                      size="small"
-                      options={axisOptions}
-                      value={axis}
-                      onChange={onAxisChange}
-                    />
-                  )}
                   <Text style={{ fontWeight: 600 }}>
                     {layerName || `${axisLabel} ${currentLayer + 1}`} /{" "}
                     {totalLayers}
@@ -1463,20 +1632,6 @@ const ProofreadingEditor = forwardRef(
                     disabled={!canEdit}
                   >
                     Save mask
-                  </Button>
-                  <Button
-                    icon={<LeftOutlined />}
-                    onClick={onPrevious}
-                    disabled={currentLayer === 0}
-                  >
-                    Previous
-                  </Button>
-                  <Button
-                    icon={<RightOutlined />}
-                    onClick={onNext}
-                    disabled={currentLayer === totalLayers - 1}
-                  >
-                    Next
                   </Button>
                 </Space>
               </Space>
@@ -1518,28 +1673,6 @@ const ProofreadingEditor = forwardRef(
               onMouseUp={handleMouseUp}
               onMouseLeave={handleMouseUp}
             >
-              <div
-                style={{
-                  position: "absolute",
-                  left: 12,
-                  top: 12,
-                  zIndex: 2,
-                  background: "rgba(15, 23, 42, 0.7)",
-                  color: "#fff",
-                  padding: "6px 10px",
-                  borderRadius: 10,
-                  fontSize: 12,
-                }}
-              >
-                {cursorPos ? (
-                  <Text style={{ color: "#fff" }}>
-                    {axisCursorLabel().h}: {cursorPos.x} · {axisCursorLabel().v}
-                    : {cursorPos.y}
-                  </Text>
-                ) : (
-                  <Text style={{ color: "#9ca3af" }}>Cursor: --</Text>
-                )}
-              </div>
               <canvas
                 ref={canvasRef}
                 style={{

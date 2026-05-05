@@ -1,6 +1,5 @@
 import React, { useMemo, useRef, useState, useEffect } from "react";
-import { Input, Tag, Space, Typography, Button } from "antd";
-import { LeftOutlined, RightOutlined } from "@ant-design/icons";
+import { Input, Space, Tag, Typography } from "antd";
 
 const { Text } = Typography;
 
@@ -22,12 +21,10 @@ function InstanceNavigator({
   instances,
   activeInstanceId,
   onSelect,
-  onPrev,
-  onNext,
   filterText,
   onFilterText,
-  instanceMode,
   showSummary = true,
+  showClassification = false,
 }) {
   const listRef = useRef(null);
   const [scrollTop, setScrollTop] = useState(0);
@@ -71,21 +68,9 @@ function InstanceNavigator({
 
   return (
     <div style={{ padding: "0" }}>
-      <Space style={{ width: "100%", justifyContent: "space-between" }}>
-        <Text style={{ fontSize: 12 }} strong>
-          Instances
-        </Text>
-        {instanceMode && instanceMode !== "none" && (
-          <Tag color="blue" style={{ fontSize: 11 }}>
-            {instanceMode === "semantic" ? "semantic (derived)" : "instance"}
-          </Tag>
-        )}
-      </Space>
-
-      <Space style={{ marginTop: 8 }}>
-        <Button size="small" icon={<LeftOutlined />} onClick={onPrev} />
-        <Button size="small" icon={<RightOutlined />} onClick={onNext} />
-      </Space>
+      <Text style={{ fontSize: 12 }} strong>
+        Instances
+      </Text>
 
       <Input
         placeholder="Filter"
@@ -138,17 +123,16 @@ function InstanceNavigator({
                   <Text style={{ fontSize: 12 }} strong>
                     #{item.id}
                   </Text>
-                  <Tag
-                    color={statusColor[item.classification]}
-                    style={{ fontSize: 10 }}
-                  >
-                    {statusLabel[item.classification]}
-                  </Tag>
+                  {showClassification && (
+                    <Tag
+                      color={statusColor[item.classification]}
+                      style={{ fontSize: 10 }}
+                    >
+                      {statusLabel[item.classification]}
+                    </Tag>
+                  )}
                 </Space>
                 <div style={{ display: "grid", gap: 2, marginTop: 4 }}>
-                  <Text type="secondary" style={{ fontSize: 12 }}>
-                    COM: {item.com_z}, {item.com_y}, {item.com_x}
-                  </Text>
                   <Text type="secondary" style={{ fontSize: 12 }}>
                     voxels: {Number(item.voxel_count || 0).toLocaleString()}
                   </Text>
