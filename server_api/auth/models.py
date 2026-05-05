@@ -103,12 +103,14 @@ class ChatMessage(Base):
     conversation_id = Column(
         Integer, ForeignKey("conversations.id", ondelete="CASCADE"), nullable=False
     )
+    workflow_id = Column(Integer, nullable=True, index=True)
     role = Column(String, nullable=False)  # "user" or "assistant"
     content = Column(Text, nullable=False)
     source = Column(String, nullable=True)
     actions_json = Column(Text, nullable=True)
     commands_json = Column(Text, nullable=True)
     proposals_json = Column(Text, nullable=True)
+    trace_json = Column(Text, nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
     conversation = relationship("Conversation", back_populates="messages")
@@ -134,6 +136,10 @@ class ChatMessage(Base):
     @property
     def proposals(self):
         return self._decode_json_list(self.proposals_json)
+
+    @property
+    def trace(self):
+        return self._decode_json_list(self.trace_json)
 
 
 # Pydantic Schemas
@@ -240,12 +246,14 @@ class ProjectResponse(BaseModel):
 # Chat History Schemas
 class ChatMessageResponse(BaseModel):
     id: int
+    workflow_id: Optional[int] = None
     role: str
     content: str
     source: Optional[str] = None
     actions: List[dict] = Field(default_factory=list)
     commands: List[dict] = Field(default_factory=list)
     proposals: List[dict] = Field(default_factory=list)
+    trace: List[dict] = Field(default_factory=list)
     created_at: datetime
 
     class Config:

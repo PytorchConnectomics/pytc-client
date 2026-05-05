@@ -5,6 +5,7 @@ import {
   getProjectRoleDefaultsFromSuggestion,
   getProjectContextDefaultsFromSuggestion,
   evaluateProjectContextCompleteness,
+  formatVoxelSizeNm,
   inferProjectContextFromDescription,
 } from "./projectSuggestions";
 
@@ -92,6 +93,31 @@ describe("project suggestion utilities", () => {
     });
   });
 
+  it("copies confirmed imaging resolution into workflow metadata", () => {
+    expect(
+      buildWorkflowPatchFromConfirmedProjectRoles({
+        rootPath: "/projects/demo",
+        roles: {
+          image: "raw.h5",
+          label: "labels.h5",
+        },
+        metadata: {
+          project_context: {
+            voxel_size_nm: [30, 6, 6],
+            voxel_size_source: "project_description",
+          },
+        },
+      }),
+    ).toEqual(
+      expect.objectContaining({
+        metadata: expect.objectContaining({
+          visualization_scales: [30, 6, 6],
+          visualization_scales_source: "project_description",
+        }),
+      }),
+    );
+  });
+
   it("keeps the legacy suggestion patch behavior backed by confirmed role defaults", () => {
     expect(buildWorkflowPatchFromProjectSuggestion(suggestion)).toEqual({
       dataset_path: "/projects/demo",
@@ -124,37 +150,41 @@ describe("project suggestion utilities", () => {
   it("extracts lightweight project context from a biologist description", () => {
     expect(
       inferProjectContextFromDescription(
-        "Mouse micro-CT nuclei dataset; segment nuclei and prioritize accuracy.",
+        "Mouse micro-CT nuclei dataset; segment nuclei at 4 x 4 x 40 nm and prioritize accuracy.",
       ),
     ).toEqual({
       freeform_note:
-        "Mouse micro-CT nuclei dataset; segment nuclei and prioritize accuracy.",
+        "Mouse micro-CT nuclei dataset; segment nuclei at 4 x 4 x 40 nm and prioritize accuracy.",
       imaging_modality: "CT",
       target_structure: "nuclei",
       task_goal: "segmentation",
       optimization_priority: "accuracy",
+      voxel_size_nm: [4, 4, 40],
+      voxel_size_source: "project_description",
     });
   });
 
-  it("infers only structural defaults from profiled folders", () => {
-    expect(getProjectContextDefaultsFromSuggestion(batchSuggestion)).toEqual(
+  it("parses and formats isotropic imaging resolution", () => {
+    const context = inferProjectContextFromDescription(
+      "EM mitochondria stack; segmentation from one volume; prioritize accuracy; isotropic 5 nm voxels.",
+    );
+    expect(context).toEqual(
       expect.objectContaining({
-        data_unit: "folder of volumes",
-        task_goal: "segmentation",
-        optimization_priority: "accuracy",
+        voxel_size_nm: [5, 5, 5],
       }),
     );
+    expect(formatVoxelSizeNm(context.voxel_size_nm)).toBe("5 x 5 x 5 nm");
+  });
+
+  it("does not invent generic defaults from profiled folders", () => {
+    expect(getProjectContextDefaultsFromSuggestion(batchSuggestion)).toEqual({});
     expect(
       getProjectContextDefaultsFromSuggestion({
         name: "prepilot_cremi_official",
         directory_path: "/projects/prepilot_cremi_official",
         profile: { counts: { image: 3, label: 3 } },
       }),
-    ).toEqual({
-      data_unit: "folder of volumes",
-      task_goal: "segmentation",
-      optimization_priority: "accuracy",
-    });
+    ).toEqual({});
   });
 
   it("uses backend content hints instead of biological name guesses", () => {
@@ -169,6 +199,7 @@ describe("project suggestion utilities", () => {
             target_structure: "neurites",
             task_goal: "proofreading",
             optimization_priority: "accuracy",
+            voxel_size_nm: [40, 4, 4],
           },
         },
       }),
@@ -176,9 +207,8 @@ describe("project suggestion utilities", () => {
       expect.objectContaining({
         imaging_modality: "EM",
         target_structure: "neurites",
-        task_goal: "proofreading",
-        optimization_priority: "accuracy",
-        data_unit: "folder of volumes",
+        voxel_size_nm: [40, 4, 4],
+        voxel_size_source: "project_profile",
       }),
     );
   });
@@ -198,18 +228,14 @@ describe("project suggestion utilities", () => {
     ).toEqual(
       expect.objectContaining({
         complete: false,
-        missing: expect.arrayContaining([
-          "task goal",
-          "data organization",
-          "speed vs accuracy preference",
-        ]),
+        missing: ["imaging resolution"],
         next_question:
-          "Is the immediate goal segmentation, proofreading, training, or comparison?",
+          "What is the voxel size or imaging resolution in z, y, x nanometers?",
       }),
     );
     expect(
       evaluateProjectContextCompleteness(
-        "EM mitochondria segmentation from a single volume; prioritize accuracy.",
+        "EM mitochondria segmentation from a single volume at 30 x 6 x 6 nm; prioritize accuracy.",
       ),
     ).toEqual(
       expect.objectContaining({
@@ -217,9 +243,7 @@ describe("project suggestion utilities", () => {
         context: expect.objectContaining({
           imaging_modality: "EM",
           target_structure: "mitochondria",
-          task_goal: "segmentation",
-          data_unit: "single volume",
-          optimization_priority: "accuracy",
+          voxel_size_nm: [30, 6, 6],
         }),
       }),
     );
@@ -235,6 +259,7 @@ describe("project suggestion utilities", () => {
             counts: { image: 3, label: 3 },
             context_hints: {
               target_structure: "neurites",
+              voxel_size_nm: [8, 8, 8],
             },
           },
         }),
@@ -246,9 +271,8 @@ describe("project suggestion utilities", () => {
         context: expect.objectContaining({
           imaging_modality: "EM",
           target_structure: "neurites",
-          data_unit: "folder of volumes",
-          task_goal: "segmentation",
-          optimization_priority: "accuracy",
+          voxel_size_nm: [8, 8, 8],
+          voxel_size_source: "project_profile",
         }),
       }),
     );

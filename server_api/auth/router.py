@@ -6,6 +6,7 @@ from . import models, utils, database
 from jose import JWTError, jwt
 from typing import List, Optional
 from datetime import datetime, timezone
+from urllib.parse import parse_qs, unquote, urlparse
 import json
 import shutil
 import os
@@ -78,13 +79,43 @@ def _project_suggestion_candidates() -> List[dict]:
     workspace_root = os.path.abspath(os.path.join(repo_root, ".."))
     return [
         {
+            "id": "mitoem2-progress-demo",
+            "name": "mitoem2_progress_demo",
+            "directory_path": os.getenv(
+                "PYTC_INITIAL_PROJECT_ROOT",
+                "/home/weidf/demo_data/mitoem2_progress_demo",
+            ),
+            "description": "MitoEM2.0 progress demo with curated, draft, and missing segmentations.",
+            "recommended": True,
+            "context_hints": {
+                "imaging_modality": "EM / ssSEM",
+                "target_structure": "mitochondria",
+                "task_goal": "segmentation",
+                "optimization_priority": "accuracy",
+                "voxel_size_nm": [30, 8, 8],
+            },
+        },
+        {
+            "id": "prepilot-lucchi-pp",
+            "name": "prepilot_lucchi_pp",
+            "directory_path": "/home/weidf/demo_data/prepilot_lucchi_pp",
+            "description": "Prepilot Lucchi++ mitochondria segmentation project.",
+            "recommended": False,
+            "context_hints": {
+                "imaging_modality": "EM",
+                "target_structure": "mitochondria",
+                "task_goal": "segmentation",
+                "optimization_priority": "accuracy",
+            },
+        },
+        {
             "id": "mito25-paper-loop-smoke",
             "name": "mito25-paper-loop-smoke",
             "directory_path": os.path.join(
                 repo_root, "testing_projects", "mito25_paper_loop_smoke"
             ),
             "description": "Curated mito25 smoke project with image/seg, configs, checkpoint, and prediction artifacts.",
-            "recommended": True,
+            "recommended": False,
         },
         {
             "id": "mito25-raw-data",
@@ -416,6 +447,50 @@ def _best_context_hint(text: str, patterns: List[tuple]) -> tuple:
     return matches[0]["value"], matches
 
 
+def _parse_voxel_size_nm_hint(text: str) -> Optional[List[float]]:
+    source = text or ""
+    if not source.strip():
+        return None
+    three_axis_match = re.search(
+        r"(?:voxel(?:\s+(?:size|spacing))?|resolution|spacing|pixel\s+size|scale)"
+        r"[^\d]{0,60}"
+        r"(\d+(?:\.\d+)?)\s*(?:x|by|,|;|/|-|\s)\s*"
+        r"(\d+(?:\.\d+)?)\s*(?:x|by|,|;|/|-|\s)\s*"
+        r"(\d+(?:\.\d+)?)(?:\s*(nm|nanometers?|um|\u00b5m|microns?))?",
+        source,
+        flags=re.IGNORECASE,
+    )
+    if three_axis_match:
+        unit_text = (three_axis_match.group(4) or source).lower()
+        multiplier = 1000.0 if re.search(r"\u00b5m|um|microns?", unit_text) else 1.0
+        return [float(three_axis_match.group(index)) * multiplier for index in (1, 2, 3)]
+
+    unit_qualified_match = re.search(
+        r"(?:at|@)?\s*(\d+(?:\.\d+)?)\s*(?:x|by|,|;|/|-)\s*"
+        r"(\d+(?:\.\d+)?)\s*(?:x|by|,|;|/|-)\s*"
+        r"(\d+(?:\.\d+)?)\s*(nm|nanometers?|um|\u00b5m|microns?)",
+        source,
+        flags=re.IGNORECASE,
+    )
+    if unit_qualified_match:
+        unit_text = unit_qualified_match.group(4).lower()
+        multiplier = 1000.0 if re.search(r"\u00b5m|um|microns?", unit_text) else 1.0
+        return [float(unit_qualified_match.group(index)) * multiplier for index in (1, 2, 3)]
+
+    isotropic_match = re.search(
+        r"(?:isotropic|cubic|same\s+voxel|same\s+scale)[^\d]{0,60}"
+        r"(\d+(?:\.\d+)?)(?:\s*(nm|nanometers?|um|\u00b5m|microns?))?",
+        source,
+        flags=re.IGNORECASE,
+    )
+    if isotropic_match:
+        unit_text = (isotropic_match.group(2) or source).lower()
+        multiplier = 1000.0 if re.search(r"\u00b5m|um|microns?", unit_text) else 1.0
+        value = float(isotropic_match.group(1)) * multiplier
+        return [value, value, value]
+    return None
+
+
 def _infer_project_context_hints(content_text: str) -> dict:
     text = content_text or ""
     hints = {"source": "content_spot_check"}
@@ -465,6 +540,10 @@ def _infer_project_context_hints(content_text: str) -> dict:
         hints["task_goal"] = task_goal
     if priority:
         hints["optimization_priority"] = priority
+    voxel_size_nm = _parse_voxel_size_nm_hint(text)
+    if voxel_size_nm:
+        hints["voxel_size_nm"] = voxel_size_nm
+        hints["voxel_size_source"] = "content_spot_check"
     if modality_candidates:
         hints["modality_candidates"] = modality_candidates[:4]
     if target_candidates:
@@ -874,6 +953,35 @@ def _project_context_file_path(directory_path: str) -> str:
     return os.path.join(source_dir, PROJECT_CONTEXT_FILENAME)
 
 
+def _assert_project_context_access(
+    db: Session,
+    *,
+    user_id: int,
+    directory_path: str,
+) -> None:
+    source_dir = os.path.abspath(os.path.expanduser(directory_path))
+    if _is_managed_upload_path(user_id, source_dir):
+        return
+    mounted_roots = (
+        db.query(models.File)
+        .filter(
+            models.File.user_id == user_id,
+            models.File.path == "root",
+            models.File.is_folder.is_(True),
+            models.File.physical_path.isnot(None),
+        )
+        .all()
+    )
+    for root in mounted_roots:
+        root_path = os.path.abspath(os.path.expanduser(root.physical_path or ""))
+        if source_dir == root_path or source_dir.startswith(f"{root_path}{os.sep}"):
+            return
+    raise HTTPException(
+        status_code=403,
+        detail="Project context can only be read or written for mounted projects.",
+    )
+
+
 def _read_project_context_profile(directory_path: str) -> Optional[dict]:
     context_path = _project_context_file_path(directory_path)
     if not os.path.isfile(context_path):
@@ -917,6 +1025,19 @@ def _write_project_context_profile(directory_path: str, profile: dict) -> dict:
     return payload
 
 
+def _delete_project_context_profile(directory_path: str) -> bool:
+    context_path = _project_context_file_path(directory_path)
+    if not os.path.exists(context_path):
+        return False
+    try:
+        os.remove(context_path)
+    except OSError as exc:
+        raise HTTPException(
+            status_code=500, detail="Project context file could not be deleted"
+        ) from exc
+    return True
+
+
 def _ensure_unique_name(
     db: Session, user_id: int, parent_path: str, base_name: str
 ) -> str:
@@ -934,6 +1055,57 @@ def _ensure_unique_name(
         if candidate not in existing_names:
             return candidate
         index += 1
+
+
+def _normalize_mount_directory_input(raw_value: str) -> str:
+    value = str(raw_value or "").strip()
+    if not value:
+        raise HTTPException(status_code=400, detail="Project path is required")
+
+    parsed = urlparse(value)
+    if parsed.scheme == "file":
+        value = unquote(parsed.path)
+    elif parsed.scheme in {"http", "https"}:
+        query = parse_qs(parsed.query)
+        for key in ("directory_path", "project_path", "path", "project"):
+            if query.get(key) and query[key][0]:
+                value = query[key][0]
+                break
+        else:
+            candidate = unquote(parsed.path or "")
+            if candidate.startswith(("/home/", "/mnt/", "/data/", "/tmp/")):
+                value = candidate
+            elif os.getenv("PYTC_INITIAL_PROJECT_ROOT"):
+                value = os.getenv("PYTC_INITIAL_PROJECT_ROOT", "")
+            else:
+                raise HTTPException(
+                    status_code=400,
+                    detail=(
+                        "Remote browser mounts need a server path, or a URL with "
+                        "a path/directory_path query parameter."
+                    ),
+                )
+
+    return os.path.abspath(os.path.expanduser(value))
+
+
+def _mounted_project_response(
+    source_dir: str,
+    mounted_root: models.File,
+    *,
+    mounted_folders: int,
+    mounted_files: int,
+    message: str,
+) -> dict:
+    return {
+        "message": message,
+        "directory_path": source_dir,
+        "mounted_root_id": mounted_root.id,
+        "mount_name": mounted_root.name,
+        "mounted_folders": mounted_folders,
+        "mounted_files": mounted_files,
+        "profile": _scan_project_profile(source_dir),
+    }
 
 
 def _is_managed_upload_path(user_id: int, physical_path: Optional[str]) -> bool:
@@ -1139,6 +1311,25 @@ def get_files(
     _prune_missing_managed_upload_entries(db, current_user.id)
     query = db.query(models.File).filter(models.File.user_id == current_user.id)
     if parent is not None:
+        if parent != "root":
+            try:
+                parent_id = int(parent)
+            except (TypeError, ValueError):
+                parent_id = -1
+            parent_folder = (
+                db.query(models.File)
+                .filter(
+                    models.File.id == parent_id,
+                    models.File.user_id == current_user.id,
+                    models.File.is_folder.is_(True),
+                )
+                .first()
+            )
+            if not parent_folder:
+                raise HTTPException(
+                    status_code=404,
+                    detail=f"Folder is no longer mounted or indexed: {parent}",
+                )
         query = query.filter(models.File.path == parent)
 
     return [
@@ -1354,9 +1545,12 @@ def mount_directory(
     # This endpoint creates an app-managed file index for a project root.
     # The same contract can later be backed by cloud project files/URIs for
     # programmatic access without changing the UI workflow.
-    source_dir = os.path.abspath(os.path.expanduser(mount_request.directory_path))
+    source_dir = _normalize_mount_directory_input(mount_request.directory_path)
     if not os.path.isdir(source_dir):
-        raise HTTPException(status_code=400, detail="Directory does not exist")
+        raise HTTPException(
+            status_code=400,
+            detail=f"Directory does not exist on the server: {source_dir}",
+        )
 
     destination_path = mount_request.destination_path or "root"
     if destination_path != "root":
@@ -1377,6 +1571,33 @@ def mount_directory(
         )
         if not destination_folder:
             raise HTTPException(status_code=404, detail="Destination folder not found")
+
+    existing_mount = (
+        db.query(models.File)
+        .filter(
+            models.File.user_id == current_user.id,
+            models.File.path == destination_path,
+            models.File.is_folder.is_(True),
+            models.File.physical_path == source_dir,
+        )
+        .first()
+    )
+    if existing_mount:
+        child_count = (
+            db.query(models.File)
+            .filter(
+                models.File.user_id == current_user.id,
+                models.File.path == str(existing_mount.id),
+            )
+            .count()
+        )
+        return _mounted_project_response(
+            source_dir,
+            existing_mount,
+            mounted_folders=1,
+            mounted_files=child_count,
+            message=f"{existing_mount.name} is already mounted.",
+        )
 
     default_name = os.path.basename(source_dir.rstrip(os.sep)) or "mounted-project"
     requested_name = (
@@ -1453,14 +1674,13 @@ def mount_directory(
 
     db.commit()
 
-    return {
-        "message": f"Mounted {mounted_files} files from {source_dir}",
-        "mounted_root_id": mounted_root.id,
-        "mount_name": root_name,
-        "mounted_folders": mounted_folders,
-        "mounted_files": mounted_files,
-        "profile": _scan_project_profile(source_dir),
-    }
+    return _mounted_project_response(
+        source_dir,
+        mounted_root,
+        mounted_folders=mounted_folders,
+        mounted_files=mounted_files,
+        message=f"Mounted {mounted_files} files from {source_dir}",
+    )
 
 
 @router.get("/files/project-suggestions")
@@ -1491,13 +1711,27 @@ def list_project_suggestions(
         if not os.path.isdir(directory_path):
             continue
         mounted_root = mounted_by_path.get(directory_path)
+        profile = _scan_project_profile(directory_path)
+        candidate_context_hints = candidate.get("context_hints")
+        if isinstance(candidate_context_hints, dict):
+            scanned_context_hints = profile.get("context_hints")
+            if not isinstance(scanned_context_hints, dict):
+                scanned_context_hints = {}
+            merged_context_hints = {
+                **candidate_context_hints,
+                **scanned_context_hints,
+            }
+            profile["context_hints"] = merged_context_hints
+            schema = profile.get("schema")
+            if isinstance(schema, dict):
+                schema["context_hints"] = merged_context_hints
         suggestions.append(
             {
                 **candidate,
                 "directory_path": directory_path,
                 "already_mounted": mounted_root is not None,
                 "mounted_root_id": mounted_root.id if mounted_root else None,
-                "profile": _scan_project_profile(directory_path),
+                "profile": profile,
             }
         )
     suggested_paths = {item["directory_path"] for item in suggestions}
@@ -1523,9 +1757,13 @@ def list_project_suggestions(
 def read_project_context_profile(
     directory_path: str,
     current_user: models.User = Depends(get_current_user),
+    db: Session = Depends(database.get_db),
 ):
-    # The current user dependency keeps this aligned with other file endpoints.
-    del current_user
+    _assert_project_context_access(
+        db,
+        user_id=current_user.id,
+        directory_path=directory_path,
+    )
     profile = _read_project_context_profile(directory_path)
     return {
         "exists": profile is not None,
@@ -1538,13 +1776,37 @@ def read_project_context_profile(
 def write_project_context_profile(
     body: models.ProjectContextProfileRequest,
     current_user: models.User = Depends(get_current_user),
+    db: Session = Depends(database.get_db),
 ):
-    del current_user
+    _assert_project_context_access(
+        db,
+        user_id=current_user.id,
+        directory_path=body.directory_path,
+    )
     profile = _write_project_context_profile(body.directory_path, body.profile)
     return {
         "message": "Project context saved",
         "filename": PROJECT_CONTEXT_FILENAME,
         "profile": profile,
+    }
+
+
+@router.delete("/files/project-context")
+def delete_project_context_profile(
+    directory_path: str,
+    current_user: models.User = Depends(get_current_user),
+    db: Session = Depends(database.get_db),
+):
+    _assert_project_context_access(
+        db,
+        user_id=current_user.id,
+        directory_path=directory_path,
+    )
+    deleted = _delete_project_context_profile(directory_path)
+    return {
+        "message": "Project context deleted" if deleted else "Project context not found",
+        "filename": PROJECT_CONTEXT_FILENAME,
+        "deleted": deleted,
     }
 
 
@@ -1627,6 +1889,15 @@ def reset_workspace(
         ):
             mounted_root_count += 1
             delete_disk_files = False
+            context_path = os.path.join(
+                os.path.abspath(os.path.expanduser(node.physical_path)),
+                PROJECT_CONTEXT_FILENAME,
+            )
+            if os.path.isfile(context_path):
+                try:
+                    os.remove(context_path)
+                except OSError:
+                    pass
 
         _delete_file_tree(
             db,

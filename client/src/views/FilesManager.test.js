@@ -17,6 +17,7 @@ jest.mock("../api", () => ({
 }));
 
 jest.mock("../electronApi", () => ({
+  canOpenLocalFile: jest.fn(() => true),
   openLocalFile: jest.fn(),
   revealInFinder: jest.fn(),
 }));
@@ -55,6 +56,8 @@ const mockWorkflowContext = {
   appendEvent: jest.fn(),
   refreshPreflight: jest.fn(),
   refreshAgentRecommendation: jest.fn(),
+  pendingRuntimeAction: null,
+  consumeRuntimeAction: jest.fn(),
 };
 
 jest.mock("../contexts/WorkflowContext", () => ({
@@ -336,27 +339,27 @@ const clickSuggestedProject = async () => {
 };
 
 const continueWithProjectContext = async (
-  text = "EM mitochondria volumes from mouse tissue. Segment mitochondria from a single volume and prioritize accuracy.",
+  text = "EM mitochondria volumes from mouse tissue at 30 x 6 x 6 nm. Segment mitochondria from a single volume and prioritize accuracy.",
 ) => {
   await screen.findByText("Describe project");
   fireEvent.change(screen.getByPlaceholderText(/EM mitochondria volumes/i), {
     target: { value: text },
   });
   fireEvent.click(screen.getByText("Continue"));
-  await screen.findByText("Confirm file mapping");
+  await waitFor(() => {
+    expect(screen.getAllByText("Start project").length).toBeGreaterThan(1);
+  });
 };
 
 const continueWithDefaults = async () => {
   await screen.findByText("Describe project");
   fireEvent.click(screen.getByText("Use defaults"));
-  await screen.findByText("Confirm file mapping");
-};
-
-const reviewAndStartProject = async () => {
-  fireEvent.click(screen.getByText("Review project"));
   await waitFor(() => {
     expect(screen.getAllByText("Start project").length).toBeGreaterThan(1);
   });
+};
+
+const reviewAndStartProject = async () => {
   const startButtons = screen
     .getAllByText("Start project")
     .filter((element) => element.tagName.toLowerCase() === "button");
@@ -370,6 +373,8 @@ describe("FilesManager", () => {
     mockWorkflowContext.appendEvent.mockResolvedValue({});
     mockWorkflowContext.refreshPreflight.mockResolvedValue({});
     mockWorkflowContext.refreshAgentRecommendation.mockResolvedValue({});
+    mockWorkflowContext.pendingRuntimeAction = null;
+    mockWorkflowContext.consumeRuntimeAction.mockClear();
   });
 
   it("loads root-level files with a parent-scoped request on initial render", async () => {
@@ -412,7 +417,9 @@ describe("FilesManager", () => {
       params: { parent: "7" },
     });
     await continueWithProjectContext();
-    expect(await screen.findByText("Confirm file mapping")).toBeTruthy();
+    await waitFor(() => {
+      expect(screen.getAllByText("Start project").length).toBeGreaterThan(1);
+    });
     expect(
       screen.getByDisplayValue(
         "data/image/mito25_smoke_im.h5",
@@ -424,9 +431,14 @@ describe("FilesManager", () => {
     expect(await screen.findByText("Project brief")).toBeTruthy();
     expect(
       screen.getByText(
-        "EM mitochondria segmentation from single volume. Prioritize accuracy.",
+        "EM mitochondria project at 30 x 6 x 6 nm.",
       ),
     ).toBeTruthy();
+    expect(screen.getByText("Editable project context")).toBeTruthy();
+    expect(screen.queryByText(/^Priority$/)).toBeNull();
+    expect(screen.queryByText(/^Goal$/)).toBeNull();
+    expect(screen.queryByText(/^Labels$/)).toBeNull();
+    expect(screen.queryByText(/^Data$/)).toBeNull();
     expect(screen.getByText("How the agent will use this")).toBeTruthy();
 
     await waitFor(() => {
@@ -441,14 +453,14 @@ describe("FilesManager", () => {
           "/tmp/mito25_paper_loop_smoke/checkpoints/checkpoint_00200.pth.tar",
         config_path: "/tmp/mito25_paper_loop_smoke/configs/MitoEM.yaml",
         metadata: {
+          visualization_scales: [30, 6, 6],
+          visualization_scales_source: "project_description",
           project_context: expect.objectContaining({
             freeform_note:
-              "EM mitochondria volumes from mouse tissue. Segment mitochondria from a single volume and prioritize accuracy.",
+              "EM mitochondria volumes from mouse tissue at 30 x 6 x 6 nm. Segment mitochondria from a single volume and prioritize accuracy.",
             imaging_modality: "EM",
             target_structure: "mitochondria",
-            task_goal: "segmentation",
-            data_unit: "single volume",
-            optimization_priority: "accuracy",
+            voxel_size_nm: [30, 6, 6],
             source: "project_setup_confirmation",
           }),
         },
@@ -462,25 +474,28 @@ describe("FilesManager", () => {
           source: "file_management_project_confirmation",
           setup_source: "suggested_mount",
           project_description:
-            "EM mitochondria volumes from mouse tissue. Segment mitochondria from a single volume and prioritize accuracy.",
+            "EM mitochondria volumes from mouse tissue at 30 x 6 x 6 nm. Segment mitochondria from a single volume and prioritize accuracy.",
           project_context: expect.objectContaining({
             imaging_modality: "EM",
             target_structure: "mitochondria",
-            task_goal: "segmentation",
-            data_unit: "single volume",
-            optimization_priority: "accuracy",
+            voxel_size_nm: [30, 6, 6],
           }),
           project_brief: expect.objectContaining({
             summary:
-              "EM mitochondria segmentation from single volume. Prioritize accuracy.",
+              "EM mitochondria project at 30 x 6 x 6 nm.",
             fields: expect.arrayContaining([
               expect.objectContaining({
-                label: "Target",
+                label: "Target structure",
                 value: "mitochondria",
+              }),
+              expect.objectContaining({
+                label: "Voxel size (z, y, x)",
+                value: "30 x 6 x 6 nm",
               }),
             ]),
             next_moves: expect.arrayContaining([
               "Use data/image/mito25_smoke_im.h5 as the active image data.",
+              "Use 30 x 6 x 6 nm as the z/y/x voxel size for visualization and model defaults.",
             ]),
           }),
           detected_volume_sets: expect.arrayContaining([
@@ -503,7 +518,7 @@ describe("FilesManager", () => {
           }),
           project_brief: expect.objectContaining({
             summary:
-              "EM mitochondria segmentation from single volume. Prioritize accuracy.",
+              "EM mitochondria project at 30 x 6 x 6 nm.",
           }),
           mechanistic_mapping: expect.objectContaining({
             image: "data/image/mito25_smoke_im.h5",
@@ -530,43 +545,93 @@ describe("FilesManager", () => {
     fireEvent.click(screen.getByText("Continue"));
     expect(
       await screen.findByText(
-        "Is this one volume, a folder of volumes, train/val/test splits, tiles, or a time series?",
+        "What is the voxel size or imaging resolution in z, y, x nanometers?",
       ),
     ).toBeTruthy();
-    expect(screen.queryByText("Confirm file mapping")).toBeNull();
+    expect(screen.queryAllByText("Start project")).toHaveLength(0);
     expect(descriptionBox.value).toBe("");
 
     fireEvent.change(descriptionBox, {
       target: {
-        value: "single volume",
+        value: "30 x 6 x 6 nm",
       },
     });
     fireEvent.click(screen.getByText("Continue"));
-    expect(await screen.findByText("Confirm file mapping")).toBeTruthy();
+    await waitFor(() => {
+      expect(screen.getAllByText("Start project").length).toBeGreaterThan(1);
+    });
 
     await reviewAndStartProject();
 
     await waitFor(() => {
       expect(mockWorkflowContext.updateWorkflow).toHaveBeenCalledWith(
         expect.objectContaining({
-          metadata: {
+          metadata: expect.objectContaining({
             project_context: expect.objectContaining({
               freeform_note:
-                "EM mitochondria from mouse brain tissue.\nsingle volume",
+                "EM mitochondria from mouse brain tissue.\n30 x 6 x 6 nm",
               imaging_modality: "EM",
               target_structure: "mitochondria",
-              task_goal: "segmentation",
-              data_unit: "single volume",
-              optimization_priority: "accuracy",
+              voxel_size_nm: [30, 6, 6],
               completeness: expect.objectContaining({
                 complete: true,
                 missing: [],
               }),
             }),
-          },
+          }),
         }),
       );
     });
+  });
+
+  it("lets users edit absorbed project context fields before confirming", async () => {
+    mockProjectSuggestionResponses([smokeSuggestion]);
+    apiClient.post.mockResolvedValue({
+      data: { mounted_root_id: 7, message: "Mounted smoke project" },
+    });
+
+    renderFilesManager();
+
+    await clickSuggestedProject();
+    await continueWithProjectContext();
+
+    fireEvent.change(screen.getByDisplayValue("EM"), {
+      target: { value: "serial block-face EM" },
+    });
+    fireEvent.change(screen.getByDisplayValue("mitochondria"), {
+      target: { value: "synapses" },
+    });
+    fireEvent.change(screen.getByDisplayValue("30, 6, 6"), {
+      target: { value: "4, 4, 40" },
+    });
+
+    expect(
+      screen.getByText("serial block-face EM synapses project at 4 x 4 x 40 nm."),
+    ).toBeTruthy();
+
+    await reviewAndStartProject();
+
+    await waitFor(() => {
+      expect(mockWorkflowContext.updateWorkflow).toHaveBeenCalledWith(
+        expect.objectContaining({
+          metadata: expect.objectContaining({
+            visualization_scales: [4, 4, 40],
+            visualization_scales_source: "project_setup_confirmation",
+            project_context: expect.objectContaining({
+              imaging_modality: "serial block-face EM",
+              target_structure: "synapses",
+              voxel_size_nm: [4, 4, 40],
+            }),
+          }),
+        }),
+      );
+    });
+    const projectContext =
+      mockWorkflowContext.updateWorkflow.mock.calls[0][0].metadata.project_context;
+    expect(projectContext).not.toHaveProperty("task_goal");
+    expect(projectContext).not.toHaveProperty("data_unit");
+    expect(projectContext).not.toHaveProperty("optimization_priority");
+    expect(projectContext).not.toHaveProperty("label_status");
   });
 
   it("uses edited and cleared role paths when confirming project setup", async () => {
@@ -657,7 +722,7 @@ describe("FilesManager", () => {
 
     await clickSuggestedProject();
     await continueWithProjectContext(
-      "Mouse micro-CT nuclei dataset with train/val folders. Segment nuclei and prioritize accuracy.",
+      "Mouse micro-CT nuclei dataset with train/val folders at 8 x 8 x 8 nm. Segment nuclei and prioritize accuracy.",
     );
     expect(
       screen.getByDisplayValue("data/source/Image/train"),
@@ -794,5 +859,31 @@ describe("FilesManager", () => {
     fireEvent.click(screen.getByText("Cancel"));
 
     expect(mockWorkflowContext.updateWorkflow).not.toHaveBeenCalled();
+  });
+
+  it("opens project data confirmation for assistant choose-data actions", async () => {
+    mockWorkflowContext.pendingRuntimeAction = {
+      id: "choose-data-action",
+      kind: "choose_project_data",
+    };
+    mockProjectSuggestionResponses([
+      {
+        ...smokeSuggestion,
+        already_mounted: true,
+        mounted_root_id: 7,
+      },
+    ]);
+
+    renderFilesManager();
+
+    await screen.findByText("Describe project");
+    await waitFor(() => {
+      expect(apiClient.get).toHaveBeenCalledWith("/files", {
+        params: { parent: "7" },
+      });
+      expect(mockWorkflowContext.consumeRuntimeAction).toHaveBeenCalledWith(
+        "choose-data-action",
+      );
+    });
   });
 });

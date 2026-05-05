@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useMemo } from "react";
 import { Modal, List, Breadcrumb, Button, Spin, message, Progress } from "antd";
 import {
   FolderFilled,
@@ -54,6 +54,15 @@ const FilePickerModal = ({
 
   // Refactored fetch to get all files once
   const [allData, setAllData] = useState([]);
+  const folderById = useMemo(() => {
+    const map = new Map();
+    allData.forEach((item) => {
+      if (item?.is_folder) {
+        map.set(String(item.id), item);
+      }
+    });
+    return map;
+  }, [allData]);
 
   useEffect(() => {
     if (visible) {
@@ -100,7 +109,7 @@ const FilePickerModal = ({
 
   const getParentPath = () => {
     if (currentPath === "root") return null;
-    const currentFolderObj = allData.find((f) => String(f.id) === currentPath);
+    const currentFolderObj = folderById.get(String(currentPath));
     return currentFolderObj ? currentFolderObj.path || "root" : "root";
   };
 
@@ -113,7 +122,7 @@ const FilePickerModal = ({
     const parts = [];
     let curr = currentPath;
     while (curr && curr !== "root") {
-      const folder = allData.find((f) => String(f.id) === curr);
+      const folder = folderById.get(String(curr));
       if (folder) {
         parts.unshift({ id: String(folder.id), name: folder.name });
         curr = folder.path;
@@ -135,7 +144,7 @@ const FilePickerModal = ({
     // Safety break to prevent infinite loops
     let attempts = 0;
     while (currParentId && currParentId !== "root" && attempts < 100) {
-      const parent = allData.find((f) => String(f.id) === currParentId);
+      const parent = folderById.get(String(currParentId));
       if (parent) {
         parts.unshift(parent.name);
         currParentId = parent.path;

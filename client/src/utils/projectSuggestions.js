@@ -23,6 +23,63 @@ export const normalizeProjectRolePath = (rootPath, rolePath) => {
     : joinProjectPath(rootPath, rolePath);
 };
 
+const normalizeVoxelSizeNm = (value) => {
+  if (!value) return null;
+  const values = Array.isArray(value)
+    ? value
+    : String(value).match(/\d+(?:\.\d+)?/g);
+  if (!values || values.length < 3) return null;
+  const numeric = values.slice(0, 3).map((item) => Number(item));
+  return numeric.every((item) => Number.isFinite(item) && item > 0)
+    ? numeric
+    : null;
+};
+
+const scaleUnitMultiplier = (unitText) => {
+  const lower = String(unitText || "").toLowerCase();
+  return /(?:\u00b5m|um|micron|microns)/.test(lower) ? 1000 : 1;
+};
+
+const parseVoxelSizeNmFromText = (text) => {
+  const source = String(text || "");
+  if (!source.trim()) return null;
+
+  const threeAxisPattern =
+    /(?:voxel(?:\s+(?:size|spacing))?|resolution|spacing|pixel\s+size|scale)[^\d]{0,60}(\d+(?:\.\d+)?)\s*(?:x|by|,|;|\/|-|\s)\s*(\d+(?:\.\d+)?)\s*(?:x|by|,|;|\/|-|\s)\s*(\d+(?:\.\d+)?)(?:\s*(nm|nanometers?|um|\u00b5m|microns?))?/i;
+  const threeAxisMatch = source.match(threeAxisPattern);
+  if (threeAxisMatch) {
+    const multiplier = scaleUnitMultiplier(threeAxisMatch[4] || source);
+    return threeAxisMatch.slice(1, 4).map((value) => Number(value) * multiplier);
+  }
+
+  const unitQualifiedTriple =
+    /(?:at|@)?\s*(\d+(?:\.\d+)?)\s*(?:x|by|,|;|\/|-)\s*(\d+(?:\.\d+)?)\s*(?:x|by|,|;|\/|-)\s*(\d+(?:\.\d+)?)\s*(nm|nanometers?|um|\u00b5m|microns?)/i;
+  const unitQualifiedMatch = source.match(unitQualifiedTriple);
+  if (unitQualifiedMatch) {
+    const multiplier = scaleUnitMultiplier(unitQualifiedMatch[4]);
+    return unitQualifiedMatch.slice(1, 4).map((value) => Number(value) * multiplier);
+  }
+
+  const isotropicPattern =
+    /(?:isotropic|cubic|same\s+voxel|same\s+scale)[^\d]{0,60}(\d+(?:\.\d+)?)(?:\s*(nm|nanometers?|um|\u00b5m|microns?))?/i;
+  const isotropicMatch = source.match(isotropicPattern);
+  if (isotropicMatch) {
+    const value = Number(isotropicMatch[1]) * scaleUnitMultiplier(isotropicMatch[2] || source);
+    return [value, value, value];
+  }
+
+  return null;
+};
+
+const formatScaleNumber = (value) =>
+  Number.isInteger(Number(value)) ? String(Number(value)) : `${Number(value).toFixed(4)}`.replace(/0+$/, "").replace(/\.$/, "");
+
+export const formatVoxelSizeNm = (value) => {
+  const voxelSize = normalizeVoxelSizeNm(value);
+  if (!voxelSize) return "";
+  return `${voxelSize.map(formatScaleNumber).join(" x ")} nm`;
+};
+
 export const getProjectVolumeSetsFromSuggestion = (suggestion) => {
   const profile = suggestion?.profile || {};
   return profile.volume_sets || profile.schema?.volume_sets || [];
@@ -30,8 +87,6 @@ export const getProjectVolumeSetsFromSuggestion = (suggestion) => {
 
 export const getProjectContextDefaultsFromSuggestion = (suggestion) => {
   const profile = suggestion?.profile || {};
-  const volumeSets = getProjectVolumeSetsFromSuggestion(suggestion);
-  const counts = profile.counts || {};
   const contentHints =
     profile.context_hints || profile.schema?.context_hints || {};
   const defaults = {};
@@ -39,34 +94,18 @@ export const getProjectContextDefaultsFromSuggestion = (suggestion) => {
   [
     "imaging_modality",
     "target_structure",
-    "task_goal",
-    "optimization_priority",
-    "label_status",
   ].forEach((key) => {
     if (contentHints[key]) {
       defaults[key] = contentHints[key];
     }
   });
-
-  const volumeSetNames = volumeSets.map((set) =>
-    String(set.name || "").toLowerCase(),
+  const hintedVoxelSize = normalizeVoxelSizeNm(
+    contentHints.voxel_size_nm || contentHints.visualization_scales,
   );
-  if (
-    volumeSetNames.some((name) => /train/.test(name)) &&
-    volumeSetNames.some((name) => /(val|valid|test)/.test(name))
-  ) {
-    defaults.data_unit = "train/validation/test folders";
-  } else if (volumeSets.length > 1 || Number(counts.image || 0) > 1) {
-    defaults.data_unit = "folder of volumes";
-  } else if (Number(counts.image || 0) === 1) {
-    defaults.data_unit = "single volume";
-  }
-
-  if (!defaults.task_goal) {
-    defaults.task_goal = "segmentation";
-  }
-  if (!defaults.optimization_priority) {
-    defaults.optimization_priority = "accuracy";
+  if (hintedVoxelSize) {
+    defaults.voxel_size_nm = hintedVoxelSize;
+    defaults.voxel_size_source =
+      contentHints.voxel_size_source || "project_profile";
   }
 
   return defaults;
@@ -157,6 +196,12 @@ export const inferProjectContextFromDescription = (description) => {
     context.label_status = "predictions available";
   }
 
+  const voxelSizeNm = parseVoxelSizeNmFromText(text);
+  if (voxelSizeNm) {
+    context.voxel_size_nm = voxelSizeNm;
+    context.voxel_size_source = "project_description";
+  }
+
   return context;
 };
 
@@ -172,19 +217,9 @@ const PROJECT_CONTEXT_REQUIRED_FIELDS = [
     question: "What structure should be segmented or proofread?",
   },
   {
-    key: "task_goal",
-    label: "task goal",
-    question: "Is the immediate goal segmentation, proofreading, training, or comparison?",
-  },
-  {
-    key: "data_unit",
-    label: "data organization",
-    question: "Is this one volume, a folder of volumes, train/val/test splits, tiles, or a time series?",
-  },
-  {
-    key: "optimization_priority",
-    label: "speed vs accuracy preference",
-    question: "Should I prioritize speed or accuracy for this project?",
+    key: "voxel_size_nm",
+    label: "imaging resolution",
+    question: "What is the voxel size or imaging resolution in z, y, x nanometers?",
   },
 ];
 
@@ -288,6 +323,7 @@ export const getProjectRoleDefaultsFromSuggestion = (suggestion) => {
 export const buildWorkflowPatchFromConfirmedProjectRoles = ({
   rootPath,
   roles = {},
+  metadata = null,
 } = {}) => {
   const labelOrMask = roles.label || roles.mask || "";
   const patch = {
@@ -300,6 +336,21 @@ export const buildWorkflowPatchFromConfirmedProjectRoles = ({
     checkpoint_path: normalizeProjectRolePath(rootPath, roles.checkpoint) || null,
     config_path: normalizeProjectRolePath(rootPath, roles.config) || null,
   };
+  if (metadata && typeof metadata === "object") {
+    const nextMetadata = { ...metadata };
+    const voxelSizeNm = normalizeVoxelSizeNm(
+      nextMetadata.project_context?.voxel_size_nm ||
+        nextMetadata.visualization_scales,
+    );
+    if (voxelSizeNm) {
+      nextMetadata.visualization_scales = voxelSizeNm;
+      nextMetadata.visualization_scales_source =
+        nextMetadata.project_context?.voxel_size_source ||
+        nextMetadata.visualization_scales_source ||
+        "project_setup_confirmation";
+    }
+    patch.metadata = nextMetadata;
+  }
   return Object.fromEntries(
     Object.entries(patch).filter(([, value]) => Boolean(value)),
   );

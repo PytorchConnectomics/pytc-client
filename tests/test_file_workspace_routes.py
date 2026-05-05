@@ -127,9 +127,23 @@ class FileWorkspaceRouteTests(unittest.TestCase):
         child_names = [item["name"] for item in child_response.json()]
         self.assertEqual(child_names, ["volume.tif"])
 
+    def test_missing_parent_file_listing_returns_404(self):
+        response = self.client.get("/files", params={"parent": "999999"})
+
+        self.assertEqual(response.status_code, 404)
+        self.assertIn("no longer mounted", response.json()["detail"])
+
     def test_project_context_profile_is_saved_in_hidden_project_file(self):
         project_root = pathlib.Path(self.temp_dir.name) / "profile-project"
         project_root.mkdir()
+        mount_response = self.client.post(
+            "/files/mount",
+            json={
+                "directory_path": str(project_root),
+                "destination_path": "root",
+            },
+        )
+        self.assertEqual(mount_response.status_code, 200)
 
         write_response = self.client.put(
             "/files/project-context",
@@ -165,11 +179,63 @@ class FileWorkspaceRouteTests(unittest.TestCase):
             "mitochondria",
         )
 
+    def test_project_context_profile_can_be_deleted(self):
+        project_root = pathlib.Path(self.temp_dir.name) / "profile-project-delete"
+        project_root.mkdir()
+        mount_response = self.client.post(
+            "/files/mount",
+            json={
+                "directory_path": str(project_root),
+                "destination_path": "root",
+            },
+        )
+        self.assertEqual(mount_response.status_code, 200)
+        context_path = project_root / ".pytc_project_context.json"
+        context_path.write_text(
+            '{"schema_version":"pytc-project-context/v1"}',
+            encoding="utf-8",
+        )
+
+        response = self.client.delete(
+            "/files/project-context",
+            params={"directory_path": str(project_root)},
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(response.json()["deleted"])
+        self.assertFalse(context_path.exists())
+
+    def test_project_profile_infers_voxel_size_from_notes(self):
+        project_root = pathlib.Path(self.temp_dir.name) / "resolution-project"
+        project_root.mkdir()
+        (project_root / "README.md").write_text(
+            "EM mitochondria segmentation. Voxel size: 40 x 4 x 4 nm.",
+            encoding="utf-8",
+        )
+        (project_root / "image.h5").write_text("placeholder", encoding="utf-8")
+        (project_root / "label.h5").write_text("placeholder", encoding="utf-8")
+
+        profile = _scan_project_profile(str(project_root))
+
+        self.assertEqual(
+            profile["context_hints"]["voxel_size_nm"],
+            [40.0, 4.0, 4.0],
+        )
+        self.assertEqual(
+            profile["schema"]["context_hints"]["voxel_size_nm"],
+            [40.0, 4.0, 4.0],
+        )
+
     def test_reset_workspace_preserves_mounted_sources_and_clears_uploads(self):
         mount_root = pathlib.Path(self.temp_dir.name) / "mounted-project"
         mount_root.mkdir()
         mounted_file = mount_root / "volume.tif"
         mounted_file.write_text("data", encoding="utf-8")
+        context_file = mount_root / ".pytc_project_context.json"
+        context_file.write_text(
+            '{"schema_version":"pytc-project-context/v1"}',
+            encoding="utf-8",
+        )
 
         mount_response = self.client.post(
             "/files/mount",
@@ -195,6 +261,7 @@ class FileWorkspaceRouteTests(unittest.TestCase):
         self.assertEqual(response.json()["mounted_root_count"], 1)
         self.assertTrue(mount_root.exists())
         self.assertTrue(mounted_file.exists())
+        self.assertFalse(context_file.exists())
         self.assertFalse(upload_file.exists())
         self.assertTrue(self.uploads_root.exists())
 
@@ -251,8 +318,11 @@ class FileWorkspaceRouteTests(unittest.TestCase):
 
     def test_project_suggestions_marks_existing_smoke_project_mount(self):
         repo_root = pathlib.Path(__file__).resolve().parents[1]
+        workspace_root = repo_root.parent
         smoke_project = repo_root / "testing_projects" / "mito25_paper_loop_smoke"
         smoke_project.mkdir(parents=True, exist_ok=True)
+        snemi_project = workspace_root / "testing_data" / "snemi"
+        snemi_project.mkdir(parents=True, exist_ok=True)
 
         response = self.client.get("/files/project-suggestions")
         self.assertEqual(response.status_code, 200)
