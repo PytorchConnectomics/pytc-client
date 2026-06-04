@@ -4,7 +4,7 @@ from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
 from sqlalchemy.orm import Session
 from . import models, utils, database
 from jose import JWTError, jwt
-from typing import List, Optional
+from typing import Any, List, Optional
 from datetime import datetime, timezone
 from urllib.parse import parse_qs, unquote, urlparse
 import json
@@ -13,15 +13,22 @@ import os
 import uuid
 import mimetypes
 import re
+import math
 from server_api.utils.utils import resolve_existing_path
 
-try:  # Optional preview dependencies
+try:  # Optional preview dependency
     import cv2
-    import numpy as np
-    import tifffile
 except Exception:  # pragma: no cover - preview is best-effort
     cv2 = None
+
+try:  # Optional volume inspection dependency
+    import numpy as np
+except Exception:  # pragma: no cover - inspection is best-effort
     np = None
+
+try:  # Optional volume inspection dependency
+    import tifffile
+except Exception:  # pragma: no cover - inspection is best-effort
     tifffile = None
 
 router = APIRouter()
@@ -37,6 +44,9 @@ IGNORED_SYSTEM_FILENAMES = {
 PROJECT_PROFILE_MAX_FILES = 2500
 PROJECT_PROFILE_TEXT_MAX_BYTES = 24000
 PROJECT_PROFILE_MAX_CONTENT_FILES = 24
+PROJECT_AUDIT_MAX_VOLUME_FILES = 16
+PROJECT_AUDIT_MAX_SAMPLE_VALUES = 250_000
+PROJECT_AUDIT_MAX_FINDINGS = 24
 PROJECT_CONTEXT_FILENAME = ".pytc_project_context.json"
 
 VOLUME_EXTENSIONS = {
@@ -71,7 +81,10 @@ def _format_size(size_bytes: int) -> str:
 
 
 def _is_ignored_system_file(name: Optional[str]) -> bool:
-    return str(name or "").strip().lower() in IGNORED_SYSTEM_FILENAMES
+    normalized = str(name or "").strip().lower()
+    return normalized in IGNORED_SYSTEM_FILENAMES or normalized.startswith(
+        ".__pytc_runtime_"
+    )
 
 
 def _project_suggestion_candidates() -> List[dict]:
@@ -106,6 +119,24 @@ def _project_suggestion_candidates() -> List[dict]:
                 "target_structure": "mitochondria",
                 "task_goal": "segmentation",
                 "optimization_priority": "accuracy",
+            },
+        },
+        {
+            "id": "yixiao-tapereader-xri-case-study",
+            "name": "yixiao_tapereader_xri_case_study",
+            "directory_path": "/home/weidf/demo_data/yixiao_tapereader_xri_case_study",
+            "description": "Yixiao TapeReader XRI fibre segmentation case study with GT, draft, and image-only volumes.",
+            "recommended": False,
+            "context_hints": {
+                "imaging_modality": "X-ray / XRI volumetric microscopy",
+                "target_structure": "CytoTape fibres",
+                "task_family": "XRI fibre instance segmentation",
+                "mask_status": "mixed: some masks, some image-only volumes",
+                "image_only_strategy": "run inference on image-only volumes later",
+                "training_policy": "train only on confirmed ground-truth masks",
+                "task_goal": "instance segmentation, proofreading, and model retraining",
+                "optimization_priority": "paper-faithful workflow coordination",
+                "voxel_size_nm": [40, 16.3, 16.3],
             },
         },
         {
@@ -302,12 +333,583 @@ def _inspect_tiff_container(path: str) -> Optional[dict]:
         return {"format": "tiff", "readable": False, "error": type(exc).__name__}
 
 
+def _json_safe_metadata_value(value: Any, *, max_items: int = 16) -> Any:
+    if isinstance(value, (bytes, bytearray)):
+        return value.decode("utf-8", errors="ignore")
+    if np is not None:
+        if isinstance(value, np.generic):
+            value = value.item()
+        elif isinstance(value, np.ndarray):
+            flattened = value.reshape(-1)
+            return [
+                _json_safe_metadata_value(item, max_items=max_items)
+                for item in flattened[:max_items]
+            ]
+    if isinstance(value, (list, tuple)):
+        return [
+            _json_safe_metadata_value(item, max_items=max_items)
+            for item in list(value)[:max_items]
+        ]
+    if isinstance(value, dict):
+        return {
+            str(key): _json_safe_metadata_value(item, max_items=max_items)
+            for key, item in list(value.items())[:max_items]
+        }
+    if isinstance(value, float):
+        return value if math.isfinite(value) else None
+    if isinstance(value, (str, int, bool)) or value is None:
+        return value
+    return str(value)
+
+
+def _attrs_to_safe_dict(attrs: Any, *, max_attrs: int = 16) -> dict:
+    values = {}
+    try:
+        keys = list(attrs.keys())[:max_attrs]
+    except Exception:
+        return values
+    for key in keys:
+        try:
+            values[str(key)] = _json_safe_metadata_value(attrs[key])
+        except Exception:
+            values[str(key)] = "<unreadable>"
+    return values
+
+
+def _numeric_values_from_metadata(value: Any) -> List[float]:
+    if value is None:
+        return []
+    if isinstance(value, (bytes, bytearray)):
+        value = value.decode("utf-8", errors="ignore")
+    if np is not None:
+        if isinstance(value, np.generic):
+            value = value.item()
+        elif isinstance(value, np.ndarray):
+            return [
+                float(item)
+                for item in value.reshape(-1).tolist()
+                if isinstance(item, (int, float)) and math.isfinite(float(item))
+            ]
+    if isinstance(value, (list, tuple)):
+        parsed = []
+        for item in value:
+            if isinstance(item, (int, float)) and math.isfinite(float(item)):
+                parsed.append(float(item))
+            elif isinstance(item, str):
+                parsed.extend(_numeric_values_from_metadata(item))
+        return parsed
+    if isinstance(value, (int, float)) and math.isfinite(float(value)):
+        return [float(value)]
+    if isinstance(value, str):
+        return [
+            float(match)
+            for match in re.findall(r"\d+(?:\.\d+)?", value)
+            if math.isfinite(float(match))
+        ]
+    return []
+
+
+def _metadata_voxel_size_nm(attrs: dict) -> Optional[List[float]]:
+    preferred_keys = (
+        "voxel_size_nm_zyx",
+        "voxel_size_nm",
+        "resolution_nm",
+        "spacing_nm",
+        "pixel_size_nm",
+        "voxel_size",
+        "resolution",
+        "spacing",
+        "pixel_size",
+        "scale",
+    )
+    normalized = {str(key).lower(): value for key, value in (attrs or {}).items()}
+    ordered_keys = [
+        key
+        for preferred in preferred_keys
+        for key in normalized
+        if preferred in key
+    ]
+    for key in ordered_keys:
+        values = _numeric_values_from_metadata(normalized[key])
+        if len(values) < 3:
+            continue
+        multiplier = 1000.0 if re.search(r"(^|[_\s-])(um|micron)", key) else 1.0
+        triplet = [round(value * multiplier, 6) for value in values[:3]]
+        if all(value > 0 for value in triplet):
+            return triplet
+    return None
+
+
+def _downsample_array_for_stats(array: Any, *, max_values: int = PROJECT_AUDIT_MAX_SAMPLE_VALUES):
+    if np is None:
+        return None
+    try:
+        shape = tuple(int(axis) for axis in getattr(array, "shape", ()))
+    except Exception:
+        shape = ()
+    if not shape:
+        try:
+            return np.asarray(array[()])
+        except Exception:
+            return None
+
+    try:
+        total_size = int(math.prod(shape))
+    except Exception:
+        total_size = 0
+    if total_size <= 0:
+        return None
+
+    stride = 1
+    if total_size > max_values:
+        stride = max(1, int(math.ceil((total_size / max_values) ** (1 / len(shape)))))
+    slices = tuple(slice(None, None, stride) for _ in shape)
+    try:
+        sample = np.asarray(array[slices])
+    except Exception:
+        try:
+            sample = np.asarray(array)
+        except Exception:
+            return None
+
+    if sample.size > max_values:
+        stride = max(1, int(math.ceil((sample.size / max_values) ** (1 / sample.ndim))))
+        sample = sample[tuple(slice(None, None, stride) for _ in range(sample.ndim))]
+    return sample
+
+
+def _sample_array_stats(array: Any) -> Optional[dict]:
+    if np is None:
+        return None
+    sample = _downsample_array_for_stats(array)
+    if sample is None:
+        return None
+    try:
+        sample = np.asarray(sample)
+    except Exception:
+        return None
+    stats = {
+        "sampled_voxels": int(sample.size),
+    }
+    if sample.size == 0:
+        stats.update({"empty": True})
+        return stats
+
+    if np.issubdtype(sample.dtype, np.number):
+        numeric = sample.astype(np.float64, copy=False)
+        finite_mask = np.isfinite(numeric)
+        finite = numeric[finite_mask]
+        stats["finite_fraction"] = float(finite.size / sample.size)
+        if finite.size == 0:
+            stats["empty"] = True
+            return stats
+        minimum = float(np.min(finite))
+        maximum = float(np.max(finite))
+        stats.update(
+            {
+                "min": minimum,
+                "max": maximum,
+                "mean": float(np.mean(finite)),
+                "std": float(np.std(finite)),
+                "dynamic_range": maximum - minimum,
+                "nonzero_fraction": float(np.count_nonzero(finite) / finite.size),
+            }
+        )
+        if np.issubdtype(sample.dtype, np.integer) or np.issubdtype(sample.dtype, np.bool_):
+            unique_values = np.unique(sample)
+            stats["unique_count_sample"] = int(unique_values.size)
+            stats["unique_values_preview"] = [
+                _json_safe_metadata_value(item) for item in unique_values[:12]
+            ]
+    return stats
+
+
+def _audit_findings_for_stats(relative_path: str, role: str, stats: Optional[dict]) -> List[dict]:
+    if not stats:
+        return []
+    findings = []
+    nonzero_fraction = stats.get("nonzero_fraction")
+    dynamic_range = stats.get("dynamic_range")
+    unique_count = stats.get("unique_count_sample")
+    if role == "image":
+        if stats.get("sampled_voxels", 0) == 0:
+            findings.append(
+                {
+                    "level": "warning",
+                    "code": "empty_image_sample",
+                    "message": "Image sample is empty.",
+                    "path": relative_path,
+                    "source": "volume_sample",
+                }
+            )
+        elif nonzero_fraction == 0:
+            findings.append(
+                {
+                    "level": "warning",
+                    "code": "zero_image_sample",
+                    "message": "Image sample is all zero.",
+                    "path": relative_path,
+                    "source": "volume_sample",
+                }
+            )
+        elif dynamic_range is not None and dynamic_range <= 1:
+            findings.append(
+                {
+                    "level": "warning",
+                    "code": "low_dynamic_range_image",
+                    "message": "Image sample has very little intensity variation.",
+                    "path": relative_path,
+                    "source": "volume_sample",
+                }
+            )
+    elif role in {"label", "prediction"}:
+        if nonzero_fraction == 0 or unique_count == 1:
+            findings.append(
+                {
+                    "level": "warning",
+                    "code": "empty_mask_sample",
+                    "message": "Mask-like sample has no foreground labels.",
+                    "path": relative_path,
+                    "source": "volume_sample",
+                }
+            )
+    return findings
+
+
+def _audit_hdf5_volume(
+    path: str,
+    relative_path: str,
+    role: str,
+    *,
+    collect_stats: bool = True,
+) -> dict:
+    try:
+        import h5py  # type: ignore
+    except Exception:  # pragma: no cover - optional dependency
+        return {
+            "path": relative_path,
+            "role": role,
+            "format": "hdf5",
+            "readable": False,
+            "error": "h5py_missing",
+        }
+
+    dataset_records = []
+    findings = []
+    try:
+        with h5py.File(path, "r") as handle:
+            root_attrs = _attrs_to_safe_dict(handle.attrs)
+
+            def visit(name, obj):
+                if len(dataset_records) >= 12:
+                    return
+                if isinstance(obj, h5py.Dataset):
+                    dataset_attrs = _attrs_to_safe_dict(obj.attrs)
+                    dataset_records.append(
+                        {
+                            "path": name,
+                            "shape": list(obj.shape),
+                            "dtype": str(obj.dtype),
+                            "attrs": dataset_attrs,
+                        }
+                    )
+
+            handle.visititems(visit)
+            preferred_tokens = {
+                "image": ("raw", "image", "img", "volume"),
+                "label": ("label", "labels", "seg", "mask", "mito", "gt"),
+                "prediction": ("prediction", "result", "seg", "mask"),
+            }.get(role, ())
+            selected_record = None
+            for record in dataset_records:
+                record_path = str(record.get("path", "")).lower()
+                if preferred_tokens and any(token in record_path for token in preferred_tokens):
+                    selected_record = record
+                    break
+            selected_record = selected_record or (dataset_records[0] if dataset_records else None)
+            stats = None
+            voxel_size_nm = _metadata_voxel_size_nm(root_attrs)
+            if selected_record:
+                dataset = handle[selected_record["path"]]
+                stats = _sample_array_stats(dataset) if collect_stats else None
+                voxel_size_nm = voxel_size_nm or _metadata_voxel_size_nm(
+                    selected_record.get("attrs") or {}
+                )
+                if stats:
+                    findings.extend(_audit_findings_for_stats(relative_path, role, stats))
+    except Exception as exc:
+        return {
+            "path": relative_path,
+            "role": role,
+            "format": "hdf5",
+            "readable": False,
+            "error": type(exc).__name__,
+            "findings": [
+                {
+                    "level": "error",
+                    "code": "unreadable_volume",
+                    "message": f"Could not read {relative_path} as HDF5.",
+                    "path": relative_path,
+                    "source": "volume_metadata",
+                }
+            ],
+        }
+
+    result = {
+        "path": relative_path,
+        "role": role,
+        "format": "hdf5",
+        "readable": True,
+        "datasets": dataset_records,
+        "dataset_path": selected_record.get("path") if selected_record else None,
+        "shape": selected_record.get("shape") if selected_record else None,
+        "dtype": selected_record.get("dtype") if selected_record else None,
+        "stats": stats,
+        "findings": findings,
+    }
+    if voxel_size_nm:
+        result["voxel_size_nm_zyx"] = voxel_size_nm
+    return result
+
+
+def _audit_tiff_volume(
+    path: str,
+    relative_path: str,
+    role: str,
+    *,
+    collect_stats: bool = True,
+) -> dict:
+    metadata = _inspect_tiff_container(path)
+    if not metadata:
+        return {
+            "path": relative_path,
+            "role": role,
+            "format": "tiff",
+            "readable": False,
+            "error": "tifffile_missing",
+        }
+    result = {"path": relative_path, "role": role, **metadata}
+    if collect_stats and metadata.get("readable") and tifffile is not None and np is not None:
+        try:
+            sample = tifffile.memmap(path)
+            stats = _sample_array_stats(sample)
+            result["stats"] = stats
+            result["findings"] = _audit_findings_for_stats(relative_path, role, stats)
+        except Exception:
+            result["findings"] = []
+    return result
+
+
+def _audit_volume_file(
+    directory_path: str,
+    relative_path: str,
+    role: str,
+    *,
+    collect_stats: bool = True,
+) -> dict:
+    absolute_path = os.path.join(directory_path, relative_path)
+    extension = _project_extension(relative_path)
+    if extension in {".h5", ".hdf5"}:
+        return _audit_hdf5_volume(
+            absolute_path,
+            relative_path,
+            role,
+            collect_stats=collect_stats,
+        )
+    if extension in {".tif", ".tiff", ".ome.tif", ".ome.tiff"}:
+        return _audit_tiff_volume(
+            absolute_path,
+            relative_path,
+            role,
+            collect_stats=collect_stats,
+        )
+    if extension in {".zarr", ".n5"}:
+        return {
+            "path": relative_path,
+            "role": role,
+            "format": extension.lstrip("."),
+            "readable": os.path.isdir(absolute_path),
+            "findings": [],
+        }
+    return {
+        "path": relative_path,
+        "role": role,
+        "format": extension.lstrip(".") or "unknown",
+        "readable": os.path.exists(absolute_path),
+        "findings": [],
+    }
+
+
+def _audit_context_facts(volumes: List[dict]) -> List[dict]:
+    facts = []
+    seen = set()
+    for volume in volumes:
+        voxel_size_nm = volume.get("voxel_size_nm_zyx")
+        if not voxel_size_nm:
+            continue
+        key = ("voxel_size_nm", tuple(voxel_size_nm))
+        if key in seen:
+            continue
+        seen.add(key)
+        facts.append(
+            {
+                "key": "voxel_size_nm",
+                "label": "Voxel size",
+                "value": voxel_size_nm,
+                "unit": "nm",
+                "axis_order": "z,y,x",
+                "source": f"volume_metadata:{volume.get('path')}",
+                "confidence": "high",
+            }
+        )
+    return facts[:8]
+
+
+def _build_project_audit(
+    directory_path: str,
+    roles: dict,
+    paired_examples: List[dict],
+    *,
+    include_volume_details: bool = True,
+    collect_stats: bool = True,
+) -> dict:
+    volume_candidates = []
+    seen_paths = set()
+
+    def add_candidate(relative_path: Optional[str], role: str) -> None:
+        if len(volume_candidates) >= PROJECT_AUDIT_MAX_VOLUME_FILES:
+            return
+        path = str(relative_path or "").strip()
+        if not path or path in seen_paths:
+            return
+        seen_paths.add(path)
+        volume_candidates.append((path, role))
+
+    # Pair checks are only useful if both sides are inspected. Prefer declared
+    # image/label pairs before filling the remaining sample budget.
+    for pair in paired_examples:
+        add_candidate(pair.get("image"), "image")
+        add_candidate(pair.get("label"), "label")
+        if len(volume_candidates) >= PROJECT_AUDIT_MAX_VOLUME_FILES:
+            break
+
+    for role in ("image", "label", "prediction", "volume"):
+        for relative_path in roles.get(role) or []:
+            add_candidate(relative_path, role)
+            if len(volume_candidates) >= PROJECT_AUDIT_MAX_VOLUME_FILES:
+                break
+        if len(volume_candidates) >= PROJECT_AUDIT_MAX_VOLUME_FILES:
+            break
+
+    volumes = [
+        _audit_volume_file(
+            directory_path,
+            relative_path,
+            role,
+            collect_stats=collect_stats,
+        )
+        for relative_path, role in volume_candidates
+    ]
+    volume_by_path = {volume.get("path"): volume for volume in volumes}
+    pair_checks = []
+    findings = []
+    for volume in volumes:
+        findings.extend(volume.get("findings") or [])
+        if volume.get("readable") is False:
+            findings.append(
+                {
+                    "level": "error",
+                    "code": "unreadable_volume",
+                    "message": f"Could not read {volume.get('path')}.",
+                    "path": volume.get("path"),
+                    "source": "volume_metadata",
+                }
+            )
+
+    for pair in paired_examples[:PROJECT_AUDIT_MAX_VOLUME_FILES]:
+        image_path = pair.get("image")
+        label_path = pair.get("label")
+        image_volume = volume_by_path.get(image_path)
+        label_volume = volume_by_path.get(label_path)
+        image_shape = image_volume.get("shape") if image_volume else None
+        label_shape = label_volume.get("shape") if label_volume else None
+        shape_match = bool(image_shape and label_shape and image_shape == label_shape)
+        pair_check = {
+            "image": image_path,
+            "label": label_path,
+            "image_shape": image_shape,
+            "label_shape": label_shape,
+            "shape_match": shape_match,
+            "source": "volume_metadata",
+        }
+        pair_checks.append(pair_check)
+        if image_shape and label_shape:
+            findings.append(
+                {
+                    "level": "info" if shape_match else "warning",
+                    "code": "pair_shape_match" if shape_match else "pair_shape_mismatch",
+                    "message": (
+                        "Image and mask shapes match."
+                        if shape_match
+                        else "Image and mask shapes do not match."
+                    ),
+                    "path": image_path,
+                    "related_path": label_path,
+                    "source": "volume_metadata",
+                }
+            )
+
+    level_counts = {"info": 0, "warning": 0, "error": 0}
+    for finding in findings:
+        level = finding.get("level")
+        if level in level_counts:
+            level_counts[level] += 1
+
+    audit = {
+        "schema_version": "pytc-project-audit/v1",
+        "generated_at": datetime.now(timezone.utc).isoformat(),
+        "summary": {
+            "audited_volumes": len(volumes),
+            "readable_volumes": sum(1 for volume in volumes if volume.get("readable")),
+            "pair_checks": len(pair_checks),
+            "shape_match_count": sum(1 for pair in pair_checks if pair.get("shape_match")),
+            "shape_mismatch_count": sum(
+                1
+                for pair in pair_checks
+                if pair.get("image_shape")
+                and pair.get("label_shape")
+                and not pair.get("shape_match")
+            ),
+            "warnings": level_counts["warning"],
+            "errors": level_counts["error"],
+        },
+        "pair_checks": pair_checks,
+        "findings": findings[:PROJECT_AUDIT_MAX_FINDINGS],
+        "context_facts": _audit_context_facts(volumes),
+    }
+    if include_volume_details:
+        audit["volumes"] = volumes
+    return audit
+
+
+def _merge_audit_context_hints(context_hints: dict, audit: dict) -> dict:
+    hints = dict(context_hints or {})
+    for fact in audit.get("context_facts") or []:
+        if fact.get("key") == "voxel_size_nm" and fact.get("value"):
+            hints["voxel_size_nm"] = fact["value"]
+            hints["voxel_size_source"] = fact.get("source") or "volume_metadata"
+            break
+    return hints
+
+
 def _context_terms_for_text(text: str) -> List[str]:
     checks = {
         "EM": r"\bEM\b|electron microscopy|electron microscope|FIB-SEM|TEM|SEM",
+        "XRI": r"\bXRI\b|x[\s-]?ray|xray",
         "CT": r"micro[\s-]?CT|micro.?ct|\bCT\b",
         "fluorescence": r"fluorescen|confocal|light[\s-]?sheet",
         "mitochondria": r"mitochond(?:ria|rion|rial)",
+        "fibres": r"\b(?:fiber|fibers|fibre|fibres|cytotape)\b",
         "nuclei": r"\b(?:nuclei|nucleus|nuclear)\b",
         "neurites": r"\b(?:neurite|axon|dendrite|neuron[_\s-]?ids?)\b",
         "synapses": r"\b(?:synapse|synaptic|presynaptic|postsynaptic|cleft)\b",
@@ -499,6 +1101,7 @@ def _infer_project_context_hints(content_text: str) -> dict:
         text,
         [
             ("EM", r"\bEM\b|electron microscopy|electron microscope|FIB-SEM|TEM|SEM"),
+            ("X-ray / XRI volumetric microscopy", r"\bXRI\b|x[\s-]?ray|xray"),
             ("CT", r"micro[\s-]?CT|micro.?ct|\bCT\b"),
             ("fluorescence microscopy", r"fluorescen|confocal|light[\s-]?sheet"),
             ("MRI", r"\bMRI\b"),
@@ -508,6 +1111,7 @@ def _infer_project_context_hints(content_text: str) -> dict:
         text,
         [
             ("mitochondria", r"mitochond(?:ria|rion|rial)"),
+            ("fibres", r"\b(?:fiber|fibers|fibre|fibres|cytotape)\b"),
             ("nuclei", r"\b(?:nuclei|nucleus|nuclear)\b"),
             ("neurites", r"\b(?:neurite|axon|dendrite|neuron[_\s-]?ids?)\b"),
             ("synapses", r"\b(?:synapse|synaptic|presynaptic|postsynaptic|cleft)\b"),
@@ -540,6 +1144,17 @@ def _infer_project_context_hints(content_text: str) -> dict:
         hints["task_goal"] = task_goal
     if priority:
         hints["optimization_priority"] = priority
+    if modality and target:
+        lower_modality = modality.lower()
+        lower_target = target.lower()
+        if "xri" in lower_modality and "fibre" in lower_target:
+            hints["task_family"] = "XRI fibre instance segmentation"
+        elif "mitochond" in lower_target:
+            hints["task_family"] = "mitochondria instance segmentation"
+        elif "synap" in lower_target:
+            hints["task_family"] = "synapse segmentation"
+        elif "nuclei" in lower_target:
+            hints["task_family"] = "nuclei instance segmentation"
     voxel_size_nm = _parse_voxel_size_nm_hint(text)
     if voxel_size_nm:
         hints["voxel_size_nm"] = voxel_size_nm
@@ -581,9 +1196,151 @@ def _project_primary_root(role_directories: dict, role: str, counts: dict) -> Op
     return directories[0]["path"]
 
 
+def _prepend_preferred_role_directory(
+    role_directories: dict,
+    role: str,
+    preferred_root: Optional[str],
+    role_paths: List[str],
+    *,
+    max_directories: int = 6,
+) -> None:
+    root = str(preferred_root or "").strip().replace("\\", "/").rstrip("/")
+    if not root:
+        return
+    prefix = f"{root}/"
+    examples = [
+        path
+        for path in role_paths
+        if path == root or str(path).replace("\\", "/").startswith(prefix)
+    ]
+    if not examples:
+        return
+    preferred = {
+        "path": root,
+        "count": len(examples),
+        "examples": examples[:3],
+        "source": "project_manifest",
+    }
+    remaining = [
+        item
+        for item in (role_directories.get(role) or [])
+        if item.get("path") != root
+    ]
+    role_directories[role] = [preferred, *remaining][:max_directories]
+
+
 def _first_project_path(roles: dict, role: str) -> Optional[str]:
     values = roles.get(role) or []
     return values[0] if values else None
+
+
+def _load_project_manifest_profile(directory_path: str) -> Optional[dict]:
+    manifest_path = os.path.join(directory_path, "project_manifest.json")
+    if not os.path.isfile(manifest_path):
+        return None
+    try:
+        with open(manifest_path, "r", encoding="utf-8") as handle:
+            manifest = json.load(handle)
+    except (OSError, json.JSONDecodeError):
+        return None
+    return manifest if isinstance(manifest, dict) else None
+
+
+def _unique_project_paths(paths: List[Optional[str]]) -> List[str]:
+    seen = set()
+    unique = []
+    for path in paths:
+        value = str(path or "").strip().replace("\\", "/")
+        if not value or value in seen:
+            continue
+        seen.add(value)
+        unique.append(value)
+    return unique
+
+
+def _manifest_volume_profile(manifest: Optional[dict]) -> dict:
+    if not isinstance(manifest, dict):
+        return {}
+    volumes = [item for item in manifest.get("volumes") or [] if isinstance(item, dict)]
+    if not volumes:
+        return {}
+    active_paths = manifest.get("active_paths")
+    if not isinstance(active_paths, dict):
+        active_paths = {}
+
+    image_paths = _unique_project_paths([volume.get("image") for volume in volumes])
+    label_paths = _unique_project_paths(
+        [volume.get("segmentation") for volume in volumes if volume.get("segmentation")]
+    )
+    paired_examples = [
+        {"image": volume.get("image"), "label": volume.get("segmentation")}
+        for volume in volumes
+        if volume.get("image") and volume.get("segmentation")
+    ]
+    image_root = active_paths.get("image_root") or (
+        os.path.commonpath(image_paths) if len(image_paths) > 1 else None
+    )
+    label_root = active_paths.get("label_root") or (
+        os.path.commonpath(label_paths) if len(label_paths) > 1 else None
+    )
+    volume_sets = []
+    if image_paths:
+        volume_sets.append(
+            {
+                "id": "manifest-active-set",
+                "name": "manifest raw + masks",
+                "image_root": image_root,
+                "label_root": label_root,
+                "image_count": len(image_paths),
+                "label_count": len(label_paths),
+                "pair_count": len(paired_examples),
+                "examples": paired_examples[:3],
+                "source": "project_manifest",
+            }
+        )
+
+    voxel_size = manifest.get("voxel_size")
+    voxel_size_nm = None
+    if isinstance(voxel_size, dict):
+        voxel_size_nm = voxel_size.get("zyx_nm")
+    hints = {}
+    if manifest.get("imaging_modality"):
+        hints["imaging_modality"] = manifest.get("imaging_modality")
+    if manifest.get("target_structure"):
+        hints["target_structure"] = manifest.get("target_structure")
+    if manifest.get("task_family"):
+        hints["task_family"] = manifest.get("task_family")
+    if manifest.get("task"):
+        hints["task_goal"] = manifest.get("task")
+    if voxel_size_nm:
+        hints["voxel_size_nm"] = voxel_size_nm
+        hints["voxel_size_source"] = "project_manifest.json"
+    summary = manifest.get("initial_progress_summary")
+    if isinstance(summary, dict):
+        gt = int(summary.get("ground_truth") or 0)
+        draft = int(summary.get("needs_proofreading") or 0)
+        missing = int(summary.get("missing_segmentation") or 0)
+        hints["mask_status"] = (
+            f"mixed: {gt} ground-truth masks, {draft} draft masks, "
+            f"{missing} image-only targets"
+        )
+    workflow_split = manifest.get("workflow_split")
+    if isinstance(workflow_split, dict):
+        if workflow_split.get("image_only_inference_targets"):
+            hints["image_only_strategy"] = (
+                "run inference on image-only volumes after training"
+            )
+        if workflow_split.get("ground_truth_training_volumes"):
+            hints["training_policy"] = "train only on confirmed ground-truth masks"
+
+    return {
+        "active_paths": active_paths,
+        "image_paths": image_paths,
+        "label_paths": label_paths,
+        "paired_examples": paired_examples,
+        "volume_sets": volume_sets,
+        "context_hints": hints,
+    }
 
 
 def _project_stage_status(
@@ -833,7 +1590,22 @@ def _record_project_role_path(
         roles[role].append(relative_path)
 
 
-def _scan_project_profile(directory_path: str) -> dict:
+def _apply_manifest_profile_to_roles(roles: dict, manifest_profile: dict) -> None:
+    if not manifest_profile:
+        return
+    image_paths = manifest_profile.get("image_paths") or []
+    label_paths = manifest_profile.get("label_paths") or []
+    active_paths = manifest_profile.get("active_paths") or {}
+    if image_paths:
+        roles["image"] = _unique_project_paths([*image_paths, *(roles.get("image") or [])])
+    if label_paths:
+        roles["label"] = _unique_project_paths([*label_paths, *(roles.get("label") or [])])
+    active_config = active_paths.get("config")
+    if active_config:
+        roles["config"] = _unique_project_paths([active_config, *(roles.get("config") or [])])
+
+
+def _scan_project_profile(directory_path: str, *, audit_detail: str = "full") -> dict:
     roles = {
         "image": [],
         "label": [],
@@ -887,21 +1659,40 @@ def _scan_project_profile(directory_path: str) -> dict:
         if truncated:
             break
 
-    paired_examples = []
+    manifest = _load_project_manifest_profile(directory_path)
+    manifest_profile = _manifest_volume_profile(manifest)
+    _apply_manifest_profile_to_roles(roles, manifest_profile)
+
+    paired_examples = manifest_profile.get("paired_examples") or []
     for image_path in roles["image"]:
-        for label_path in roles["label"]:
-            if _looks_like_image_label_pair(image_path, label_path):
-                paired_examples.append(
-                    {"image": image_path, "label": label_path}
-                )
-                break
         if len(paired_examples) >= 4:
             break
+        for label_path in roles["label"]:
+            if _looks_like_image_label_pair(image_path, label_path):
+                pair = {"image": image_path, "label": label_path}
+                if pair not in paired_examples:
+                    paired_examples.append(pair)
+                break
 
     role_directories = {
         role: _project_role_directories(paths) for role, paths in roles.items()
     }
-    volume_sets = _infer_project_volume_sets(roles, role_directories)
+    manifest_active_paths = manifest_profile.get("active_paths") or {}
+    _prepend_preferred_role_directory(
+        role_directories,
+        "image",
+        manifest_active_paths.get("image_root"),
+        roles.get("image") or [],
+    )
+    _prepend_preferred_role_directory(
+        role_directories,
+        "label",
+        manifest_active_paths.get("label_root"),
+        roles.get("label") or [],
+    )
+    volume_sets = manifest_profile.get("volume_sets") or _infer_project_volume_sets(
+        roles, role_directories
+    )
     examples = {role: paths[:8] for role, paths in roles.items()}
     schema = _build_project_workable_schema(
         examples,
@@ -916,8 +1707,32 @@ def _scan_project_profile(directory_path: str) -> dict:
         roles,
         extension_counts,
     )
-    context_hints = _infer_project_context_hints(content_text)
+    use_summary_audit = audit_detail == "summary"
+    audit = _build_project_audit(
+        directory_path,
+        roles,
+        paired_examples,
+        include_volume_details=not use_summary_audit,
+        collect_stats=not use_summary_audit,
+    )
+    context_hints = _merge_audit_context_hints(
+        _infer_project_context_hints(content_text),
+        audit,
+    )
+    context_hints = {
+        **context_hints,
+        **(manifest_profile.get("context_hints") or {}),
+    }
     schema["context_hints"] = context_hints
+    schema["audit"] = audit
+    if manifest_profile:
+        schema["manifest"] = {
+            "title": manifest.get("title") if isinstance(manifest, dict) else None,
+            "active_paths": manifest_profile.get("active_paths") or {},
+            "initial_progress_summary": manifest.get("initial_progress_summary")
+            if isinstance(manifest, dict)
+            else None,
+        }
 
     required_roles = {
         "image": counts["image"] > 0,
@@ -940,6 +1755,7 @@ def _scan_project_profile(directory_path: str) -> dict:
         "paired_examples": paired_examples,
         "content_signals": content_signals,
         "context_hints": context_hints,
+        "audit": audit,
         "ready_for_smoke": not missing_roles,
         "missing_roles": missing_roles,
         "schema": schema,
@@ -1106,6 +1922,31 @@ def _mounted_project_response(
         "mounted_files": mounted_files,
         "profile": _scan_project_profile(source_dir),
     }
+
+
+def _count_indexed_mount_descendants(
+    db: Session,
+    *,
+    user_id: int,
+    mounted_root_id: int,
+) -> tuple[int, int]:
+    pending_parent_ids = [str(mounted_root_id)]
+    mounted_folders = 0
+    mounted_files = 0
+    while pending_parent_ids:
+        parent_id = pending_parent_ids.pop(0)
+        children = (
+            db.query(models.File)
+            .filter(models.File.user_id == user_id, models.File.path == parent_id)
+            .all()
+        )
+        for child in children:
+            if child.is_folder:
+                mounted_folders += 1
+                pending_parent_ids.append(str(child.id))
+            else:
+                mounted_files += 1
+    return mounted_folders, mounted_files
 
 
 def _is_managed_upload_path(user_id: int, physical_path: Optional[str]) -> bool:
@@ -1296,6 +2137,49 @@ def login_for_access_token(
 @router.get("/users/me", response_model=models.UserResponse)
 def read_users_me(current_user: models.User = Depends(get_current_user)):
     return current_user
+
+
+@router.get("/users/me/projects", response_model=models.UserProjectListResponse)
+def list_current_user_projects(
+    current_user: models.User = Depends(get_current_user),
+    db: Session = Depends(database.get_db),
+):
+    mounted_roots = (
+        db.query(models.File)
+        .filter(
+            models.File.user_id == current_user.id,
+            models.File.path == "root",
+            models.File.is_folder.is_(True),
+            models.File.physical_path.isnot(None),
+        )
+        .order_by(models.File.created_at.asc(), models.File.id.asc())
+        .all()
+    )
+    mounted_projects = []
+    for root in mounted_roots:
+        directory_path = os.path.abspath(os.path.expanduser(root.physical_path or ""))
+        if not os.path.isdir(directory_path):
+            continue
+        mounted_folders, mounted_files = _count_indexed_mount_descendants(
+            db,
+            user_id=current_user.id,
+            mounted_root_id=root.id,
+        )
+        mounted_projects.append(
+            models.MountedProjectResponse(
+                mounted_root_id=root.id,
+                name=root.name,
+                directory_path=directory_path,
+                mounted_folders=mounted_folders,
+                mounted_files=mounted_files,
+                profile=_scan_project_profile(directory_path, audit_detail="summary"),
+                created_at=root.created_at,
+            )
+        )
+    return models.UserProjectListResponse(
+        user=current_user,
+        mounted_projects=mounted_projects,
+    )
 
 
 # File Management Endpoints
@@ -1711,15 +2595,15 @@ def list_project_suggestions(
         if not os.path.isdir(directory_path):
             continue
         mounted_root = mounted_by_path.get(directory_path)
-        profile = _scan_project_profile(directory_path)
+        profile = _scan_project_profile(directory_path, audit_detail="summary")
         candidate_context_hints = candidate.get("context_hints")
         if isinstance(candidate_context_hints, dict):
             scanned_context_hints = profile.get("context_hints")
             if not isinstance(scanned_context_hints, dict):
                 scanned_context_hints = {}
             merged_context_hints = {
-                **candidate_context_hints,
                 **scanned_context_hints,
+                **candidate_context_hints,
             }
             profile["context_hints"] = merged_context_hints
             schema = profile.get("schema")
@@ -1747,7 +2631,10 @@ def list_project_suggestions(
                 "recommended": False,
                 "already_mounted": True,
                 "mounted_root_id": mounted_root.id,
-                "profile": _scan_project_profile(mounted_path),
+                "profile": _scan_project_profile(
+                    mounted_path,
+                    audit_detail="summary",
+                ),
             }
         )
     return suggestions
@@ -1889,15 +2776,6 @@ def reset_workspace(
         ):
             mounted_root_count += 1
             delete_disk_files = False
-            context_path = os.path.join(
-                os.path.abspath(os.path.expanduser(node.physical_path)),
-                PROJECT_CONTEXT_FILENAME,
-            )
-            if os.path.isfile(context_path):
-                try:
-                    os.remove(context_path)
-                except OSError:
-                    pass
 
         _delete_file_tree(
             db,

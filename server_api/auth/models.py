@@ -243,6 +243,21 @@ class ProjectResponse(BaseModel):
         from_attributes = True
 
 
+class MountedProjectResponse(BaseModel):
+    mounted_root_id: int
+    name: str
+    directory_path: str
+    mounted_folders: int = 0
+    mounted_files: int = 0
+    profile: Dict[str, Any] = Field(default_factory=dict)
+    created_at: datetime
+
+
+class UserProjectListResponse(BaseModel):
+    user: UserResponse
+    mounted_projects: List[MountedProjectResponse] = Field(default_factory=list)
+
+
 # Chat History Schemas
 class ChatMessageResponse(BaseModel):
     id: int
