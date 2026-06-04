@@ -234,6 +234,19 @@ _ensure_sqlite_column(
 )
 _ensure_sqlite_column("workflow_events", "idempotency_key", "idempotency_key VARCHAR")
 _ensure_sqlite_column("workflow_model_runs", "run_id", "run_id VARCHAR")
+_ensure_sqlite_column(
+    "workflow_volume_states", "annotation_state", "annotation_state VARCHAR"
+)
+_ensure_sqlite_column("workflow_volume_states", "role_state", "role_state VARCHAR")
+_ensure_sqlite_column(
+    "workflow_volume_states", "execution_state", "execution_state VARCHAR"
+)
+_ensure_sqlite_column(
+    "workflow_volume_states", "region_scope_json", "region_scope_json TEXT"
+)
+_ensure_sqlite_column(
+    "workflow_volume_states", "state_schema_version", "state_schema_version VARCHAR"
+)
 
 app = FastAPI()
 
@@ -601,6 +614,19 @@ def _build_training_body_from_command(
 async def configure_app_event_logging():
     log_path = configure_process_logging("server_api")
     logger.info("App event logging enabled at %s", log_path)
+    append_app_event(
+        component="server_api",
+        event="api_runtime_configured",
+        level="INFO",
+        message="API runtime configuration loaded.",
+        api_host=PYTC_API_HOST,
+        api_port=PYTC_API_PORT,
+        worker_protocol=REACT_APP_SERVER_PROTOCOL,
+        worker_url=REACT_APP_SERVER_URL,
+        neuroglancer_port=PYTC_NEUROGLANCER_PORT,
+        neuroglancer_public_base=get_neuroglancer_public_base(),
+        log_path=str(log_path),
+    )
 
 
 @app.middleware("http")
@@ -861,6 +887,20 @@ def _proxy_to_worker(
     timeout: int = 30,
 ):
     target_url = _worker_url(path)
+    start_time = time.perf_counter()
+    method_upper = method.upper()
+    append_app_event(
+        component="server_api",
+        event="worker_proxy_request_started",
+        level="INFO",
+        message=f"{method_upper} {path} -> PyTC worker",
+        method=method_upper,
+        path=path,
+        worker_url=target_url,
+        timeout_seconds=timeout,
+        has_json_body=bool(json_body),
+        json_keys=sorted(json_body.keys()) if isinstance(json_body, dict) else None,
+    )
     try:
         response = requests.request(
             method=method,
@@ -870,6 +910,18 @@ def _proxy_to_worker(
             timeout=timeout,
         )
     except requests.exceptions.ConnectionError as exc:
+        append_app_event(
+            component="server_api",
+            event="worker_proxy_request_failed",
+            level="ERROR",
+            message="Failed to connect to PyTC worker.",
+            method=method_upper,
+            path=path,
+            worker_url=target_url,
+            latency_ms=round((time.perf_counter() - start_time) * 1000, 2),
+            error="ConnectionError",
+            reason=str(exc),
+        )
         raise HTTPException(
             status_code=503,
             detail={
@@ -880,6 +932,17 @@ def _proxy_to_worker(
             },
         ) from exc
     except requests.exceptions.Timeout as exc:
+        append_app_event(
+            component="server_api",
+            event="worker_proxy_request_failed",
+            level="ERROR",
+            message="PyTC worker request timed out.",
+            method=method_upper,
+            path=path,
+            worker_url=target_url,
+            latency_ms=round((time.perf_counter() - start_time) * 1000, 2),
+            error="Timeout",
+        )
         raise HTTPException(
             status_code=504,
             detail={
@@ -889,6 +952,18 @@ def _proxy_to_worker(
             },
         ) from exc
     except requests.RequestException as exc:
+        append_app_event(
+            component="server_api",
+            event="worker_proxy_request_failed",
+            level="ERROR",
+            message="Unexpected error while calling PyTC worker.",
+            method=method_upper,
+            path=path,
+            worker_url=target_url,
+            latency_ms=round((time.perf_counter() - start_time) * 1000, 2),
+            error=type(exc).__name__,
+            reason=str(exc),
+        )
         raise HTTPException(
             status_code=502,
             detail={
@@ -899,6 +974,18 @@ def _proxy_to_worker(
             },
         ) from exc
     except Exception as exc:
+        append_app_event(
+            component="server_api",
+            event="worker_proxy_request_failed",
+            level="ERROR",
+            message="Unhandled error while calling PyTC worker.",
+            method=method_upper,
+            path=path,
+            worker_url=target_url,
+            latency_ms=round((time.perf_counter() - start_time) * 1000, 2),
+            error=type(exc).__name__,
+            reason=str(exc),
+        )
         raise HTTPException(
             status_code=502,
             detail={
@@ -911,6 +998,18 @@ def _proxy_to_worker(
 
     payload = _extract_upstream_payload(response)
     if response.status_code >= 400:
+        append_app_event(
+            component="server_api",
+            event="worker_proxy_request_completed",
+            level="ERROR",
+            message="PyTC worker returned an error.",
+            method=method_upper,
+            path=path,
+            worker_url=target_url,
+            latency_ms=round((time.perf_counter() - start_time) * 1000, 2),
+            status_code=response.status_code,
+            upstream_body=payload,
+        )
         raise HTTPException(
             status_code=response.status_code,
             detail={
@@ -920,6 +1019,17 @@ def _proxy_to_worker(
                 "upstream_body": payload,
             },
         )
+    append_app_event(
+        component="server_api",
+        event="worker_proxy_request_completed",
+        level="INFO",
+        message=f"{method_upper} {path} -> PyTC worker {response.status_code}",
+        method=method_upper,
+        path=path,
+        worker_url=target_url,
+        latency_ms=round((time.perf_counter() - start_time) * 1000, 2),
+        status_code=response.status_code,
+    )
     return payload
 
 

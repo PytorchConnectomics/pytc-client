@@ -18,6 +18,7 @@ from .db_models import (
     WorkflowModelVersion,
     WorkflowRegionHotspot,
     WorkflowSession,
+    WorkflowVolumeState,
 )
 
 ALLOWED_STAGES = {
@@ -209,6 +210,39 @@ def artifact_to_dict(artifact: WorkflowArtifact) -> Dict[str, Any]:
         "metadata": decode_json(artifact.metadata_json),
         "created_at": artifact.created_at,
         "exists": bool(artifact.path and os.path.exists(artifact.path)),
+    }
+
+
+def volume_state_to_dict(volume_state: WorkflowVolumeState) -> Dict[str, Any]:
+    return {
+        "id": volume_state.id,
+        "workflow_id": volume_state.workflow_id,
+        "volume_id": volume_state.volume_id,
+        "name": volume_state.name,
+        "status": volume_state.status,
+        "annotation_state": getattr(volume_state, "annotation_state", None),
+        "role_state": getattr(volume_state, "role_state", None),
+        "execution_state": getattr(volume_state, "execution_state", None),
+        "region_scope_json": getattr(volume_state, "region_scope_json", None),
+        "region_scope": decode_json(getattr(volume_state, "region_scope_json", None)),
+        "state_schema_version": getattr(volume_state, "state_schema_version", None),
+        "status_source": volume_state.status_source,
+        "status_confidence": volume_state.status_confidence,
+        "project_root": volume_state.project_root,
+        "volume_set_id": volume_state.volume_set_id,
+        "volume_set_name": volume_state.volume_set_name,
+        "image_path": volume_state.image_path,
+        "label_path": volume_state.label_path,
+        "prediction_path": volume_state.prediction_path,
+        "corrected_mask_path": volume_state.corrected_mask_path,
+        "eligible_for_training": bool(volume_state.eligible_for_training),
+        "eligible_for_inference": bool(volume_state.eligible_for_inference),
+        "note": volume_state.note,
+        "metadata_json": volume_state.metadata_json,
+        "metadata": decode_json(volume_state.metadata_json),
+        "source_event_id": volume_state.source_event_id,
+        "created_at": volume_state.created_at,
+        "updated_at": volume_state.updated_at,
     }
 
 
@@ -821,6 +855,22 @@ def _artifact_specs_for_event(
 ) -> List[Dict[str, Any]]:
     specs: List[Dict[str, Any]] = []
 
+    def add_non_copy_path(path_key: str, artifact_type: str, role: str) -> None:
+        path = payload.get(path_key)
+        if path:
+            specs.append(
+                {
+                    "artifact_type": artifact_type,
+                    "role": role,
+                    "path": str(path),
+                    "metadata": {
+                        "source_payload_key": path_key,
+                        "allow_copy_in_bundle": False,
+                        "copy_reason": "external_reference_path",
+                    },
+                }
+            )
+
     def add(path_key: str, artifact_type: str, role: str) -> None:
         path = payload.get(path_key)
         if path:
@@ -840,6 +890,11 @@ def _artifact_specs_for_event(
         add("mask_path", "mask_volume", "mask")
         add("ground_truth_path", "label_volume", "ground_truth")
         add("source_ground_truth_path", "label_volume", "ground_truth")
+        add_non_copy_path("withheld_ground_truth", "label_volume", "withheld_ground_truth")
+        add_non_copy_path("source_ground_truth", "label_volume", "ground_truth")
+        add_non_copy_path(
+            "withheld_ground_truth_path", "label_volume", "withheld_ground_truth"
+        )
     if event_type in {"proofreading.masks_exported", "retraining.staged"}:
         add("written_path", "correction_set", "corrected_mask")
         add("output_path", "correction_set", "corrected_mask")

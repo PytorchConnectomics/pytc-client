@@ -194,6 +194,24 @@ class ServerApiProxyTests(unittest.TestCase):
         self.assertEqual(response.status_code, 504)
         self.assertEqual(response.json()["detail"]["error"], "Timeout")
 
+    def test_worker_proxy_logs_connection_failures(self):
+        with patch(
+            "server_api.main.requests.request",
+            side_effect=requests.exceptions.ConnectionError("connection refused"),
+        ), patch("server_api.main.append_app_event") as log_event:
+            response = self.client.get("/training_status")
+
+        self.assertEqual(response.status_code, 503)
+        self.assertEqual(response.json()["detail"]["error"], "ConnectionError")
+        failure_events = [
+            call.kwargs
+            for call in log_event.call_args_list
+            if call.kwargs.get("event") == "worker_proxy_request_failed"
+        ]
+        self.assertTrue(failure_events)
+        self.assertEqual(failure_events[-1]["error"], "ConnectionError")
+        self.assertIn("/training_status", failure_events[-1]["path"])
+
     def test_training_logs_proxy_returns_worker_payload(self):
         payload = {"phase": "running", "text": "runtime", "lines": ["runtime"]}
         with patch(

@@ -1,4 +1,5 @@
 import pathlib
+import json
 import tempfile
 import unittest
 from unittest.mock import patch
@@ -19,6 +20,7 @@ from server_api.auth import models
 import server_api.ehtool.router as ehtool_router_module
 from server_api.ehtool.utils import array_to_base64
 from server_api.main import app as server_api_app
+import server_api.workflows.router as workflows_router_module
 
 
 class WorkflowRouteTests(unittest.TestCase):
@@ -54,6 +56,30 @@ class WorkflowRouteTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         payload = response.json()
         return payload["workflow"], payload["events"]
+
+    def test_semantic_workflow_intents_have_one_source_of_truth(self):
+        prompt_intents = set(workflows_router_module.SEMANTIC_WORKFLOW_INTENT_ORDER)
+        self.assertEqual(prompt_intents, workflows_router_module.SEMANTIC_WORKFLOW_INTENTS)
+        self.assertIn("style_feedback", prompt_intents)
+        self.assertIn("project_files", prompt_intents)
+        self.assertIn("project_progress", prompt_intents)
+
+    def test_project_progress_matches_nested_xri_mask_by_volume_folder(self):
+        root = "/demo/yixiao"
+        image_path = f"{root}/data/raw/5_1/5_1-xri-raw.tif"
+        segmentation_paths = [
+            f"{root}/data/seg/4_3/4_3-mask.tif",
+            f"{root}/data/seg/5_1/5_1-mask.tif",
+        ]
+
+        matched = workflows_router_module._project_progress_match_segmentation(
+            image_path,
+            segmentation_paths,
+            project_root=root,
+            single_image=False,
+        )
+
+        self.assertEqual(matched, f"{root}/data/seg/5_1/5_1-mask.tif")
 
     def test_current_workflow_create_update_and_events(self):
         workflow, events = self._current_workflow()
@@ -148,6 +174,92 @@ class WorkflowRouteTests(unittest.TestCase):
         self.assertEqual(
             first_event.json()["idempotency_key"],
             "runtime:start-training:abc",
+        )
+
+    def test_project_memory_endpoint_returns_canonical_context(self):
+        workflow, _ = self._current_workflow()
+        workflow_id = workflow["id"]
+        patch_response = self.client.patch(
+            f"/api/workflows/{workflow_id}",
+            json={
+                "title": "Yixiao TapeReader XRI Case Study",
+                "stage": "setup",
+                "dataset_path": "/projects/yixiao",
+                "image_path": "/projects/yixiao/data/raw",
+                "label_path": "/projects/yixiao/data/seg",
+                "metadata": {
+                    "project_context": {
+                        "imaging_modality": "X-ray / XRI volumetric microscopy",
+                        "target_structure": "CytoTape fibres",
+                        "task_family": "XRI fibre instance segmentation",
+                        "voxel_size_nm": [40, 16.3, 16.3],
+                        "mask_status": "mixed: some masks, some image-only volumes",
+                        "training_policy": "train only on confirmed ground-truth masks",
+                    }
+                },
+            },
+        )
+        self.assertEqual(patch_response.status_code, 200)
+        event_response = self.client.post(
+            f"/api/workflows/{workflow_id}/events",
+            json={
+                "actor": "user",
+                "event_type": "dataset.loaded",
+                "stage": "setup",
+                "summary": "Loaded Yixiao case study.",
+                "payload": {"source": "test"},
+            },
+        )
+        self.assertEqual(event_response.status_code, 200)
+
+        response = self.client.get(f"/api/workflows/{workflow_id}/memory")
+        self.assertEqual(response.status_code, 200)
+        memory = response.json()
+        self.assertEqual(memory["schema_version"], "pytc-project-memory/v1")
+        self.assertEqual(
+            memory["project_facts"]["task_family_preset"]["id"],
+            "tapereader_xri_fiber",
+        )
+        self.assertEqual(
+            memory["project_facts"]["project_context"]["target_structure"],
+            "CytoTape fibres",
+        )
+        self.assertEqual(
+            memory["artifact_index"]["canonical_paths"]["image"],
+            "/projects/yixiao/data/raw",
+        )
+        self.assertEqual(
+            memory["volume_states"]["summary"]["total"],
+            1,
+        )
+        canonical_status = memory["volume_states"]["items"][0]["canonical_status"]
+        self.assertEqual(
+            memory["volume_states"]["summary"]["canonical"]["counts"][canonical_status],
+            1,
+        )
+        self.assertEqual(
+            memory["volume_states"]["items"][0]["state_schema_version"],
+            "workflow-volume-state/v2",
+        )
+        self.assertIn(
+            memory["volume_states"]["items"][0]["annotation_state"],
+            {"draft_needs_proofreading", "image_only", "proofread_ground_truth"},
+        )
+        self.assertIn(
+            canonical_status,
+            {"draft_needs_proofreading", "image_only", "proofread_ground_truth"},
+        )
+        self.assertEqual(
+            memory["volume_states"]["items"][0]["image_path"],
+            "/projects/yixiao/data/raw",
+        )
+        self.assertEqual(
+            memory["freshness"]["volume_states"]["row_count"],
+            1,
+        )
+        self.assertEqual(
+            memory["evidence_events"][-1]["event_type"],
+            "dataset.loaded",
         )
 
     def test_current_workflow_reset_starts_clean_session(self):
@@ -630,6 +742,61 @@ class WorkflowRouteTests(unittest.TestCase):
         self.assertEqual(query_payload["actions"][0]["id"], "start-proofreading")
         self.assertEqual(query_payload["commands"], [])
 
+    def test_agent_proofreading_launch_prefers_corrected_or_prediction_masks(self):
+        workflow, _ = self._current_workflow()
+        workflow_id = workflow["id"]
+        patch_response = self.client.patch(
+            f"/api/workflows/{workflow_id}",
+            json={
+                "title": "Corrected proofread",
+                "stage": "visualization",
+                "image_path": "/tmp/source-image.h5",
+                "mask_path": "/tmp/original-mask.h5",
+                "inference_output_path": "/tmp/prediction-mask.h5",
+                "corrected_mask_path": "/tmp/corrected-mask.tif",
+            },
+        )
+        self.assertEqual(patch_response.status_code, 200)
+
+        recommendation_response = self.client.get(
+            f"/api/workflows/{workflow_id}/agent/recommendation"
+        )
+        self.assertEqual(recommendation_response.status_code, 200)
+        recommendation = recommendation_response.json()
+        primary = next(
+            action
+            for action in recommendation["actions"]
+            if action["id"] == "start-proofreading"
+        )
+        self.assertEqual(
+            primary["client_effects"]["set_proofreading_dataset_path"],
+            "/tmp/source-image.h5",
+        )
+        self.assertEqual(
+            primary["client_effects"]["set_proofreading_mask_path"],
+            "/tmp/corrected-mask.tif",
+        )
+
+        patch_response = self.client.patch(
+            f"/api/workflows/{workflow_id}",
+            json={"corrected_mask_path": None},
+        )
+        self.assertEqual(patch_response.status_code, 200)
+        recommendation_response = self.client.get(
+            f"/api/workflows/{workflow_id}/agent/recommendation"
+        )
+        self.assertEqual(recommendation_response.status_code, 200)
+        recommendation = recommendation_response.json()
+        primary = next(
+            action
+            for action in recommendation["actions"]
+            if action["id"] == "start-proofreading"
+        )
+        self.assertEqual(
+            primary["client_effects"]["set_proofreading_mask_path"],
+            "/tmp/prediction-mask.h5",
+        )
+
     def test_agent_visualize_request_populates_viewer_paths_not_status(self):
         workflow, _ = self._current_workflow()
         workflow_id = workflow["id"]
@@ -729,6 +896,50 @@ class WorkflowRouteTests(unittest.TestCase):
             str(label_dir / "seg_000_604_576.h5"),
         )
         self.assertEqual(payload["commands"], [])
+
+    def test_agent_visualize_request_uses_explicit_selected_pair(self):
+        workflow, _ = self._current_workflow()
+        workflow_id = workflow["id"]
+        project_root = pathlib.Path(self.temp_dir.name) / "explicit-pair-project"
+        image_dir = project_root / "images"
+        label_dir = project_root / "labels"
+        image_dir.mkdir(parents=True)
+        label_dir.mkdir(parents=True)
+        selected_image = image_dir / "img_b.h5"
+        selected_label = label_dir / "label_b.h5"
+        other_image = image_dir / "img_a.h5"
+        other_label = label_dir / "label_a.h5"
+        other_image.write_bytes(b"")
+        other_label.write_bytes(b"")
+        selected_image.write_bytes(b"")
+        selected_label.write_bytes(b"")
+
+        self.client.patch(
+            f"/api/workflows/{workflow_id}",
+            json={
+                "stage": "setup",
+                "dataset_path": str(project_root),
+                "image_path": str(selected_image),
+                "label_path": str(selected_label),
+            },
+        )
+
+        response = self.client.post(
+            f"/api/workflows/{workflow_id}/agent/query",
+            json={"query": "can we visualize the selected pair?"},
+        )
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertEqual(payload["intent"], "view_data")
+        effects = payload["actions"][0]["client_effects"]
+        self.assertEqual(
+            effects["set_visualization_image_path"],
+            str(selected_image),
+        )
+        self.assertEqual(
+            effects["set_visualization_label_path"],
+            str(selected_label),
+        )
 
     def test_agent_inspects_project_tree_for_alternate_volume_set(self):
         workflow, _ = self._current_workflow()
@@ -834,6 +1045,36 @@ class WorkflowRouteTests(unittest.TestCase):
             any(item["label"] == "Checked project files" for item in payload["trace"])
         )
 
+    def test_workflow_agent_conversation_hydrates_latest_workflow_chat(self):
+        workflow, _ = self._current_workflow()
+        workflow_id = workflow["id"]
+
+        query_response = self.client.post(
+            f"/api/workflows/{workflow_id}/agent/query",
+            json={"query": "what should I do next?"},
+        )
+        self.assertEqual(query_response.status_code, 200)
+        conversation_id = query_response.json()["conversation_id"]
+
+        response = self.client.get(
+            f"/api/workflows/{workflow_id}/agent/conversation"
+        )
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertEqual(payload["conversation_id"], conversation_id)
+        self.assertEqual(len(payload["messages"]), 2)
+        self.assertEqual(payload["messages"][0]["role"], "user")
+        self.assertEqual(payload["messages"][1]["role"], "assistant")
+        self.assertEqual(
+            payload["messages"][1]["source"],
+            "workflow_orchestrator",
+        )
+        self.assertIn("trace", payload["messages"][1])
+        self.assertTrue(
+            all("category" in item and "data" in item for item in payload["messages"][1]["trace"])
+        )
+
     def test_project_progress_counts_ground_truth_unproofread_and_missing_volumes(self):
         workflow, _ = self._current_workflow()
         workflow_id = workflow["id"]
@@ -869,10 +1110,24 @@ class WorkflowRouteTests(unittest.TestCase):
         self.assertEqual(payload["summary"]["needs_proofreading"], 1)
         self.assertEqual(payload["summary"]["missing_segmentation"], 1)
         self.assertEqual(payload["summary"]["remaining"], 2)
+        self.assertIn("annotation_state", payload["composite_state_definitions"])
         rows = {row["name"]: row for row in payload["volumes"]}
         self.assertEqual(rows["vol_a_im.h5"]["status"], "ground_truth")
+        self.assertEqual(
+            rows["vol_a_im.h5"]["annotation_state"],
+            "proofread_ground_truth",
+        )
+        self.assertEqual(rows["vol_a_im.h5"]["role_state"], "training_source")
         self.assertEqual(rows["vol_b_im.h5"]["status"], "needs_proofreading")
+        self.assertEqual(
+            rows["vol_b_im.h5"]["annotation_state"],
+            "draft_needs_proofreading",
+        )
         self.assertEqual(rows["vol_c_im.h5"]["status"], "missing_segmentation")
+        self.assertEqual(rows["vol_c_im.h5"]["annotation_state"], "image_only")
+        self.assertIsInstance(rows["vol_a_im.h5"].get("volume_state_id"), int)
+        self.assertTrue(rows["vol_a_im.h5"]["eligible_for_training"])
+        self.assertTrue(rows["vol_c_im.h5"]["eligible_for_inference"])
 
         update_response = self.client.post(
             f"/api/workflows/{workflow_id}/project-progress/volume-status",
@@ -887,7 +1142,155 @@ class WorkflowRouteTests(unittest.TestCase):
         self.assertEqual(updated["summary"]["ground_truth"], 2)
         updated_rows = {row["name"]: row for row in updated["volumes"]}
         self.assertEqual(updated_rows["vol_b_im.h5"]["status_source"], "manual_override")
+        self.assertEqual(
+            updated_rows["vol_b_im.h5"]["annotation_state"],
+            "proofread_ground_truth",
+        )
+        self.assertEqual(updated_rows["vol_b_im.h5"]["role_state"], "training_source")
         self.assertEqual(updated_rows["vol_b_im.h5"]["note"], "Reviewed by expert.")
+
+        states_response = self.client.get(f"/api/workflows/{workflow_id}/volumes")
+        self.assertEqual(states_response.status_code, 200)
+        states = states_response.json()
+        self.assertEqual(states["summary"]["total"], 3)
+        self.assertEqual(states["summary"]["ground_truth"], 2)
+        self.assertEqual(states["summary"]["training_ready"], 2)
+        state_by_volume_id = {
+            state["volume_id"]: state for state in states["volumes"]
+        }
+        self.assertEqual(
+            state_by_volume_id[rows["vol_b_im.h5"]["id"]]["status_source"],
+            "manual_override",
+        )
+        self.assertEqual(
+            state_by_volume_id[rows["vol_b_im.h5"]["id"]]["annotation_state"],
+            "proofread_ground_truth",
+        )
+        self.assertEqual(
+            state_by_volume_id[rows["vol_b_im.h5"]["id"]]["note"],
+            "Reviewed by expert.",
+        )
+
+        events_response = self.client.get(f"/api/workflows/{workflow_id}/events")
+        self.assertEqual(events_response.status_code, 200)
+        self.assertIn(
+            "project_volume.status_updated",
+            [event["event_type"] for event in events_response.json()],
+        )
+
+    def test_workflow_volume_state_api_updates_training_and_inference_flags(self):
+        workflow, _ = self._current_workflow()
+        workflow_id = workflow["id"]
+        image_path = pathlib.Path(self.temp_dir.name) / "volume_im.h5"
+        label_path = pathlib.Path(self.temp_dir.name) / "volume_seg.h5"
+        image_path.write_bytes(b"image")
+        label_path.write_bytes(b"label")
+
+        response = self.client.patch(
+            f"/api/workflows/{workflow_id}/volumes",
+            json={
+                "volume_id": "manual/volume_im.h5",
+                "status": "ground_truth",
+                "image_path": str(image_path),
+                "label_path": str(label_path),
+                "note": "Confirmed in test.",
+            },
+        )
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertEqual(payload["status"], "ground_truth")
+        self.assertEqual(payload["status_source"], "manual")
+        self.assertEqual(payload["legacy_status"], "ground_truth")
+        self.assertEqual(payload["canonical_status"], "proofread_ground_truth")
+        self.assertEqual(payload["annotation_state"], "proofread_ground_truth")
+        self.assertEqual(payload["role_state"], "training_source")
+        self.assertEqual(payload["execution_state"], "ready")
+        self.assertEqual(payload["region_scope"]["scope_type"], "full_volume")
+        self.assertEqual(payload["state_schema_version"], "workflow-volume-state/v2")
+        self.assertTrue(payload["eligible_for_training"])
+        self.assertFalse(payload["eligible_for_inference"])
+        self.assertEqual(payload["note"], "Confirmed in test.")
+
+        states_response = self.client.get(
+            f"/api/workflows/{workflow_id}/volumes",
+            params={"refresh": "false"},
+        )
+        self.assertEqual(states_response.status_code, 200)
+        states = states_response.json()
+        self.assertEqual(states["summary"]["training_ready"], 1)
+        self.assertEqual(states["volumes"][0]["volume_id"], "manual/volume_im.h5")
+
+        target_response = self.client.patch(
+            f"/api/workflows/{workflow_id}/volumes",
+            json={
+                "volume_id": "manual/target_im.h5",
+                "annotation_state": "image_only",
+                "role_state": "inference_target",
+                "execution_state": "ready",
+                "image_path": str(image_path),
+            },
+        )
+        self.assertEqual(target_response.status_code, 200)
+        target_payload = target_response.json()
+        self.assertEqual(target_payload["status"], "missing_segmentation")
+        self.assertTrue(target_payload["eligible_for_inference"])
+        self.assertFalse(target_payload["eligible_for_training"])
+
+        contradictory_response = self.client.patch(
+            f"/api/workflows/{workflow_id}/volumes",
+            json={
+                "volume_id": "manual/bad_state.h5",
+                "status": "ground_truth",
+                "annotation_state": "image_only",
+            },
+        )
+        self.assertEqual(contradictory_response.status_code, 400)
+
+    def test_workflow_overview_summarizes_phase_progress_and_next_actions(self):
+        workflow, _ = self._current_workflow()
+        workflow_id = workflow["id"]
+        project_root = pathlib.Path(self.temp_dir.name) / "overview-project"
+        image_dir = project_root / "data" / "image"
+        label_dir = project_root / "data" / "seg"
+        image_dir.mkdir(parents=True)
+        label_dir.mkdir(parents=True)
+        for stem in ["vol_a", "vol_b", "vol_c"]:
+            (image_dir / f"{stem}_im.h5").write_bytes(b"")
+        (label_dir / "vol_a_ground_truth.h5").write_bytes(b"")
+        (label_dir / "vol_b_seg.h5").write_bytes(b"")
+
+        self.client.patch(
+            f"/api/workflows/{workflow_id}",
+            json={
+                "title": "Overview smoke",
+                "stage": "visualization",
+                "dataset_path": str(project_root),
+                "image_path": str(image_dir / "vol_a_im.h5"),
+                "label_path": str(label_dir / "vol_a_ground_truth.h5"),
+            },
+        )
+
+        response = self.client.get(f"/api/workflows/{workflow_id}/overview")
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertEqual(payload["project_name"], "Overview smoke")
+        self.assertEqual(payload["phase"], "proofread")
+        self.assertEqual(payload["phase_label"], "Proofread")
+        self.assertEqual(payload["volume_summary"]["ground_truth"], 1)
+        self.assertEqual(payload["volume_summary"]["needs_proofreading"], 1)
+        self.assertEqual(payload["volume_summary"]["missing_segmentation"], 1)
+        self.assertEqual(payload["project_progress"]["summary"]["total"], 3)
+        stage_by_id = {stage["id"]: stage for stage in payload["stages"]}
+        self.assertTrue(stage_by_id["setup"]["complete"])
+        self.assertTrue(stage_by_id["inspect"]["complete"])
+        self.assertTrue(stage_by_id["proofread"]["current"])
+        action_ids = [action["id"] for action in payload["recommended_next_actions"]]
+        self.assertIn("proofread-draft-masks", action_ids)
+        self.assertIn("train-from-ground-truth", action_ids)
+        blocker_ids = [blocker["id"] for blocker in payload["blockers"]]
+        self.assertIn("draft_masks_need_review", blocker_ids)
 
     def test_agent_opens_project_progress_tracker_with_counts(self):
         workflow, _ = self._current_workflow()
@@ -919,8 +1322,28 @@ class WorkflowRouteTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         payload = response.json()
         self.assertEqual(payload["intent"], "project_progress")
+        self.assertEqual(payload["orchestrator_agent"]["type"], "project_manager")
+        self.assertTrue(
+            any(agent["type"] == "training_agent" for agent in payload["subagents"])
+        )
         self.assertIn("tracked image volume", payload["response"])
+        self.assertEqual(payload["trace_schema_version"], "agent_trace/v1")
+        self.assertTrue(any(item["category"] == "proposed" for item in payload["trace"]))
+        self.assertTrue(
+            any(item["agent_type"] == "project_manager" for item in payload["trace"])
+        )
         self.assertEqual(payload["actions"][0]["id"], "open-project-progress")
+        self.assertEqual(payload["actions"][0]["agent_type"], "project_manager")
+        self.assertEqual(
+            payload["actions"][0]["specialist_agent"]["type"],
+            "project_manager",
+        )
+        self.assertEqual(payload["actions"][0]["card_type"], "workflow.action_card/v2")
+        self.assertEqual(payload["actions"][0]["risk_tier"], "R0_view")
+        self.assertEqual(
+            payload["actions"][0]["action_card"]["executor"],
+            "bounded_app_routine",
+        )
         self.assertEqual(
             payload["actions"][0]["client_effects"]["navigate_to"],
             "project-progress",
@@ -1394,8 +1817,60 @@ class WorkflowRouteTests(unittest.TestCase):
         self.assertEqual(payload["intent"], "collect_project_context")
         self.assertIn("imaging modality", payload["response"])
         self.assertIn("target structure", payload["response"])
+        self.assertEqual(payload["policy_decision"]["decision"], "blocked")
+        self.assertFalse(payload["policy_decision"]["requires_approval"])
+        self.assertEqual(payload["freshness"]["scope"], "project_context")
+        self.assertEqual(payload["freshness"]["state"], "missing")
+        self.assertCountEqual(
+            payload["freshness"]["missing"],
+            ["imaging_modality", "target_structure"],
+        )
+        self.assertEqual(payload["blocking_reasons"][0]["code"], "project_context.missing_imaging_modality")
+        self.assertEqual(payload["blocking_reasons"][1]["code"], "project_context.missing_target_structure")
         self.assertEqual(payload["actions"], [])
         self.assertEqual(payload["commands"], [])
+
+    def test_project_context_freshness_reports_missing_and_stale_states(self):
+        missing_context_workflow = type(
+            "WorkflowSession",
+            (),
+            {"metadata_json": json.dumps({"project_context": {}})},
+        )()
+        missing_freshness = workflows_router_module._project_context_freshness(
+            missing_context_workflow
+        )
+        self.assertEqual(missing_freshness["scope"], "project_context")
+        self.assertEqual(missing_freshness["state"], "missing")
+        self.assertCountEqual(
+            missing_freshness["missing"],
+            ["imaging_modality", "target_structure"],
+        )
+
+        stale_context_workflow = type(
+            "WorkflowSession",
+            (),
+            {
+                "metadata_json": json.dumps(
+                    {
+                        "project_context": {
+                            "imaging_modality": "EM",
+                            "target_structure": "mitochondria",
+                            "source": "initial_project_default",
+                        }
+                    }
+                )
+            },
+        )()
+        stale_freshness = workflows_router_module._project_context_freshness(
+            stale_context_workflow
+        )
+        self.assertEqual(stale_freshness["scope"], "project_context")
+        self.assertEqual(stale_freshness["state"], "stale")
+        self.assertEqual(stale_freshness["missing"], [])
+        self.assertEqual(
+            stale_freshness["present"],
+            ["imaging_modality", "target_structure"],
+        )
 
     def test_agent_stores_context_and_then_runs_inference(self):
         workflow, _ = self._current_workflow()
@@ -1454,6 +1929,8 @@ class WorkflowRouteTests(unittest.TestCase):
         payload = response.json()
         self.assertEqual(payload["intent"], "start_training")
         self.assertIn("safe defaults", payload["response"])
+        self.assertEqual(payload["policy_decision"]["decision"], "allowed")
+        self.assertTrue(payload["policy_decision"]["requires_approval"])
         effects = payload["actions"][0]["client_effects"]
         self.assertEqual(effects["navigate_to"], "training")
         self.assertEqual(
@@ -1473,6 +1950,10 @@ class WorkflowRouteTests(unittest.TestCase):
             effects["runtime_action"]["parameter_mode"],
             "agent_default",
         )
+        self.assertEqual(payload["actions"][0]["policy_decision"]["decision"], "allowed")
+        self.assertTrue(payload["actions"][0]["policy_decision"]["requires_approval"])
+        self.assertEqual(payload["actions"][0]["freshness"]["scope"], "training")
+        self.assertEqual(payload["actions"][0]["freshness"]["state"], "ready")
 
     def test_approved_training_run_proposal_returns_runtime_launch_effects(self):
         workflow, _ = self._current_workflow()
@@ -1549,6 +2030,88 @@ class WorkflowRouteTests(unittest.TestCase):
         self.assertEqual(len(command_list.json()), 1)
         self.assertEqual(command_list.json()[0]["id"], payload["commands"][0]["id"])
 
+    def test_approved_training_run_applies_user_field_overrides(self):
+        workflow, _ = self._current_workflow()
+        workflow_id = workflow["id"]
+        self.client.patch(
+            f"/api/workflows/{workflow_id}",
+            json={
+                "stage": "retraining_staged",
+                "image_path": "/projects/mito25/data/image/original_im.h5",
+                "corrected_mask_path": "/projects/mito25/data/seg/original_seg.h5",
+            },
+        )
+        client_effects = {
+            "navigate_to": "training",
+            "runtime_action": {
+                "kind": "start_training",
+                "autopick_parameters": True,
+                "parameter_mode": "agent_default",
+            },
+            "set_training_config_preset": "configs/original.yaml",
+            "set_training_image_path": "/projects/mito25/subsets/original_image",
+            "set_training_label_path": "/projects/mito25/subsets/original_seg",
+            "set_training_output_path": "/projects/mito25/outputs/original",
+            "set_training_log_path": "/projects/mito25/outputs/original",
+        }
+        proposal = self.client.post(
+            f"/api/workflows/{workflow_id}/agent-actions",
+            json={
+                "action": "start_training_run",
+                "summary": "Approve training run.",
+                "payload": {
+                    "client_effects": client_effects,
+                    "config_preset": client_effects["set_training_config_preset"],
+                    "image_path": client_effects["set_training_image_path"],
+                    "label_path": client_effects["set_training_label_path"],
+                    "output_path": client_effects["set_training_output_path"],
+                },
+            },
+        )
+        self.assertEqual(proposal.status_code, 200)
+
+        approval = self.client.post(
+            f"/api/workflows/{workflow_id}/agent-actions/"
+            f"{proposal.json()['id']}/approve",
+            json={
+                "overrides": {
+                    "config_preset": "configs/edited.yaml",
+                    "image_path": "/projects/mito25/subsets/edited_image",
+                    "label_path": "/projects/mito25/subsets/edited_seg",
+                    "output_path": "/projects/mito25/outputs/edited",
+                }
+            },
+        )
+        self.assertEqual(approval.status_code, 200)
+        payload = approval.json()
+        self.assertEqual(
+            payload["client_effects"]["set_training_config_preset"],
+            "configs/edited.yaml",
+        )
+        self.assertEqual(
+            payload["client_effects"]["set_training_image_path"],
+            "/projects/mito25/subsets/edited_image",
+        )
+        self.assertEqual(
+            payload["client_effects"]["set_training_label_path"],
+            "/projects/mito25/subsets/edited_seg",
+        )
+        self.assertEqual(
+            payload["client_effects"]["set_training_output_path"],
+            "/projects/mito25/outputs/edited",
+        )
+        self.assertEqual(
+            payload["commands"][0]["input"]["client_effects"][
+                "set_training_output_path"
+            ],
+            "/projects/mito25/outputs/edited",
+        )
+        approved_payload = payload["events"][0]["payload"]
+        self.assertEqual(
+            approved_payload["user_edits"]["output_path"],
+            "/projects/mito25/outputs/edited",
+        )
+
     def test_agent_train_short_phrases_do_not_fall_to_unknown(self):
         workflow, _ = self._current_workflow()
         workflow_id = workflow["id"]
@@ -1584,6 +2147,8 @@ class WorkflowRouteTests(unittest.TestCase):
         payload = response.json()
         self.assertEqual(payload["intent"], "start_training")
         self.assertIn("train a model", payload["response"].lower())
+        self.assertEqual(payload["policy_decision"]["decision"], "allowed")
+        self.assertTrue(payload["policy_decision"]["requires_approval"])
         self.assertEqual(payload["actions"][0]["id"], "start-training")
         effects = payload["actions"][0]["client_effects"]
         self.assertEqual(effects["navigate_to"], "training")
@@ -1596,6 +2161,10 @@ class WorkflowRouteTests(unittest.TestCase):
             "/projects/sample/data/labels/train",
         )
         self.assertEqual(effects["runtime_action"]["kind"], "start_training")
+        self.assertEqual(payload["actions"][0]["policy_decision"]["decision"], "allowed")
+        self.assertTrue(payload["actions"][0]["policy_decision"]["requires_approval"])
+        self.assertEqual(payload["actions"][0]["freshness"]["scope"], "training")
+        self.assertEqual(payload["actions"][0]["freshness"]["state"], "ready")
 
     def test_agent_train_model_uses_ground_truth_progress_subset(self):
         workflow, _ = self._current_workflow()
@@ -1643,7 +2212,28 @@ class WorkflowRouteTests(unittest.TestCase):
         self.assertEqual(payload["intent"], "start_training")
         self.assertIn("ground-truth", payload["response"])
         self.assertNotEqual(payload["intent"], "project_progress")
-        effects = payload["actions"][0]["client_effects"]
+        action = payload["actions"][0]
+        self.assertEqual(action["card_type"], "workflow.action_card/v2")
+        self.assertEqual(action["agent_type"], "training_agent")
+        self.assertEqual(action["specialist_agent"]["label"], "Training Agent")
+        self.assertEqual(action["agent_icon_key"], "experiment")
+        self.assertEqual(action["agent_border_style"], "thick")
+        self.assertEqual(action["specialist_agent"]["icon_key"], "experiment")
+        self.assertEqual(action["risk_tier"], "R4_runtime_job")
+        self.assertTrue(action["requires_approval"])
+        self.assertIn("input_artifacts", action)
+        self.assertTrue(action["input_artifacts"])
+        self.assertTrue(action["output_artifacts"])
+        self.assertEqual(action["action_card"]["action_type"], "start_training")
+        self.assertEqual(
+            action["action_card"]["orchestrator_agent"]["type"],
+            "project_manager",
+        )
+        self.assertEqual(
+            action["action_card"]["specialist_agent"]["type"],
+            "training_agent",
+        )
+        effects = action["client_effects"]
         subset = effects["training_volume_subset"]
         self.assertEqual(subset["train_volume_count"], 1)
         self.assertEqual(subset["target_volume_count"], 1)
@@ -1685,10 +2275,169 @@ class WorkflowRouteTests(unittest.TestCase):
         self.assertEqual(payload["commands"], [])
         self.assertEqual(payload["actions"][0]["risk_level"], "prefills_form")
         self.assertFalse(payload["actions"][0]["requires_approval"])
+        self.assertEqual(payload["policy_decision"]["decision"], "blocked")
+        self.assertFalse(payload["policy_decision"]["requires_approval"])
+        self.assertEqual(
+            payload["actions"][0]["policy_decision"]["decision"],
+            "blocked",
+        )
+        self.assertFalse(payload["actions"][0]["policy_decision"]["requires_approval"])
+        self.assertEqual(
+            payload["actions"][0]["policy_decision"]["blocking_reasons"][0]["code"],
+            "training.missing_labels",
+        )
+        self.assertEqual(payload["actions"][0]["freshness"]["scope"], "training")
+        self.assertEqual(payload["actions"][0]["freshness"]["state"], "missing")
         self.assertEqual(
             payload["actions"][0]["client_effects"]["runtime_action"]["kind"],
             "choose_project_data",
         )
+
+    def test_agent_train_on_trusted_masks_only_for_tapereader_context(self):
+        workflow, _ = self._current_workflow()
+        workflow_id = workflow["id"]
+        self.client.patch(
+            f"/api/workflows/{workflow_id}",
+            json={
+                "stage": "setup",
+                "image_path": "/tmp/yixiao/image.h5",
+                "metadata": {
+                    "project_context": {
+                        "imaging_modality": "X-ray / XRI volumetric microscopy",
+                        "target_structure": "CytoTape fibres",
+                        "training_policy": "train only on confirmed ground-truth masks",
+                    }
+                },
+            },
+        )
+
+        response = self.client.post(
+            f"/api/workflows/{workflow_id}/agent/query",
+            json={"query": "train the model now"},
+        )
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertEqual(payload["intent"], "start_training")
+        self.assertIn("confirmed labels or saved proofreading edits", payload["response"].lower())
+        self.assertEqual(payload["policy_decision"]["decision"], "blocked")
+        self.assertFalse(payload["policy_decision"]["requires_approval"])
+        self.assertEqual(
+            payload["actions"][0]["policy_decision"]["reason_code"],
+            "training_missing_inputs",
+        )
+        self.assertEqual(payload["actions"][0]["id"], "open-files")
+
+        self.client.patch(
+            f"/api/workflows/{workflow_id}",
+            json={"corrected_mask_path": "/tmp/yixiao/saved-edits.tif"},
+        )
+        response = self.client.post(
+            f"/api/workflows/{workflow_id}/agent/query",
+            json={"query": "train this image"},
+        )
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertEqual(payload["intent"], "start_training")
+        self.assertEqual(payload["policy_decision"]["decision"], "allowed")
+        self.assertTrue(payload["policy_decision"]["requires_approval"])
+        self.assertEqual(payload["actions"][0]["policy_decision"]["decision"], "allowed")
+        self.assertTrue(payload["actions"][0]["policy_decision"]["requires_approval"])
+        self.assertEqual(payload["actions"][0]["id"], "start-training")
+        self.assertEqual(
+            payload["actions"][0]["client_effects"]["set_training_label_path"],
+            "/tmp/yixiao/saved-edits.tif",
+        )
+
+    def test_agent_infer_on_image_only_projects_only_with_checkpoint(self):
+        workflow, _ = self._current_workflow()
+        workflow_id = workflow["id"]
+        self.client.patch(
+            f"/api/workflows/{workflow_id}",
+            json={
+                "stage": "setup",
+                "image_path": "/tmp/yixiao/image-only-project.tif",
+                "metadata": {
+                    "project_context": {
+                        "imaging_modality": "X-ray / XRI volumetric microscopy",
+                        "target_structure": "CytoTape fibres",
+                    }
+                },
+            },
+        )
+
+        checkpoint_missing = self.client.post(
+            f"/api/workflows/{workflow_id}/agent/query",
+            json={"query": "run inference"},
+        )
+        self.assertEqual(checkpoint_missing.status_code, 200)
+        checkpoint_payload = checkpoint_missing.json()
+        self.assertEqual(checkpoint_payload["intent"], "start_inference")
+        self.assertIn("need model checkpoint", checkpoint_payload["response"].lower())
+        self.assertEqual(checkpoint_payload["policy_decision"]["decision"], "blocked")
+        self.assertFalse(checkpoint_payload["policy_decision"]["requires_approval"])
+        self.assertEqual(checkpoint_payload["freshness"]["scope"], "inference")
+        self.assertEqual(checkpoint_payload["freshness"]["state"], "missing")
+        self.assertEqual(
+            checkpoint_payload["actions"][0]["policy_decision"]["decision"],
+            "blocked",
+        )
+        self.assertFalse(
+            checkpoint_payload["actions"][0]["policy_decision"]["requires_approval"]
+        )
+        self.assertEqual(checkpoint_payload["actions"][0]["id"], "open-inference")
+
+        self.client.patch(
+            f"/api/workflows/{workflow_id}",
+            json={"checkpoint_path": "/tmp/yixiao/model-checkpoint.pt"},
+        )
+        checkpoint_present = self.client.post(
+            f"/api/workflows/{workflow_id}/agent/query",
+            json={"query": "run model"},
+        )
+        self.assertEqual(checkpoint_present.status_code, 200)
+        ready_payload = checkpoint_present.json()
+        self.assertEqual(ready_payload["intent"], "start_inference")
+        self.assertEqual(ready_payload["policy_decision"]["decision"], "allowed")
+        self.assertTrue(ready_payload["policy_decision"]["requires_approval"])
+        self.assertEqual(ready_payload["freshness"]["scope"], "inference")
+        self.assertEqual(ready_payload["freshness"]["state"], "ready")
+        self.assertEqual(ready_payload["actions"][0]["id"], "start-inference")
+        self.assertEqual(
+            ready_payload["actions"][0]["policy_decision"]["decision"],
+            "allowed",
+        )
+        self.assertTrue(
+            ready_payload["actions"][0]["policy_decision"]["requires_approval"]
+        )
+
+    def test_agent_segment_request_does_not_retrain_from_untrusted_prediction(self):
+        workflow, _ = self._current_workflow()
+        workflow_id = workflow["id"]
+        self.client.patch(
+            f"/api/workflows/{workflow_id}",
+            json={
+                "stage": "setup",
+                "image_path": "/tmp/yixiao/tape-seg-image.h5",
+                "inference_output_path": "/tmp/yixiao/untrusted-prediction.tif",
+                "metadata": {
+                    "project_context": {
+                        "imaging_modality": "X-ray / XRI volumetric microscopy",
+                        "target_structure": "CytoTape fibres",
+                    }
+                },
+            },
+        )
+
+        response = self.client.post(
+            f"/api/workflows/{workflow_id}/agent/query",
+            json={"query": "segment this dataset"},
+        )
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertEqual(payload["intent"], "start_segmentation")
+        self.assertIn("running inference needs model checkpoint", payload["response"])
+        action_ids = [action["id"] for action in payload["actions"]]
+        self.assertNotIn("start-training", action_ids)
 
     def test_general_chat_direct_guard_answers_meta_run_questions(self):
         with patch("server_api.main._ensure_chatbot") as ensure_chatbot:
@@ -1794,7 +2543,7 @@ class WorkflowRouteTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         payload = response.json()
         self.assertIn("Hey", payload["response"])
-        self.assertIn("next useful move", payload["response"])
+        self.assertIn("I would probably", payload["response"])
         self.assertNotIn("Next:", payload["response"])
         self.assertNotIn("Tell me the job", payload["response"])
         self.assertNotIn("Supervisor Agent", payload["response"])
@@ -1875,10 +2624,18 @@ class WorkflowRouteTests(unittest.TestCase):
         self.assertEqual(evaluation_response.status_code, 200)
         evaluation_payload = evaluation_response.json()
         self.assertIn("compute before/after metrics", evaluation_payload["response"])
+        self.assertEqual(evaluation_payload["policy_decision"]["decision"], "allowed")
+        self.assertTrue(evaluation_payload["policy_decision"]["requires_approval"])
+        self.assertEqual(evaluation_payload["freshness"]["scope"], "evaluation")
+        self.assertEqual(evaluation_payload["freshness"]["state"], "ready")
         compute_action = evaluation_payload["actions"][0]
         self.assertEqual(compute_action["id"], "compute-evaluation")
         self.assertEqual(compute_action["risk_level"], "writes_workflow_record")
         self.assertTrue(compute_action["requires_approval"])
+        self.assertEqual(compute_action["policy_decision"]["decision"], "allowed")
+        self.assertTrue(compute_action["policy_decision"]["requires_approval"])
+        self.assertEqual(compute_action["freshness"]["scope"], "evaluation")
+        self.assertEqual(compute_action["freshness"]["state"], "ready")
         self.assertEqual(
             compute_action["client_effects"]["workflow_action"]["kind"],
             "compute_evaluation",
@@ -1890,6 +2647,63 @@ class WorkflowRouteTests(unittest.TestCase):
             "/tmp/baseline.tif",
         )
 
+    def test_agent_evaluation_blocks_when_reference_mask_missing(self):
+        workflow, _ = self._current_workflow()
+        workflow_id = workflow["id"]
+        self.client.patch(
+            f"/api/workflows/{workflow_id}",
+            json={
+                "stage": "evaluation",
+                "image_path": "/tmp/yixiao/eval-image.h5",
+            },
+        )
+
+        baseline_response = self.client.post(
+            f"/api/workflows/{workflow_id}/model-runs",
+            json={
+                "run_type": "inference",
+                "status": "completed",
+                "output_path": "/tmp/baseline-reference-case.tif",
+            },
+        )
+        self.assertEqual(baseline_response.status_code, 200)
+        candidate_response = self.client.post(
+            f"/api/workflows/{workflow_id}/model-runs",
+            json={
+                "run_type": "inference",
+                "status": "completed",
+                "output_path": "/tmp/candidate-reference-case.tif",
+            },
+        )
+        self.assertEqual(candidate_response.status_code, 200)
+
+        response = self.client.post(
+            f"/api/workflows/{workflow_id}/agent/query",
+            json={"query": "compare results and compute metrics"},
+        )
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertEqual(payload["intent"], "compute_evaluation")
+        self.assertIn("collect reference mask first.", payload["response"])
+        self.assertEqual(payload["policy_decision"]["decision"], "blocked")
+        self.assertFalse(payload["policy_decision"]["requires_approval"])
+        self.assertEqual(
+            payload["policy_decision"]["reason_code"],
+            "evaluation_missing_inputs",
+        )
+        self.assertEqual(payload["actions"][0]["id"], "show-evaluation-status")
+        self.assertEqual(
+            payload["actions"][0]["policy_decision"]["decision"],
+            "blocked",
+        )
+        self.assertFalse(
+            payload["actions"][0]["policy_decision"]["requires_approval"]
+        )
+        self.assertEqual(
+            payload["blocking_reasons"][0]["code"],
+            "evaluation.missing_reference_mask",
+        )
+
         export_response = self.client.post(
             f"/api/workflows/{workflow_id}/agent/query",
             json={"query": "export evidence bundle"},
@@ -1899,6 +2713,8 @@ class WorkflowRouteTests(unittest.TestCase):
         self.assertEqual(export_payload["actions"][0]["id"], "export-workflow-bundle")
         self.assertEqual(export_payload["actions"][0]["risk_level"], "exports_evidence")
         self.assertTrue(export_payload["actions"][0]["requires_approval"])
+        self.assertEqual(export_payload["actions"][0]["policy_decision"]["decision"], "allowed")
+        self.assertTrue(export_payload["actions"][0]["policy_decision"]["requires_approval"])
         self.assertEqual(
             export_payload["actions"][0]["client_effects"]["workflow_action"]["kind"],
             "export_bundle",

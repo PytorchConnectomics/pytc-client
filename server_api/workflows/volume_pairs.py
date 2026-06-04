@@ -140,12 +140,14 @@ def discover_neuroglancer_volume_pairs(
 
     pairs: List[Dict[str, Any]] = []
     unpaired_images: List[str] = []
+    used_images: set[str] = set()
     used_labels: set[str] = set()
     for image_candidate in image_candidates:
         key = _volume_pair_key(image_candidate)
         label_candidate = None
         if key in label_by_key and label_by_key[key]:
             label_candidate = label_by_key[key].pop(0)
+            used_images.add(str(image_candidate))
             used_labels.add(str(label_candidate))
         if label_candidate:
             pairs.append(
@@ -175,8 +177,12 @@ def discover_neuroglancer_volume_pairs(
                 "match_basis": "single-image-single-label",
             }
         )
+        used_images.add(str(image_candidate))
         used_labels.add(str(label_candidate))
 
+    unpaired_images = [
+        image for image in unpaired_images if image not in used_images
+    ]
     unpaired_labels = [
         str(candidate)
         for candidate in label_candidates

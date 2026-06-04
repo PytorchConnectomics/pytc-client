@@ -137,6 +137,20 @@ def test_discover_neuroglancer_directory_pairs_lists_all_clear_matches(tmp_path)
     assert str(image_dir / "img_unpaired.h5") in discovery["unpaired_images"]
 
 
+def test_discover_neuroglancer_single_file_fallback_does_not_report_unpaired(tmp_path):
+    image_path = tmp_path / "1-xri_raw.tif"
+    label_path = tmp_path / "1-mask.tif"
+    image_path.write_bytes(b"")
+    label_path.write_bytes(b"")
+
+    discovery = discover_neuroglancer_volume_pairs(image_path, label_path)
+
+    assert discovery["pair_count"] == 1
+    assert discovery["pairs"][0]["match_basis"] == "single-image-single-label"
+    assert discovery["unpaired_images"] == []
+    assert discovery["unpaired_labels"] == []
+
+
 def test_resolve_neuroglancer_keeps_chunked_volume_directories(tmp_path):
     zarr_path = tmp_path / "volume.zarr"
     zarr_path.mkdir()

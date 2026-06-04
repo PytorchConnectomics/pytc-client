@@ -182,6 +182,35 @@ class WorkflowArtifactRecordTests(unittest.TestCase):
             {event["event_type"] for event in events},
         )
 
+    def test_dataset_loaded_with_withheld_ground_truth_creates_reference_artifact(self):
+        workflow_id = self._workflow_id()
+        image_path = self._write_file("withheld-image.tif")
+        holdout_mask_path = self._write_file("withheld-mask.tif")
+        self.client.post(
+            f"/api/workflows/{workflow_id}/events",
+            json={
+                "actor": "user",
+                "event_type": "dataset.loaded",
+                "stage": "visualization",
+                "summary": "Loaded image with external held-out target mask.",
+                "payload": {
+                    "image_path": image_path,
+                    "withheld_ground_truth": holdout_mask_path,
+                },
+            },
+        )
+        artifacts = self.client.get(f"/api/workflows/{workflow_id}/artifacts").json()
+        holdout_artifacts = [
+            artifact
+            for artifact in artifacts
+            if artifact["role"] == "withheld_ground_truth"
+            and artifact["path"] == holdout_mask_path
+        ]
+        self.assertEqual(len(holdout_artifacts), 1)
+        self.assertFalse(
+            holdout_artifacts[0]["metadata"].get("allow_copy_in_bundle", True)
+        )
+
     def test_model_run_events_pair_by_explicit_run_id(self):
         workflow_id = self._workflow_id()
         first_output = self._write_file("training-output-a")

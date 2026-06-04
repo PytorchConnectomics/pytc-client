@@ -209,6 +209,52 @@ class WorkflowCaseStudyAcceptanceTests(unittest.TestCase):
         self.assertEqual(len(bundle["model_versions"]), 1)
         self.assertEqual(len(bundle["evaluation_results"]), 1)
 
+    def test_case_study_readiness_gate_taxonomy_surface(self):
+        workflow_id = self._workflow_id()
+
+        response = self.client.get(
+            f"/api/workflows/{workflow_id}/case-study-readiness"
+        )
+        self.assertEqual(response.status_code, 200)
+        readiness = response.json()
+
+        required_top_level = {
+            "workflow_id",
+            "ready_for_case_study",
+            "completed_count",
+            "total_count",
+            "gates",
+            "next_required_items",
+        }
+        self.assertTrue(required_top_level.issubset(readiness))
+        self.assertEqual(readiness["workflow_id"], workflow_id)
+        self.assertIsInstance(readiness["gates"], list)
+        self.assertIsInstance(readiness["next_required_items"], list)
+        self.assertEqual(len(readiness["gates"]), readiness["total_count"])
+
+        gate_ids = {item["id"] for item in readiness["gates"]}
+        for required_gate in [
+            "workflow_context",
+            "data_loaded",
+            "baseline_inference",
+            "proofreading_corrections",
+            "retraining_handoff",
+            "training_completion",
+            "model_version",
+            "post_retraining_inference",
+            "evaluation_result",
+            "agent_plan_preview",
+            "agent_audit",
+        ]:
+            self.assertIn(required_gate, gate_ids)
+
+        self.assertLessEqual(len(readiness["next_required_items"]), readiness["total_count"])
+        if readiness["ready_for_case_study"]:
+            self.assertEqual(readiness["completed_count"], readiness["total_count"])
+            self.assertEqual(readiness["next_required_items"], [])
+        else:
+            self.assertGreaterEqual(readiness["completed_count"], 0)
+
 
 if __name__ == "__main__":
     unittest.main()

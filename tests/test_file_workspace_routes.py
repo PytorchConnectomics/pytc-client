@@ -261,7 +261,7 @@ class FileWorkspaceRouteTests(unittest.TestCase):
         self.assertEqual(response.json()["mounted_root_count"], 1)
         self.assertTrue(mount_root.exists())
         self.assertTrue(mounted_file.exists())
-        self.assertFalse(context_file.exists())
+        self.assertTrue(context_file.exists())
         self.assertFalse(upload_file.exists())
         self.assertTrue(self.uploads_root.exists())
 
@@ -358,6 +358,43 @@ class FileWorkspaceRouteTests(unittest.TestCase):
             mount_response.json()["mounted_root_id"],
         )
         self.assertIn("profile", mounted_smoke)
+
+    def test_users_me_projects_lists_owned_mounted_projects(self):
+        project_root = pathlib.Path(self.temp_dir.name) / "owned-project"
+        image_dir = project_root / "data" / "image"
+        label_dir = project_root / "data" / "seg"
+        image_dir.mkdir(parents=True)
+        label_dir.mkdir(parents=True)
+        (image_dir / "sample_im.h5").write_bytes(b"image")
+        (label_dir / "sample_seg.h5").write_bytes(b"label")
+
+        mount_response = self.client.post(
+            "/files/mount",
+            json={
+                "directory_path": str(project_root),
+                "destination_path": "root",
+                "mount_name": "Owned Demo",
+            },
+        )
+        self.assertEqual(mount_response.status_code, 200)
+
+        response = self.client.get("/users/me/projects")
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertEqual(payload["user"]["username"], "guest")
+        self.assertEqual(len(payload["mounted_projects"]), 1)
+        project = payload["mounted_projects"][0]
+        self.assertEqual(project["name"], "Owned Demo")
+        self.assertEqual(project["directory_path"], str(project_root))
+        self.assertEqual(
+            project["mounted_root_id"],
+            mount_response.json()["mounted_root_id"],
+        )
+        self.assertGreaterEqual(project["mounted_folders"], 2)
+        self.assertEqual(project["mounted_files"], 2)
+        self.assertEqual(project["profile"]["counts"]["image"], 1)
+        self.assertEqual(project["profile"]["counts"]["label"], 1)
 
     def test_project_profile_detects_smoke_project_roles(self):
         project_root = pathlib.Path(self.temp_dir.name) / "project-profile"
@@ -472,6 +509,97 @@ class FileWorkspaceRouteTests(unittest.TestCase):
         self.assertEqual(profile["volume_sets"][0]["label_count"], 4)
         self.assertEqual(profile["volume_sets"][0]["pair_count"], 4)
 
+    def test_project_profile_prefers_manifest_volume_map(self):
+        project_root = pathlib.Path(self.temp_dir.name) / "manifest-profile"
+        raw_dir = project_root / "data" / "raw"
+        seg_dir = project_root / "data" / "seg"
+        train_dir = project_root / "data" / "pytc_train" / "1"
+        config_dir = project_root / "configs"
+        raw_dir.mkdir(parents=True)
+        seg_dir.mkdir(parents=True)
+        train_dir.mkdir(parents=True)
+        config_dir.mkdir()
+        for volume_id in ["1", "2", "3"]:
+            (raw_dir / volume_id).mkdir()
+            (raw_dir / volume_id / f"{volume_id}-xri_raw.tif").write_bytes(b"raw")
+        for volume_id in ["1", "2"]:
+            (seg_dir / volume_id).mkdir()
+            (seg_dir / volume_id / f"{volume_id}-mask.tif").write_bytes(b"mask")
+        (train_dir / "1-xri_raw-tiled_clahe.tif").write_bytes(b"train raw")
+        (train_dir / "1-annotated_mask.tif").write_bytes(b"train mask")
+        (config_dir / "TapeReader-Fiber-BCS-AppCompat-Sanity.yaml").write_text(
+            "SYSTEM: {}\n", encoding="utf-8"
+        )
+        (project_root / "project_manifest.json").write_text(
+            json.dumps(
+                {
+                    "title": "Yixiao TapeReader XRI Case Study",
+                    "task": "CytoTape fibre instance segmentation",
+                    "imaging_modality": "X-ray / XRI volumetric microscopy",
+                    "target_structure": "CytoTape fibres",
+                    "task_family": "XRI fibre instance segmentation",
+                    "active_paths": {
+                        "image_root": "data/raw",
+                        "label_root": "data/seg",
+                        "config": "configs/TapeReader-Fiber-BCS-AppCompat-Sanity.yaml",
+                    },
+                    "initial_progress_summary": {
+                        "ground_truth": 2,
+                        "needs_proofreading": 0,
+                        "missing_segmentation": 1,
+                    },
+                    "workflow_split": {
+                        "ground_truth_training_volumes": ["1", "2"],
+                        "image_only_inference_targets": ["3"],
+                    },
+                    "voxel_size": {"zyx_nm": [40, 16.3, 16.3]},
+                    "volumes": [
+                        {
+                            "id": "1",
+                            "status": "ground_truth",
+                            "image": "data/raw/1/1-xri_raw.tif",
+                            "segmentation": "data/seg/1/1-mask.tif",
+                        },
+                        {
+                            "id": "2",
+                            "status": "ground_truth",
+                            "image": "data/raw/2/2-xri_raw.tif",
+                            "segmentation": "data/seg/2/2-mask.tif",
+                        },
+                        {
+                            "id": "3",
+                            "status": "missing_segmentation",
+                            "image": "data/raw/3/3-xri_raw.tif",
+                            "segmentation": None,
+                        },
+                    ],
+                }
+            ),
+            encoding="utf-8",
+        )
+
+        profile = _scan_project_profile(str(project_root))
+
+        self.assertEqual(profile["role_directories"]["image"][0]["path"], "data/raw")
+        self.assertEqual(profile["role_directories"]["label"][0]["path"], "data/seg")
+        self.assertEqual(profile["schema"]["primary_paths"]["image"], "data/raw/1/1-xri_raw.tif")
+        self.assertEqual(profile["schema"]["primary_paths"]["label"], "data/seg/1/1-mask.tif")
+        self.assertEqual(
+            profile["schema"]["primary_paths"]["config"],
+            "configs/TapeReader-Fiber-BCS-AppCompat-Sanity.yaml",
+        )
+        self.assertEqual(profile["schema"]["primary_paths"]["image_root"], "data/raw")
+        self.assertEqual(profile["schema"]["primary_paths"]["label_root"], "data/seg")
+        self.assertEqual(profile["volume_sets"][0]["source"], "project_manifest")
+        self.assertEqual(profile["volume_sets"][0]["image_count"], 3)
+        self.assertEqual(profile["volume_sets"][0]["label_count"], 2)
+        self.assertEqual(profile["volume_sets"][0]["pair_count"], 2)
+        self.assertEqual(
+            profile["context_hints"]["task_family"],
+            "XRI fibre instance segmentation",
+        )
+        self.assertEqual(profile["context_hints"]["voxel_size_nm"], [40, 16.3, 16.3])
+
     def test_project_profile_uses_content_for_context_hints(self):
         project_root = pathlib.Path(self.temp_dir.name) / "content-profile"
         (project_root / "volumes").mkdir(parents=True)
@@ -525,6 +653,72 @@ class FileWorkspaceRouteTests(unittest.TestCase):
             ["volumes/labels/neuron_ids", "volumes/raw"],
         )
         self.assertEqual(profile["context_hints"]["target_structure"], "neurites")
+
+    def test_project_profile_audits_hdf5_pairs_and_metadata_facts(self):
+        try:
+            import h5py
+        except Exception:
+            self.skipTest("h5py not installed")
+
+        project_root = pathlib.Path(self.temp_dir.name) / "hdf5-audit-profile"
+        image_dir = project_root / "data" / "image"
+        label_dir = project_root / "data" / "seg"
+        image_dir.mkdir(parents=True)
+        label_dir.mkdir(parents=True)
+        with h5py.File(image_dir / "sample_im.h5", "w") as handle:
+            handle.attrs["voxel_size_nm_zyx"] = [30, 8, 8]
+            handle.create_dataset(
+                "volumes/raw",
+                data=[
+                    [[1, 2, 3], [4, 5, 6]],
+                    [[7, 8, 9], [10, 11, 12]],
+                ],
+            )
+        with h5py.File(label_dir / "sample_seg.h5", "w") as handle:
+            handle.create_dataset(
+                "volumes/labels/mitochondria",
+                data=[
+                    [[0, 1, 1], [0, 0, 2]],
+                    [[0, 2, 2], [0, 0, 0]],
+                ],
+            )
+
+        profile = _scan_project_profile(str(project_root))
+        audit = profile["audit"]
+
+        self.assertEqual(audit["schema_version"], "pytc-project-audit/v1")
+        self.assertEqual(audit["summary"]["audited_volumes"], 2)
+        self.assertEqual(audit["summary"]["readable_volumes"], 2)
+        self.assertEqual(audit["summary"]["shape_match_count"], 1)
+        self.assertEqual(profile["context_hints"]["voxel_size_nm"], [30, 8, 8])
+        self.assertEqual(
+            profile["context_hints"]["voxel_size_source"],
+            "volume_metadata:data/image/sample_im.h5",
+        )
+        self.assertEqual(
+            audit["pair_checks"][0],
+            {
+                "image": "data/image/sample_im.h5",
+                "label": "data/seg/sample_seg.h5",
+                "image_shape": [2, 2, 3],
+                "label_shape": [2, 2, 3],
+                "shape_match": True,
+                "source": "volume_metadata",
+            },
+        )
+        self.assertEqual(
+            audit["context_facts"][0],
+            {
+                "key": "voxel_size_nm",
+                "label": "Voxel size",
+                "value": [30, 8, 8],
+                "unit": "nm",
+                "axis_order": "z,y,x",
+                "source": "volume_metadata:data/image/sample_im.h5",
+                "confidence": "high",
+            },
+        )
+        self.assertGreater(audit["volumes"][0]["stats"]["nonzero_fraction"], 0)
 
 
 if __name__ == "__main__":

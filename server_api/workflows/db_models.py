@@ -93,6 +93,12 @@ class WorkflowSession(Base):
         cascade="all, delete-orphan",
         order_by="WorkflowCommand.created_at",
     )
+    volume_states = relationship(
+        "WorkflowVolumeState",
+        back_populates="workflow",
+        cascade="all, delete-orphan",
+        order_by="WorkflowVolumeState.volume_id",
+    )
 
 
 class WorkflowEvent(Base):
@@ -188,6 +194,51 @@ class WorkflowArtifact(Base):
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
     workflow = relationship("WorkflowSession", back_populates="artifacts")
+    source_event = relationship("WorkflowEvent")
+
+
+class WorkflowVolumeState(Base):
+    __tablename__ = "workflow_volume_states"
+    __table_args__ = (
+        UniqueConstraint(
+            "workflow_id",
+            "volume_id",
+            name="uq_workflow_volume_states_workflow_id_volume_id",
+        ),
+    )
+
+    id = Column(Integer, primary_key=True, index=True)
+    workflow_id = Column(
+        Integer, ForeignKey("workflow_sessions.id"), nullable=False, index=True
+    )
+    volume_id = Column(String, nullable=False, index=True)
+    name = Column(String, nullable=True)
+    status = Column(String, nullable=False, default="missing_segmentation", index=True)
+    annotation_state = Column(String, nullable=True, index=True)
+    role_state = Column(String, nullable=True, index=True)
+    execution_state = Column(String, nullable=True, index=True)
+    region_scope_json = Column(Text, nullable=True)
+    state_schema_version = Column(String, nullable=True)
+    status_source = Column(String, default="derived", nullable=False, index=True)
+    status_confidence = Column(Float, nullable=True)
+    project_root = Column(Text, nullable=True)
+    volume_set_id = Column(String, nullable=True, index=True)
+    volume_set_name = Column(String, nullable=True)
+    image_path = Column(Text, nullable=True)
+    label_path = Column(Text, nullable=True)
+    prediction_path = Column(Text, nullable=True)
+    corrected_mask_path = Column(Text, nullable=True)
+    eligible_for_training = Column(Boolean, default=False, nullable=False, index=True)
+    eligible_for_inference = Column(Boolean, default=False, nullable=False, index=True)
+    note = Column(Text, nullable=True)
+    metadata_json = Column(Text, nullable=True)
+    source_event_id = Column(Integer, ForeignKey("workflow_events.id"), nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )
+
+    workflow = relationship("WorkflowSession", back_populates="volume_states")
     source_event = relationship("WorkflowEvent")
 
 

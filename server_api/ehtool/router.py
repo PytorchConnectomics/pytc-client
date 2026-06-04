@@ -76,11 +76,6 @@ from app_event_logger import append_app_event
 
 router = APIRouter()
 
-# DIAGNOSTIC: This should print when the module is loaded
-print("=" * 80)
-print("EHTOOL ROUTER MODULE LOADED - VERSION: DEBUG v2")
-print("=" * 80)
-
 # In-memory cache for DataManagers (session_id -> DataManager)
 _data_managers = {}
 
@@ -322,8 +317,11 @@ async def get_detection_layers(
                 layer_info.image_base64 = image_base64
                 layer_info.mask_base64 = mask_base64
             except Exception as e:
-                print(
-                    f"[GET_LAYERS] Warning: Failed to load image for layer {db_layer.layer_index}: {e}"
+                _append_ehtool_event(
+                    "layer_preview_load_failed",
+                    level="WARNING",
+                    layer_index=db_layer.layer_index,
+                    error=str(e),
                 )
 
         layers.append(layer_info)
