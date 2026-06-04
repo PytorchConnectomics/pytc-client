@@ -26,10 +26,15 @@ const compactRationale = (rationale) => {
   return trimmed.length > 160 ? `${trimmed.slice(0, 157)}…` : trimmed;
 };
 
-const field = (key, label, value) => ({
+const field = (key, label, value, options = {}) => ({
   key,
   label,
-  value: toDisplayValue(value),
+  rawValue: value,
+  value:
+    options.displayValue !== undefined
+      ? toDisplayValue(options.displayValue)
+      : toDisplayValue(value),
+  editable: Boolean(options.editable),
 });
 
 const pickEntries = (proposal, keys) =>
@@ -40,6 +45,41 @@ const pickEntries = (proposal, keys) =>
       label: key.replace(/_/g, " "),
       value: toDisplayValue(proposal[key]),
     }));
+
+const CLIENT_EFFECT_FIELD_SPECS = [
+  ["set_training_config_preset", "Config", "config_preset"],
+  ["set_training_image_path", "Images", "image_path"],
+  ["set_training_label_path", "Labels", "label_path"],
+  ["set_training_output_path", "Output", "output_path"],
+  ["set_training_log_path", "Log", "log_path"],
+  ["set_inference_config_preset", "Config", "inference_config_preset"],
+  ["set_inference_checkpoint_path", "Checkpoint", "checkpoint_path"],
+  ["set_inference_image_path", "Image", "inference_image_path"],
+  ["set_inference_label_path", "Label", "inference_label_path"],
+  ["set_inference_output_path", "Output", "inference_output_path"],
+  ["set_visualization_image_path", "Image", "visualization_image_path"],
+  ["set_visualization_label_path", "Label", "visualization_label_path"],
+  ["set_visualization_scales", "Scales", "visualization_scales"],
+  ["set_proofreading_dataset_path", "Image", "proofreading_dataset_path"],
+  ["set_proofreading_mask_path", "Mask", "proofreading_mask_path"],
+  ["set_proofreading_project_name", "Project", "proofreading_project_name"],
+];
+
+const clientEffectFields = (clientEffects = {}) => {
+  if (!clientEffects || typeof clientEffects !== "object") return [];
+  return CLIENT_EFFECT_FIELD_SPECS.filter(
+    ([effectKey]) => clientEffects[effectKey] !== undefined,
+  ).map(([effectKey, label, overrideKey]) => {
+    const rawValue = clientEffects[effectKey];
+    const shouldCompact =
+      typeof rawValue === "string" &&
+      (rawValue.includes("/") || rawValue.includes("\\"));
+    return field(overrideKey, label, rawValue, {
+      editable: true,
+      displayValue: shouldCompact ? compactPath(rawValue) : rawValue,
+    });
+  });
+};
 
 const trainingSubsetFields = (subset = {}) => {
   if (!subset || typeof subset !== "object") return [];
@@ -134,7 +174,18 @@ export const getProposalCardContent = (proposal = {}) => {
         "corrected_mask_path",
         "written_path",
         "training_output_path",
-      ]),
+      ]).map((item) =>
+        ["corrected_mask_path", "written_path", "training_output_path"].includes(
+          item.key,
+        )
+          ? {
+              ...item,
+              rawValue: proposal[item.key],
+              value: compactPath(proposal[item.key]),
+              editable: true,
+            }
+          : item,
+      ),
     };
   }
 
@@ -149,15 +200,28 @@ export const getProposalCardContent = (proposal = {}) => {
           "Start training with the proposed inputs and safe defaults.",
       ),
       fields: [
-        field("config_preset", "Config", compactPath(proposal.config_preset)),
-        field("image_path", "Images", compactPath(proposal.image_path)),
-        field("label_path", "Labels", compactPath(proposal.label_path)),
-        field("output_path", "Output", compactPath(proposal.output_path)),
+        field("config_preset", "Config", proposal.config_preset, {
+          editable: true,
+          displayValue: compactPath(proposal.config_preset),
+        }),
+        field("image_path", "Images", proposal.image_path, {
+          editable: true,
+          displayValue: compactPath(proposal.image_path),
+        }),
+        field("label_path", "Labels", proposal.label_path, {
+          editable: true,
+          displayValue: compactPath(proposal.label_path),
+        }),
+        field("output_path", "Output", proposal.output_path, {
+          editable: true,
+          displayValue: compactPath(proposal.output_path),
+        }),
         ...trainingSubsetFields(subset),
         field(
           "parameters",
           "Parameters",
           proposal.autopick_parameters ? "safe defaults" : proposal.parameter_mode,
+          { editable: false },
         ),
       ].filter((item) => item.value !== "—"),
     };
@@ -178,7 +242,7 @@ export const getProposalCardContent = (proposal = {}) => {
         "risk_level",
         "runtime_action",
         "workflow_action",
-      ]),
+      ]).concat(clientEffectFields(proposal.client_effects)),
     };
   }
 

@@ -55,10 +55,9 @@ jest.mock("@ant-design/icons", () => {
     EyeOutlined: Icon,
     ExperimentOutlined: Icon,
     ThunderboltOutlined: Icon,
-    DashboardOutlined: Icon,
     BugOutlined: Icon,
     ProjectOutlined: Icon,
-  MessageOutlined: Icon,
+    MessageOutlined: Icon,
   };
 });
 
@@ -66,7 +65,6 @@ jest.mock("./FilesManager", () => () => <div>Files Manager Content</div>);
 jest.mock("./Visualization", () => () => <div>Visualization Content</div>);
 jest.mock("./ModelTraining", () => () => <div>Training Content</div>);
 jest.mock("./ModelInference", () => () => <div>Inference Content</div>);
-jest.mock("./Monitoring", () => () => <div>Monitoring Content</div>);
 jest.mock("./ProjectProgress", () => () => <div>Project Progress Content</div>);
 jest.mock("./MaskProofreading", () => () => (
   <div>Mask Proofreading Content</div>
@@ -87,7 +85,21 @@ describe("Views", () => {
       workflow: {
         id: 1,
         stage: "setup",
+        title: "Demo Workflow",
         metadata: {},
+      },
+      workflowOverview: {
+        project_name: "Demo Workflow",
+        phase: "setup",
+        phase_label: "Setup",
+        volume_summary: {
+          ground_truth: 0,
+          needs_proofreading: 0,
+          missing_segmentation: 0,
+        },
+        blockers: [{ label: "No project mounted", detail: "Mount data." }],
+        recommended_next_actions: [],
+        active_runs: [],
       },
       loading: false,
       startNewWorkflow: jest.fn().mockResolvedValue({}),
@@ -102,8 +114,10 @@ describe("Views", () => {
     expect(screen.getByText("Visualize")).toBeTruthy();
     expect(screen.getByText("Train Model")).toBeTruthy();
     expect(screen.getByText("Run Model")).toBeTruthy();
-    expect(screen.getByText("Monitor")).toBeTruthy();
-    expect(screen.getByText("Progress")).toBeTruthy();
+    expect(screen.queryByText("Monitor")).toBeNull();
+    expect(screen.getByText("Workflow")).toBeTruthy();
+    expect(screen.getByText("Demo Workflow")).toBeTruthy();
+    expect(screen.getByText("Setup")).toBeTruthy();
     expect(screen.getByText("Proofread")).toBeTruthy();
     expect(screen.queryByText("What are you trying to do?")).toBeNull();
     expect(screen.queryByText("Confirm project folders")).toBeNull();
@@ -123,9 +137,20 @@ describe("Views", () => {
   it("opens the project progress tracker tab", () => {
     render(<Views />);
 
-    fireEvent.click(screen.getByText("Progress"));
+    fireEvent.click(screen.getByText("Workflow"));
 
     expect(screen.getByText("Project Progress Content")).toBeTruthy();
+  });
+
+  it("routes legacy monitoring navigation to Train Model", async () => {
+    mockWorkflowContext.lastClientEffects = { navigate_to: "monitoring" };
+
+    render(<Views />);
+
+    await waitFor(() => {
+      expect(screen.getByText("Training Content")).toBeTruthy();
+    });
+    expect(mockWorkflowContext.consumeClientEffects).toHaveBeenCalled();
   });
 
   it("starts a fresh workflow from the app shell", async () => {

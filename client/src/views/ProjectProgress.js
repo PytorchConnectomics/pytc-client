@@ -82,9 +82,11 @@ function ProjectProgress() {
   const workflowContext = useWorkflow();
   const {
     workflow,
+    workflowOverview,
     projectProgress,
     refreshProjectProgress,
     updateProjectProgressVolume,
+    runClientEffects,
   } = workflowContext || {};
   const [loading, setLoading] = useState(false);
   const [filter, setFilter] = useState("all");
@@ -114,11 +116,22 @@ function ProjectProgress() {
   }, [workflow?.id]);
 
   const summary = projectProgress?.summary || {};
+  const stages = workflowOverview?.stages || [];
+  const blockers = workflowOverview?.blockers || [];
+  const actions = workflowOverview?.recommended_next_actions || [];
   const filteredVolumes = useMemo(() => {
     const volumes = projectProgress?.volumes || [];
     if (filter === "all") return volumes;
     return volumes.filter((volume) => volume.status === filter);
   }, [filter, projectProgress?.volumes]);
+
+  const handleOverviewAction = async (action) => {
+    if (!action) return;
+    const effects = action.client_effects?.navigate_to
+      ? action.client_effects
+      : { navigate_to: action.target_view || "project-progress" };
+    await runClientEffects?.(effects);
+  };
 
   const handleStatusChange = async (volumeId, status) => {
     if (!workflow?.id || !updateProjectProgressVolume) return;
@@ -207,10 +220,10 @@ function ProjectProgress() {
       >
         <Space direction="vertical" size={4}>
           <Title level={3} style={{ margin: 0 }}>
-            Project Progress
+            Workflow Overview
           </Title>
           <Text type="secondary">
-            Volume-level readout for ground truth, unproofread segmentations, and missing segmentations.
+            Shared workflow map for the user, agent, volume statuses, blockers, and next actions.
           </Text>
         </Space>
         <Button
@@ -221,6 +234,72 @@ function ProjectProgress() {
           Refresh
         </Button>
       </div>
+
+      <Card size="small" style={{ marginBottom: 16 }}>
+        <Space direction="vertical" size={12} style={{ width: "100%" }}>
+          <Space align="center" style={{ width: "100%", justifyContent: "space-between" }}>
+            <Space direction="vertical" size={2}>
+              <Text strong>
+                Current phase: {workflowOverview?.phase_label || workflow?.stage || "Setup"}
+              </Text>
+              <Text type="secondary">
+                {workflowOverview?.phase_reason || "The workflow is waiting for project state."}
+              </Text>
+            </Space>
+            <Text type="secondary">
+              {workflowOverview?.active_runs?.length
+                ? `${workflowOverview.active_runs.length} active run(s)`
+                : "No active run"}
+            </Text>
+          </Space>
+          {stages.length > 0 && (
+            <div
+              style={{
+                display: "grid",
+                gap: 8,
+                gridTemplateColumns: "repeat(auto-fit, minmax(110px, 1fr))",
+              }}
+            >
+              {stages.map((stage) => (
+                <button
+                  key={stage.id}
+                  type="button"
+                  onClick={() =>
+                    runClientEffects?.({ navigate_to: stage.target_view })
+                  }
+                  style={{
+                    border: stage.current
+                      ? "1px solid #4338ca"
+                      : "1px solid #e5e7eb",
+                    borderRadius: 8,
+                    background: stage.current
+                      ? "#eef2ff"
+                      : stage.complete
+                        ? "#f0fdf4"
+                        : "#fff",
+                    color: stage.blocked ? "#b91c1c" : "#111827",
+                    cursor: "pointer",
+                    padding: "8px 10px",
+                    textAlign: "left",
+                    minHeight: 58,
+                  }}
+                >
+                  <div style={{ fontWeight: 650 }}>{stage.label}</div>
+                  <div style={{ color: "#6b7280", fontSize: 12 }}>
+                    {stage.current
+                      ? "Current"
+                      : stage.complete
+                        ? "Done"
+                        : stage.blocked
+                          ? "Needs attention"
+                          : "Upcoming"}
+                  </div>
+                </button>
+              ))}
+            </div>
+          )}
+        </Space>
+      </Card>
 
       <div
         style={{
@@ -272,6 +351,64 @@ function ProjectProgress() {
           </Text>
         </Space>
       </Card>
+
+      {(blockers.length > 0 || actions.length > 0) && (
+        <div
+          style={{
+            display: "grid",
+            gap: 12,
+            gridTemplateColumns: "repeat(auto-fit, minmax(280px, 1fr))",
+            marginBottom: 16,
+          }}
+        >
+          <Card size="small" title="What needs attention">
+            {blockers.length ? (
+              <Space direction="vertical" size={10} style={{ width: "100%" }}>
+                {blockers.map((blocker) => (
+                  <Space
+                    key={blocker.id}
+                    direction="vertical"
+                    size={2}
+                    style={{ width: "100%" }}
+                  >
+                    <Text strong>{blocker.label}</Text>
+                    <Text type="secondary">{blocker.detail}</Text>
+                  </Space>
+                ))}
+              </Space>
+            ) : (
+              <Text type="secondary">No blockers are currently detected.</Text>
+            )}
+          </Card>
+          <Card size="small" title="Recommended next moves">
+            {actions.length ? (
+              <Space direction="vertical" size={10} style={{ width: "100%" }}>
+                {actions.map((action) => (
+                  <div
+                    key={action.id}
+                    style={{
+                      display: "flex",
+                      gap: 12,
+                      justifyContent: "space-between",
+                      alignItems: "flex-start",
+                    }}
+                  >
+                    <Space direction="vertical" size={2}>
+                      <Text strong>{action.label}</Text>
+                      <Text type="secondary">{action.detail}</Text>
+                    </Space>
+                    <Button size="small" onClick={() => handleOverviewAction(action)}>
+                      Open
+                    </Button>
+                  </div>
+                ))}
+              </Space>
+            ) : (
+              <Text type="secondary">No next move is suggested yet.</Text>
+            )}
+          </Card>
+        </div>
+      )}
 
       <Space wrap style={{ marginBottom: 12 }}>
         <Select

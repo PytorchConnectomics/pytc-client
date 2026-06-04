@@ -15,6 +15,40 @@ import {
 } from "../design/workflowDesignSystem";
 
 const { Text } = Typography;
+const toList = (value) => (Array.isArray(value) ? value : []);
+
+const parsePayload = (payload) => {
+  if (!payload) return {};
+  if (typeof payload === "string") {
+    try {
+      const parsed = JSON.parse(payload);
+      return parsed && typeof parsed === "object" ? parsed : {};
+    } catch {
+      return {};
+    }
+  }
+  if (typeof payload === "object" && !Array.isArray(payload)) return payload;
+  return {};
+};
+
+const toProposalPayload = (event = {}) => {
+  const rawPayload = parsePayload(event.payload || event.payload_json);
+  const params = parsePayload(rawPayload?.params);
+  return {
+    ...rawPayload,
+    ...(params || {}),
+    action_card: rawPayload.action_card || params.action_card || null,
+    specialist_agent: rawPayload.specialist_agent || params.specialist_agent,
+    orchestrator_agent: rawPayload.orchestrator_agent || params.orchestrator_agent,
+    trace: toList(
+      params.trace ||
+        rawPayload.trace ||
+        params.action_card?.trace ||
+        rawPayload?.action_card?.trace,
+    ),
+    type: rawPayload.action || rawPayload.type || "agent_proposal",
+  };
+};
 
 function formatEventTime(value) {
   if (!value) return "";
@@ -144,6 +178,9 @@ function WorkflowTimeline({ limit = 8, showFilters = true }) {
             const isPendingProposal =
               event.event_type === "agent.proposal_created" &&
               event.approval_status === "pending";
+            const proposalPayload = isPendingProposal
+              ? toProposalPayload(event)
+              : null;
             return (
               <List.Item
                 style={{
@@ -188,15 +225,21 @@ function WorkflowTimeline({ limit = 8, showFilters = true }) {
                           {formatEventTime(event.created_at)}
                         </Text>
                       </Space>
-                      {isPendingProposal && (
+                      {proposalPayload && (
                         <AgentProposalCard
                           proposal={{
-                            ...(event.payload || {}),
-                            type: event.payload?.action || "agent_proposal",
+                            ...proposalPayload,
+                            type: proposalPayload.type,
                             rationale: event.summary,
-                            ...(event.payload?.params || {}),
                           }}
-                          onApprove={() => approveAgentAction?.(event.id)}
+                          trace={proposalPayload.trace}
+                          onApprove={(_proposal, overrides) => {
+                            if (overrides && Object.keys(overrides).length > 0) {
+                              approveAgentAction?.(event.id, overrides);
+                              return;
+                            }
+                            approveAgentAction?.(event.id);
+                          }}
                           onReject={() => rejectAgentAction?.(event.id)}
                         />
                       )}

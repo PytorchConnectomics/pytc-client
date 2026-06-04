@@ -5,7 +5,6 @@ import {
   EyeOutlined,
   ExperimentOutlined,
   ThunderboltOutlined,
-  DashboardOutlined,
   BugOutlined,
   MessageOutlined,
   ProjectOutlined,
@@ -14,7 +13,6 @@ import FilesManager from "./FilesManager";
 import Visualization from "./Visualization";
 import ModelTraining from "./ModelTraining";
 import ModelInference from "./ModelInference";
-import Monitoring from "./Monitoring";
 import MaskProofreading from "./MaskProofreading";
 import ProjectProgress from "./ProjectProgress";
 import Chatbot from "../components/Chatbot";
@@ -32,9 +30,8 @@ const MODULE_ITEMS = [
     key: "inference",
     icon: <ThunderboltOutlined />,
   },
-  { label: "Monitor", key: "monitoring", icon: <DashboardOutlined /> },
   {
-    label: "Progress",
+    label: "Workflow",
     key: "project-progress",
     icon: <ProjectOutlined />,
   },
@@ -45,6 +42,124 @@ const MODULE_ITEMS = [
   },
 ];
 
+const formatCount = (value, label) => `${Number(value || 0)} ${label}`;
+
+const workflowPhaseTone = {
+  setup: "#6b7280",
+  inspect: "#2563eb",
+  proofread: "#b45309",
+  train: "#4338ca",
+  infer: "#047857",
+  evaluate: "#7c3aed",
+};
+
+function WorkflowOverviewStrip({ overview, workflow, onNavigate }) {
+  const summary = overview?.volume_summary || {};
+  const phase = overview?.phase || workflow?.stage || "setup";
+  const phaseLabel =
+    overview?.phase_label || String(phase || "Setup").replace(/_/g, " ");
+  const projectName =
+    overview?.project_name || workflow?.title || "Segmentation workflow";
+  const blocker = overview?.blockers?.[0] || null;
+  const activeRun = overview?.active_runs?.[0] || null;
+  const action = overview?.recommended_next_actions?.[0] || null;
+  const tone = workflowPhaseTone[phase] || "#4338ca";
+  const counts = [
+    formatCount(summary.ground_truth, "GT"),
+    formatCount(summary.needs_proofreading, "draft"),
+    formatCount(summary.missing_segmentation, "missing"),
+  ];
+
+  return (
+    <div
+      aria-label="Workflow overview"
+      style={{
+        display: "flex",
+        alignItems: "center",
+        gap: 12,
+        padding: "8px 14px",
+        borderBottom: "1px solid #eceef3",
+        background: "#fbfbfd",
+        minHeight: 42,
+        overflowX: "auto",
+        whiteSpace: "nowrap",
+      }}
+    >
+      <button
+        type="button"
+        onClick={() => onNavigate("project-progress")}
+        style={{
+          border: "none",
+          background: "transparent",
+          padding: 0,
+          color: "#111827",
+          fontWeight: 650,
+          cursor: "pointer",
+        }}
+      >
+        {projectName}
+      </button>
+      <span
+        style={{
+          color: tone,
+          border: `1px solid ${tone}`,
+          borderRadius: 999,
+          padding: "2px 9px",
+          fontSize: 12,
+          fontWeight: 650,
+          textTransform: "capitalize",
+        }}
+      >
+        {phaseLabel}
+      </span>
+      <button
+        type="button"
+        onClick={() => onNavigate("project-progress")}
+        style={{
+          border: "none",
+          background: "transparent",
+          color: "#4b5563",
+          cursor: "pointer",
+          padding: 0,
+        }}
+      >
+        {counts.join(" · ")}
+      </button>
+      {activeRun ? (
+        <span style={{ color: "#4338ca", fontWeight: 600 }}>
+          {activeRun.run_type} {activeRun.status}
+        </span>
+      ) : blocker ? (
+        <button
+          type="button"
+          onClick={() => onNavigate(blocker.target_view || "project-progress")}
+          style={{
+            border: "none",
+            background: "transparent",
+            color: blocker.severity === "blocking" ? "#b91c1c" : "#92400e",
+            cursor: "pointer",
+            padding: 0,
+          }}
+          title={blocker.detail}
+        >
+          {blocker.label}
+        </button>
+      ) : (
+        <span style={{ color: "#047857", fontWeight: 600 }}>No blockers</span>
+      )}
+      {action && (
+        <Button
+          size="small"
+          onClick={() => onNavigate(action.target_view)}
+          style={{ marginLeft: "auto" }}
+        >
+          {action.label}
+        </Button>
+      )}
+    </div>
+  );
+}
+
 function Views() {
   const [current, setCurrent] = useState("files");
   const [visitedTabs, setVisitedTabs] = useState(new Set(["files"]));
@@ -53,7 +168,6 @@ function Views() {
   const consumeClientEffects = workflowContext?.consumeClientEffects;
   const refreshProjectProgress = workflowContext?.refreshProjectProgress;
   const [isChatOpen, setIsChatOpen] = useState(false);
-  const [assistantContextOpen, setAssistantContextOpen] = useState(false);
   const [quickAgentRequest, setQuickAgentRequest] = useState(null);
   const [chatWidth, setChatWidth] = useState(460);
   const isResizing = useRef(false);
@@ -66,6 +180,13 @@ function Views() {
     setCurrent(e.key);
     setVisitedTabs((prev) => new Set(prev).add(e.key));
   };
+
+  const navigateTo = useCallback((key) => {
+    if (!key) return;
+    const targetKey = key === "monitoring" || key === "model-training" ? "training" : key;
+    setCurrent(targetKey);
+    setVisitedTabs((prev) => new Set(prev).add(targetKey));
+  }, []);
 
   const startResizing = useCallback((e) => {
     isResizing.current = true;
@@ -98,21 +219,19 @@ function Views() {
     if (!lastClientEffects) return;
     const target = lastClientEffects.navigate_to;
     if (target) {
-      const targetKey = target === "model-training" ? "training" : target;
-      setCurrent(targetKey);
-      setVisitedTabs((prev) => new Set(prev).add(targetKey));
+      navigateTo(target);
     }
     if (lastClientEffects.open_assistant) {
       setIsChatOpen(true);
     }
     if (lastClientEffects.show_workflow_context) {
-      setAssistantContextOpen(true);
+      navigateTo("project-progress");
     }
     if (lastClientEffects.refresh_project_progress) {
       refreshProjectProgress?.();
     }
     consumeClientEffects?.();
-  }, [lastClientEffects, consumeClientEffects, refreshProjectProgress]);
+  }, [lastClientEffects, consumeClientEffects, refreshProjectProgress, navigateTo]);
 
   useEffect(() => {
     logClientEvent("view_changed", {
@@ -251,6 +370,11 @@ function Views() {
           style={{ marginLeft: 8 }}
         />
       </div>
+      <WorkflowOverviewStrip
+        overview={workflowContext?.workflowOverview}
+        workflow={workflowContext?.workflow}
+        onNavigate={navigateTo}
+      />
       <Content
         style={{
           padding: "16px",
@@ -265,7 +389,6 @@ function Views() {
           <Visualization viewers={viewers} setViewers={setViewers} />,
         )}
         {renderTabContent("training", <ModelTraining />)}
-        {renderTabContent("monitoring", <Monitoring />)}
         {renderTabContent("project-progress", <ProjectProgress />)}
         {renderTabContent(
           "inference",
@@ -309,8 +432,6 @@ function Views() {
         />
         <Chatbot
           onClose={() => setIsChatOpen(false)}
-          forceShowWorkflowInspector={assistantContextOpen}
-          onWorkflowInspectorConsumed={() => setAssistantContextOpen(false)}
           queuedWorkflowQuery={quickAgentRequest}
           onQueuedWorkflowQueryConsumed={(id) => {
             setQuickAgentRequest((currentRequest) =>

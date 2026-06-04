@@ -73,11 +73,109 @@
   padding: 10px;
 }
 
+.workflow-proposal-card__header {
+  align-items: flex-start;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  min-width: 0;
+}
+
+.workflow-proposal-card__title {
+  flex: 1 1 100%;
+  overflow-wrap: anywhere;
+  min-width: 0;
+}
+
+.workflow-proposal-card__rationale,
+.workflow-proposal-card__field-value {
+  overflow-wrap: anywhere;
+}
+
+.workflow-proposal-card__type-tag,
+.workflow-proposal-card__status-tag {
+  max-width: 100%;
+  overflow-wrap: anywhere;
+  white-space: normal;
+}
+
+.workflow-proposal-card__agent-badge {
+  flex: 0 0 auto;
+  max-width: 100%;
+  min-width: 0;
+}
+
+.workflow-proposal-card__field-value--editable {
+  cursor: pointer;
+}
+
 .workflow-proposal-card__fields {
   display: grid;
   grid-template-columns: minmax(92px, auto) 1fr;
   column-gap: 10px;
   row-gap: 4px;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
+.workflow-proposal-card__fields .workflow-proposal-card__field-label {
+  overflow-wrap: anywhere;
+}
+
+.workflow-proposal-card__trace {
+  border-top: 1px solid var(--seg-border-subtle);
+  margin-top: 4px;
+  padding-top: 4px;
+}
+
+.workflow-proposal-card__trace-body {
+  margin-top: 4px;
+}
+
+.workflow-proposal-card__trace-block {
+  margin-bottom: 4px;
+}
+
+.workflow-proposal-card__trace-block-title {
+  display: block;
+  font-size: 11px;
+}
+
+.workflow-proposal-card__trace-block-body {
+  margin-top: 2px;
+}
+
+.workflow-proposal-card__trace-line {
+  display: block;
+  font-size: 11px;
+  line-height: 1.35;
+}
+
+.assistant-trace__panel {
+  border-top: 1px solid var(--seg-border-subtle);
+  display: grid;
+  gap: 8px;
+  margin-top: 4px;
+  padding-top: 6px;
+}
+
+.assistant-trace__section {
+  display: grid;
+  gap: 4px;
+}
+
+.assistant-trace__items {
+  display: grid;
+  gap: 4px;
+}
+
+.assistant-trace__item {
+  border: 1px solid var(--seg-border-subtle);
+  border-radius: 8px;
+  display: grid;
+  gap: 4px;
+  padding: 6px 8px;
+  background: var(--seg-bg-raised);
 }
 
 .workflow-proposal-card__field-label {

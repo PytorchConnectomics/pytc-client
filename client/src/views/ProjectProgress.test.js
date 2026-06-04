@@ -28,6 +28,45 @@ describe("ProjectProgress", () => {
     }));
     mockWorkflowContext = {
       workflow: { id: 1 },
+      workflowOverview: {
+        phase: "proofread",
+        phase_label: "Proofread",
+        phase_reason: "One draft mask still needs review.",
+        stages: [
+          {
+            id: "setup",
+            label: "Setup",
+            target_view: "files",
+            complete: true,
+            current: false,
+          },
+          {
+            id: "proofread",
+            label: "Proofread",
+            target_view: "mask-proofreading",
+            complete: false,
+            current: true,
+          },
+        ],
+        blockers: [
+          {
+            id: "draft_masks_need_review",
+            label: "Draft masks need review",
+            detail: "1 volume has a mask that is not marked ground truth.",
+            target_view: "mask-proofreading",
+          },
+        ],
+        recommended_next_actions: [
+          {
+            id: "proofread-draft-masks",
+            label: "Proofread draft masks",
+            detail: "Review the draft mask before treating it as ground truth.",
+            target_view: "mask-proofreading",
+            client_effects: { navigate_to: "mask-proofreading" },
+          },
+        ],
+        active_runs: [],
+      },
       projectProgress: {
         summary: {
           total: 3,
@@ -58,13 +97,16 @@ describe("ProjectProgress", () => {
         summary: { total: 3 },
       }),
       updateProjectProgressVolume: jest.fn().mockResolvedValue({}),
+      runClientEffects: jest.fn().mockResolvedValue(),
     };
   });
 
   it("renders the workflow project progress summary", async () => {
     render(<ProjectProgress />);
 
-    expect(await screen.findByText("Project Progress")).toBeTruthy();
+    expect(await screen.findByText("Workflow Overview")).toBeTruthy();
+    expect(screen.getByText("Current phase: Proofread")).toBeTruthy();
+    expect(screen.getByText("Recommended next moves")).toBeTruthy();
     expect(screen.getByText("Tracked volumes")).toBeTruthy();
     expect(screen.getAllByText("Fully good").length).toBeGreaterThan(0);
     expect(screen.getAllByText("Needs proofreading").length).toBeGreaterThan(0);

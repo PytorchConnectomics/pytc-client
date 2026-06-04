@@ -85,15 +85,29 @@ export const getProjectVolumeSetsFromSuggestion = (suggestion) => {
   return profile.volume_sets || profile.schema?.volume_sets || [];
 };
 
+export const getProjectAuditFromSuggestion = (suggestion) => {
+  const profile = suggestion?.profile || {};
+  return profile.audit || profile.schema?.audit || null;
+};
+
 export const getProjectContextDefaultsFromSuggestion = (suggestion) => {
   const profile = suggestion?.profile || {};
-  const contentHints =
-    profile.context_hints || profile.schema?.context_hints || {};
+  const contentHints = {
+    ...(profile.schema?.context_hints || {}),
+    ...(profile.context_hints || {}),
+    ...(suggestion?.context_hints || {}),
+  };
+  const counts = profile.counts || {};
+  const auditFacts = getProjectAuditFromSuggestion(suggestion)?.context_facts || [];
   const defaults = {};
 
   [
     "imaging_modality",
     "target_structure",
+    "task_family",
+    "mask_status",
+    "image_only_strategy",
+    "training_policy",
   ].forEach((key) => {
     if (contentHints[key]) {
       defaults[key] = contentHints[key];
@@ -106,6 +120,67 @@ export const getProjectContextDefaultsFromSuggestion = (suggestion) => {
     defaults.voxel_size_nm = hintedVoxelSize;
     defaults.voxel_size_source =
       contentHints.voxel_size_source || "project_profile";
+  }
+  const auditVoxelSizeFact = auditFacts.find(
+    (fact) => fact?.key === "voxel_size_nm" && fact.value,
+  );
+  const auditVoxelSize = normalizeVoxelSizeNm(auditVoxelSizeFact?.value);
+  if (auditVoxelSize) {
+    defaults.voxel_size_nm = auditVoxelSize;
+    defaults.voxel_size_source =
+      auditVoxelSizeFact.source || "volume_metadata";
+  }
+
+  const modalityText = String(defaults.imaging_modality || "").toLowerCase();
+  const targetText = String(defaults.target_structure || "").toLowerCase();
+  const suggestionText = [
+    suggestion?.id,
+    suggestion?.name,
+    suggestion?.description,
+    suggestion?.directory_path,
+  ]
+    .filter(Boolean)
+    .join(" ")
+    .toLowerCase();
+  if (!defaults.task_family) {
+    if (/(xri|x-ray|xray)/.test(`${modalityText} ${suggestionText}`)) {
+      defaults.task_family = /fiber|fibre|cytotape/.test(
+        `${targetText} ${suggestionText}`,
+      )
+        ? "XRI fibre instance segmentation"
+        : "XRI volumetric segmentation";
+    } else if (/mitochond/.test(targetText)) {
+      defaults.task_family = "mitochondria instance segmentation";
+    } else if (/synap|cleft/.test(targetText)) {
+      defaults.task_family = "synapse segmentation";
+    } else if (/nuclei|nucleus/.test(targetText)) {
+      defaults.task_family = "nuclei instance segmentation";
+    }
+  }
+  const hasDomainContext = Boolean(
+    defaults.imaging_modality ||
+      defaults.target_structure ||
+      defaults.task_family ||
+      contentHints.task_goal,
+  );
+  if (hasDomainContext && !defaults.mask_status) {
+    if ((counts.image || 0) > 0 && (counts.label || 0) === 0) {
+      defaults.mask_status = "image-only; no masks found";
+    } else if ((counts.image || 0) > (counts.label || 0) && (counts.label || 0) > 0) {
+      defaults.mask_status = "mixed: some masks, some image-only volumes";
+    } else if ((counts.label || 0) > 0) {
+      defaults.mask_status = "masks found; confirm ground truth vs draft";
+    }
+  }
+  if (
+    hasDomainContext &&
+    !defaults.image_only_strategy &&
+    (counts.image || 0) > (counts.label || 0)
+  ) {
+    defaults.image_only_strategy = "run inference on image-only volumes later";
+  }
+  if (hasDomainContext && !defaults.training_policy && (counts.label || 0) > 0) {
+    defaults.training_policy = "train only on confirmed ground-truth masks";
   }
 
   return defaults;
@@ -123,6 +198,7 @@ export const inferProjectContextFromDescription = (description) => {
   };
 
   const modalityTerms = [
+    ["X-ray / XRI volumetric microscopy", ["xri", "x-ray", "xray"]],
     ["electron microscopy", ["electron microscopy", "electron microscope"]],
     ["EM", [" em ", "sem", "tem", "fib-sem", "fib sem"]],
     ["confocal microscopy", ["confocal"]],
@@ -141,6 +217,7 @@ export const inferProjectContextFromDescription = (description) => {
   }
 
   const targetTerms = [
+    ["fibres", ["fiber", "fibers", "fibre", "fibres", "cytotape"]],
     ["mitochondria", ["mitochondria", "mitochondrion", "mito"]],
     ["membranes", ["membrane", "membranes"]],
     ["synapses", ["synapse", "synapses"]],
@@ -156,6 +233,19 @@ export const inferProjectContextFromDescription = (description) => {
   );
   if (target) {
     context.target_structure = target[0];
+  }
+
+  if (
+    /xri|x-ray|xray/.test(lower) &&
+    /fiber|fibers|fibre|fibres|cytotape/.test(lower)
+  ) {
+    context.task_family = "XRI fibre instance segmentation";
+  } else if (/mitochond/.test(lower)) {
+    context.task_family = "mitochondria instance segmentation";
+  } else if (/synap|cleft/.test(lower)) {
+    context.task_family = "synapse segmentation";
+  } else if (/nuclei|nucleus/.test(lower)) {
+    context.task_family = "nuclei instance segmentation";
   }
 
   if (/(fast|quick|smoke|prototype|rough|draft)/.test(lower)) {

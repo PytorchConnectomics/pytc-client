@@ -3,9 +3,10 @@ import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 
 import Chatbot from "./Chatbot";
 import { WorkflowContext } from "../contexts/WorkflowContext";
-import { queryChatBot } from "../api";
+import { getWorkflowAgentConversation, queryChatBot } from "../api";
 
 jest.mock("../api", () => ({
+  getWorkflowAgentConversation: jest.fn().mockResolvedValue({ messages: [] }),
   queryChatBot: jest.fn(),
 }));
 
@@ -60,6 +61,7 @@ describe("Chatbot workflow routing", () => {
   beforeEach(() => {
     jest.clearAllMocks();
     window.sessionStorage.clear();
+    getWorkflowAgentConversation.mockResolvedValue({ messages: [] });
     queryChatBot.mockResolvedValue({ response: "generic response" });
   });
 
@@ -192,7 +194,7 @@ describe("Chatbot workflow routing", () => {
     });
     expect(queryChatBot).not.toHaveBeenCalled();
     expect(await screen.findByText("Do this: view the current volume pair.")).toBeTruthy();
-    expect(await screen.findByText("View data")).toBeTruthy();
+    expect(screen.getAllByText("View data").length).toBeGreaterThan(0);
   });
 
   it("routes plain data-viewing requests to the workflow agent action cards", async () => {
@@ -237,7 +239,7 @@ describe("Chatbot workflow routing", () => {
     });
     expect(queryChatBot).not.toHaveBeenCalled();
     expect(await screen.findByText("Do this: view image with seg.")).toBeTruthy();
-    expect(await screen.findByText("View data")).toBeTruthy();
+    expect(screen.getAllByText("View data").length).toBeGreaterThan(0);
     expect(screen.getByRole("button", { name: "Run in app" })).toBeTruthy();
   });
 
@@ -275,11 +277,12 @@ describe("Chatbot workflow routing", () => {
       );
     });
     const traceToggle = await screen.findByRole("button", {
-      name: /What I checked/,
+      name: /Operational trace/,
     });
-    expect(screen.queryByText("Checked project files")).toBeNull();
     fireEvent.click(traceToggle);
-    expect(await screen.findByText("Checked project files")).toBeTruthy();
+    expect(
+      (await screen.findAllByText("Checked project files")).length,
+    ).toBeGreaterThan(0);
     expect(
       await screen.findByText(
         "Scanned prepilot_lucchi_pp; found 2 image/seg sets.",
@@ -326,7 +329,7 @@ describe("Chatbot workflow routing", () => {
     });
     expect(queryChatBot).not.toHaveBeenCalled();
     expect(await screen.findByText("Do this: view the mounted data.")).toBeTruthy();
-    expect(await screen.findByText("View data")).toBeTruthy();
+    expect(screen.getAllByText("View data").length).toBeGreaterThan(0);
     expect(screen.getByRole("button", { name: "Run in app" })).toBeTruthy();
   });
 
@@ -366,7 +369,35 @@ describe("Chatbot workflow routing", () => {
     });
     expect(queryChatBot).not.toHaveBeenCalled();
     expect(await screen.findByText("Do this: inspect workflow status.")).toBeTruthy();
-    expect(await screen.findByText("Show status")).toBeTruthy();
+    expect(screen.getAllByText("Show status").length).toBeGreaterThan(0);
+  });
+
+  it("lets general conceptual questions use the regular chat path", async () => {
+    const workflow = renderChatbot();
+    queryChatBot.mockResolvedValueOnce({
+      response: "Binary cross entropy is a loss for binary labels.",
+      conversationId: 91,
+    });
+
+    fireEvent.change(screen.getByPlaceholderText("Message"), {
+      target: { value: "what is binary cross entropy?" },
+    });
+    fireEvent.keyPress(screen.getByPlaceholderText("Message"), {
+      key: "Enter",
+      code: "Enter",
+      charCode: 13,
+    });
+
+    await waitFor(() => {
+      expect(queryChatBot).toHaveBeenCalledWith(
+        "what is binary cross entropy?",
+        null,
+      );
+    });
+    expect(workflow.queryAgent).not.toHaveBeenCalled();
+    expect(
+      await screen.findByText("Binary cross entropy is a loss for binary labels."),
+    ).toBeTruthy();
   });
 
   it("routes casual label viewing language to the workflow agent", async () => {
@@ -432,7 +463,7 @@ describe("Chatbot workflow routing", () => {
     expect(
       await screen.findByText("Do this: reload the viewer with 1,1,1 nm voxel scales."),
     ).toBeTruthy();
-    expect(await screen.findByText("Reload viewer")).toBeTruthy();
+    expect((await screen.findAllByText("Reload viewer")).length).toBeGreaterThan(0);
   });
 
   it("routes greetings to the workflow agent so internal LLM prompts cannot leak", async () => {
@@ -539,7 +570,7 @@ describe("Chatbot workflow routing", () => {
     expect(
       await screen.findByText("Do this: add a checkpoint or mask/label."),
     ).toBeTruthy();
-    expect(await screen.findByText("Choose data")).toBeTruthy();
+    expect((await screen.findAllByText("Choose data")).length).toBeGreaterThan(0);
   });
 
   it("keeps workflow follow-up questions with the orchestrator after a workflow answer", async () => {
@@ -606,7 +637,7 @@ describe("Chatbot workflow routing", () => {
     expect(
       await screen.findByText("Do this: open the current image and mask pair first."),
     ).toBeTruthy();
-    expect(await screen.findByText("Show data")).toBeTruthy();
+    expect(screen.getAllByText("Show data").length).toBeGreaterThan(0);
   });
 
   it("routes short clarification follow-ups to the orchestrator after a workflow answer", async () => {
@@ -781,8 +812,149 @@ describe("Chatbot workflow routing", () => {
     renderChatbot();
 
     expect(await screen.findByText("Do this: proofread this data.")).toBeTruthy();
-    expect(await screen.findByText("Proofread this data")).toBeTruthy();
+    expect(screen.getAllByText("Proofread this data").length).toBeGreaterThan(0);
     expect(screen.getByRole("button", { name: "Run in app" })).toBeTruthy();
+  });
+
+  it("reconciles persisted proposal statuses with the latest server conversation", async () => {
+    window.sessionStorage.setItem(
+      "pytc.workflowAssistant.continuousChat.v1",
+      JSON.stringify({
+        activeConvoId: 8,
+        messages: [
+          {
+            role: "user",
+            content: "train this dataset",
+          },
+          {
+            role: "assistant",
+            content: "Review this run.",
+            source: "workflow_orchestrator",
+            workflow_id: 2,
+            proposals: [
+              {
+                id: 201,
+                summary: "Approve training run.",
+                approval_status: "pending",
+                payload: {
+                  action: "start_training_run",
+                  params: {
+                    config_preset: "/project/config.yaml",
+                    image_path: "/project/image",
+                    label_path: "/project/label",
+                    output_path: "/project/out",
+                  },
+                },
+              },
+            ],
+          },
+        ],
+      }),
+    );
+    const queryResult = {
+      response: "I checked the conversation state.",
+      conversationId: 8,
+      source: "workflow_orchestrator",
+      proposals: [
+        {
+          id: 201,
+          summary: "Approve training run.",
+          approval_status: "approved",
+          payload: {
+            action: "start_training_run",
+            params: {
+              config_preset: "/project/config.yaml",
+              image_path: "/project/image",
+              label_path: "/project/label",
+              output_path: "/project/out",
+            },
+          },
+        },
+      ],
+      actions: [],
+      commands: [],
+    };
+    getWorkflowAgentConversation.mockResolvedValue({
+      conversation_id: 8,
+      messages: [
+        {
+          role: "assistant",
+          content: "Review this run.",
+          source: "workflow_orchestrator",
+          workflow_id: 2,
+          proposals: [
+            {
+              id: 201,
+              summary: "Approve training run.",
+              approval_status: "approved",
+              payload: {
+                action: "start_training_run",
+                params: {
+                  config_preset: "/project/config.yaml",
+                  image_path: "/project/image",
+                  label_path: "/project/label",
+                  output_path: "/project/out",
+                },
+              },
+            },
+          ],
+        },
+      ],
+    });
+    renderChatbot({
+      workflow: { id: 2, stage: "setup" },
+      queryAgent: jest.fn().mockResolvedValue(queryResult),
+    });
+
+    expect(await screen.findByText("Review this run.")).toBeTruthy();
+    await waitFor(() => {
+      expect(getWorkflowAgentConversation).toHaveBeenCalledWith(2);
+    });
+    const approveButton = screen.getByRole("button", { name: "Approve" });
+    expect(approveButton.disabled).toBe(true);
+  });
+
+  it("displays specialist agent badges for persisted proposal metadata", async () => {
+    window.sessionStorage.setItem(
+      "pytc.workflowAssistant.continuousChat.v1",
+      JSON.stringify({
+        activeConvoId: 12,
+        messages: [
+          {
+            role: "assistant",
+            content: "Review this action.",
+            source: "workflow_orchestrator",
+            workflow_id: 44,
+            proposals: [
+              {
+                id: 901,
+                summary: "Approve app action.",
+                payload: {
+                  action: "run_client_effects",
+                  params: {
+                    item_label: "Run inference",
+                  },
+                },
+                specialist_agent: {
+                  agent_label: "Inference Specialist",
+                  agent_short_label: "INFER",
+                  agent_color: "#123abc",
+                  agent_icon_key: "eye",
+                  agent_border_style: "dashed",
+                },
+              },
+            ],
+          },
+        ],
+      }),
+    );
+
+    renderChatbot({
+      workflow: { id: 44, stage: "inference" },
+    });
+
+    expect(await screen.findByText("Review this action.")).toBeTruthy();
+    expect(screen.getByText("INFER")).toBeTruthy();
   });
 
   it("proposes approval before running risky non-training app actions", async () => {
@@ -947,6 +1119,81 @@ describe("Chatbot workflow routing", () => {
         }),
       }),
     );
+  });
+
+  it("shows operational proposal trace sections for approval cards", async () => {
+    const workflow = renderChatbot({
+      queryAgent: jest.fn().mockResolvedValue({
+        response: "I drafted an execution proposal.",
+        conversationId: 57,
+        source: "workflow_orchestrator",
+        actions: [],
+        commands: [],
+        proposals: [
+          {
+            id: 77,
+            summary: "Approve proposed action.",
+            payload: {
+              action: "run_client_effects",
+              params: {
+                item_label: "Run model",
+                action_card: {
+                  trace: [
+                    {
+                      label: "Checked inputs",
+                      detail: "Model checkpoint and image pair resolved.",
+                      status: "checked",
+                      category: "checked",
+                    },
+                  ],
+                  requires_approval: true,
+                  risk_level: "runs_job",
+                  approval_reason: "Model inference is expensive.",
+                  input_artifacts: [{ path: "/project/images/input.tif" }],
+                  output_artifacts: [{ path: "/project/results/output.tif" }],
+                  project_memory_update: { stage: "inference" },
+                },
+              },
+            },
+          },
+        ],
+      }),
+    });
+
+    fireEvent.change(screen.getByPlaceholderText("Message"), {
+      target: { value: "run inference for review" },
+    });
+    fireEvent.keyPress(screen.getByPlaceholderText("Message"), {
+      key: "Enter",
+      code: "Enter",
+      charCode: 13,
+    });
+
+    await waitFor(() => {
+      expect(workflow.queryAgent).toHaveBeenCalledWith(
+        "run inference for review",
+        null,
+      );
+    });
+    expect(await screen.findByRole("button", { name: "Approve" })).toBeTruthy();
+
+    const traceToggle = await screen.findByRole("button", {
+      name: /Operational trace/,
+    });
+    fireEvent.click(traceToggle);
+    expect(await screen.findByText("Inspected facts")).toBeTruthy();
+    expect(await screen.findByText(/Checked inputs/)).toBeTruthy();
+    expect(await screen.findByText(/Risk level: runs_job/)).toBeTruthy();
+    expect(
+      await screen.findByText(
+        /(Input · path: \/project\/images\/input\.tif)|(Input · artifact: \/project\/images\/input\.tif)/,
+      ),
+    ).toBeTruthy();
+    expect(
+      await screen.findByText(
+        /(Output · path: \/project\/results\/output\.tif)|(Output · artifact: \/project\/results\/output\.tif)/,
+      ),
+    ).toBeTruthy();
   });
 
   it("recreates a missing persisted proposal before approving it", async () => {

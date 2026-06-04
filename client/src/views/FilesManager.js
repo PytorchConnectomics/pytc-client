@@ -37,6 +37,7 @@ import {
   describeProjectContextAssessment,
   evaluateProjectContextCompleteness,
   formatVoxelSizeNm,
+  getProjectAuditFromSuggestion,
   getProjectContextDefaultsFromSuggestion,
   getProjectVolumeSetsFromSuggestion,
   getProjectRoleDefaultsFromSuggestion,
@@ -267,6 +268,9 @@ const PROJECT_CONTEXT_LABELS = {
   imaging_modality: "Imaging modality",
   target_structure: "Target structure",
   voxel_size_nm: "Voxel size (z, y, x)",
+  task_family: "Task family",
+  training_policy: "Training policy",
+  volume_split: "Volume split",
 };
 
 const EDITABLE_PROJECT_CONTEXT_FIELDS = [
@@ -286,6 +290,73 @@ const EDITABLE_PROJECT_CONTEXT_FIELDS = [
     placeholder: "30, 6, 6",
   },
 ];
+
+const normalizeVolumeSplitCount = (value) => {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) && parsed >= 0 ? Math.trunc(parsed) : null;
+};
+
+const formatVolumeSplitText = (summary) => {
+  if (!summary) return "";
+  const groundTruth = normalizeVolumeSplitCount(summary.ground_truth);
+  const needsProofreading = normalizeVolumeSplitCount(summary.needs_proofreading);
+  const missingSegmentation = normalizeVolumeSplitCount(
+    summary.missing_segmentation,
+  );
+  if (
+    groundTruth === null ||
+    needsProofreading === null ||
+    missingSegmentation === null
+  ) {
+    return "";
+  }
+  return `${groundTruth} ground-truth / ${needsProofreading} draft masks / ${missingSegmentation} image-only`;
+};
+
+const parseVolumeSplitFromMaskStatusText = (text) => {
+  const source = String(text || "").toLowerCase();
+  const groundTruth = source.match(
+    /(\d+)\s*(?:ground-truth|ground truth)\s*(?:mask|masks)?/,
+  );
+  const needsProofreading = source.match(
+    /(\d+)\s*(?:draft|proofread|needs proofreading|needs-proofreading)/,
+  );
+  const imageOnly = source.match(
+    /(\d+)\s*(?:image-only|no segmentation|missing segmentation)/,
+  );
+  if (!groundTruth && !needsProofreading && !imageOnly) {
+    return "";
+  }
+  const parsed = {
+    ground_truth: normalizeVolumeSplitCount(groundTruth?.[1]),
+    needs_proofreading: normalizeVolumeSplitCount(needsProofreading?.[1]),
+    missing_segmentation: normalizeVolumeSplitCount(imageOnly?.[1]),
+  };
+  return formatVolumeSplitText(parsed);
+};
+
+const getProjectVolumeSplitFromSuggestion = (suggestion) => {
+  const profile = suggestion?.profile || {};
+  const candidates = [
+    profile.schema?.manifest?.initial_progress_summary,
+    profile.manifest?.initial_progress_summary,
+  ].filter(Boolean);
+  const splitFromSummary = candidates
+    .map(formatVolumeSplitText)
+    .find(Boolean);
+  if (splitFromSummary) {
+    return splitFromSummary;
+  }
+  const maskHints = [
+    profile.context_hints?.mask_status,
+    profile.schema?.context_hints?.mask_status,
+  ].filter(Boolean);
+  const splitFromMasks = maskHints.map(parseVolumeSplitFromMaskStatusText).find(Boolean);
+  if (splitFromMasks) {
+    return splitFromMasks;
+  }
+  return "";
+};
 
 const parseEditableVoxelSizeNm = (value) => {
   if (Array.isArray(value)) {
@@ -318,6 +389,16 @@ const cleanEditableProjectContext = (context, fallbackDescription = "") => {
     next.freeform_note = freeformNote.slice(0, 1000);
   }
   ["imaging_modality", "target_structure"].forEach((key) => {
+    const value = String(source[key] || "").trim();
+    if (value) next[key] = value;
+  });
+  [
+    "task_family",
+    "mask_status",
+    "image_only_strategy",
+    "training_policy",
+    "volume_split",
+  ].forEach((key) => {
     const value = String(source[key] || "").trim();
     if (value) next[key] = value;
   });
@@ -370,6 +451,22 @@ const buildProjectContextMetadata = (
   };
 };
 
+const getProjectContextDraftWithSharedFacts = (
+  setup,
+  descriptionOverride = "",
+  context = null,
+) => {
+  const baseContext = cleanEditableProjectContext(
+    context || {},
+    descriptionOverride,
+  );
+  const splitText = getProjectVolumeSplitFromSuggestion(setup?.suggestion);
+  if (splitText && !baseContext.volume_split) {
+    baseContext.volume_split = splitText;
+  }
+  return baseContext;
+};
+
 const compactProjectPath = (pathValue) => {
   const text = String(pathValue || "").trim();
   if (!text) return "";
@@ -377,6 +474,41 @@ const compactProjectPath = (pathValue) => {
   const parts = normalized.split("/").filter(Boolean);
   if (parts.length <= 3) return normalized;
   return parts.slice(-3).join("/");
+};
+
+const formatAuditFactValue = (fact) => {
+  if (!fact) return "";
+  if (fact.key === "voxel_size_nm") {
+    return formatVoxelSizeNm(fact.value);
+  }
+  if (Array.isArray(fact.value)) {
+    return fact.value.join(", ");
+  }
+  return String(fact.value ?? "");
+};
+
+const compactAuditSource = (source) => {
+  const text = String(source || "").trim();
+  if (!text) return "";
+  return text.replace(/^volume_metadata:/, "").replace(/^content_spot_check:/, "");
+};
+
+const auditFindingStyles = {
+  error: {
+    background: "#fff1f0",
+    border: "#ffccc7",
+    color: "#a8071a",
+  },
+  warning: {
+    background: "#fff7e6",
+    border: "#ffd591",
+    color: "#ad6800",
+  },
+  info: {
+    background: "#f6ffed",
+    border: "#b7eb8f",
+    color: "#237804",
+  },
 };
 
 const buildProjectBrief = ({ context, roles, suggestion, volumeSets }) => {
@@ -445,6 +577,7 @@ const buildProjectMemoryProfile = ({
   projectDescription,
   projectContext,
   projectBrief,
+  projectAudit,
   semanticTurns,
   mappingTurns,
   source,
@@ -460,6 +593,8 @@ const buildProjectMemoryProfile = ({
       freeform_note: String(projectDescription || "").trim(),
     },
     project_brief: projectBrief || null,
+    project_audit: projectAudit || null,
+    context_facts: projectAudit?.context_facts || [],
     mechanistic_mapping: roles || {},
     workflow_memory: {
       current_stage: "setup",
@@ -476,6 +611,51 @@ const buildProjectMemoryProfile = ({
     updated_at: now,
   };
 };
+
+const GUIDED_PROJECT_CONTEXT_GROUPS = [
+  {
+    key: "task_family",
+    label: "Task",
+    helper: "What kind of segmentation loop should this project use?",
+    options: [
+      "XRI fibre instance segmentation",
+      "mitochondria instance segmentation",
+      "semantic segmentation",
+      "proofreading existing masks",
+    ],
+  },
+  {
+    key: "mask_status",
+    label: "Mask readiness",
+    helper: "How should the agent treat masks it finds?",
+    options: [
+      "mixed: some masks, some image-only volumes",
+      "all masks are ground truth",
+      "masks are draft predictions to proofread",
+      "image-only; no masks found",
+    ],
+  },
+  {
+    key: "image_only_strategy",
+    label: "Image-only volumes",
+    helper: "What should happen to volumes without masks?",
+    options: [
+      "run inference on image-only volumes later",
+      "ignore image-only volumes for now",
+      "ask before using image-only volumes",
+    ],
+  },
+  {
+    key: "training_policy",
+    label: "Training rule",
+    helper: "Which masks are safe training data?",
+    options: [
+      "train only on confirmed ground-truth masks",
+      "train on proofread masks after approval",
+      "do not train from this project yet",
+    ],
+  },
+];
 
 const appendProjectContextAnswer = (existingText, nextAnswer) => {
   const existing = String(existingText || "").trim();
@@ -1913,7 +2093,8 @@ function FilesManager() {
       getProjectRoleDefaultsFromSuggestion(suggestion),
     );
     const volumeSets = getProjectVolumeSetsFromSuggestion(suggestion);
-    const storedProjectMemory = await readStoredProjectMemory(
+    const projectAudit = getProjectAuditFromSuggestion(suggestion);
+  const storedProjectMemory = await readStoredProjectMemory(
       suggestion?.directory_path,
     );
     const storedSemanticContext = storedProjectMemory?.semantic_context || {};
@@ -1922,27 +2103,39 @@ function FilesManager() {
       storedProjectMemory?.project_description ||
       "";
     const projectContextDefaults = getProjectContextDefaultsFromSuggestion(suggestion);
-    const initialProjectContextDraft = cleanEditableProjectContext(
+    const initialProjectContextDraft = getProjectContextDraftWithSharedFacts(
+      {
+        suggestion,
+      },
+      storedDescription,
       {
         ...projectContextDefaults,
         ...storedSemanticContext,
       },
-      storedDescription,
     );
+    const missingInitialContextFields = editableProjectContextMissingFields(
+      initialProjectContextDraft,
+    );
+    const startsWithMapping =
+      missingInitialContextFields.length === 0 && Boolean(roles.image);
     setPendingProjectSetup({
       source,
       suggestion,
       roles,
-      setupStep: "semantic",
+      setupStep: startsWithMapping ? "mapping" : "semantic",
       projectDescription: storedDescription,
       projectDescriptionDraft: storedDescription,
       projectContextDraft: initialProjectContextDraft,
       projectContextDefaults,
-      useContextDefaults: Boolean(storedSemanticContext.use_defaults),
+      projectAudit,
+      useContextDefaults:
+        startsWithMapping || Boolean(storedSemanticContext.use_defaults),
       semanticFeedbackTurns: [],
       lastSemanticResponse: storedDescription
         ? "I found saved project context. Review it before continuing."
-        : "",
+        : startsWithMapping
+          ? "I filled the project basics from the files I checked."
+          : "",
       mappingFeedback: "",
       feedbackTurns: [],
       lastFeedbackResponse: "",
@@ -1957,7 +2150,10 @@ function FilesManager() {
         projectName: suggestion?.name || null,
         profileMode: suggestion?.profile?.schema?.mode || null,
         volumeSetCount: volumeSets.length,
+        auditSummary: projectAudit?.summary || null,
         projectContextDefaults,
+        missingInitialContextFields,
+        skippedSemanticSetup: startsWithMapping,
         hasImage: Boolean(roles.image),
         hasLabel: Boolean(roles.label),
         hasPrediction: Boolean(roles.prediction),
@@ -2040,15 +2236,46 @@ function FilesManager() {
       currentAnswer,
     );
     const hasProjectDescription = Boolean(combinedProjectDescription);
-    const assessment = evaluateProjectContextCompleteness(
+    const defaultContext = getProjectContextDraftWithSharedFacts(
+      setupSnapshot,
+      combinedProjectDescription,
+      getPendingProjectContextDefaults(setupSnapshot),
+    );
+    const draftContext = getProjectContextDraftWithSharedFacts(
+      setupSnapshot,
+      combinedProjectDescription,
+      setupSnapshot.projectContextDraft,
+    );
+    const draftMissing = editableProjectContextMissingFields(draftContext);
+    const hasCompleteDraft = draftMissing.length === 0;
+    let assessment = evaluateProjectContextCompleteness(
       combinedProjectDescription,
       {
         useDefaults: useDefaults || setupSnapshot.useContextDefaults,
-        defaultContext: getPendingProjectContextDefaults(setupSnapshot),
+        defaultContext: hasCompleteDraft ? draftContext : defaultContext,
       },
     );
-    if (!useDefaults && !hasProjectDescription) {
-      message.warning("Describe the project or use defaults.");
+    if (hasCompleteDraft) {
+      assessment = {
+        ...assessment,
+        complete: true,
+        context: {
+          ...assessment.context,
+          ...draftContext,
+          ...(useDefaults || setupSnapshot.useContextDefaults
+            ? { use_defaults: true }
+            : {}),
+        },
+        known: {
+          ...(assessment.known || {}),
+          ...draftContext,
+        },
+        missing: [],
+        next_question: "",
+      };
+    }
+    if (!useDefaults && !hasProjectDescription && !hasCompleteDraft) {
+      message.warning("Fill the project basics or add a note.");
       return;
     }
     const response = describeProjectContextAssessment(assessment);
@@ -2263,6 +2490,7 @@ function FilesManager() {
         projectDescription: projectDescriptionText,
         projectContext: projectContextMetadata,
         projectBrief,
+        projectAudit: pendingProjectSetup.projectAudit,
         semanticTurns: semanticFeedbackTurns,
         mappingTurns: feedbackTurns,
         source,
@@ -2304,6 +2532,8 @@ function FilesManager() {
           project_description: projectDescriptionText,
           project_context: projectContextMetadata,
           project_brief: projectBrief,
+          project_audit: pendingProjectSetup.projectAudit || null,
+          context_facts: pendingProjectSetup.projectAudit?.context_facts || [],
           semantic_context_assessment: contextAssessment,
           semantic_context_turns: semanticFeedbackTurns,
           setup_feedback_turns: feedbackTurns,
@@ -2486,7 +2716,14 @@ function FilesManager() {
     </div>
   );
 
-  const renderEditableProjectContextFields = () => {
+  const renderEditableProjectContextFields = (options = {}) => {
+    const {
+      title = "Editable project context",
+      description =
+        "These are the concrete assumptions the agent absorbed. Edit or clear each one before starting.",
+      includeNotes = true,
+      marginBottom = 12,
+    } = options;
     const draft = pendingProjectSetup.projectContextDraft || {};
     return (
       <div
@@ -2495,16 +2732,17 @@ function FilesManager() {
           borderRadius: 10,
           border: "1px solid #e5e7eb",
           background: "#ffffff",
-          marginBottom: 12,
+          marginBottom,
         }}
       >
         <div style={{ fontWeight: 700, fontSize: 13, marginBottom: 4 }}>
-          Editable project context
+          {title}
         </div>
-        <div style={{ color: "#6b7280", fontSize: 12, marginBottom: 10 }}>
-          These are the concrete assumptions the agent absorbed. Edit or clear
-          each one before starting.
-        </div>
+        {description ? (
+          <div style={{ color: "#6b7280", fontSize: 12, marginBottom: 10 }}>
+            {description}
+          </div>
+        ) : null}
         <div style={{ display: "grid", gap: 8 }}>
           {EDITABLE_PROJECT_CONTEXT_FIELDS.map((field) => (
             <div
@@ -2536,41 +2774,425 @@ function FilesManager() {
               </Button>
             </div>
           ))}
+          {includeNotes ? (
+            <div
+              style={{
+                display: "grid",
+                gridTemplateColumns: "155px minmax(0, 1fr)",
+                gap: 8,
+                alignItems: "start",
+              }}
+            >
+              <div style={{ fontWeight: 700, fontSize: 13 }}>Notes</div>
+              <Input.TextArea
+                rows={2}
+                value={draft.freeform_note || ""}
+                placeholder="Short project note for the agent memory."
+                onChange={(event) =>
+                  setPendingProjectContextValue(
+                    "freeform_note",
+                    event.target.value,
+                  )
+                }
+              />
+            </div>
+          ) : null}
+        </div>
+      </div>
+    );
+  };
+
+  const renderProjectAuditPanel = () => {
+    const audit = pendingProjectSetup?.projectAudit;
+    if (!audit) return null;
+    const summary = audit.summary || {};
+    const facts = (audit.context_facts || [])
+      .map((fact) => ({
+        ...fact,
+        displayValue: formatAuditFactValue(fact),
+      }))
+      .filter((fact) => fact.displayValue)
+      .slice(0, 4);
+    const findings = (audit.findings || []).slice(0, 5);
+    const checkedText = [
+      summary.audited_volumes
+        ? `${summary.audited_volumes} volume${summary.audited_volumes === 1 ? "" : "s"}`
+        : "",
+      summary.pair_checks
+        ? `${summary.pair_checks} image/mask pair${summary.pair_checks === 1 ? "" : "s"}`
+        : "",
+    ]
+      .filter(Boolean)
+      .join(" and ");
+
+    return (
+      <div
+        style={{
+          padding: "10px 12px",
+          borderRadius: 10,
+          border: "1px solid #bae6fd",
+          background: "#f0f9ff",
+          marginBottom: 12,
+        }}
+      >
+        <div style={{ fontWeight: 700, fontSize: 13, marginBottom: 4 }}>
+          What I checked automatically
+        </div>
+        <div style={{ color: "#374151", fontSize: 13, lineHeight: 1.45 }}>
+          {checkedText
+            ? `I inspected ${checkedText} directly from disk.`
+            : "I checked project files directly from disk."}{" "}
+          {summary.warnings || summary.errors
+            ? `${summary.warnings || 0} warning(s), ${summary.errors || 0} error(s).`
+            : "No blocking file issues were found in the sampled files."}
+        </div>
+        {facts.length > 0 && (
           <div
             style={{
               display: "grid",
-              gridTemplateColumns: "155px minmax(0, 1fr)",
+              gridTemplateColumns: "repeat(auto-fit, minmax(160px, 1fr))",
               gap: 8,
-              alignItems: "start",
+              marginTop: 10,
             }}
           >
-            <div style={{ fontWeight: 700, fontSize: 13 }}>Notes</div>
-            <Input.TextArea
-              rows={2}
-              value={draft.freeform_note || ""}
-              placeholder="Short project note for the agent memory."
-              onChange={(event) =>
-                setPendingProjectContextValue(
-                  "freeform_note",
-                  event.target.value,
-                )
-              }
-            />
+            {facts.map((fact) => (
+              <div
+                key={`${fact.key}-${fact.source || fact.displayValue}`}
+                style={{
+                  background: "#fff",
+                  border: "1px solid #dbeafe",
+                  borderRadius: 8,
+                  padding: "7px 8px",
+                }}
+              >
+                <div
+                  style={{
+                    color: "#6b7280",
+                    fontSize: 11,
+                    textTransform: "uppercase",
+                    letterSpacing: 0,
+                  }}
+                >
+                  {fact.label || fact.key}
+                </div>
+                <div style={{ color: "#111827", fontSize: 13 }}>
+                  {fact.displayValue}
+                </div>
+                <div style={{ color: "#6b7280", fontSize: 11 }}>
+                  {compactProjectPath(compactAuditSource(fact.source)) ||
+                    fact.confidence ||
+                    "file metadata"}
+                </div>
+              </div>
+            ))}
           </div>
+        )}
+        {findings.length > 0 && (
+          <div style={{ display: "grid", gap: 6, marginTop: 10 }}>
+            {findings.map((finding, index) => {
+              const tone =
+                auditFindingStyles[finding.level] || auditFindingStyles.info;
+              return (
+                <div
+                  key={`${finding.code || "finding"}-${finding.path || index}-${index}`}
+                  style={{
+                    display: "grid",
+                    gridTemplateColumns: "82px minmax(0, 1fr)",
+                    gap: 8,
+                    alignItems: "start",
+                    fontSize: 12,
+                    lineHeight: 1.4,
+                  }}
+                >
+                  <span
+                    style={{
+                      display: "inline-flex",
+                      justifyContent: "center",
+                      border: `1px solid ${tone.border}`,
+                      background: tone.background,
+                      color: tone.color,
+                      borderRadius: 999,
+                      padding: "1px 7px",
+                      fontWeight: 700,
+                      textTransform: "capitalize",
+                    }}
+                  >
+                    {finding.level || "info"}
+                  </span>
+                  <span style={{ color: "#374151" }}>
+                    {finding.message}
+                    {finding.path ? (
+                      <span style={{ color: "#6b7280" }}>
+                        {" "}
+                        {compactProjectPath(finding.path)}
+                      </span>
+                    ) : null}
+                  </span>
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </div>
+    );
+  };
+
+  const renderProjectSharedFactsPanel = () => {
+    if (!pendingProjectSetup) return null;
+    const draft = pendingProjectSetup.projectContextDraft || {};
+    const volumeSplit =
+      draft.volume_split || getProjectVolumeSplitFromSuggestion(pendingProjectSetup.suggestion);
+    const factRows = [
+      {
+        key: "imaging_modality",
+        label: "Modality",
+        value: draft.imaging_modality || "Not set",
+      },
+      {
+        key: "target_structure",
+        label: "Target",
+        value: draft.target_structure || "Not set",
+      },
+      {
+        key: "voxel_size_nm",
+        label: "Voxel size",
+        value: formatEditableVoxelSize(draft.voxel_size_nm) || "Not set",
+      },
+      {
+        key: "volume_split",
+        label: "Volume split",
+        value: volumeSplit || "Not set",
+      },
+      {
+        key: "task_family",
+        label: "Task family",
+        value: draft.task_family || "Not set",
+      },
+      {
+        key: "training_policy",
+        label: "Training policy",
+        value: draft.training_policy || "Not set",
+      },
+    ];
+
+    return (
+      <div
+        style={{
+          padding: "10px 12px",
+          borderRadius: 10,
+          border: "1px solid #e5e7eb",
+          background: "#f8fafc",
+          marginBottom: 12,
+        }}
+      >
+        <div style={{ fontWeight: 700, fontSize: 13, marginBottom: 4 }}>
+          Shared project facts
+        </div>
+        <div style={{ color: "#6b7280", fontSize: 12, marginBottom: 10 }}>
+          These are the facts the agent will use to interpret this project. Edit or
+          confirm them in the controls below.
+        </div>
+        <div
+          style={{
+            display: "grid",
+            gridTemplateColumns: "repeat(auto-fit, minmax(120px, 1fr))",
+            gap: 8,
+          }}
+        >
+          {factRows.map((fact) => (
+            <div
+              key={fact.key}
+              style={{
+                border: "1px solid #eef2ff",
+                borderRadius: 8,
+                padding: "7px 8px",
+                background: "#fff",
+              }}
+            >
+              <div
+                style={{
+                  color: "#6b7280",
+                  fontSize: 11,
+                  textTransform: "uppercase",
+                  letterSpacing: "0.03em",
+                }}
+              >
+                {fact.label}
+              </div>
+              <div style={{ color: "#111827", fontSize: 13 }}>
+                {fact.value}
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
+    );
+  };
+
+  const renderDetectedDataSummary = () => {
+    const profile = pendingProjectSetup?.suggestion?.profile || {};
+    const counts = profile.counts || {};
+    const volumeSets = getProjectVolumeSetsFromSuggestion(
+      pendingProjectSetup?.suggestion,
+    );
+    const bestSet = volumeSets
+      .slice()
+      .sort((a, b) => Number(b.pair_count || 0) - Number(a.pair_count || 0))[0];
+    const items = [
+      ["Images", counts.image || counts.volume || 0],
+      ["Masks", counts.label || 0],
+      ["Predictions", counts.prediction || 0],
+      ["Configs", counts.config || 0],
+      ["Checkpoints", counts.checkpoint || 0],
+    ];
+    return (
+      <div
+        style={{
+          padding: "10px 12px",
+          borderRadius: 10,
+          border: "1px solid #e5e7eb",
+          background: "#ffffff",
+          marginBottom: 12,
+        }}
+      >
+        <div style={{ fontWeight: 700, fontSize: 13, marginBottom: 8 }}>
+          Detected data
+        </div>
+        <div
+          style={{
+            display: "grid",
+            gridTemplateColumns: "repeat(auto-fit, minmax(94px, 1fr))",
+            gap: 8,
+          }}
+        >
+          {items.map(([label, value]) => (
+            <div
+              key={label}
+              style={{
+                border: "1px solid #eef0f4",
+                borderRadius: 8,
+                padding: "7px 8px",
+                background: "#fafafa",
+              }}
+            >
+              <div style={{ color: "#6b7280", fontSize: 11 }}>{label}</div>
+              <div style={{ color: "#111827", fontWeight: 800, fontSize: 18 }}>
+                {value}
+              </div>
+            </div>
+          ))}
+        </div>
+        {bestSet ? (
+          <div style={{ color: "#6b7280", fontSize: 12, marginTop: 8 }}>
+            Best detected pairing: {bestSet.name || "image + mask"} with{" "}
+            {bestSet.pair_count || 0} pair
+            {Number(bestSet.pair_count || 0) === 1 ? "" : "s"}.
+          </div>
+        ) : null}
+      </div>
+    );
+  };
+
+  const renderGuidedContextConfirmations = () => {
+    const draft = pendingProjectSetup?.projectContextDraft || {};
+    return (
+      <div
+        style={{
+          padding: "10px 12px",
+          borderRadius: 10,
+          border: "1px solid #ddd6fe",
+          background: "#fbfaff",
+          marginBottom: 12,
+        }}
+      >
+        <div style={{ fontWeight: 700, fontSize: 13, marginBottom: 4 }}>
+          Quick confirmations
+        </div>
+        <div style={{ color: "#6b7280", fontSize: 12, marginBottom: 10 }}>
+          Click the options that match the project. These become durable agent
+          context, not just UI labels.
+        </div>
+        <div style={{ display: "grid", gap: 12 }}>
+          {GUIDED_PROJECT_CONTEXT_GROUPS.map((group) => {
+            const selectedValue = String(draft[group.key] || "");
+            return (
+              <div key={group.key}>
+                <div
+                  style={{
+                    display: "flex",
+                    justifyContent: "space-between",
+                    gap: 8,
+                    alignItems: "baseline",
+                    marginBottom: 6,
+                  }}
+                >
+                  <span style={{ fontWeight: 700, fontSize: 13 }}>
+                    {group.label}
+                  </span>
+                  <span style={{ color: "#6b7280", fontSize: 11 }}>
+                    {group.helper}
+                  </span>
+                </div>
+                <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
+                  {group.options.map((option) => {
+                    const selected = selectedValue === option;
+                    return (
+                      <Button
+                        key={option}
+                        size="small"
+                        type={selected ? "primary" : "default"}
+                        onClick={() =>
+                          setPendingProjectContextValue(group.key, option)
+                        }
+                      >
+                        {option}
+                      </Button>
+                    );
+                  })}
+                  {selectedValue &&
+                  !group.options.includes(selectedValue) ? (
+                    <Button size="small" type="primary">
+                      {selectedValue}
+                    </Button>
+                  ) : null}
+                  <Button
+                    size="small"
+                    onClick={() => setPendingProjectContextValue(group.key, "")}
+                    disabled={!selectedValue}
+                  >
+                    Clear
+                  </Button>
+                </div>
+              </div>
+            );
+          })}
         </div>
       </div>
     );
   };
 
   const renderProjectSetupSemanticStep = () => {
+    const draft = pendingProjectSetup.projectContextDraft || {};
+    const missingFields = editableProjectContextMissingFields(draft);
+    const missingText = missingFields.length
+      ? `Still needed: ${missingFields.join(", ")}.`
+      : "The basics are filled. You can continue or add an optional note.";
     return (
       <div>
         <div style={{ marginBottom: 10, color: "#4b5563", fontSize: 13 }}>
-          Tell me what this dataset is before I map files or run anything.
+          I checked the folder first. Confirm what I found, then fill only the
+          basics I could not infer.
         </div>
-        <div style={{ fontWeight: 700, fontSize: 13, marginBottom: 4 }}>
-          What is in this directory?
-        </div>
+        {renderDetectedDataSummary()}
+        {renderProjectAuditPanel()}
+        {renderProjectSharedFactsPanel()}
+        {renderGuidedContextConfirmations()}
+        {renderEditableProjectContextFields({
+          title: "Project basics",
+          description:
+            "These three fields give the agent enough context to choose sensible workflow defaults.",
+          includeNotes: false,
+        })}
         {pendingProjectSetup.lastSemanticResponse && (
           <div
             style={{
@@ -2587,13 +3209,16 @@ function FilesManager() {
             {pendingProjectSetup.lastSemanticResponse}
           </div>
         )}
+        <div style={{ fontWeight: 700, fontSize: 13, marginBottom: 4 }}>
+          Anything else I should know?
+        </div>
         <Input.TextArea
-          rows={5}
+          rows={3}
           value={pendingProjectSetup.projectDescriptionDraft || ""}
           placeholder={
             pendingProjectSetup.lastSemanticResponse
-              ? "Answer here. Press Enter to continue; Shift+Enter for a new line."
-              : "Example: EM mitochondria volumes from mouse tissue at 30 x 6 x 6 nm. Segment mitochondria, then proofread likely mistakes."
+              ? "Add an answer here. Press Enter to continue; Shift+Enter for a new line."
+              : "Optional: tissue, species, acquisition quirks, what should count as good enough."
           }
           onChange={(event) => setPendingProjectDescription(event.target.value)}
           onKeyDown={(event) => {
@@ -2604,6 +3229,9 @@ function FilesManager() {
           }}
           style={{ marginBottom: 0 }}
         />
+        <div style={{ color: "#6b7280", fontSize: 12, marginTop: 8 }}>
+          {missingText}
+        </div>
       </div>
     );
   };
@@ -2729,6 +3357,10 @@ function FilesManager() {
         Confirm the project context and file mapping before starting.
       </div>
       {renderDetectedProjectStructure()}
+      {renderDetectedDataSummary()}
+      {renderProjectAuditPanel()}
+      {renderProjectSharedFactsPanel()}
+      {renderGuidedContextConfirmations()}
       {renderEditableProjectContextFields()}
       {renderProjectBriefCard()}
       <div style={{ fontWeight: 700, fontSize: 13, marginBottom: 4 }}>
@@ -2828,19 +3460,26 @@ function FilesManager() {
         String(pendingProjectSetup.projectDescription || "").trim() &&
           !pendingProjectSetup.lastSemanticResponse,
       );
+      const hasCompleteDraft =
+        editableProjectContextMissingFields(
+          pendingProjectSetup.projectContextDraft || {},
+        ).length === 0;
       footer.push(
         <Button
           key="defaults"
           onClick={() => handleProjectContextContinue({ useDefaults: true })}
           disabled={projectSetupSaving}
         >
-          Use defaults
+          {hasCompleteDraft ? "Use detected context" : "Use safe defaults"}
         </Button>,
         <Button
           key="continue"
           type="primary"
           onClick={() => handleProjectContextContinue()}
-          disabled={projectSetupSaving || (!hasDraft && !hasReviewableContext)}
+          disabled={
+            projectSetupSaving ||
+            (!hasDraft && !hasReviewableContext && !hasCompleteDraft)
+          }
         >
           Continue
         </Button>,
@@ -3757,7 +4396,7 @@ function FilesManager() {
               ? "Start project"
               : pendingProjectSetup?.setupStep === "confirm"
                 ? "Start project"
-                : "Describe project"
+                : "Confirm project basics"
           }
           open={!!pendingProjectSetup}
           onCancel={closeProjectSetupConfirmation}

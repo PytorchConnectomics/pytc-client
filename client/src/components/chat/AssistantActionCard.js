@@ -1,5 +1,10 @@
 import React from "react";
 import { Button, Tag, Typography } from "antd";
+import AgentBadge, {
+  DEFAULT_AGENT_VISUAL,
+  getAgentBorderStyles,
+  getAgentVisual,
+} from "./AgentVisuals";
 
 const { Text } = Typography;
 const MONO_FONT =
@@ -18,12 +23,27 @@ function AssistantActionCard({ action, onRun, disabled = false }) {
   const buttonType = action?.variant === "primary" ? "primary" : "default";
   const riskLabel = RISK_LABELS[action?.risk_level] || action?.risk_level;
   const isDisabled = disabled || Boolean(action?.disabled_reason);
+  const specialist = action?.specialist_agent || {};
+  const agentVisual = getAgentVisual({
+    ...specialist,
+    agent_label: action?.agent_label,
+    agent_color: action?.agent_color,
+    agent_icon_key: action?.agent_icon_key,
+    agent_border_style: action?.agent_border_style,
+  });
+  const summaryFields = Array.isArray(action?.summary_fields)
+    ? action.summary_fields.slice(0, 3)
+    : [];
 
   return (
     <section
       aria-label={`assistant-action-${action?.id || "unknown"}`}
       style={{
         border: "1px solid #e5e7eb",
+        ...getAgentBorderStyles(
+          agentVisual.borderStyle || DEFAULT_AGENT_VISUAL.border_style,
+          agentVisual.color,
+        ),
         borderRadius: 12,
         padding: 12,
         background: "#fbfbfa",
@@ -39,6 +59,7 @@ function AssistantActionCard({ action, onRun, disabled = false }) {
       >
         <div style={{ minWidth: 0 }}>
           <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+            <AgentBadge agent={agentVisual} />
             <Text
               strong
               style={{ fontSize: 12, display: "block", fontFamily: MONO_FONT }}
@@ -64,6 +85,35 @@ function AssistantActionCard({ action, onRun, disabled = false }) {
             >
               {action.description}
             </Text>
+          )}
+          {summaryFields.length > 0 && (
+            <div
+              style={{
+                display: "grid",
+                gridTemplateColumns: "auto minmax(0, 1fr)",
+                gap: "2px 8px",
+                marginTop: 8,
+              }}
+            >
+              {summaryFields.map((field, index) => (
+                <React.Fragment key={`${field.label || "field"}-${index}`}>
+                  <Text type="secondary" style={{ fontSize: 11 }}>
+                    {field.label}
+                  </Text>
+                  <Text
+                    style={{
+                      fontSize: 11,
+                      overflow: "hidden",
+                      textOverflow: "ellipsis",
+                      whiteSpace: "nowrap",
+                    }}
+                    title={field.value}
+                  >
+                    {field.value}
+                  </Text>
+                </React.Fragment>
+              ))}
+            </div>
           )}
           {action?.disabled_reason && (
             <Text type="danger" style={{ fontSize: 12, display: "block" }}>

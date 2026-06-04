@@ -201,6 +201,37 @@ const smokeSuggestion = {
         label: "data/seg/mito25_smoke_seg.h5",
       },
     ],
+    audit: {
+      schema_version: "pytc-project-audit/v1",
+      summary: {
+        audited_volumes: 2,
+        readable_volumes: 2,
+        pair_checks: 1,
+        shape_match_count: 1,
+        shape_mismatch_count: 0,
+        warnings: 0,
+        errors: 0,
+      },
+      context_facts: [
+        {
+          key: "voxel_size_nm",
+          label: "Voxel size",
+          value: [30, 6, 6],
+          source: "volume_metadata:data/image/mito25_smoke_im.h5",
+          confidence: "high",
+        },
+      ],
+      findings: [
+        {
+          level: "info",
+          code: "pair_shape_match",
+          message: "Image and mask shapes match.",
+          path: "data/image/mito25_smoke_im.h5",
+          related_path: "data/seg/mito25_smoke_seg.h5",
+          source: "volume_metadata",
+        },
+      ],
+    },
     examples: {
       image: ["data/image/mito25_smoke_im.h5"],
       label: ["data/seg/mito25_smoke_seg.h5"],
@@ -209,6 +240,61 @@ const smokeSuggestion = {
       config: ["configs/MitoEM.yaml"],
     },
     missing_roles: [],
+  },
+};
+
+const completeSmokeSuggestion = {
+  ...smokeSuggestion,
+  profile: {
+    ...smokeSuggestion.profile,
+    context_hints: {
+      imaging_modality: "EM",
+      target_structure: "mitochondria",
+      voxel_size_nm: [30, 6, 6],
+      voxel_size_source: "volume_metadata:data/image/mito25_smoke_im.h5",
+    },
+    schema: {
+      ...smokeSuggestion.profile.schema,
+      context_hints: {
+        imaging_modality: "EM",
+        target_structure: "mitochondria",
+        voxel_size_nm: [30, 6, 6],
+        voxel_size_source: "volume_metadata:data/image/mito25_smoke_im.h5",
+      },
+    },
+  },
+};
+
+const yixiaoLikeSmokeSuggestion = {
+  ...completeSmokeSuggestion,
+  name: "Yixiao TapeReader XRI Case Study",
+  profile: {
+    ...completeSmokeSuggestion.profile,
+    context_hints: {
+      ...completeSmokeSuggestion.profile.context_hints,
+      task_family: "XRI fibre instance segmentation",
+      training_policy: "train only on confirmed ground-truth masks",
+      mask_status: "mixed: 6 ground-truth masks, 2 draft masks, 2 image-only targets",
+    },
+    schema: {
+      ...completeSmokeSuggestion.profile.schema,
+      context_hints: {
+        ...(completeSmokeSuggestion.profile.schema &&
+        completeSmokeSuggestion.profile.schema.context_hints
+          ? completeSmokeSuggestion.profile.schema.context_hints
+          : {}),
+        task_family: "XRI fibre instance segmentation",
+        training_policy: "train only on confirmed ground-truth masks",
+        mask_status: "mixed: 6 ground-truth masks, 2 draft masks, 2 image-only targets",
+      },
+      manifest: {
+        initial_progress_summary: {
+          ground_truth: 6,
+          needs_proofreading: 2,
+          missing_segmentation: 2,
+        },
+      },
+    },
   },
 };
 
@@ -341,8 +427,8 @@ const clickSuggestedProject = async () => {
 const continueWithProjectContext = async (
   text = "EM mitochondria volumes from mouse tissue at 30 x 6 x 6 nm. Segment mitochondria from a single volume and prioritize accuracy.",
 ) => {
-  await screen.findByText("Describe project");
-  fireEvent.change(screen.getByPlaceholderText(/EM mitochondria volumes/i), {
+  await screen.findByText("Confirm project basics");
+  fireEvent.change(screen.getByPlaceholderText(/Optional:/i), {
     target: { value: text },
   });
   fireEvent.click(screen.getByText("Continue"));
@@ -352,8 +438,9 @@ const continueWithProjectContext = async (
 };
 
 const continueWithDefaults = async () => {
-  await screen.findByText("Describe project");
-  fireEvent.click(screen.getByText("Use defaults"));
+  await screen.findByRole("dialog");
+  if (screen.queryAllByText("Start project").length > 1) return;
+  fireEvent.click(screen.getByText(/Use (safe defaults|detected context)/));
   await waitFor(() => {
     expect(screen.getAllByText("Start project").length).toBeGreaterThan(1);
   });
@@ -435,6 +522,9 @@ describe("FilesManager", () => {
       ),
     ).toBeTruthy();
     expect(screen.getByText("Editable project context")).toBeTruthy();
+    expect(screen.getByText("What I checked automatically")).toBeTruthy();
+    expect(screen.getByText(/I inspected 2 volumes and 1 image\/mask pair/i)).toBeTruthy();
+    expect(screen.getByText(/Image and mask shapes match/i)).toBeTruthy();
     expect(screen.queryByText(/^Priority$/)).toBeNull();
     expect(screen.queryByText(/^Goal$/)).toBeNull();
     expect(screen.queryByText(/^Labels$/)).toBeNull();
@@ -501,6 +591,12 @@ describe("FilesManager", () => {
           detected_volume_sets: expect.arrayContaining([
             expect.objectContaining({ pair_count: 1 }),
           ]),
+          project_audit: expect.objectContaining({
+            schema_version: "pytc-project-audit/v1",
+          }),
+          context_facts: expect.arrayContaining([
+            expect.objectContaining({ key: "voxel_size_nm" }),
+          ]),
           confirmed_roles: expect.objectContaining({
             config: "configs/MitoEM.yaml",
           }),
@@ -520,12 +616,82 @@ describe("FilesManager", () => {
             summary:
               "EM mitochondria project at 30 x 6 x 6 nm.",
           }),
+          project_audit: expect.objectContaining({
+            schema_version: "pytc-project-audit/v1",
+          }),
           mechanistic_mapping: expect.objectContaining({
             image: "data/image/mito25_smoke_im.h5",
           }),
         }),
       }),
     );
+  });
+
+  it("skips the blank description prompt when project basics are already detected", async () => {
+    mockProjectSuggestionResponses([completeSmokeSuggestion]);
+    apiClient.post.mockResolvedValue({
+      data: { mounted_root_id: 7, message: "Mounted smoke project" },
+    });
+
+    renderFilesManager();
+
+    await clickSuggestedProject();
+
+    await waitFor(() => {
+      expect(screen.getAllByText("Start project").length).toBeGreaterThan(1);
+    });
+    expect(screen.queryByText("Confirm project basics")).toBeNull();
+    expect(screen.queryByText("Anything else I should know?")).toBeNull();
+    expect(screen.getByDisplayValue("EM")).toBeTruthy();
+    expect(screen.getByDisplayValue("mitochondria")).toBeTruthy();
+    expect(screen.getByDisplayValue("30, 6, 6")).toBeTruthy();
+    expect(screen.getByText("What I checked automatically")).toBeTruthy();
+  });
+
+  it("shows compact shared facts including task/training policy and volume split", async () => {
+    mockProjectSuggestionResponses([yixiaoLikeSmokeSuggestion]);
+    apiClient.post.mockResolvedValue({
+      data: { mounted_root_id: 7, message: "Mounted yixiao project" },
+    });
+
+    renderFilesManager();
+
+    await clickSuggestedProject();
+    await screen.findByText("Shared project facts");
+    expect(screen.getAllByText("Shared project facts").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("Modality").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("Target").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("Voxel size").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("Volume split").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("XRI fibre instance segmentation").length).toBeGreaterThan(
+      0,
+    );
+    expect(
+      screen.getAllByText("train only on confirmed ground-truth masks").length,
+    ).toBeGreaterThan(0);
+    expect(
+      screen.getAllByText("6 ground-truth / 2 draft masks / 2 image-only")
+        .length,
+    ).toBeGreaterThan(0);
+
+    await continueWithDefaults();
+    expect(screen.getByText("Shared project facts")).toBeTruthy();
+    await reviewAndStartProject();
+
+    await waitFor(() => {
+      expect(mockWorkflowContext.updateWorkflow).toHaveBeenCalledWith(
+        expect.objectContaining({
+          metadata: expect.objectContaining({
+            project_context: expect.objectContaining({
+              task_family: "XRI fibre instance segmentation",
+              training_policy: "train only on confirmed ground-truth masks",
+              volume_split:
+                "6 ground-truth / 2 draft masks / 2 image-only",
+            }),
+          }),
+        }),
+      );
+    });
   });
 
   it("asks semantic follow-up questions for context the app cannot infer", async () => {
@@ -537,8 +703,8 @@ describe("FilesManager", () => {
     renderFilesManager();
 
     await clickSuggestedProject();
-    await screen.findByText("Describe project");
-    const descriptionBox = screen.getByPlaceholderText(/EM mitochondria volumes/i);
+    await screen.findByText("Confirm project basics");
+    const descriptionBox = screen.getByPlaceholderText(/Optional:/i);
     fireEvent.change(descriptionBox, {
       target: { value: "EM mitochondria from mouse brain tissue." },
     });
@@ -852,9 +1018,9 @@ describe("FilesManager", () => {
     renderFilesManager();
 
     fireEvent.click(await screen.findByText("Mount Project"));
-    await screen.findByText("Describe project");
+    await screen.findByText("Confirm project basics");
     expect(
-      screen.getByPlaceholderText(/EM mitochondria volumes/i),
+      screen.getByPlaceholderText(/Optional:/i),
     ).toBeTruthy();
     fireEvent.click(screen.getByText("Cancel"));
 
@@ -876,7 +1042,7 @@ describe("FilesManager", () => {
 
     renderFilesManager();
 
-    await screen.findByText("Describe project");
+    await screen.findByText("Confirm project basics");
     await waitFor(() => {
       expect(apiClient.get).toHaveBeenCalledWith("/files", {
         params: { parent: "7" },

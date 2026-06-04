@@ -14,6 +14,7 @@ import {
   getWorkflowAgentRecommendation,
   getWorkflowHotspots,
   getWorkflowImpactPreview,
+  getWorkflowOverview,
   getWorkflowPreflight,
   getWorkflowProjectProgress,
   listWorkflowArtifacts,
@@ -42,6 +43,7 @@ jest.mock("../api", () => ({
   getWorkflowAgentRecommendation: jest.fn(),
   getWorkflowHotspots: jest.fn(),
   getWorkflowImpactPreview: jest.fn(),
+  getWorkflowOverview: jest.fn(),
   getWorkflowPreflight: jest.fn(),
   getWorkflowProjectProgress: jest.fn(),
   listWorkflowArtifacts: jest.fn(),
@@ -324,6 +326,26 @@ describe("WorkflowProvider", () => {
       summary: { total: 0, tracked_total: 0 },
       volumes: [],
     });
+    getWorkflowOverview.mockResolvedValue({
+      workflow_id: 1,
+      project_name: "Segmentation Workflow",
+      workflow_stage: "setup",
+      phase: "setup",
+      phase_label: "Setup",
+      phase_reason: "No project data is mounted yet.",
+      phase_index: 0,
+      volume_summary: { total: 0, tracked_total: 0 },
+      project_progress: {
+        workflow_id: 1,
+        summary: { total: 0, tracked_total: 0 },
+        volumes: [],
+      },
+      stages: [],
+      blockers: [],
+      recommended_next_actions: [],
+      active_runs: [],
+      recent_events: [],
+    });
     updateWorkflowProjectProgressVolume.mockResolvedValue({
       workflow_id: 1,
       summary: { total: 1, tracked_total: 1, ground_truth: 1 },
@@ -369,9 +391,9 @@ describe("WorkflowProvider", () => {
     ]);
   });
 
-  it("starts a fresh workflow and remounts the boot project on startup", async () => {
+  it("resumes the current workflow and remounts the boot project on startup", async () => {
     const resetFileState = jest.fn();
-    startNewWorkflow.mockResolvedValueOnce({
+    getCurrentWorkflow.mockResolvedValueOnce({
       workflow: { ...baseWorkflow, dataset_path: "/tmp/boot-project" },
       events: [{ id: 1, event_type: "workflow.created" }],
     });
@@ -399,19 +421,18 @@ describe("WorkflowProvider", () => {
     });
     expect(listWorkflowArtifacts).toHaveBeenCalledWith(1);
     expect(listWorkflowEvaluationResults).toHaveBeenCalledWith(1);
-    expect(resetFileWorkspace).toHaveBeenCalledTimes(1);
-    expect(resetFileState).toHaveBeenCalled();
-    expect(startNewWorkflow).toHaveBeenCalledWith({
-      metadata: { created_from: "page_reload" },
-    });
+    expect(resetFileWorkspace).not.toHaveBeenCalled();
+    expect(resetFileState).not.toHaveBeenCalled();
+    expect(startNewWorkflow).not.toHaveBeenCalled();
     expect(mountProjectDirectory).toHaveBeenCalledWith({
       directoryPath: "/tmp/boot-project",
       mountName: baseWorkflow.title,
       destinationPath: "root",
     });
-    expect(getCurrentWorkflow).not.toHaveBeenCalled();
+    expect(getCurrentWorkflow).toHaveBeenCalled();
     expect(getWorkflowAgentRecommendation).toHaveBeenCalledWith(1);
     expect(getWorkflowPreflight).toHaveBeenCalledWith(1);
+    expect(getWorkflowOverview).toHaveBeenCalledWith(1, { refresh: true });
   });
 
   it("applies client effects when an agent proposal is approved", async () => {
@@ -722,5 +743,106 @@ describe("WorkflowProvider", () => {
       );
     });
     expect(screen.getByText("workflow.created")).toBeTruthy();
+  });
+
+  it("restores a persisted training monitor action after provider remount", async () => {
+    window.sessionStorage.setItem(
+      "pytc.workflow.pendingRuntimeAction.v1",
+      JSON.stringify({
+        kind: "pending_runtime_action",
+        workflowId: 1,
+        action: {
+          id: "monitor_training:123",
+          kind: "monitor_training",
+          commandId: 22,
+          commandResult: { submitted: true },
+          clientEffects: {
+            set_training_config_preset: "configs/MitoEM/Mito-CaseStudy-BC.yaml",
+            set_training_image_path: "/persist/image.tif",
+            set_training_label_path: "/persist/label.tif",
+            set_training_output_path: "/persist/out",
+            set_training_log_path: "/persist/log.txt",
+          },
+          overrides: {
+            inputImagePath: "/persist/image.tif",
+            inputLabelPath: "/persist/label.tif",
+            outputPath: "/persist/out",
+            logPath: "/persist/log.txt",
+          },
+        },
+        savedAt: Date.now(),
+      }),
+    );
+
+    renderProvider({
+      setTrainingConfig: jest.fn(),
+      trainingState: {
+        setInputImage: jest.fn(),
+        setInputLabel: jest.fn(),
+        setOutputPath: jest.fn(),
+        setLogPath: jest.fn(),
+      },
+      inferenceState: {
+        setInputImage: jest.fn(),
+        setInputLabel: jest.fn(),
+      },
+    });
+
+    expect(await screen.findByText("monitor_training")).toBeTruthy();
+    const storageEntry = window.sessionStorage.getItem(
+      "pytc.workflow.pendingRuntimeAction.v1",
+    );
+    expect(storageEntry).toBeTruthy();
+  });
+
+  it("persists an approved durable training proposal as monitor training action", async () => {
+    const setInputImage = jest.fn();
+    const setInputLabel = jest.fn();
+    const setOutputPath = jest.fn();
+    const setLogPath = jest.fn();
+    approveAgentAction.mockResolvedValue({
+      workflow: { ...baseWorkflow, stage: "training_ready" },
+      client_effects: {
+        navigate_to: "training",
+        set_training_image_path: "/tmp/image.h5",
+        set_training_label_path: "/tmp/corrected.tif",
+        set_training_output_path: "/tmp/training-output",
+        set_training_log_path: "/tmp/training-log",
+        runtime_action: { kind: "start_training" },
+      },
+      commands: [
+        {
+          id: 22,
+          title: "Start training",
+          command: "pytc train",
+        },
+      ],
+    });
+
+    renderProvider({
+      setTrainingConfig: jest.fn(),
+      trainingState: {
+        setInputImage,
+        setInputLabel,
+        setOutputPath,
+        setLogPath,
+      },
+      inferenceState: {
+        setInputImage: jest.fn(),
+        setInputLabel: jest.fn(),
+      },
+    });
+
+    await screen.findByText("setup");
+    fireEvent.click(screen.getByText("Approve proposal"));
+
+    await waitFor(() => {
+      expect(screen.getByText("monitor_training")).toBeTruthy();
+    });
+    const persisted = JSON.parse(
+      window.sessionStorage.getItem("pytc.workflow.pendingRuntimeAction.v1"),
+    );
+    expect(persisted?.kind).toBe("pending_runtime_action");
+    expect(persisted?.action?.kind).toBe("monitor_training");
   });
 });

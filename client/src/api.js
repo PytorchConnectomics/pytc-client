@@ -24,6 +24,15 @@ const getDefaultBaseUrl = () => {
 };
 
 const BASE_URL = process.env.REACT_APP_API_BASE_URL || getDefaultBaseUrl();
+const DEBUG_API_LOGS =
+  process.env.REACT_APP_DEBUG_API_LOGS === "1" ||
+  process.env.REACT_APP_DEBUG_API_LOGS === "true";
+
+const apiDebugLog = (...args) => {
+  if (DEBUG_API_LOGS) {
+    console.log(...args);
+  }
+};
 
 // Create axios instance without auth headers—app runs as guest by default.
 export const apiClient = axios.create({
@@ -331,9 +340,9 @@ export async function startModelTraining(
   inputLabelPath = "",
 ) {
   try {
-    console.log("[API] ===== Starting Training Configuration =====");
-    console.log("[API] logPath:", logPath);
-    console.log("[API] outputPath:", outputPath);
+    apiDebugLog("[API] ===== Starting Training Configuration =====");
+    apiDebugLog("[API] logPath:", logPath);
+    apiDebugLog("[API] outputPath:", outputPath);
 
     // Parse the YAML config and inject the outputPath
     let configToSend = trainingConfig;
@@ -344,8 +353,8 @@ export async function startModelTraining(
         setTrainingOutputPath(configObj, outputPath);
 
         configToSend = yaml.dump(configObj);
-        console.log("[API] Injected training output path:", outputPath);
-        console.log(
+        apiDebugLog("[API] Injected training output path:", outputPath);
+        apiDebugLog(
           "[API] Modified config preview:",
           configToSend.substring(0, 500),
         );
@@ -385,9 +394,9 @@ export async function startModelTraining(
       inputLabelPath,
     });
 
-    console.log("[API] Request payload size:", data.length, "bytes");
-    console.log("[API] Note: TensorBoard will monitor outputPath, not logPath");
-    console.log("[API] =========================================");
+    apiDebugLog("[API] Request payload size:", data.length, "bytes");
+    apiDebugLog("[API] Note: TensorBoard will monitor outputPath, not logPath");
+    apiDebugLog("[API] =========================================");
 
     const configSummary = summarizeConfigText(configToSend, "training");
     const diagnostics = detectConfigDiagnostics(configSummary);
@@ -464,42 +473,42 @@ export async function startModelInference(
   workflowId = null,
   inputImagePath = "",
 ) {
-  console.log("\n========== API.JS: START_MODEL_INFERENCE CALLED ==========");
-  console.log("[API] Function arguments:");
-  console.log("[API]   - inferenceConfig type:", typeof inferenceConfig);
-  console.log(
+  apiDebugLog("\n========== API.JS: START_MODEL_INFERENCE CALLED ==========");
+  apiDebugLog("[API] Function arguments:");
+  apiDebugLog("[API]   - inferenceConfig type:", typeof inferenceConfig);
+  apiDebugLog(
     "[API]   - inferenceConfig length:",
     inferenceConfig?.length || "N/A",
   );
-  console.log("[API]   - outputPath:", outputPath);
-  console.log("[API]   - outputPath type:", typeof outputPath);
-  console.log("[API]   - checkpointPath:", checkpointPath);
-  console.log("[API]   - checkpointPath type:", typeof checkpointPath);
+  apiDebugLog("[API]   - outputPath:", outputPath);
+  apiDebugLog("[API]   - outputPath type:", typeof outputPath);
+  apiDebugLog("[API]   - checkpointPath:", checkpointPath);
+  apiDebugLog("[API]   - checkpointPath type:", typeof checkpointPath);
 
   try {
-    console.log("[API] ===== Starting Inference Configuration =====");
+    apiDebugLog("[API] ===== Starting Inference Configuration =====");
 
     // Parse the YAML config and inject the outputPath
     let configToSend = inferenceConfig;
 
     if (inferenceConfig) {
       try {
-        console.log("[API] Parsing YAML config...");
+        apiDebugLog("[API] Parsing YAML config...");
         const configObj = yaml.load(inferenceConfig) || {};
-        console.log("[API] ✓ YAML parsed successfully");
+        apiDebugLog("[API] ✓ YAML parsed successfully");
 
         if (outputPath) {
           setInferenceOutputPath(configObj, outputPath);
-          console.log("[API] ✓ Injected inference output path:", outputPath);
+          apiDebugLog("[API] ✓ Injected inference output path:", outputPath);
         }
         setInferenceExecutionDefaults(configObj);
-        console.log("[API] ✓ Applied inference runtime defaults");
+        apiDebugLog("[API] ✓ Applied inference runtime defaults");
 
         // Convert back to YAML
-        console.log("[API] Converting back to YAML...");
+        apiDebugLog("[API] Converting back to YAML...");
         configToSend = yaml.dump(configObj);
-        console.log("[API] ✓ YAML conversion successful");
-        console.log(
+        apiDebugLog("[API] ✓ YAML conversion successful");
+        apiDebugLog(
           "[API] Modified config preview (first 500 chars):",
           configToSend.substring(0, 500),
         );
@@ -528,7 +537,7 @@ export async function startModelInference(
       );
     }
 
-    console.log("[API] Building request payload...");
+    apiDebugLog("[API] Building request payload...");
     const payload = {
       arguments: {
         checkpoint: checkpointPath,
@@ -540,20 +549,20 @@ export async function startModelInference(
       workflow_id: workflowId,
     };
 
-    console.log("[API] Payload structure:");
-    console.log(
+    apiDebugLog("[API] Payload structure:");
+    apiDebugLog(
       "[API]   - arguments.checkpoint:",
       payload.arguments.checkpoint,
     );
-    console.log("[API]   - outputPath:", payload.outputPath);
-    console.log(
+    apiDebugLog("[API]   - outputPath:", payload.outputPath);
+    apiDebugLog(
       "[API]   - inferenceConfig length:",
       payload.inferenceConfig?.length,
     );
 
     const data = JSON.stringify(payload);
-    console.log("[API] Request payload size:", data.length, "bytes");
-    console.log(
+    apiDebugLog("[API] Request payload size:", data.length, "bytes");
+    apiDebugLog(
       "[API] JSON payload preview (first 300 chars):",
       data.substring(0, 300),
     );
@@ -575,14 +584,14 @@ export async function startModelInference(
       },
     });
 
-    console.log("[API] Calling makeApiRequest...");
-    console.log("[API] Target endpoint: start_model_inference");
-    console.log("[API] Method: POST");
-    console.log("[API] =========================================");
+    apiDebugLog("[API] Calling makeApiRequest...");
+    apiDebugLog("[API] Target endpoint: start_model_inference");
+    apiDebugLog("[API] Method: POST");
+    apiDebugLog("[API] =========================================");
 
     const result = await makeApiRequest("start_model_inference", "post", data);
-    console.log("[API] ✓ makeApiRequest returned:", result);
-    console.log("========== API.JS: END START_MODEL_INFERENCE ==========\n");
+    apiDebugLog("[API] ✓ makeApiRequest returned:", result);
+    apiDebugLog("========== API.JS: END START_MODEL_INFERENCE ==========\n");
     return result;
   } catch (error) {
     console.error(
@@ -829,6 +838,17 @@ export async function getWorkflowProjectProgress(workflowId) {
   }
 }
 
+export async function getWorkflowOverview(workflowId, { refresh = true } = {}) {
+  try {
+    const res = await apiClient.get(`/api/workflows/${workflowId}/overview`, {
+      params: { refresh },
+    });
+    return res.data;
+  } catch (error) {
+    handleError(error);
+  }
+}
+
 export async function updateWorkflowProjectProgressVolume(workflowId, body) {
   try {
     const res = await apiClient.post(
@@ -959,10 +979,13 @@ export async function createAgentAction(workflowId, action) {
   }
 }
 
-export async function approveAgentAction(workflowId, eventId) {
+export async function approveAgentAction(workflowId, eventId, overrides = {}) {
   try {
+    const hasOverrides =
+      overrides && typeof overrides === "object" && Object.keys(overrides).length > 0;
     const res = await apiClient.post(
       `/api/workflows/${workflowId}/agent-actions/${eventId}/approve`,
+      hasOverrides ? { overrides } : undefined,
     );
     return res.data;
   } catch (error) {
@@ -998,6 +1021,17 @@ export async function queryWorkflowAgent(workflowId, query, conversationId = nul
       query,
       conversation_id: conversationId,
     });
+    return res.data;
+  } catch (error) {
+    handleError(error);
+  }
+}
+
+export async function getWorkflowAgentConversation(workflowId) {
+  try {
+    const res = await apiClient.get(
+      `/api/workflows/${workflowId}/agent/conversation`,
+    );
     return res.data;
   } catch (error) {
     handleError(error);

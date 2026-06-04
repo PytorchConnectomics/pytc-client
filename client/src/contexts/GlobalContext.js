@@ -1,4 +1,4 @@
-import React, { createContext, useState, useCallback } from "react";
+import React, { createContext, useState, useCallback, useEffect } from "react";
 import localforage from "localforage";
 
 export const AppContext = createContext(null);
@@ -32,9 +32,49 @@ const FILE_STATE_DEFAULTS = {
 };
 
 const FILE_CACHE_KEYS = Object.keys(FILE_STATE_DEFAULTS);
-function usePersistedState(_key, defaultValue) {
+const NON_PERSISTED_FILE_STATE_KEYS = new Set(["viewer"]);
+
+function usePersistedState(key, defaultValue) {
   const [state, setState] = useState(defaultValue);
-  return [state, setState];
+  const shouldPersist = !NON_PERSISTED_FILE_STATE_KEYS.has(key);
+
+  useEffect(() => {
+    if (!shouldPersist) return undefined;
+    let cancelled = false;
+    localforage
+      .getItem(key)
+      .then((storedValue) => {
+        if (!cancelled && storedValue !== null && storedValue !== undefined) {
+          setState(storedValue);
+        }
+      })
+      .catch((error) => {
+        console.warn(`Failed to hydrate cached state for ${key}:`, error);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [key, shouldPersist]);
+
+  const setPersistedState = useCallback(
+    (nextValueOrUpdater) => {
+      setState((previousValue) => {
+        const nextValue =
+          typeof nextValueOrUpdater === "function"
+            ? nextValueOrUpdater(previousValue)
+            : nextValueOrUpdater;
+        if (shouldPersist) {
+          localforage.setItem(key, nextValue).catch((error) => {
+            console.warn(`Failed to persist cached state for ${key}:`, error);
+          });
+        }
+        return nextValue;
+      });
+    },
+    [key, shouldPersist],
+  );
+
+  return [state, setPersistedState];
 }
 
 // function safeParseJSON(jsonString, defaultValue) {

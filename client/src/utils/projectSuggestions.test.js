@@ -157,11 +157,53 @@ describe("project suggestion utilities", () => {
         "Mouse micro-CT nuclei dataset; segment nuclei at 4 x 4 x 40 nm and prioritize accuracy.",
       imaging_modality: "CT",
       target_structure: "nuclei",
+      task_family: "nuclei instance segmentation",
       task_goal: "segmentation",
       optimization_priority: "accuracy",
       voxel_size_nm: [4, 4, 40],
       voxel_size_source: "project_description",
     });
+  });
+
+  it("derives guided defaults for the TapeReader XRI case study", () => {
+    expect(
+      getProjectContextDefaultsFromSuggestion({
+        id: "yixiao-tapereader-xri-case-study",
+        name: "yixiao_tapereader_xri_case_study",
+        directory_path: "/home/weidf/demo_data/yixiao_tapereader_xri_case_study",
+        description: "Yixiao TapeReader XRI fibre segmentation case study.",
+        profile: {
+          counts: { image: 10, label: 8, config: 3 },
+          context_hints: {
+            imaging_modality: "X-ray / XRI volumetric microscopy",
+            target_structure: "CytoTape fibres",
+            voxel_size_nm: [40, 16.3, 16.3],
+          },
+        },
+      }),
+    ).toEqual(
+      expect.objectContaining({
+        imaging_modality: "X-ray / XRI volumetric microscopy",
+        target_structure: "CytoTape fibres",
+        task_family: "XRI fibre instance segmentation",
+        mask_status: "mixed: some masks, some image-only volumes",
+        image_only_strategy: "run inference on image-only volumes later",
+        training_policy: "train only on confirmed ground-truth masks",
+        voxel_size_nm: [40, 16.3, 16.3],
+      }),
+    );
+    expect(
+      inferProjectContextFromDescription(
+        "XRI CytoTape fibre masks at 40 x 16.3 x 16.3 nm.",
+      ),
+    ).toEqual(
+      expect.objectContaining({
+        imaging_modality: "X-ray / XRI volumetric microscopy",
+        target_structure: "fibres",
+        task_family: "XRI fibre instance segmentation",
+        voxel_size_nm: [40, 16.3, 16.3],
+      }),
+    );
   });
 
   it("parses and formats isotropic imaging resolution", () => {
@@ -209,6 +251,40 @@ describe("project suggestion utilities", () => {
         target_structure: "neurites",
         voxel_size_nm: [40, 4, 4],
         voxel_size_source: "project_profile",
+      }),
+    );
+  });
+
+  it("uses high-confidence audit facts for voxel size defaults", () => {
+    expect(
+      getProjectContextDefaultsFromSuggestion({
+        name: "audit-project",
+        directory_path: "/projects/audit-project",
+        profile: {
+          counts: { image: 1, label: 1 },
+          context_hints: {
+            imaging_modality: "EM",
+            target_structure: "mitochondria",
+            voxel_size_nm: [30, 6, 6],
+          },
+          audit: {
+            context_facts: [
+              {
+                key: "voxel_size_nm",
+                value: [30, 8, 8],
+                source: "volume_metadata:data/image/sample.h5",
+                confidence: "high",
+              },
+            ],
+          },
+        },
+      }),
+    ).toEqual(
+      expect.objectContaining({
+        imaging_modality: "EM",
+        target_structure: "mitochondria",
+        voxel_size_nm: [30, 8, 8],
+        voxel_size_source: "volume_metadata:data/image/sample.h5",
       }),
     );
   });

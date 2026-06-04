@@ -1,9 +1,10 @@
 import React, { useCallback, useContext, useState, useEffect, useRef } from "react";
-import { Button, Space, Tag, Typography } from "antd";
+import { Button, Space, Tag, Typography, message } from "antd";
 import {
   getTrainingLogs,
   stopModelTraining,
   getTrainingStatus,
+  startTensorboard,
 } from "../api";
 import Configurator from "../components/Configurator";
 import RuntimeLogPanel from "../components/RuntimeLogPanel";
@@ -412,8 +413,29 @@ function ModelTraining() {
   }, [latestCheckpointPath, runClientEffects, setInferenceCheckpointPath]);
 
   const handleOpenTensorboard = useCallback(async () => {
-    await runClientEffects?.({ navigate_to: "monitoring" });
-  }, [runClientEffects]);
+    try {
+      const response = await startTensorboard(resolvedTrainingOutputPath);
+      const url = response?.url || response?.tensorboard_url || response;
+      if (url && typeof url === "string") {
+        context?.setTensorBoardURL?.(url);
+        if (typeof window !== "undefined" && typeof window.open === "function") {
+          window.open(url, "_blank", "noopener,noreferrer");
+        }
+        message.success("TensorBoard opened for this training run.");
+      } else {
+        message.success("TensorBoard is starting for this training run.");
+      }
+      await refreshTrainingLogs();
+      await runClientEffects?.({ navigate_to: "training" });
+    } catch (error) {
+      message.error(error.message || "Failed to start TensorBoard.");
+    }
+  }, [
+    context,
+    refreshTrainingLogs,
+    resolvedTrainingOutputPath,
+    runClientEffects,
+  ]);
 
   const handleRevealOutput = useCallback(async () => {
     if (!resolvedTrainingOutputPath) return;

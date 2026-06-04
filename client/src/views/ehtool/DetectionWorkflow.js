@@ -37,6 +37,11 @@ import {
 import { AppContext } from "../../contexts/GlobalContext";
 import { useWorkflow } from "../../contexts/WorkflowContext";
 import { logClientEvent } from "../../logging/appEventLog";
+import {
+  getProofreadingImagePath,
+  getProofreadingMaskPath,
+  getTrainingReadyCorrectedMask,
+} from "./proofreadingPaths";
 
 const { Sider, Content } = Layout;
 const { Title, Text } = Typography;
@@ -750,18 +755,9 @@ function DetectionWorkflow({
 
     const overrides = action.overrides || {};
     const datasetPath =
-      overrides.datasetPath ||
-      activeWorkflow?.image_path ||
-      activeWorkflow?.dataset_path ||
-      activeWorkflow?.inference_output_path ||
-      "";
+      overrides.datasetPath || getProofreadingImagePath(activeWorkflow);
     const maskPath =
-      overrides.maskPath ||
-      activeWorkflow?.mask_path ||
-      activeWorkflow?.inference_output_path ||
-      activeWorkflow?.corrected_mask_path ||
-      activeWorkflow?.label_path ||
-      "";
+      overrides.maskPath || getProofreadingMaskPath(activeWorkflow);
     const nextProjectName =
       overrides.projectName || activeWorkflow?.title || "Proofreading review";
 
@@ -2264,14 +2260,14 @@ function DetectionWorkflow({
   };
 
   const handleStageForRetraining = async () => {
-    const correctedMaskPath =
-      persistence?.artifact_path ||
-      persistence?.last_export_path ||
-      activeWorkflow?.corrected_mask_path ||
-      activeWorkflow?.mask_path ||
-      activeWorkflow?.label_path;
+    const { path: correctedMaskPath, source } = getTrainingReadyCorrectedMask({
+      persistence,
+      workflow: activeWorkflow,
+    });
     if (!correctedMaskPath) {
-      message.warning("No edited mask artifact is available yet.");
+      message.warning(
+        "Save an edit or export corrected masks before staging for training.",
+      );
       return;
     }
     if (!workflowContext?.workflow?.id) {
@@ -2292,7 +2288,7 @@ function DetectionWorkflow({
         payload: {
           corrected_mask_path: correctedMaskPath,
           ehtool_session_id: sessionId,
-          source: "proofreading_persistence",
+          source,
         },
       });
       if (appContext?.trainingState?.setInputLabel) {

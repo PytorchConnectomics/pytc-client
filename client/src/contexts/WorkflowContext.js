@@ -3,6 +3,7 @@ import React, {
   useCallback,
   useContext,
   useEffect,
+  useRef,
   useState,
 } from "react";
 import { message } from "antd";
@@ -17,6 +18,7 @@ import {
   getWorkflowAgentRecommendation,
   getWorkflowHotspots,
   getWorkflowImpactPreview,
+  getWorkflowOverview,
   getWorkflowPreflight,
   getWorkflowProjectProgress,
   listWorkflowArtifacts,
@@ -40,6 +42,63 @@ import { AppContext } from "./GlobalContext";
 import { logClientEvent } from "../logging/appEventLog";
 
 export const WorkflowContext = createContext(null);
+
+const PENDING_RUNTIME_ACTION_KEY = "pytc.workflow.pendingRuntimeAction.v1";
+const PENDING_RUNTIME_ACTION_TTL_MS = 6 * 60 * 60 * 1000;
+const PERSISTABLE_RUNTIME_KINDS = new Set(["monitor_training"]);
+
+const isPersistableRuntimeAction = (kind) => PERSISTABLE_RUNTIME_KINDS.has(kind);
+
+const readPersistedRuntimeAction = (workflowId = null) => {
+  if (typeof window === "undefined" || !window.sessionStorage) return null;
+  if (!workflowId) return null;
+
+  try {
+    const raw = window.sessionStorage.getItem(PENDING_RUNTIME_ACTION_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw);
+    if (
+      parsed?.kind !== "pending_runtime_action" ||
+      parsed?.workflowId !== workflowId ||
+      !parsed?.action?.kind
+    ) {
+      if (parsed?.kind || parsed?.action) {
+        window.sessionStorage.removeItem(PENDING_RUNTIME_ACTION_KEY);
+      }
+      return null;
+    }
+    const savedAt = Number(parsed.savedAt || 0);
+    const age = Date.now() - savedAt;
+    if (!Number.isFinite(age) || age > PENDING_RUNTIME_ACTION_TTL_MS) {
+      window.sessionStorage.removeItem(PENDING_RUNTIME_ACTION_KEY);
+      return null;
+    }
+    return parsed.action;
+  } catch {
+    return null;
+  }
+};
+
+const writePersistedRuntimeAction = (workflowId = null, action = null) => {
+  if (typeof window === "undefined" || !window.sessionStorage) return;
+  if (!workflowId || !action) {
+    window.sessionStorage.removeItem(PENDING_RUNTIME_ACTION_KEY);
+    return;
+  }
+  try {
+    window.sessionStorage.setItem(
+      PENDING_RUNTIME_ACTION_KEY,
+      JSON.stringify({
+        kind: "pending_runtime_action",
+        workflowId,
+        action,
+        savedAt: Date.now(),
+      }),
+    );
+  } catch {
+    // Persisting pending runtime actions is best-effort; it should not block runtime.
+  }
+};
 
 export function useWorkflow() {
   return useContext(WorkflowContext);
@@ -91,6 +150,7 @@ export function WorkflowProvider({ children }) {
   const [impactPreview, setImpactPreview] = useState(null);
   const [agentRecommendation, setAgentRecommendation] = useState(null);
   const [preflight, setPreflight] = useState(null);
+  const [workflowOverview, setWorkflowOverview] = useState(null);
   const [projectProgress, setProjectProgress] = useState(null);
   const [artifacts, setArtifacts] = useState([]);
   const [modelRuns, setModelRuns] = useState([]);
@@ -100,6 +160,30 @@ export function WorkflowProvider({ children }) {
   const [loading, setLoading] = useState(true);
   const [lastClientEffects, setLastClientEffects] = useState(null);
   const [pendingRuntimeAction, setPendingRuntimeAction] = useState(null);
+  const hydratedPendingRuntimeRef = useRef(false);
+
+  const clearPersistedRuntimeAction = useCallback(() => {
+    writePersistedRuntimeAction(null, null);
+  }, []);
+
+  const registerPendingRuntimeAction = useCallback(
+    (action, persist = false) => {
+      if (!action) return;
+      const nextAction = {
+        id: action.id || `${action.kind}:${Date.now()}`,
+        ...action,
+      };
+      setPendingRuntimeAction(nextAction);
+      const shouldPersist = persist || isPersistableRuntimeAction(action.kind);
+      if (shouldPersist) {
+        writePersistedRuntimeAction(workflow?.id, nextAction);
+      } else if (workflow?.id) {
+        writePersistedRuntimeAction(workflow?.id, null);
+      }
+      return nextAction;
+    },
+    [workflow?.id],
+  );
 
   const clientEffectsWithoutRuntime = useCallback((effects) => {
     if (!effects || typeof effects !== "object") return effects;
@@ -129,6 +213,7 @@ export function WorkflowProvider({ children }) {
     setImpactPreview(null);
     setAgentRecommendation(null);
     setPreflight(null);
+    setWorkflowOverview(null);
     setProjectProgress(null);
     setArtifacts([]);
     setModelRuns([]);
@@ -213,14 +298,36 @@ export function WorkflowProvider({ children }) {
     }
   }, [workflow?.id]);
 
+  const refreshWorkflowOverview = useCallback(
+    async ({ refresh = true } = {}) => {
+      if (!workflow?.id) {
+        setWorkflowOverview(null);
+        return null;
+      }
+      try {
+        const overview = await getWorkflowOverview(workflow.id, { refresh });
+        setWorkflowOverview(overview || null);
+        if (overview?.project_progress) {
+          setProjectProgress(overview.project_progress);
+        }
+        return overview || null;
+      } catch (error) {
+        console.warn("Workflow overview refresh failed:", error);
+        return null;
+      }
+    },
+    [workflow?.id],
+  );
+
   const updateProjectProgressVolume = useCallback(
     async (body) => {
       if (!workflow?.id) return null;
       const progress = await updateWorkflowProjectProgressVolume(workflow.id, body);
       setProjectProgress(progress || null);
+      await refreshWorkflowOverview({ refresh: false });
       return progress || null;
     },
-    [workflow?.id],
+    [refreshWorkflowOverview, workflow?.id],
   );
 
   const refreshEvidence = useCallback(async () => {
@@ -321,6 +428,23 @@ export function WorkflowProvider({ children }) {
     refreshPreflight,
   ]);
 
+  useEffect(() => {
+    refreshWorkflowOverview();
+  }, [
+    workflow?.id,
+    workflow?.stage,
+    workflow?.dataset_path,
+    workflow?.image_path,
+    workflow?.label_path,
+    workflow?.mask_path,
+    workflow?.inference_output_path,
+    workflow?.checkpoint_path,
+    workflow?.corrected_mask_path,
+    workflow?.training_output_path,
+    events.length,
+    refreshWorkflowOverview,
+  ]);
+
   const updateWorkflow = useCallback(
     async (patch) => {
       if (!workflow?.id) return null;
@@ -368,9 +492,10 @@ export function WorkflowProvider({ children }) {
 
   const startNewWorkflow = useCallback(
     async (body = {}) => {
+      await resetFileWorkspace();
+      await clearLocalWorkflowInputs();
       const data = await startNewWorkflowApi(body);
       applyWorkflowDetail(data);
-      await clearLocalWorkflowInputs();
       return data;
     },
     [applyWorkflowDetail, clearLocalWorkflowInputs],
@@ -378,14 +503,10 @@ export function WorkflowProvider({ children }) {
 
   useEffect(() => {
     let cancelled = false;
-    const bootFreshSession = async () => {
+    const resumeWorkflowSession = async () => {
       setLoading(true);
       try {
-        await resetFileWorkspace();
-        await clearLocalWorkflowInputs();
-        const data = await startNewWorkflowApi({
-          metadata: { created_from: "page_reload" },
-        });
+        const data = await getCurrentWorkflow();
         if (cancelled) return;
         applyWorkflowDetail(data);
 
@@ -402,19 +523,33 @@ export function WorkflowProvider({ children }) {
           }
         }
       } catch (error) {
-        console.warn("Fresh workflow boot failed:", error);
+        console.warn("Workflow session resume failed:", error);
         if (!cancelled) {
-          message.error("Failed to initialize a fresh workflow session.");
+          message.error("Failed to load workflow session.");
         }
       } finally {
         if (!cancelled) setLoading(false);
       }
     };
-    bootFreshSession();
+    resumeWorkflowSession();
     return () => {
       cancelled = true;
     };
-  }, [applyWorkflowDetail, clearLocalWorkflowInputs]);
+  }, [applyWorkflowDetail]);
+
+  useEffect(() => {
+    if (!workflow?.id) return;
+    const workflowId = workflow.id;
+    if (hydratedPendingRuntimeRef.current === workflowId) return;
+    hydratedPendingRuntimeRef.current = workflowId;
+
+    const restored = readPersistedRuntimeAction(workflowId);
+    if (restored) {
+      setPendingRuntimeAction(restored);
+    } else {
+      clearPersistedRuntimeAction();
+    }
+  }, [clearPersistedRuntimeAction, workflow?.id]);
 
   const proposeAgentAction = useCallback(
     async (action) => {
@@ -554,7 +689,7 @@ export function WorkflowProvider({ children }) {
           await stopModelTraining();
           message.info("Training stop requested.");
         }
-        setPendingRuntimeAction({
+        const nextRuntimeAction = {
           id: `${effects.runtime_action.kind}:${Date.now()}`,
           ...effects.runtime_action,
           overrides: buildRuntimeOverridesFromEffects(effects, {
@@ -563,7 +698,8 @@ export function WorkflowProvider({ children }) {
             resolvedInferenceConfig,
             resolvedInferenceConfigOrigin,
           }),
-        });
+        };
+        registerPendingRuntimeAction(nextRuntimeAction);
       }
       if (effects.reset_workspace) {
         const resetResult = await resetFileWorkspace();
@@ -589,8 +725,9 @@ export function WorkflowProvider({ children }) {
           typeof effects.start_new_workflow === "object"
             ? effects.start_new_workflow
             : {};
-        await startNewWorkflowApi(resetBody);
+        await resetFileWorkspace();
         await clearLocalWorkflowInputs();
+        await startNewWorkflowApi(resetBody);
         await refreshWorkflow();
       }
       if (effects.mount_project?.directory_path) {
@@ -717,6 +854,7 @@ export function WorkflowProvider({ children }) {
     [
       appContext,
       clearLocalWorkflowInputs,
+      registerPendingRuntimeAction,
       refreshAgentRecommendation,
       refreshEvidence,
       refreshEvents,
@@ -732,11 +870,12 @@ export function WorkflowProvider({ children }) {
     setPendingRuntimeAction((current) => {
       if (!current) return null;
       if (!actionId || current.id === actionId) {
+        clearPersistedRuntimeAction();
         return null;
       }
       return current;
     });
-  }, []);
+  }, [clearPersistedRuntimeAction]);
 
   const executeAssistantItem = useCallback(
     async (item) => {
@@ -765,9 +904,9 @@ export function WorkflowProvider({ children }) {
   );
 
   const approveAgentAction = useCallback(
-    async (eventId) => {
+    async (eventId, overrides = {}) => {
       if (!workflow?.id) return null;
-      const result = await approveAgentActionApi(workflow.id, eventId);
+      const result = await approveAgentActionApi(workflow.id, eventId, overrides);
       if (result?.workflow) {
         setWorkflow(result.workflow);
       }
@@ -781,14 +920,17 @@ export function WorkflowProvider({ children }) {
         if (
           (approvedEffects?.runtime_action || {}).kind === "start_training"
         ) {
-          setPendingRuntimeAction({
-            id: `monitor_training:${Date.now()}`,
-            kind: "monitor_training",
-            commandId: durableCommand.id,
-            commandResult,
-            clientEffects: approvedEffects,
-            overrides: buildRuntimeOverridesFromEffects(approvedEffects),
-          });
+          registerPendingRuntimeAction(
+            {
+              id: `monitor_training:${Date.now()}`,
+              kind: "monitor_training",
+              commandId: durableCommand.id,
+              commandResult,
+              clientEffects: approvedEffects,
+              overrides: buildRuntimeOverridesFromEffects(approvedEffects),
+            },
+            true,
+          );
         }
         await Promise.allSettled([
           refreshWorkflow(),
@@ -796,6 +938,7 @@ export function WorkflowProvider({ children }) {
           refreshEvidence(),
           refreshAgentRecommendation(),
           refreshPreflight(),
+          refreshWorkflowOverview(),
           refreshProjectProgress(),
         ]);
       } else {
@@ -807,10 +950,12 @@ export function WorkflowProvider({ children }) {
     },
     [
       clientEffectsWithoutRuntime,
+      registerPendingRuntimeAction,
       refreshAgentRecommendation,
       refreshEvents,
       refreshEvidence,
       refreshPreflight,
+      refreshWorkflowOverview,
       refreshProjectProgress,
       refreshWorkflow,
       runClientEffects,
@@ -843,6 +988,7 @@ export function WorkflowProvider({ children }) {
       await Promise.allSettled([
         refreshWorkflow(),
         refreshAgentRecommendation(),
+        refreshWorkflowOverview(),
         refreshProjectProgress(),
       ]);
       return result;
@@ -852,6 +998,7 @@ export function WorkflowProvider({ children }) {
       refreshEvents,
       refreshWorkflow,
       refreshAgentRecommendation,
+      refreshWorkflowOverview,
       refreshProjectProgress,
     ],
   );
@@ -871,6 +1018,7 @@ export function WorkflowProvider({ children }) {
         impactPreview,
         agentRecommendation,
         preflight,
+        workflowOverview,
         projectProgress,
         artifacts,
         modelRuns,
@@ -885,6 +1033,7 @@ export function WorkflowProvider({ children }) {
         refreshInsights,
         refreshAgentRecommendation,
         refreshPreflight,
+        refreshWorkflowOverview,
         refreshProjectProgress,
         updateProjectProgressVolume,
         refreshEvidence,

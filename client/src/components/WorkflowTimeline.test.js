@@ -71,6 +71,16 @@ jest.mock("@ant-design/icons", () => {
   return {
     CheckOutlined: Icon,
     CloseOutlined: Icon,
+    DownOutlined: Icon,
+    RightOutlined: Icon,
+    BarChartOutlined: Icon,
+    BugOutlined: Icon,
+    ExperimentOutlined: Icon,
+    EyeOutlined: Icon,
+    FileDoneOutlined: Icon,
+    FolderOpenOutlined: Icon,
+    ProjectOutlined: Icon,
+    ThunderboltOutlined: Icon,
   };
 });
 
@@ -226,5 +236,48 @@ describe("WorkflowTimeline", () => {
     });
     expect(screen.getAllByText("Stage corrected masks.").length).toBeGreaterThan(0);
     expect(screen.getByText("Stage Retraining From Corrections")).toBeTruthy();
+  });
+
+  it("shows operational trace for pending proposal events with payload_json", () => {
+    renderTimeline({
+      events: [
+        {
+          id: 8,
+          actor: "agent",
+          event_type: "agent.proposal_created",
+          stage: "inference",
+          summary: "Approve training run.",
+          approval_status: "pending",
+          payload_json: JSON.stringify({
+            action: "start_training_run",
+            params: {
+              config_preset: "/tmp/config.yaml",
+              image_path: "/tmp/image.tif",
+              label_path: "/tmp/label.tif",
+              output_path: "/tmp/out.tif",
+              action_card: {
+                trace: [
+                  {
+                    label: "Checked training resources",
+                    detail: "Data, labels, and checkpoints are ready.",
+                    category: "checked",
+                  },
+                ],
+                input_artifacts: [{ path: "/tmp/image.tif" }],
+                output_artifacts: [{ path: "/tmp/out.tif" }],
+              },
+            },
+          }),
+          created_at: "2026-04-12T12:04:00Z",
+        },
+      ],
+    });
+
+    const traceToggle = screen.getByRole("button", { name: /Operational trace/ });
+    fireEvent.click(traceToggle);
+    expect(screen.getByText(/Inspected facts/i)).toBeTruthy();
+    expect(screen.getByText(/Checked training resources/)).toBeTruthy();
+    expect(screen.getByText(/Input · .*tmp\/image\.tif/)).toBeTruthy();
+    expect(screen.getByText(/Output · .*tmp\/out\.tif/)).toBeTruthy();
   });
 });

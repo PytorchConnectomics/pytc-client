@@ -6,22 +6,22 @@ import {
   Typography,
   Space,
   Spin,
+  Tag,
   message,
 } from "antd";
 import {
   SendOutlined,
   CloseOutlined,
 } from "@ant-design/icons";
-import { queryChatBot } from "../api";
+import { getWorkflowAgentConversation, queryChatBot } from "../api";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
-import WorkflowTimeline from "./WorkflowTimeline";
 import { useWorkflow } from "../contexts/WorkflowContext";
 import AgentProposalCard from "./chat/AgentProposalCard";
 import AssistantActionCard from "./chat/AssistantActionCard";
 import AssistantCommandCard from "./chat/AssistantCommandCard";
 import AssistantTrace from "./chat/AssistantTrace";
-import WorkflowEvidencePanel from "./workflow/WorkflowEvidencePanel";
+import AgentBadge, { getAgentVisual } from "./chat/AgentVisuals";
 import { logClientEvent } from "../logging/appEventLog";
 
 const { TextArea } = Input;
@@ -32,7 +32,7 @@ const MONO_FONT =
 const GREETING = {
   role: "assistant",
   content:
-    "Tell me what you want to do in plain language. I can run a model, show data, proofread masks, train from labels or edits, compare results, or move screens.",
+    "I’ll coordinate the workflow and pull in specialist agents for data, visualization, proofreading, training, inference, and evidence when needed. Tell me what you want to do in plain language.",
 };
 
 const QUICK_NEXT_QUERY = "What should I do next?";
@@ -56,6 +56,11 @@ const WORKFLOW_AGENT_KEYWORDS = [
   "workflow",
   "project",
   "dataset",
+  "directory",
+  "folder",
+  "folders",
+  "file",
+  "files",
   "volume",
   "image",
   "label",
@@ -104,6 +109,8 @@ const WORKFLOW_AGENT_KEYWORDS = [
 const WORKFLOW_AGENT_PATTERNS = [
   /\b(view|show|open|inspect|see|vis|viz)\b.{0,48}\b(data|volume|volumes|image|images|label|labels|mask|masks|seg|segs|segmentation|segmentations)\b/,
   /\blook at\b.{0,48}\b(data|volume|volumes|image|images|label|labels|mask|masks|seg|segs|segmentation|segmentations)\b/,
+  /\bwhat\b.{0,40}\b(looking at|loaded|open|mounted|project|dataset|volume|data)\b/,
+  /\bwhere\b.{0,40}\b(are we|am i|is this|in the workflow)\b/,
   /\b(run|start|launch)\b.{0,48}\b(app|model|inference|training|proofread|proofreading|viewer|visualization)\b/,
 ];
 
@@ -113,6 +120,8 @@ const WORKFLOW_FOLLOW_UP_PATTERNS = [
   /\b(go ahead|do it|do that|run it|start it|use that|sounds good)\b/,
   /^(yes|yeah|yep|ok|okay|sure|please|what|why|how|wait|huh)[\s!.?,]*$/i,
 ];
+
+const toList = (value) => (Array.isArray(value) ? value : []);
 
 const normalizeWorkflowAgentQuery = (query) => {
   const trimmed = query.trim();
@@ -141,6 +150,33 @@ const runnableAttachmentCount = (message = {}) =>
   (Array.isArray(message.actions) ? message.actions.length : 0) +
   (Array.isArray(message.commands) ? message.commands.length : 0) +
   (Array.isArray(message.proposals) ? message.proposals.length : 0);
+
+const agentIdentityKey = (agent = {}) =>
+  agent.agent_type || agent.type || agent.label || agent.agent_label || "project_manager";
+
+const messageAgents = (message = {}) => {
+  const agents = [];
+  const addAgent = (agent) => {
+    if (!agent) return;
+    const visual = getAgentVisual(agent);
+    const key = agentIdentityKey(agent);
+    if (agents.some((item) => item.key === key)) return;
+    agents.push({ key, ...visual });
+  };
+
+  (message.trace || []).forEach((item) => addAgent(item));
+  (message.actions || []).forEach((action) => {
+    addAgent(action.specialist_agent || action);
+    addAgent(action.orchestrator_agent);
+  });
+  (message.proposals || []).forEach((proposal) => {
+    const payload = proposal.payload || proposal;
+    addAgent(payload.specialist_agent || payload.action_card?.specialist_agent);
+    addAgent(payload.orchestrator_agent || payload.action_card?.orchestrator_agent);
+  });
+
+  return agents;
+};
 
 const STALE_WORKFLOW_CARD_NOTICE =
   "That run card belonged to an earlier workflow, so I hid the stale button. Ask me to stage it again and I'll make a fresh one for this project.";
@@ -348,12 +384,81 @@ const saveContinuousChatState = ({ activeConvoId, messages }) => {
   }
 };
 
+const workflowConversationMessageToChatMessage = (
+  message,
+  currentWorkflowId = null,
+) =>
+  sanitizeLoadedMessage(
+    {
+      role: message.role,
+      content: message.content,
+      source: message.source || undefined,
+      workflow_id: message.workflow_id || currentWorkflowId || undefined,
+      actions: message.actions || [],
+      commands: message.commands || [],
+      proposals: message.proposals || [],
+      trace: message.trace || [],
+    },
+    currentWorkflowId,
+  );
+
+const byProposalId = (messages = []) => {
+  const index = {};
+  messages.forEach((message) => {
+    (message?.proposals || []).forEach((proposal) => {
+      if (proposal?.id == null) return;
+      index[String(proposal.id)] = {
+        ...(proposal?.payload ? { payload: proposal.payload } : {}),
+        ...proposal,
+      };
+    });
+  });
+  return index;
+};
+
+const reconcileProposal = (localProposal, hydratedProposal) => {
+  if (!localProposal?.id || !hydratedProposal) return localProposal;
+  const approval_status =
+    hydratedProposal.approval_status ||
+    localProposal.approval_status ||
+    "pending";
+  return {
+    ...localProposal,
+    ...hydratedProposal,
+    summary: hydratedProposal.summary || localProposal.summary,
+    payload: {
+      ...(localProposal?.payload || {}),
+      ...(hydratedProposal.payload || {}),
+    },
+    params: {
+      ...(localProposal?.params || {}),
+      ...(hydratedProposal.params || {}),
+    },
+    approval_status,
+  };
+};
+
+const reconcileProposalStatuses = (messages = [], hydratedMessages = []) => {
+  const hydrated = byProposalId(hydratedMessages);
+  return messages.map((message) => {
+    if (!message || !Array.isArray(message.proposals) || !message.proposals.length) {
+      return message;
+    }
+    return {
+      ...message,
+      proposals: message.proposals.map((proposal) => {
+        const hydratedProposal = hydrated[String(proposal?.id)];
+        if (!hydratedProposal) return proposal;
+        return reconcileProposal(proposal, hydratedProposal);
+      }),
+    };
+  });
+};
+
 /* ═══════════════════════════════════════════════════════════════════════════ */
 
 function Chatbot({
   onClose,
-  forceShowWorkflowInspector = false,
-  onWorkflowInspectorConsumed,
   queuedWorkflowQuery = null,
   onQueuedWorkflowQueryConsumed,
 }) {
@@ -373,11 +478,10 @@ function Chatbot({
   const [messages, setMessages] = useState(initialChatStateRef.current.messages);
   const [inputValue, setInputValue] = useState("");
   const [isSending, setIsSending] = useState(false);
-  const [showWorkflowInspector, setShowWorkflowInspector] = useState(false);
-  const [showWorkflowTimeline, setShowWorkflowTimeline] = useState(false);
 
   const lastMessageRef = useRef(null);
   const handledQueuedQueryRef = useRef(null);
+  const hydratedWorkflowConversationRef = useRef(null);
 
   const appendLocalProposalToLatestAssistant = useCallback((proposal) => {
     if (!proposal?.id) return;
@@ -429,6 +533,9 @@ function Chatbot({
       summary: `Approve training run: ${item?.title || item?.label || "start training"}.`,
       payload: {
         client_effects: effects,
+        action_card: item?.action_card || null,
+        orchestrator_agent: item?.orchestrator_agent || null,
+        specialist_agent: item?.specialist_agent || null,
         config_preset: configPreset,
         image_path: imagePath,
         label_path: labelPath,
@@ -448,6 +555,9 @@ function Chatbot({
       summary: `Approve app action: ${label}.`,
       payload: {
         client_effects: effects,
+        action_card: item?.action_card || null,
+        orchestrator_agent: item?.orchestrator_agent || null,
+        specialist_agent: item?.specialist_agent || null,
         item_id: item?.id || null,
         item_label: label,
         item_type: item?.command ? "command" : "action",
@@ -531,8 +641,7 @@ function Chatbot({
     }
     return (
       isWorkflowAgentQuery(query) ||
-      isWorkflowFollowUpQuery(query, messages, workflowContext.workflow.id) ||
-      query.trim().length > 0
+      isWorkflowFollowUpQuery(query, messages, workflowContext.workflow.id)
     );
   };
 
@@ -562,10 +671,50 @@ function Chatbot({
   }, [workflow?.id]);
 
   useEffect(() => {
-    if (!forceShowWorkflowInspector) return;
-    setShowWorkflowInspector(true);
-    onWorkflowInspectorConsumed?.();
-  }, [forceShowWorkflowInspector, onWorkflowInspectorConsumed]);
+    if (!workflow?.id) return;
+    if (hydratedWorkflowConversationRef.current === workflow.id) return;
+    hydratedWorkflowConversationRef.current = workflow.id;
+
+    let cancelled = false;
+    getWorkflowAgentConversation(workflow.id)
+      .then((conversation) => {
+        if (cancelled || !conversation?.messages?.length) return;
+        const serverMessages = conversation.messages
+          .filter(
+            (message) =>
+              message &&
+              (message.role === "assistant" || message.role === "user") &&
+              typeof message.content === "string",
+          )
+          .map((message) =>
+            workflowConversationMessageToChatMessage(message, workflow.id),
+          );
+        if (!serverMessages.length) return;
+        setActiveConvoId((current) =>
+          current || conversation.conversation_id || conversation.conversationId || null,
+        );
+        setMessages((previousMessages) => {
+          const hasLocalUserMessages = previousMessages.some(
+            (message) => message.role === "user",
+          );
+          if (hasLocalUserMessages) {
+            return reconcileProposalStatuses(previousMessages, serverMessages);
+          }
+          return reconcileProposalStatuses(serverMessages, serverMessages);
+        });
+      })
+      .catch((error) => {
+        logClientEvent("workflow_agent_chat_hydration_failed", {
+          level: "WARNING",
+          source: "chatbot",
+          message: error.message || "Could not hydrate workflow chat history.",
+          data: { workflowId: workflow.id },
+        });
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [workflow?.id]);
 
   const sendWorkflowAgentMessage = useCallback(
     async (
@@ -856,7 +1005,7 @@ function Chatbot({
   );
 
   const handleApproveProposal = useCallback(
-    async (proposal) => {
+    async (proposal, overrides = {}) => {
       if (!proposal?.id || !workflowContext?.approveAgentAction) return;
       const activeWorkflowId = Number(workflowContext?.workflow?.id || 0);
       const proposalWorkflowId = Number(
@@ -868,6 +1017,8 @@ function Chatbot({
         activeWorkflowId !== proposalWorkflowId;
       let approvalId = proposal.id;
       let recreated = false;
+      const approvalOverrides =
+        overrides && Object.keys(overrides).length > 0 ? overrides : undefined;
 
       try {
         if (isStaleWorkflowProposal) {
@@ -875,7 +1026,11 @@ function Chatbot({
           approvalId = nextProposal.id;
           recreated = true;
         }
-        await workflowContext.approveAgentAction(approvalId);
+        if (approvalOverrides) {
+          await workflowContext.approveAgentAction(approvalId, approvalOverrides);
+        } else {
+          await workflowContext.approveAgentAction(approvalId);
+        }
         updateLocalProposalStatus(approvalId, "approved");
         if (recreated) {
           updateLocalProposalStatus(proposal.id, "superseded");
@@ -884,7 +1039,14 @@ function Chatbot({
         if (!recreated && isProposalNotFoundError(error)) {
           try {
             const nextProposal = await recreateProposalForCurrentWorkflow(proposal);
-            await workflowContext.approveAgentAction(nextProposal.id);
+            if (approvalOverrides) {
+              await workflowContext.approveAgentAction(
+                nextProposal.id,
+                approvalOverrides,
+              );
+            } else {
+              await workflowContext.approveAgentAction(nextProposal.id);
+            }
             updateLocalProposalStatus(nextProposal.id, "approved");
             updateLocalProposalStatus(proposal.id, "superseded");
             message.info("That run card was stale, so I recreated it and approved the fresh one.");
@@ -1062,20 +1224,17 @@ function Chatbot({
                   letterSpacing: "0.02em",
                 }}
               >
-                Assistant
+                Project Manager
+              </Text>
+              <Text type="secondary" style={{ display: "block", fontSize: 12 }}>
+                Orchestrates specialist workflow agents
               </Text>
             </div>
+            <Tag color="#111827" style={{ marginInlineEnd: 0 }}>
+              Orchestrator
+            </Tag>
           </Space>
           <Space>
-            {workflow?.id && (
-              <Button
-                type="text"
-                size="small"
-                onClick={() => setShowWorkflowInspector((current) => !current)}
-              >
-                {showWorkflowInspector ? "Hide Status" : "Status"}
-              </Button>
-            )}
             <Button
               type="text"
               icon={<CloseOutlined />}
@@ -1085,29 +1244,6 @@ function Chatbot({
             />
           </Space>
         </div>
-
-        {showWorkflowInspector && (
-          <div style={{ borderBottom: "1px solid #ececec" }}>
-            <WorkflowEvidencePanel compact />
-            <div
-              style={{
-                padding: "0 12px 10px",
-                background: "#fffdfa",
-              }}
-            >
-              <Button
-                size="small"
-                type="text"
-                onClick={() => setShowWorkflowTimeline((current) => !current)}
-              >
-                {showWorkflowTimeline ? "Hide timeline" : "Show timeline"}
-              </Button>
-            </div>
-            {showWorkflowTimeline && (
-              <WorkflowTimeline limit={5} showFilters={false} />
-            )}
-          </div>
-        )}
 
         {/* messages */}
         <div
@@ -1123,6 +1259,7 @@ function Chatbot({
             renderItem={(message, index) => {
               const isLast = index === messages.length - 1;
               const isUser = message.role === "user";
+              const consultedAgents = isUser ? [] : messageAgents(message);
               return (
                 <List.Item
                   ref={isLast ? lastMessageRef : null}
@@ -1156,15 +1293,45 @@ function Chatbot({
                         size={10}
                         style={{ width: "100%" }}
                       >
+                        {consultedAgents.length > 0 && (
+                          <div
+                            aria-label="Consulted workflow agents"
+                            style={{
+                              display: "flex",
+                              alignItems: "center",
+                              flexWrap: "wrap",
+                              gap: 6,
+                              marginBottom: 2,
+                            }}
+                          >
+                            <Text
+                              type="secondary"
+                              style={{
+                                fontSize: 11,
+                                lineHeight: "18px",
+                                fontFamily: MONO_FONT,
+                              }}
+                            >
+                              Agents
+                            </Text>
+                            {consultedAgents.map((agent) => (
+                              <AgentBadge
+                                key={agent.key}
+                                agent={agent}
+                                compact
+                              />
+                            ))}
+                          </div>
+                        )}
+                        {message.trace?.length > 0 && (
+                          <AssistantTrace trace={message.trace} />
+                        )}
                         <ReactMarkdown
                           remarkPlugins={[remarkGfm]}
                           components={mdComponents}
                         >
                           {message.content}
                         </ReactMarkdown>
-                        {message.trace?.length > 0 && (
-                          <AssistantTrace trace={message.trace} />
-                        )}
                         {(message.actions?.length > 0 ||
                           message.commands?.length > 0 ||
                           message.proposals?.length > 0) && (
@@ -1189,43 +1356,69 @@ function Chatbot({
                                 onRun={handleRunAssistantItem}
                               />
                             ))}
-                            {message.proposals?.map((proposal) => (
-                              <AgentProposalCard
-                                key={proposal.id}
-                                proposal={{
-                                  ...(proposal.payload || {}),
-                                  id: proposal.id,
-                                  workflow_id:
-                                    proposal.workflow_id ||
-                                    proposal.workflowId ||
-                                    message.workflow_id,
-                                  approval_status: proposal.approval_status,
-                                  type:
-                                    proposal.payload?.action ||
-                                    "agent_proposal",
-                                  rationale: proposal.summary,
-                                  ...(proposal.payload?.params || {}),
-                                }}
-                                onApprove={() =>
-                                  handleApproveProposal({
-                                    ...proposal,
-                                    workflow_id:
-                                      proposal.workflow_id ||
-                                      proposal.workflowId ||
-                                      message.workflow_id,
-                                  })
-                                }
-                                onReject={() =>
-                                  handleRejectProposal({
-                                    ...proposal,
-                                    workflow_id:
-                                      proposal.workflow_id ||
-                                      proposal.workflowId ||
-                                      message.workflow_id,
-                                  })
-                                }
-                              />
-                            ))}
+                            {message.proposals?.map((proposal) => {
+                              const payload = proposal?.payload || {};
+                              const params = payload?.params || {};
+                              const actionCard =
+                                params?.action_card ||
+                                payload?.action_card ||
+                                proposal?.action_card ||
+                                {};
+                              const actionTrace =
+                                toList(params?.trace || payload?.trace || proposal?.trace || actionCard?.trace);
+                              const proposalTrace = toList(proposal.trace || payload?.trace || params?.trace);
+                              const specialistAgent =
+                                params?.specialist_agent ||
+                                payload?.specialist_agent ||
+                                actionCard?.specialist_agent ||
+                                proposal?.specialist_agent;
+                              const orchestratorAgent =
+                                params?.orchestrator_agent ||
+                                payload?.orchestrator_agent ||
+                                actionCard?.orchestrator_agent ||
+                                proposal?.orchestrator_agent;
+                              const workflowId =
+                                proposal.workflow_id ||
+                                proposal.workflowId ||
+                                message.workflow_id;
+
+                              return (
+                                <AgentProposalCard
+                                  key={proposal.id}
+                                  proposal={{
+                                    ...(payload || {}),
+                                    ...(params || {}),
+                                    specialist_agent: specialistAgent,
+                                    orchestrator_agent: orchestratorAgent,
+                                    action_card: actionCard,
+                                    id: proposal.id,
+                                    workflow_id: workflowId,
+                                    approval_status: proposal.approval_status,
+                                    type:
+                                      payload.action ||
+                                      proposal.type ||
+                                      "agent_proposal",
+                                    rationale: proposal.summary,
+                                  }}
+                                  onApprove={(_cardProposal, overrides) =>
+                                    handleApproveProposal(
+                                      {
+                                        ...proposal,
+                                        workflow_id: workflowId,
+                                      },
+                                      overrides,
+                                    )
+                                  }
+                                  onReject={() =>
+                                    handleRejectProposal({
+                                      ...proposal,
+                                      workflow_id: workflowId,
+                                    })
+                                  }
+                                  trace={[...actionTrace, ...proposalTrace]}
+                                />
+                              );
+                            })}
                           </div>
                         )}
                       </Space>

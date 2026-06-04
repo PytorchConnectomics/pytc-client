@@ -2,6 +2,12 @@ import React, { useMemo } from "react";
 import { Card, Form, Input, Button, Modal, Space, Typography, Tag } from "antd";
 import { FolderOpenOutlined, UploadOutlined } from "@ant-design/icons";
 import UnifiedFileInput from "../../components/UnifiedFileInput";
+import {
+  basename,
+  getProofreadingImagePath,
+  getProofreadingMaskPath,
+  getProofreadingProjectName,
+} from "./proofreadingPaths";
 
 const { Title, Text } = Typography;
 
@@ -65,35 +71,16 @@ function DatasetLoader({ onLoad, loading, workflow }) {
     }
   };
 
-  const basename = (value) => {
-    if (!value) return "";
-    const trimmed = String(value).replace(/\/+$/, "");
-    return trimmed.split("/").pop() || trimmed;
-  };
-
   const currentPair = useMemo(() => {
     if (!workflow) return null;
-    const imagePath =
-      workflow.image_path ||
-      workflow.dataset_path ||
-      workflow.inference_output_path ||
-      "";
-    const maskPath =
-      workflow.mask_path ||
-      workflow.corrected_mask_path ||
-      workflow.label_path ||
-      "";
+    const imagePath = getProofreadingImagePath(workflow);
+    const maskPath = getProofreadingMaskPath(workflow);
 
     if (!imagePath) return null;
     return {
       imagePath,
       maskPath,
-      projectName:
-        workflow.project_name ||
-        workflow.metadata?.project_name ||
-        workflow.metadata?.projectName ||
-        workflow.title ||
-        "Proofreading review",
+      projectName: getProofreadingProjectName(workflow),
     };
   }, [workflow]);
 
