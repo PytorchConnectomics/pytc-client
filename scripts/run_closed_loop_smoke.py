@@ -199,6 +199,25 @@ def _load_prediction_volume(
     return _apply_crop_to_array(selected, crop)
 
 
+def _summarize_model_runs(rows: Any) -> List[Dict[str, Any]]:
+    return [
+        {
+            "id": row.get("id"),
+            "run_type": row.get("run_type"),
+            "status": row.get("status"),
+            "runtime": row.get("metadata", {}).get("runtime"),
+            "output_path": row.get("output_path"),
+            "checkpoint_path": row.get("checkpoint_path"),
+            "config_path": row.get("config_path"),
+        }
+        for row in (rows or [])
+    ]
+
+
+def _latest_row(rows: List[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
+    return rows[-1] if rows else None
+
+
 def _derived_baseline_from_mask(mask: np.ndarray) -> np.ndarray:
     baseline = np.asarray(mask).copy()
     if baseline.size == 0:
@@ -355,12 +374,20 @@ def run_closed_loop_smoke(
     candidate_channel: Optional[int] = None,
     ground_truth_path: Optional[str] = None,
     ground_truth_dataset: Optional[str] = None,
+    require_explicit_ground_truth: bool = False,
+    training_iterations: Optional[int] = None,
+    inference_iterations: Optional[int] = None,
     crop: Optional[str] = None,
 ) -> Dict[str, Any]:
     output_dir.mkdir(parents=True, exist_ok=True)
     if image_path or mask_path:
         if not image_path or not mask_path:
             raise ValueError("Real-artifact mode requires both image_path and mask_path")
+        if require_explicit_ground_truth and not ground_truth_path:
+            raise ValueError(
+                "Closed-loop real-artifact mode requires explicit --ground-truth-path for "
+                "evaluation in closed-loop rehearsal mode."
+            )
         has_prediction_inputs = bool(baseline_prediction_path or candidate_prediction_path)
         if has_prediction_inputs and not (
             baseline_prediction_path and candidate_prediction_path
@@ -397,6 +424,9 @@ def run_closed_loop_smoke(
             "mask_dataset": mask_dataset,
             "ground_truth_path": ground_truth_path or mask_path,
             "ground_truth_dataset": ground_truth_dataset or mask_dataset,
+            "require_explicit_ground_truth": require_explicit_ground_truth,
+            "training_iterations": training_iterations,
+            "inference_iterations": inference_iterations,
             "baseline_prediction_path": baseline_prediction_path,
             "candidate_prediction_path": candidate_prediction_path,
             "baseline_dataset": baseline_dataset,
@@ -555,6 +585,7 @@ def run_closed_loop_smoke(
                 "checkpointPath": artifacts["checkpoint"],
                 "checkpointName": "checkpoint-smoke.pth",
                 "runtime": "simulated",
+                "iterations": training_iterations,
                 "artifact_mode": artifact_mode,
             },
         )
@@ -568,12 +599,35 @@ def run_closed_loop_smoke(
                 "outputPath": artifacts["candidate_prediction"],
                 "checkpointPath": artifacts["checkpoint"],
                 "runtime": prediction_runtime,
+                "iterations": inference_iterations,
                 "artifact_mode": artifact_mode,
                 "source_prediction_path": artifacts.get("source_candidate_prediction"),
                 "prediction_dataset": candidate_dataset,
                 "prediction_channel": candidate_channel,
             },
         )
+
+        training_runs = _request_json(
+            client.get(
+                f"/api/workflows/{workflow_id}/model-runs",
+                params={"run_type": "training"},
+            ),
+            "list training runs",
+        )
+        inference_runs = _request_json(
+            client.get(
+                f"/api/workflows/{workflow_id}/model-runs",
+                params={"run_type": "inference"},
+            ),
+            "list inference runs",
+        )
+        model_versions = _request_json(
+            client.get(f"/api/workflows/{workflow_id}/model-versions"),
+            "list model versions",
+        )
+        latest_training_run = _latest_row(training_runs)
+        latest_inference_run = _latest_row(inference_runs)
+        latest_model_version = _latest_row(model_versions)
 
         research_plan: Optional[Dict[str, Any]] = None
         if include_research_plan:
@@ -636,6 +690,32 @@ def run_closed_loop_smoke(
                 "next_required_items": readiness["next_required_items"],
             },
             "metric_summary": evaluation["metrics"]["summary"],
+            "runtime_sync": {
+                "training_runs": _summarize_model_runs(training_runs),
+                "inference_runs": _summarize_model_runs(inference_runs),
+                "model_versions": [
+                    {
+                        "id": item.get("id"),
+                        "version_label": item.get("version_label"),
+                        "status": item.get("status"),
+                        "checkpoint_path": item.get("checkpoint_path"),
+                        "training_run_id": item.get("training_run_id"),
+                    }
+                    for item in (model_versions or [])
+                ],
+            },
+            "runtime_checkpoints": {
+                "checkpoint": artifacts["checkpoint"],
+                "training_run_checkpoint": latest_training_run.get("checkpoint_path"),
+                "inference_run_checkpoint": latest_inference_run.get("checkpoint_path"),
+                "model_version_checkpoint": latest_model_version.get("checkpoint_path")
+                if latest_model_version
+                else None,
+            },
+            "runtime_overrides": {
+                "training_iterations": training_iterations,
+                "inference_iterations": inference_iterations,
+            },
             "bundle_counts": {
                 "events": len(bundle.get("events", [])),
                 "artifacts": len(bundle.get("artifacts", [])),
@@ -747,6 +827,14 @@ def main() -> int:
         help="Optional ground-truth path for evaluation. Defaults to --mask-path.",
     )
     parser.add_argument(
+        "--ground-truth-required",
+        action="store_true",
+        help=(
+            "Require explicit ground-truth path for evaluation; do not infer from "
+            "--mask-path for rehearsal runs."
+        ),
+    )
+    parser.add_argument(
         "--ground-truth-dataset",
         type=str,
         default=None,
@@ -800,6 +888,18 @@ def main() -> int:
         default=None,
         help="Optional crop like '0:8,0:256,0:256'. Use this for large volumes.",
     )
+    parser.add_argument(
+        "--training-iterations",
+        type=int,
+        default=None,
+        help="Optional training iteration override for dry-run rehearsal metadata.",
+    )
+    parser.add_argument(
+        "--inference-iterations",
+        type=int,
+        default=None,
+        help="Optional inference iteration override for dry-run rehearsal metadata.",
+    )
     args = parser.parse_args()
 
     output_dir = args.output_dir or Path(
@@ -820,6 +920,9 @@ def main() -> int:
         candidate_channel=args.candidate_channel,
         ground_truth_path=args.ground_truth_path,
         ground_truth_dataset=args.ground_truth_dataset,
+        require_explicit_ground_truth=args.ground_truth_required,
+        training_iterations=args.training_iterations,
+        inference_iterations=args.inference_iterations,
         crop=args.crop,
     )
 

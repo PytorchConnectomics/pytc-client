@@ -37,7 +37,7 @@ TOCHI-facing workflow without running full PyTC training.
 
 - Open the assistant drawer and click `Status`.
 - Confirm the assistant drawer opens with workflow context visible.
-- Open Tensorboard/Monitoring.
+- Open TensorBoard from Train Model runtime details.
 - Confirm `Review status` is visible.
 - Confirm the `Loop progress` map is visible.
 - Confirm the panel shows the next incomplete gate if the loop is not complete.

@@ -66,6 +66,25 @@ def test_closed_loop_smoke_script_accepts_real_hdf5_pair(tmp_path):
     )
 
 
+def test_closed_loop_smoke_reports_runtime_sync_and_iteration_overrides(tmp_path):
+    report = run_closed_loop_smoke(
+        pathlib.Path(tmp_path / "smoke"),
+        training_iterations=9,
+        inference_iterations=3,
+    )
+
+    assert report["runtime_overrides"]["training_iterations"] == 9
+    assert report["runtime_overrides"]["inference_iterations"] == 3
+    assert isinstance(report["runtime_sync"]["training_runs"], list)
+    assert isinstance(report["runtime_sync"]["inference_runs"], list)
+    assert isinstance(report["runtime_sync"]["model_versions"], list)
+    assert "checkpoint" in report["runtime_checkpoints"]
+    assert report["runtime_checkpoints"]["checkpoint"]
+    assert report["runtime_checkpoints"]["training_run_checkpoint"]
+    assert report["runtime_checkpoints"]["inference_run_checkpoint"]
+    assert "id" in report["runtime_sync"]["model_versions"][0]
+
+
 def test_closed_loop_smoke_script_accepts_real_hdf5_predictions(tmp_path):
     image_path = tmp_path / "image.h5"
     mask_path = tmp_path / "mask.h5"
@@ -112,6 +131,21 @@ def test_closed_loop_smoke_script_accepts_real_hdf5_predictions(tmp_path):
         item.startswith("baseline/candidate predictions derived")
         for item in report["simulated_or_not_exercised"]
     )
+
+
+def test_closed_loop_smoke_requires_explicit_ground_truth_in_real_pair_mode(tmp_path):
+    image_path = tmp_path / "image.tif"
+    mask_path = tmp_path / "mask.tif"
+    image_path.write_text("image", encoding="utf-8")
+    mask_path.write_text("mask", encoding="utf-8")
+
+    with pytest.raises(ValueError, match="explicit --ground-truth-path"):
+        run_closed_loop_smoke(
+            pathlib.Path(tmp_path / "smoke"),
+            image_path=str(image_path),
+            mask_path=str(mask_path),
+            require_explicit_ground_truth=True,
+        )
 
 
 def test_closed_loop_smoke_accepts_channel_first_pytc_predictions(tmp_path):
