@@ -5,6 +5,36 @@ Local backlog for ideas, follow-ups, and possible improvements discovered while 
 ## Candidate Items
 
 - Keep this list lightweight: add items here when they are useful but not part of the current task.
+- Set up project and model config for the Yixiao case study. Initial case-study
+  project is now assembled at
+  `/home/weidf/demo_data/yixiao_tapereader_xri_case_study`; remaining work is
+  validating an exact barcode-branch PyTC runtime or explicitly using the
+  app-compatible fallback config for workflow-only demonstrations.
+- Formalize the progress tracking implementation.
+
+## Deep Research Synthesis Backlog - 2026-05-24
+
+### Highest Priority
+
+- Make workflow-agent intent contracts single-source: prompt-listed intents, validation allowlists, handlers, and tests should be generated from one typed registry.
+- Replace fragmented agent actions/client effects/durable commands/runtime actions with one `ActionExecution` envelope and state machine.
+- Stop treating chat/session storage as project memory. Hydrate the big workflow chat and mounted project state from server workflow records, with browser storage only as a display cache.
+- Promote project context into structured project memory: project facts, artifact index, per-volume state, run history, and evidence events.
+- Make multi-volume training sets a real artifact with PyTC-compatible representation and dry-run loader validation before launch.
+
+### Product / HCI Direction
+
+- Keep visible assistant messages conversational and short; put mechanics in expandable "What I checked" traces.
+- Replace blank project-context intake with inspect-first onboarding that asks concrete follow-up questions only when auto-detected facts are missing or ambiguous.
+- Treat Progress as the main project control surface: row actions for view, proofread, mark ground truth, infer missing, ignore, and train on selected.
+- Add task-family presets for semantic mitochondria, instance mitochondria, neuron affinity, synaptic clefts, and nuclei workflows so the UI does not flatten distinct PyTC pipelines into generic "segmentation."
+- Plan region-level and `valid_mask` support so partially proofread areas can become training-ready without marking a whole volume as complete.
+
+### Paper / Study Support
+
+- Frame the system around workflow coordination and handoff support, not segmentation-model novelty.
+- Add evidence export for project facts, status transitions, proposals, approvals, run configs, logs, metrics, and artifacts.
+- Avoid claims about accuracy/workload/generalization until backed by study evidence.
 
 ## Codebase Audit Backlog - 2026-04-13
 

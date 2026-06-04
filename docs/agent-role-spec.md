@@ -308,3 +308,17 @@ Implemented UI commitments:
 - Backend agent logs should include the chosen intent, recommendation decision,
   action ids/labels, command ids/titles, and blocker list so mismatched cards
   can be debugged from `.logs/app/app-events.jsonl`.
+
+## 2026-06-04 Yixiao TapeReader Action Bounds
+
+- For TapeReader/XRI fibre projects, visualization should prioritize explicit
+  workflow selection: when `image_path` and `label_path` are concrete files, the
+  selected pair must be opened before fallback pair auto-selection.
+- Proofread launch should prefer draft masks first:
+  `corrected_mask_path` → `inference_output_path` → `mask_path` → `label_path`.
+- TapeReader training must not use raw prediction masks as labels. In this project
+  family, training requires confirmed labels or saved proofreading edits; if absent,
+  the agent should block with the correction/path-finding prompt.
+- Inference can only be proposed for image-only targets when a checkpoint exists.
+- Evaluation can only run when all required compare inputs exist: previous result,
+  new result, and reference mask.

@@ -2,6 +2,41 @@
 
 Local working log for Codex sessions on `pytc-client`.
 
+## 2026-06-04
+
+- Hardened agent proposal UX in chat for safer approval workflows:
+  - made proposal fields editable before approval via a visible `Edit details` action and clickable field values;
+  - ensured approved/rejected proposal cards remain locked (approve/reject disabled, no active edit mode).
+  - reduced long label clipping risk with wrapping-safe proposal header, type tag, field, and agent badge styles.
+  - propagated specialist agent metadata from proposal payload/action_card so non-PM badges render in chat cards.
+  - extended/updated focused React tests for edit-before-approve, disabled after decision, long-label/wrapping, and specialist badge behavior.
+  - verified with:
+    - `npm --prefix client test -- --watchAll=false --runInBand --runTestsByPath src/components/chat/AgentProposalCard.test.js src/__tests__/agentProposalCards.test.js src/components/Chatbot.test.js`.
+
+- Audited and stabilized the Yixiao browser smoke script at
+  `scripts/browser_yixiao_case_study_smoke.py`:
+  - fixed parser/help string syntax;
+  - fixed Playwright runtime validation flow (now uses an active Playwright context correctly);
+  - added an explicit install remediation message (`python3 -m pip install playwright` + `python3 -m playwright install chromium`).
+- Added focused unit coverage for smoke parser helpers in
+  `tests/test_browser_yixiao_case_study_smoke.py`:
+  - viewport parsing behavior,
+  - progress-text extraction (`10/6/2/2`, `60%`, `80%`),
+  - default arg parsing.
+- Documented browser smoke usage and operator-facing dependency gap in
+  `docs/manual-yixiao-case-study-demo.md`.
+
+- Refined Yixiao readiness taxonomy into explicit go/no-go gates for a one-hour case-study launch:
+  - baseline project state, agent context, approval-gated training proposal, proofread promotion, closed-loop rehearsal, real artifact production, export bundle health, and live demo health.
+- Added explicit claim boundary in paper-readiness plan: what can be claimed from the current prototype versus after real train/infer/eval closure.
+- Updated the Yixiao demo manual with a launch acceptance checklist and revised claim-tier language for facilitators.
+- Added one API gate-coverage regression test in `tests/test_workflow_case_study_acceptance.py` to assert readiness endpoint has all required gate IDs.
+- Added workflow evidence/export hardening:
+  - exported paths now retain provenance (`source_type`, `source_key`, `sources`) and copy-policy metadata;
+  - proposal/approval links and user status-change history are surfaced in evidence summaries;
+  - held-out/withheld ground-truth paths are treated as reference-only by default during bundle copy, while still being fully represented in `artifact_paths`;
+  - added focused bundle/artifact regression coverage for Yixiao-style `withheld_ground_truth` references.
+
 ## 2026-04-10
 
 - Created this local-only progress log outside the repo Git root.
@@ -731,3 +766,863 @@ Local working log for Codex sessions on `pytc-client`.
   - `npm run build` passed with only existing EHTool hook dependency warnings;
   - deployed frontend bundle `main.3cb1a337.js` to `/var/www/demo.seg.bio`;
   - verified API `/health`, worker `/hello`, and idle worker `/training_status`.
+
+## 2026-05-05 - Add Mechanical Project Context Audits
+
+- Added a bounded project scan audit that samples readable volume files instead of relying only on file names or user prose.
+- Backend project profiles now include `audit` / `schema.audit` with:
+  - sampled HDF5/TIFF volume metadata and simple statistics;
+  - image/mask pair shape checks;
+  - warnings for unreadable, empty, all-zero, or low-dynamic-range sampled data;
+  - source-tagged `context_facts`, currently including voxel size pulled from volume metadata attributes.
+- Project context defaults now prefer high-confidence audit facts over stale text/default hints, so metadata can correct bad scales before the workflow starts.
+- Project setup UI now shows a "What I checked automatically" panel with audited volume counts, pair checks, source-tagged facts, and warnings/errors.
+- Persisted `.pytc_project_context.json` now carries `project_audit` and `context_facts` so the workflow assistant can reference mechanically verified project facts later.
+- Verification:
+  - `.venv/bin/python -m pytest tests/test_file_workspace_routes.py -q` passed: 15 tests;
+  - `npm test -- --runTestsByPath src/utils/projectSuggestions.test.js src/views/FilesManager.test.js --watchAll=false` passed: 23 tests, with existing React `act(...)` warnings from file-loading effects;
+  - `npm run build` passed with the existing EHTool hook dependency warnings;
+  - deployed frontend bundle `main.5c07d5d9.js` to `/var/www/demo.seg.bio`;
+  - restarted the public demo API as PID `2188115` on port `4342` with `PYTC_ALLOWED_ORIGINS=https://demo.seg.bio,...`;
+  - remounted `mitoem2_progress_demo` as root item `1`;
+  - verified public `/api/health`, root files, worker `/hello`, and project suggestions with audit summary `{audited_volumes: 10, pair_checks: 4, warnings: 0, errors: 0}`.
+
+## 2026-05-05 - Replace Blank Project Setup Prompt With Guided Context
+
+- Removed the stranded blank first step for mounted projects when the app already has enough detected context.
+- Project setup now:
+  - jumps directly to the mapping/start confirmation when modality, target, voxel size, and image data are already inferred;
+  - otherwise shows a guided "Project basics" checklist for modality, target, and voxel size;
+  - keeps free-text as an optional note instead of the primary required input.
+- Backend project suggestions now use a lightweight audit summary:
+  - still checks metadata, image/mask pair shapes, findings, and context facts;
+  - avoids full sample statistics and bulky per-volume payloads while rendering the project list.
+- Project scanning now ignores transient runtime config files like `.__pytc_runtime_training_*.yaml`.
+- Verification:
+  - `.venv/bin/python -m pytest tests/test_file_workspace_routes.py -q` passed: 15 tests;
+  - `npm test -- --runTestsByPath src/utils/projectSuggestions.test.js src/views/FilesManager.test.js --watchAll=false` passed: 24 tests, with existing React `act(...)` warnings from file-loading effects;
+  - `npm run build` passed with the existing EHTool hook dependency warnings;
+  - deployed frontend bundle `main.32c3c460.js` to `/var/www/demo.seg.bio`;
+  - restarted the public demo API as PID `2335698` on port `4342`;
+  - verified public `/api/health`, root files, worker `/hello`, and project suggestions returning in roughly `0.27s` with MitoEM2 audit summary `{audited_volumes: 10, pair_checks: 4, warnings: 0, errors: 0}`.
+
+## 2026-05-23 - Sunset Monitor Tab
+
+- Removed the Monitor module from the top navigation and stopped mounting the standalone Monitoring view.
+- Retargeted legacy `navigate_to: monitoring` client effects to Train Model so older agent cards or saved actions do not strand users on a removed screen.
+- Updated workflow-agent monitor/log/TensorBoard actions to open Train Model runtime details instead of proposing an "Open Monitor" card.
+- Verification:
+  - `.venv/bin/python -m py_compile server_api/workflows/router.py` passed;
+  - `npm test -- --runTestsByPath src/views/Views.test.js --watchAll=false` passed: 6 tests;
+  - `npm run build` passed with the existing EHTool hook dependency warnings;
+  - deployed frontend bundle `main.a299bdfd.js` to `/var/www/demo.seg.bio`;
+  - restarted the public demo API as PID `1118358` on port `4342`;
+  - verified public `/api/health`.
+
+## 2026-05-23 - Soften Workflow Agent Chat Tone
+
+- Replaced the most robotic canned workflow-agent responses:
+  - removed "The next useful move looks like..." from greeting/status-style paths;
+  - changed greeting replies from status-template language to conversational guidance;
+  - softened "workflow checks are ready" and style-feedback acknowledgements.
+- Kept mechanical details in the expandable evidence/status surfaces rather than front-loading them in the chat response.
+- Verification:
+  - `.venv/bin/python -m py_compile server_api/workflows/router.py` passed;
+  - `.venv/bin/python -m pytest tests/test_workflow_routes.py -q` passed: 46 tests;
+  - restarted `pytc-demo@pytc-client-demo2.service` and `pytc-worker-demo2.service`;
+  - verified public `/api/health`;
+  - verified local demo workflow-agent greeting returns: "Hey. We are still in proofreading. I would probably keep proofreading likely mistakes. I can open the right screen, walk through what I am seeing, or help decide the next step."
+
+## 2026-05-23 - Technical Incongruity Pass
+
+- Fixed a sunset-monitoring inconsistency:
+  - the top-level Monitor tab was already gone, but chatbot/RAG help still described a standalone TensorBoard/Monitoring page;
+  - updated `Monitoring.md`, `GettingStarted.md`, `rag_eval.py`, and the manual checklist so user-facing help now points to Train Model runtime details instead.
+- Fixed the Train Model completion card's TensorBoard button:
+  - it had become a no-op that navigated back to Train Model;
+  - it now starts TensorBoard for the resolved training output path, stores the returned URL in app context, and opens it in a new tab when available.
+- Verification:
+  - `npm test -- --runInBand src/contexts/WorkflowContext.test.js src/components/Chatbot.test.js src/views/Views.test.js src/views/FilesManager.test.js src/utils/projectSuggestions.test.js` passed: 67 tests, with existing FilesManager `act(...)` warnings;
+  - `CI=true npm test -- --runInBand src/views/ModelTraining.js src/views/Views.test.js src/components/Chatbot.test.js` passed the matching test suites: 31 tests;
+  - `CI=true npm run build` passed with existing EHTool hook dependency warnings;
+  - `.venv/bin/python -m py_compile server_api/workflows/router.py server_api/auth/router.py server_api/main.py` passed;
+  - direct backend `pytest` without the venv used system Python 2 and failed at collection; venv-targeted workflow tests were attempted but timed out while executing the selected agent-query test.
+
+## 2026-05-24 - Deep Technical Audit Report
+
+- Created `docs/research/internal-technical-audit-2026-05-24.md` as a broad internal audit of the current agentic PyTC client.
+- Covered frontend workflow surfaces, backend workflow orchestration, project ingestion/context, training/runtime launch, proofread/EHTool persistence, logging/observability, and UI streamlining.
+- Key risks called out:
+  - workflow semantic intent prompt/schema drift rejects valid LLM intents;
+  - app boot still clears mounted file/workflow state in places that conflict with continuous workflow memory;
+  - workflow-agent routing captures nearly every chat message once a workflow exists, starving general help/RAG;
+  - training subset staging points PyTC at directories, which can reproduce the previous "unrecognizable file format" failure;
+  - chat/action execution remains split across multiple command/action paths;
+  - project context and proofread artifacts are still sidecar-heavy rather than a first-class project memory model.
+- UI and agent expansion notes include guided context intake, richer progress row actions, explicit agent readouts, traceable tool probes, continuous chat hydration, and a unified action proposal model.
+- Verification:
+  - `.venv/bin/python -m py_compile server_api/workflows/router.py server_api/auth/router.py server_api/main.py server_pytc/services/model.py server_api/ehtool/router.py server_api/ehtool/data_manager.py runtime_settings.py app_event_logger.py` passed;
+  - `CI=true npm test -- --runInBand src/views/Views.test.js src/components/Chatbot.test.js src/views/FilesManager.test.js src/utils/projectSuggestions.test.js` passed: 55 tests, with existing FilesManager `act(...)` warnings;
+  - `CI=true npm run build` passed with existing EHTool hook dependency warnings and bundle-size warnings;
+  - `.venv/bin/python -m pytest tests/test_workflow_routes.py tests/test_file_workspace_routes.py -q` passed: 61 tests, with existing framework deprecation warnings.
+
+## 2026-05-24 - Deep Research Synthesis And Semantic Intent Hardening
+
+- Synthesized the user-provided deep research report into `docs/research/deep-research-engineering-synthesis-2026-05-24.md`.
+- Updated `docs/codex-working-memory/backlog.md` with research-driven engineering priorities:
+  - structured project memory as the core state model;
+  - one approval-gated action execution envelope;
+  - server-backed continuous workflow chat and project hydration;
+  - first-class per-volume state and multi-volume training artifacts;
+  - conversational visible agent responses with mechanics in expandable traces;
+  - task-family presets and eventual `valid_mask`/region-level support.
+- Fixed the semantic workflow router prompt/validator mismatch:
+  - introduced `SEMANTIC_WORKFLOW_INTENT_ORDER` as the prompt source of truth;
+  - derived `SEMANTIC_WORKFLOW_INTENTS` from it;
+  - included `style_feedback`, `project_files`, and `project_progress` so LLM classifications for those prompt-listed intents are no longer discarded.
+- Added a regression test asserting the semantic prompt intent list and validation set stay aligned.
+- Verification:
+  - `.venv/bin/python -m py_compile server_api/workflows/router.py tests/test_workflow_routes.py` passed;
+  - `.venv/bin/python -m pytest tests/test_workflow_routes.py -k "semantic_workflow_intents or project_file_overview or opens_project_progress or style_feedback" -q` passed: 3 tests, with existing framework deprecation warnings;
+  - `.venv/bin/python -m pytest tests/test_workflow_routes.py -q` passed: 47 tests, with existing framework deprecation warnings.
+
+## 2026-05-24 - Code Sweep Bug Fix Pass
+
+- Fixed app boot wiping useful state:
+  - removed the frontend `CacheBootstrapper` that reset file state before rendering;
+  - restored localforage-backed hydration/persistence for global app state, while leaving the live Neuroglancer viewer object non-persisted;
+  - changed workflow boot from "start a fresh workflow on every reload" to resuming the current workflow session.
+- Kept explicit resets explicit:
+  - `startNewWorkflow` and agent `start_new_workflow` effects still reset the file workspace and local workflow inputs before creating a new workflow;
+  - the workspace reset route now preserves mounted-source `.pytc_project_context.json` sidecars instead of deleting project context during cleanup.
+- Fixed workflow chat continuity:
+  - added `GET /api/workflows/{workflow_id}/agent/conversation`;
+  - hydrated the big workflow chat from the latest server-side workflow-agent conversation when reopening the panel in the same workflow session.
+- Fixed over-eager workflow-agent routing:
+  - general conceptual questions now stay on the regular chatbot/RAG path;
+  - project/file/data/workflow questions and workflow follow-ups still route to the workflow agent.
+- Reduced debug noise:
+  - gated verbose training/inference client API logs behind `REACT_APP_DEBUG_API_LOGS`;
+  - removed EHTool module-load prints and replaced a layer-preview failure print with structured event logging.
+- Confirmed the existing training-subset path expansion test passes, covering the earlier "unrecognizable file format for .../image" failure mode.
+- Verification:
+  - `.venv/bin/python -m py_compile server_api/workflows/router.py server_api/auth/router.py server_api/ehtool/router.py` passed;
+  - `.venv/bin/python -m pytest tests/test_workflow_routes.py tests/test_file_workspace_routes.py -q` passed: 63 tests, with existing framework deprecation warnings;
+  - `CI=true npm test -- --runInBand src/contexts/WorkflowContext.test.js src/components/Chatbot.test.js` passed: 38 tests, with one existing intentional network-error warning;
+  - `CI=true npm run build` passed with existing browser-data, EHTool hook dependency, and bundle-size warnings;
+  - `CI=true npm test -- --runInBand src/views/Views.test.js src/views/FilesManager.test.js src/utils/projectSuggestions.test.js` passed: 30 tests, with existing FilesManager `act(...)` warnings;
+  - `.venv/bin/python -m pytest tests/test_pytc_runtime_routes.py -k training_subset -q` passed: 1 test, with existing framework deprecation warnings.
+
+## 2026-05-24 - Paper Readiness Production Plan
+
+- Created `docs/codex-working-memory/paper-readiness-production-plan.md` as the detailed bridge from the current prototype to the paper-implied final product.
+- The plan defines:
+  - the core product contract for a production-shaped human-agent segmentation workflow;
+  - the paper claim contract mapping claims to required system evidence;
+  - P0/P1 readiness gates;
+  - three case-study placeholders for guided intake, proofreading/data curation, and closed-loop training/inference/evaluation;
+  - twelve implementation workstreams with concrete action items, verification gates, and paper evidence outputs;
+  - milestone ordering from state foundation through paper freeze;
+  - a final readiness checklist for claim-to-evidence alignment.
+
+## 2026-05-24 - Backend Volume State And Project Management Hardening
+
+- Added durable workflow-level volume state:
+  - introduced `workflow_volume_states` with one row per workflow volume;
+  - stores status, provenance/source, confidence, image/label/prediction/corrected-mask paths, training eligibility, inference eligibility, notes, metadata, and event linkage;
+  - exposes volume state in workflow export bundles so paper/evidence snapshots include the actual project status map.
+- Hardened the project progress loop:
+  - project-progress refresh now syncs derived volume rows into durable volume state;
+  - manual progress/status edits are preserved as manual volume-state overrides instead of being overwritten by rescans;
+  - progress rows now include durable volume-state ids plus training/inference eligibility flags.
+- Added backend APIs for the workflow loop:
+  - `GET /api/workflows/{workflow_id}/volumes` refreshes and returns canonical workflow volume state with summary counts;
+  - `PATCH /api/workflows/{workflow_id}/volumes` updates one volume's status, paths, eligibility, note, and metadata while appending a workflow event.
+- Added a user-scoped mounted-project inventory:
+  - `GET /users/me/projects` returns the current user plus mounted project roots owned by that user, indexed file/folder counts, and a summary project profile.
+- Updated the production plan so its backend endpoint checklist matches the implemented workflow-scoped API surface.
+- Verification:
+  - `.venv/bin/python -m py_compile server_api/workflows/db_models.py server_api/workflows/service.py server_api/workflows/bundle_export.py server_api/workflows/router.py server_api/auth/models.py server_api/auth/router.py` passed;
+  - `.venv/bin/python -m pytest tests/test_workflow_routes.py -k "project_progress_counts or workflow_volume_state_api" -q` passed: 2 tests, with existing framework deprecation warnings;
+  - `.venv/bin/python -m pytest tests/test_file_workspace_routes.py -k "users_me_projects" -q` passed: 1 test, with existing framework deprecation warnings;
+  - `.venv/bin/python -m pytest tests/test_workflow_routes.py tests/test_file_workspace_routes.py tests/test_workflow_export_bundle.py -q` passed: 66 tests, with existing framework deprecation warnings.
+
+## 2026-05-24 - Canonical Workflow Overview Surface
+
+- Formalized workflow progress display around one backend overview object:
+  - added `GET /api/workflows/{workflow_id}/overview`;
+  - overview includes current phase, phase reason, volume summary, full project progress snapshot, workflow stages, blockers, recommended next actions, active runs, and recent events;
+  - derives from the same workflow/project-progress/model-run/event state that the agent and progress tables use.
+- Updated frontend workflow state:
+  - `WorkflowContext` now refreshes and stores `workflowOverview`;
+  - overview refresh also hydrates the existing `projectProgress` cache when returned;
+  - project progress status changes refresh the overview so manual volume edits are reflected in the shared state map.
+- Reworked the visible workflow UI:
+  - top navigation now has an always-visible workflow overview strip showing project name, phase, GT/draft/missing counts, blocker/run state, and the top next action;
+  - renamed the old `Progress` tab to `Workflow`;
+  - the page title is now `Workflow Overview` and includes phase/stage tiles, blockers, recommended next moves, completion summary, and the volume table;
+  - chat drawer's old `Status` toggle is now `Evidence`, keeping traces/details separate from canonical workflow state.
+- Verification:
+  - `.venv/bin/python -m py_compile server_api/workflows/router.py` passed;
+  - `.venv/bin/python -m pytest tests/test_workflow_routes.py -k "workflow_overview or project_progress_counts or workflow_volume_state_api" -q` passed: 3 tests, with existing framework deprecation warnings;
+  - `CI=true npm test -- --runInBand src/views/Views.test.js src/views/ProjectProgress.test.js src/contexts/WorkflowContext.test.js src/components/Chatbot.test.js` from `client/` passed: 46 tests, with the existing intentional workflow-event network warning;
+  - `.venv/bin/python -m pytest tests/test_workflow_routes.py tests/test_file_workspace_routes.py tests/test_workflow_export_bundle.py -q` passed: 67 tests, with existing framework deprecation warnings;
+  - `CI=true npm run build` from `client/` passed with existing browser-data, EHTool hook dependency, and bundle-size warnings.
+
+## 2026-05-24 - Deploy Workflow Overview To demo.seg.bio
+
+- Deployed the current React build to `/var/www/demo.seg.bio`.
+- Restarted `pytc-demo@pytc-client-demo2.service` so the new workflow overview API is live.
+- Verification:
+  - `https://demo.seg.bio/` serves `static/js/main.1166f4b3.js`;
+  - `https://demo.seg.bio/api/health` returns `{"status":"ok"}`;
+  - `https://demo.seg.bio/api/api/workflows/current` returns the active workflow;
+  - `https://demo.seg.bio/api/api/workflows/167/overview` returns the new overview payload with phase `proofread`, volume summary, project progress, blockers/actions, and recent events.
+
+## 2026-05-24 - Remove Assistant Evidence Drawer
+
+- Removed the assistant drawer's local `Evidence`/timeline panel so the chat surface stays focused on plain conversation, action cards, proposals, and expandable per-message traces.
+- Redirected legacy `show_workflow_context` client effects to the main `Workflow` page instead of opening a hidden drawer-specific context panel.
+- Kept workflow state and provenance anchored in the app-level workflow surfaces rather than duplicating them in the chat header.
+- Verification:
+  - `CI=true npm test -- --runInBand src/components/Chatbot.test.js src/views/Views.test.js` from `client/` passed: 32 tests;
+  - `CI=true npm run build` from `client/` passed with existing browser-data, EHTool hook dependency, and bundle-size warnings;
+  - deployed the new React bundle to `/var/www/demo.seg.bio`;
+  - `https://demo.seg.bio/` serves `static/js/main.d076d1c1.js`;
+  - `https://demo.seg.bio/api/health` returns `{"status":"ok"}`;
+  - verified the served bundle no longer contains `Hide Evidence`, `Show timeline`, `Hide timeline`, `forceShowWorkflowInspector`, or `onWorkflowInspectorConsumed`.
+
+## 2026-05-24 - Yixiao TapeReader XRI Case Study Fixture
+
+- Located the XRI data backing the older `view.seg.bio` visualization demo at `/home/weidf/Downloads/PT37_round2`.
+- Cloned `https://github.com/LinghuLab/TapeReader` into `/home/weidf/reference_repos/TapeReader` and inspected the pipeline/PyTC configs.
+- Assembled a current-app case-study project at `/home/weidf/demo_data/yixiao_tapereader_xri_case_study`:
+  - 10 PT37 round-2 XRI raw TIFF volumes;
+  - 6 ground-truth volumes matching the TapeReader training split (`1`, `2`, `3`, `4_1`, `4_2`, `4_3`);
+  - 2 draft-mask volumes for proofreading (`5_1`, `5_2`);
+  - 2 image-only inference targets (`6_1`, `6_2`) with masks withheld outside the project root at `/home/weidf/demo_data/yixiao_tapereader_xri_case_study_holdout_masks`.
+- Added project-facing artifacts:
+  - `project_manifest.json` with TapeReader/paper provenance, volume state, source paths, label counts, and voxel size `40 x 16.3 x 16.3 nm`;
+  - `configs/TapeReader-Fiber-BCS-Original-Barcode.yaml`, preserving the paper pipeline's PyTC target list `["0", "4-0-1", "a-0-40-16-16"]`;
+  - `configs/TapeReader-Fiber-BCS-AppCompat-Sanity.yaml`, using a current PyTC-compatible fallback target list `["0", "4-0-1", "5-2d-1-0-1.0-0"]`;
+  - `configs/tapereader_pipeline_config.yaml`, `README.md`, case-study notes, copied TapeReader source/config references, a reset script, and an initial-state metadata snapshot.
+- Added the Yixiao project to backend project suggestions so it can be mounted from the app.
+
+### 2026-05-24 - Yixiao TapeReader XRI Case Study Verification
+- Hardened `/home/weidf/demo_data/yixiao_tapereader_xri_case_study/reset_to_initial.sh` to use the demo app venv when regenerating CLAHE training inputs, so reset does not depend on ambient `python` packages.
+- Verified fixture counts after reset: 10 raw volumes, 8 visible segmentation masks, 12 PyTC training files, and 10 withheld masks in `/home/weidf/demo_data/yixiao_tapereader_xri_case_study_holdout_masks`.
+- Verified manifest split remains 6 ground-truth volumes, 2 draft/needs-proofreading volumes, and 2 image-only/missing-segmentation volumes.
+- Verified both TapeReader YAML configs parse and load through the local PyTC config loader. The app-compatible sanity target builds local PyTC training targets on a crop; the original barcode-branch target intentionally fails under bundled current PyTC with `Target option a is not valid`, preserving the known compatibility boundary.
+- Restarted the live `pytc-demo@pytc-client-demo2.service` process via systemd auto-restart and confirmed `https://demo.seg.bio/api/files/project-suggestions` now includes `yixiao-tapereader-xri-case-study`.
+## 2026-05-24 - Guided Project Context Intake Pass
+
+- Reworked mounted-project setup toward inspect-first guided confirmation:
+  - added a detected-data summary showing image, mask, prediction, config, and checkpoint counts;
+  - added quick confirmation chips for task family, mask readiness, image-only volume behavior, and training policy;
+  - persisted those confirmations into project context/profile memory so they can be reused by the workflow agent and future setup passes.
+- Improved XRI/TapeReader context handling:
+  - frontend context inference now recognizes XRI / X-ray microscopy and fibres/CytoTape;
+  - Yixiao project suggestions now carry task-family, mask-state, image-only strategy, and training-policy hints;
+  - fixed suggestion hint merging so hand-authored case-study hints override noisy scanned text rather than being overwritten by it.
+- Softened required agent context collection:
+  - the workflow agent no longer requires generic speed-vs-accuracy as a hard prerequisite;
+  - it asks for concrete project facts like imaging modality and target structure, with XRI/fibre examples.
+- Verification:
+  - `CI=true npm test -- --runInBand src/views/FilesManager.test.js src/utils/projectSuggestions.test.js --watchAll=false` passed: 25 tests, with existing FilesManager React `act(...)` warnings;
+  - `.venv/bin/python -m py_compile server_api/auth/router.py server_api/workflows/router.py` passed;
+  - `.venv/bin/python -m pytest tests/test_workflow_routes.py -k "project_context or train_short_phrases or stores_context" -q` passed: 3 tests, with existing framework deprecation warnings;
+  - `CI=true npm run build` passed with existing EHTool hook dependency and bundle-size warnings;
+  - deployed frontend bundle `main.46186d5c.js` to `/var/www/demo.seg.bio`;
+  - restarted the public demo API as PID `4107560` and verified `https://demo.seg.bio/api/health`;
+  - verified public Yixiao project suggestion context now reports XRI fibre instance segmentation, 40 x 16.3 x 16.3 nm, mixed masks/image-only volumes, and GT-only training policy.
+
+## 2026-05-24 - Canonical Project Memory Endpoint
+
+- Added a backend project-memory read model for the workflow agent and UI to share:
+  - `project_facts` with mounted path, project context, audit facts, and task-family preset;
+  - `artifact_index` with canonical paths and registered workflow artifacts;
+  - `volume_states` with summary, items, and progress snapshot;
+  - `run_history` and `evidence_events` for provenance-aware answers and action proposals.
+- Added task-family presets for TapeReader/XRI fibre, MitoEM-style mitochondria instance segmentation, and generic volumetric segmentation so the agent does not treat every project as the same generic task.
+- Exposed `GET /api/workflows/{workflow_id}/memory` and records a `workflow_project_memory/project_memory_refreshed` event when refreshed.
+- Verification:
+  - `.venv/bin/python -m py_compile server_api/workflows/router.py server_api/auth/router.py` passed;
+  - `.venv/bin/python -m pytest tests/test_workflow_routes.py -q` passed: 51 tests, with existing framework deprecation warnings;
+  - `CI=true npm test -- --runInBand src/views/FilesManager.test.js src/utils/projectSuggestions.test.js --watchAll=false` passed: 25 tests, with existing FilesManager React `act(...)` warnings;
+  - restarted the public demo API and verified `https://demo.seg.bio/api/health`;
+  - verified `https://demo.seg.bio/api/api/workflows/168/memory` returns `pytc-project-memory/v1` with canonical paths, task-family preset, volume states, and evidence events.
+
+## 2026-05-24 - Agent Context And Tone Integration
+
+- Fed richer canonical context into semantic intent routing:
+  - task family, mask status, image-only strategy, training policy, and project-progress summary now appear in the workflow state sent to intent classification;
+  - server-side casual context extraction now recognizes XRI/X-ray, CytoTape fibres, mixed masks/image-only projects, and GT-only training policy.
+- Softened front-facing workflow-agent responses:
+  - project-context answers now read as a short human summary of the current project, paths, tracker counts, and likely next move;
+  - generic follow-up answers no longer end with the stiff "I will not launch..." template;
+  - capabilities copy now emphasizes natural requests plus reviewable app-action cards.
+- Verification:
+  - `.venv/bin/python -m py_compile server_api/workflows/router.py server_api/auth/router.py` passed;
+  - `.venv/bin/python -m pytest tests/test_workflow_routes.py -q` passed: 51 tests, with existing framework deprecation warnings;
+  - restarted the public demo API as PID `4164882` and verified `https://demo.seg.bio/api/health`;
+  - verified live workflow-agent response for `what project are we looking at?` returns a concise project summary and tracker counts rather than the old status-template response.
+
+## 2026-05-27 - Yixiao Case Study Live Prep And Smoke Test
+
+- Mounted `/home/weidf/demo_data/yixiao_tapereader_xri_case_study` as the active demo2 project and reset the live workflow to `170` with Yixiao/TapeReader context:
+  - active raw root `data/raw`;
+  - active segmentation root `data/seg`;
+  - active config `configs/TapeReader-Fiber-BCS-AppCompat-Sanity.yaml`;
+  - voxel spacing `40 x 16.3 x 16.3 nm`;
+  - project split: 10 tracked volumes, 6 confirmed ground truth, 2 draft masks needing proofreading, 2 image-only inference targets.
+- Hardened mounted-project ingestion for manifest-backed case studies:
+  - the scanner now uses `project_manifest.json` to seed canonical image/label/config roots before noisy derivative folders like `data/pytc_train`;
+  - manifest-declared image/label pairs are included in project audits before the sample budget is filled;
+  - nested XRI raw/mask folders now pair by matching per-volume folder IDs, so `data/raw/5_1/...` maps to `data/seg/5_1/...`.
+- Hardened Neuroglancer volume-pair diagnostics:
+  - single image/single label fallback pairs no longer report the same selected image as unpaired;
+  - added a regression test for that fallback path.
+- Smoke-tested the live demo2 stack:
+  - systemd services `pytc-demo@pytc-client-demo2.service` and `pytc-worker-demo2.service` are active;
+  - `http://127.0.0.1:4342/health` and `https://demo.seg.bio/api/health` return `{"status":"ok"}`;
+  - public project suggestions include `yixiao-tapereader-xri-case-study` and report it as already mounted;
+  - public progress endpoint reports 10 tracked volumes, 6 ground truth, 2 needs-proofreading, 2 missing segmentation, 60% completion, and 80% segmentation coverage;
+  - workflow agent answers `what project are we looking at?` with XRI/CytoTape context and the 6/2/2 tracker readout;
+  - workflow agent stages a review-gated training action from the 6 fully good masks and preserves the 2 draft masks plus 2 image-only targets in the generated subset manifest;
+  - Neuroglancer route opens the first Yixiao image/mask pair at `40,16.3,16.3` nm and returns a live `/neuroglancer/v/...` URL.
+- Verification:
+  - `.venv/bin/python -m py_compile server_api/auth/router.py server_api/workflows/router.py server_api/workflows/volume_pairs.py` passed during the pass;
+  - targeted file-workspace manifest/profile tests passed;
+  - targeted project-progress nested XRI pairing test passed;
+  - `tests/test_neuroglancer_volume_normalization.py` passed: 12 tests.
+- Caveat:
+  - FastAPI `TestClient` endpoint smoke tests still hang in this environment even for `/health`, so live local/public HTTP smoke checks were used for route-level verification.
+
+## 2026-05-27 - Agentic Workflow Deep Research Brief
+
+- Added `docs/research/deep-research-agentic-workflow-formalization-2026-05-27.md`.
+- The brief asks a follow-on Codex/deep-research agent to investigate how to formalize the app's agentic implementation into a workflow-aware, approval-gated project operator for biomedical image segmentation.
+- It includes:
+  - local repo/data context for demo2;
+  - MitoEM/MitoEM2, Yixiao/TapeReader XRI, and third-case-study placeholders;
+  - code areas to inspect;
+  - literature areas to review;
+  - required deliverable structure for project memory schema, action cards, state machine, context elicitation, evaluation plan, and engineering roadmap.
+
+## 2026-05-27 - Yixiao Repeatable Demo Harness
+
+- Added `scripts/run_yixiao_case_study_smoke.py`, a live API harness for the Yixiao/TapeReader XRI case study.
+- The harness can prepare live demo state with `--prepare-live`:
+  - reset indexed workspace state;
+  - mount `/home/weidf/demo_data/yixiao_tapereader_xri_case_study`;
+  - create and patch a fresh Yixiao workflow;
+  - verify project profile, progress, project memory, Neuroglancer, and agent training proposal behavior.
+- The harness now also validates the worker-side PyTC training-subset path without launching training:
+  - generated subset image/seg directories resolve through `volume_subset_manifest.json`;
+  - six concrete training image/label files are found;
+  - the staged training config passes runtime path validation.
+- Fixed a staging bug exposed by the harness:
+  - agent-proposed multi-volume training now creates the output/log directory during subset proposal staging, so the Train Model UI receives an existing output path.
+- Added `docs/manual-yixiao-case-study-demo.md` with the facilitator walkthrough, expected UI states, agent prompts, reset/smoke commands, and known caveats.
+- Verification:
+  - `.venv/bin/python -m py_compile server_api/workflows/router.py scripts/run_yixiao_case_study_smoke.py` passed;
+  - `scripts/run_yixiao_case_study_smoke.py --prepare-live --verbose` passed against local demo2 API;
+  - live workflow created by the latest smoke run: `174`;
+  - live viewer URL returned: `https://demo.seg.bio/neuroglancer/v/2c26be144fec3d205344aca6f59b9c519ae0c9dc/`.
+
+## 2026-05-27 - Preliminary Agentic Report Triage
+
+- Reviewed `docs/research/agentic-workflow-formalization-report.md`, the fast preliminary research/architecture report.
+- Reviewed the ChatGPT Deep Research prompt files already present:
+  - `docs/research/deep-research-agentic-workflow-formalization-chatgpt-prompt-2026-05-27.md`;
+  - `docs/research/deep-research-agentic-workflow-lit-review-chatgpt-prompt-2026-05-27.md`.
+- Added `docs/research/preliminary-agentic-report-triage-2026-05-27.md` to separate:
+  - recommendations solid enough to implement now;
+  - claims needing deeper literature validation;
+  - Yixiao-focused engineering work to continue while the full deep research pass runs.
+- Current triage recommendation: work next on the Yixiao proofreading roundtrip so a draft mask can be promoted to ground truth and the agent's future training proposal updates from 6 GT volumes to 7 GT volumes.
+
+## 2026-05-27 - Project Memory And Yixiao Roundtrip Hardening
+
+- Enriched workflow project memory with paper-facing canonical volume states while preserving legacy app statuses:
+  - `ground_truth` -> `proofread_ground_truth`;
+  - `needs_proofreading` -> `draft_needs_proofreading`;
+  - `missing_segmentation` -> `image_only`;
+  - `ignored` -> `ignored`.
+- Added memory freshness metadata so downstream agent logic and evidence bundles can see when project progress, volume states, and assistant context were generated.
+- Embedded the project-memory snapshot into workflow evidence bundles and fixed datetime serialization so bundle export remains JSON-safe.
+- Extended `scripts/run_yixiao_case_study_smoke.py` with `--exercise-promotion`:
+  - promotes one draft Yixiao mask to `ground_truth`;
+  - verifies progress updates from 6/2/2 to 7/1/2;
+  - verifies project memory records canonical `proofread_ground_truth`;
+  - verifies the next agent training proposal uses 7 training pairs, 1 review pair, and 2 image-only inference targets.
+- Updated `docs/manual-yixiao-case-study-demo.md` with the promotion smoke flow and reset guidance.
+- Verification:
+  - `.venv/bin/python -m py_compile server_api/workflows/router.py scripts/run_yixiao_case_study_smoke.py tests/test_workflow_routes.py tests/test_workflow_export_bundle.py` passed;
+  - `timeout 60 .venv/bin/python -m pytest tests/test_workflow_export_bundle.py -q` passed;
+  - `timeout 60 .venv/bin/python -m pytest tests/test_workflow_routes.py::WorkflowRouteTests::test_project_memory_endpoint_returns_canonical_context -q` passed;
+  - `scripts/run_yixiao_case_study_smoke.py --prepare-live --exercise-promotion --report /tmp/yixiao-case-study-smoke-promotion-report.json --verbose` passed against local demo2 API;
+  - live bundle export for workflow `175` returned `workflow-export-bundle/v1` with embedded `pytc-project-memory/v1` and 7 ground-truth volumes after promotion;
+  - reran `scripts/run_yixiao_case_study_smoke.py --prepare-live --report /tmp/yixiao-case-study-smoke-report.json --verbose` to restore the public demo to the initial 6/2/2 state as workflow `176`;
+  - live bundle export for workflow `176` returned embedded project memory with 6 ground-truth volumes and 2 image-only volumes.
+
+## 2026-05-27 - Subagent Architecture Sprint Started
+
+- Spawned six focused subagents for the next prototype-hardening pass:
+  - Backend State: composite volume state and memory backend;
+  - App Agent Capability: assistant intent/action behavior;
+  - Action Policy: action-card schema and approval tiers;
+  - Trace/Evidence: structured trace and provenance export;
+  - UI Workflow: coherent manual-agent handoff surfaces;
+  - Yixiao Case Study: first case-study demo readiness.
+- Reliability/QA was deferred because the agent thread limit was reached; queue it after one current subagent completes.
+- Added `docs/research/subagent-orchestration-integration-2026-05-27.md` to keep subagent outputs tied to one implementation path and acceptance criteria.
+
+## 2026-05-27 - Subagent Sprint Implementation Pass
+
+- Integrated the subagent recommendations into the backend workflow substrate:
+  - added composite volume-state columns to `WorkflowVolumeState`;
+  - retained legacy progress statuses while adding `annotation_state`, `role_state`, `execution_state`, `region_scope`, and `workflow-volume-state/v2`;
+  - projected manual progress edits through the same composite-state helper so the Progress page, project memory, and agent training eligibility do not drift;
+  - rejected contradictory legacy/composite volume-state updates.
+- Expanded agent action cards without breaking existing frontend `client_effects`:
+  - every `AgentChatAction` now carries `workflow.action_card/v2`;
+  - action cards include action type, target, risk tier, approval reason, summary fields, input/output artifacts, expected effects, and bounded executor metadata;
+  - runtime training cards are now explicitly `R4_runtime_job`, while navigation/status cards remain `R0_view`.
+- Expanded assistant traces into a structured `agent_trace/v1` shape:
+  - trace rows now include `category`, `data`, and `evidence_refs`;
+  - persisted assistant messages retain those structured traces for later inspection;
+  - workflow evidence bundles now include `agent_messages`, `action_card_index`, and `trace_index`.
+- Added `docs/research/subagent-reliability-qa-2026-05-27.md` via the QA subagent and updated `docs/research/subagent-orchestration-integration-2026-05-27.md` with the full subagent synthesis.
+- Verification:
+  - `.venv/bin/python -m pytest tests/test_workflow_routes.py tests/test_workflow_export_bundle.py -q` passed: 53 tests;
+  - relaunched the demo2 backend manually on `127.0.0.1:4342` after systemd restart required interactive auth;
+  - `scripts/run_yixiao_case_study_smoke.py --prepare-live --report /tmp/yixiao-case-study-smoke-report.json --verbose` passed as workflow `178`;
+  - live viewer returned `https://demo.seg.bio/neuroglancer/v/baff3168abe7f9a2ea7e10e96770100ec0b13b54/`;
+  - live bundle export for workflow `178` returned `workflow-export-bundle/v1`, embedded `pytc-project-memory/v1`, 4 agent messages, 6 trace entries, and 2 action-card entries.
+
+## 2026-05-27 - App Agent Organization: Orchestrator And Specialist Agents
+
+- Reorganized the app-facing assistant model around a main Project Manager orchestrator plus typed specialist subagents:
+  - Project Manager / Orchestrator;
+  - Data Scout;
+  - Visualization Agent;
+  - Proofreading Agent;
+  - Training Agent;
+  - Inference Agent;
+  - Evaluation Agent;
+  - Evidence Agent.
+- Backend agent responses now include:
+  - `orchestrator_agent`;
+  - `subagents`;
+  - per-action `specialist_agent`, `agent_type`, `agent_label`, and `agent_color`;
+  - per-trace `agent_type`, `agent_label`, and `agent_color`;
+  - `workflow.action_card/v2` cards with both orchestrator and specialist agent metadata.
+- Chat UI now presents the drawer as `Project Manager`, describes it as an orchestrator, and uses colored badges/borders to distinguish specialist agents on action cards, approval cards, and trace rows.
+- Verification:
+  - `.venv/bin/python -m py_compile server_api/workflows/router.py` passed;
+  - targeted route tests for project-progress and training agent cards passed;
+  - `npm test -- --runTestsByPath src/components/Chatbot.test.js --watchAll=false` passed: 26 tests;
+  - relaunched the manual demo2 backend on `127.0.0.1:4342`;
+  - `scripts/run_yixiao_case_study_smoke.py --prepare-live --report /tmp/yixiao-case-study-smoke-report.json --verbose` passed as workflow `179`;
+  - live agent query returned Project Manager as orchestrator, the full specialist-agent catalog, Training Agent for the training action, and Data Scout for file-inspection trace rows.
+
+## 2026-05-27 - Chat-Visible Agent Operation Trace
+
+- Moved the assistant trace above the final natural-language answer in the workflow chat, so the chat now reads more like an agent run:
+  - expandable operation trace first;
+  - final response second;
+  - action/proposal cards after that.
+- Relabeled the trace affordance to `Agent trace · What I checked`.
+- Trace rows now show the responsible specialist-agent badge and the operation category (`Checked`, `Inferred`, `Proposed`, `Blocked`).
+- This deliberately exposes structured operation summaries rather than raw hidden chain-of-thought.
+- Verification:
+  - `npm test -- --runTestsByPath src/components/Chatbot.test.js --watchAll=false` passed: 26 tests;
+  - relaunched the manual demo2 backend on `127.0.0.1:4342`.
+
+## 2026-05-27 - demo.seg.bio Frontend Deployment
+
+- Rebuilt the React production bundle for the demo2 checkout with `npm run build`.
+- Synced the resulting `client/build/` output into the nginx web root at `/var/www/demo.seg.bio/`.
+- Verified `https://demo.seg.bio` now serves `static/js/main.2441c22e.js` instead of the stale May 24 bundle.
+- Verified the served bundle contains the new workflow-agent UI strings:
+  - `Project Manager`;
+  - `Orchestrates specialist workflow agents`;
+  - `Agent trace`.
+- Verified the live demo backend is reachable through nginx at `https://demo.seg.bio/api/api/workflows/current` and reports the mounted Yixiao TapeReader XRI workflow `179`.
+- Verified live agent query for workflow `179` returns:
+  - Project Manager orchestrator metadata;
+  - specialist subagent catalog;
+  - structured trace rows.
+- Ran `scripts/run_yixiao_case_study_smoke.py --prepare-live --report /tmp/yixiao-case-study-smoke-report.json --verbose` after deployment; it passed as workflow `180` with viewer `https://demo.seg.bio/neuroglancer/v/d1a4256dc058d12b516f5f168c84bd61b7d79fdd/`.
+- Note: the demo backend is still running via the manual `server_api.main` process on `127.0.0.1:4342`; systemd user unit lookup/restart was not available in this shell.
+
+## 2026-05-28 - Proofreading Route Hardening
+
+- Audited the proofreading view stack across `DatasetLoader`, `DetectionWorkflow`, `ProofreadingEditor`, `server_api/ehtool`, and workflow event handling.
+- Fixed proofreading source selection by centralizing path priority in `client/src/views/ehtool/proofreadingPaths.js`:
+  - source image now comes from `image_path` or `dataset_path`, not prediction output;
+  - editable mask priority is corrected mask, then inference prediction, then original mask, then label.
+- Mirrored the same path priority in backend agent proofreading action effects so chat-proposed `start_proofreading` launches cannot reintroduce stale source/mask selection.
+- Fixed retraining staging from proofreading so `Use edits for training` no longer silently stages an original mask/label or a non-existent planned persistence path.
+- Added focused frontend coverage for proofreading path priority and edited-mask staging eligibility.
+- Added backend coverage for agent proofreading launch priority across corrected masks and prediction masks.
+- Verification:
+  - `npm test -- --runTestsByPath src/views/ehtool/proofreadingPaths.test.js src/views/ehtool/DatasetLoader.test.js src/views/MaskProofreading.test.js --watchAll=false` passed: 3 suites, 9 tests;
+  - `.venv/bin/python -m pytest tests/test_ehtool_data_manager.py tests/test_ehtool_mesh_preview.py tests/test_workflow_routes.py::WorkflowRouteTests::test_ehtool_load_classify_save_and_export_append_workflow_events tests/test_workflow_routes.py::WorkflowRouteTests::test_agent_can_start_proofreading_from_current_image_mask_pair tests/test_workflow_routes.py::WorkflowRouteTests::test_agent_proofreading_launch_prefers_corrected_or_prediction_masks tests/test_workflow_routes.py::WorkflowRouteTests::test_agent_proofread_request_names_blocker_when_inputs_missing -q` passed: 9 tests.
+
+## 2026-05-28 - Editable Agent Approval Cards
+
+- Added an edit-before-approval path for agent proposal cards:
+  - pending training, retraining, inference, visualization, and proofreading cards can expose editable auto-filled fields;
+  - users can click `Adjust`, change the proposed paths/parameters, and approve the same card as `Approve with edits`;
+  - unchanged approvals keep the existing one-click behavior.
+- Threaded field overrides through the frontend approval path:
+  - `AgentProposalCard` emits only changed fields;
+  - `Chatbot`, `WorkflowTimeline`, `WorkflowContext`, and `api.js` pass overrides to the approval endpoint only when present.
+- Hardened backend approval handling:
+  - added an allowlisted `overrides` request body for approval;
+  - merged approved edits into nested `client_effects` before training commands are queued;
+  - recorded applied `user_edits` in approval/staging workflow events.
+- Added focused coverage:
+  - `AgentProposalCard.test.js` verifies editable training and client-effect fields;
+  - `test_approved_training_run_applies_user_field_overrides` verifies edited training paths reach the queued command.
+- Verification:
+  - `npm test -- --runTestsByPath src/components/chat/AgentProposalCard.test.js src/components/WorkflowTimeline.test.js src/components/Chatbot.test.js --watchAll=false` passed: 3 suites, 32 tests;
+  - `npm test -- --runTestsByPath src/contexts/WorkflowContext.test.js --watchAll=false` passed: 1 suite, 12 tests;
+  - `.venv/bin/python -m py_compile server_api/workflows/router.py` passed;
+  - `.venv/bin/python -m pytest tests/test_workflow_routes.py::WorkflowRouteTests::test_approved_training_run_proposal_returns_runtime_launch_effects tests/test_workflow_routes.py::WorkflowRouteTests::test_approved_training_run_applies_user_field_overrides -q` passed: 2 tests.
+
+## 2026-05-28 - demo.seg.bio Deploy Editable Approval Cards
+
+- Built the current React production bundle and synced it to `/var/www/demo.seg.bio/`.
+- Public frontend now serves `static/js/main.721ed937.js`.
+- Verified the served bundle contains the editable approval UI string `Approve with edits`.
+- Restarted the demo2 backend from `/home/weidf/deploy/pytc-client-demo2` as PID `83317` on port `4342` with:
+  - `PYTC_ALLOWED_ORIGINS=https://demo.seg.bio,http://localhost:3000,http://127.0.0.1:3000,null`;
+  - `PYTC_NEUROGLANCER_PUBLIC_BASE=https://demo.seg.bio/neuroglancer`;
+  - `PYTC_WORKER_URL=localhost:4343`.
+- Verification:
+  - `https://demo.seg.bio/api/health` returned `{"status":"ok"}`;
+  - `https://demo.seg.bio/api/api/workflows/current` returned active workflow `180`;
+  - live OpenAPI exposes `AgentActionApprovalRequest` / `overrides`.
+
+## 2026-05-28 - More Disparate Workflow Agent Palette
+
+- Replaced the agent/subagent palette with more visually separated hues:
+  - Project Manager: charcoal `#111827`;
+  - Data Scout: green `#00843D`;
+  - Visualization Agent: royal blue `#0057B8`;
+  - Proofreading Agent: hot magenta `#E0007A`;
+  - Training Agent: violet `#7B2CBF`;
+  - Inference Agent: burnt orange `#D55E00`;
+  - Evaluation Agent: ochre `#B58900`;
+  - Evidence Agent: cyan `#00A6A6`.
+- Updated frontend fallback/orchestrator colors to match the backend palette.
+- Deployed the rebuilt frontend to `/var/www/demo.seg.bio`; public bundle is now `static/js/main.99644842.js`.
+- Restarted the demo2 backend from this checkout; live API process is PID `120119` on port `4342`.
+- Verification:
+  - `.venv/bin/python -m py_compile server_api/workflows/router.py` passed;
+  - `npm test -- --runTestsByPath src/components/chat/AgentProposalCard.test.js src/components/Chatbot.test.js --watchAll=false` passed: 2 suites, 28 tests;
+  - `https://demo.seg.bio/api/health` returned `{"status":"ok"}`;
+  - served bundle contains the new palette values.
+
+## 2026-05-28 - Agent Icon and Border Encodings
+
+- Added non-color visual encodings for the project manager and workflow specialist agents:
+  - Project Manager uses the workflow/project icon with a solid rail;
+  - Data Scout uses the Files/folder icon with a dotted rail;
+  - Visualization Agent uses the Visualize/eye icon with a double rail;
+  - Proofreading Agent uses the Proofread/bug icon with a dashed rail;
+  - Training Agent uses the Train Model/experiment icon with a heavier rail;
+  - Inference Agent uses the Run Model/thunderbolt icon with a dash/top accent;
+  - Evaluation Agent uses a bar-chart icon with a top accent;
+  - Evidence Agent uses a file-done icon with an inset rail.
+- Extended backend agent metadata with `icon_key` and `border_style`, and mirrored those fields onto chat actions and trace items.
+- Added shared frontend agent visual helpers so action cards, approval cards, and trace rows use the same badge and rail encoding.
+- Deployed the rebuilt frontend to `/var/www/demo.seg.bio`; public bundle is now `static/js/main.45e34a89.js`.
+- Restarted the demo2 backend from this checkout as a detached `setsid` process; live API process is PID `158563` on port `4342`.
+- Verification:
+  - `.venv/bin/python -m py_compile server_api/workflows/router.py` passed;
+  - `npm test -- --watchAll=false --runTestsByPath src/__tests__/assistantActionCard.test.js src/__tests__/agentProposalCards.test.js` passed: 2 suites, 4 tests;
+  - `.venv/bin/python -m pytest tests/test_workflow_routes.py::WorkflowRouteTests::test_agent_train_model_uses_ground_truth_progress_subset -q` passed;
+  - `npm run build` passed with existing hook dependency warnings in proofreading/detection views;
+  - `https://demo.seg.bio/api/health` returned `{"status":"ok"}`.
+
+## 2026-05-28 - Visible Consulted-Agent Strip
+
+- Follow-up after staged-demo feedback that the chat still looked like everything came only from Project Manager.
+- Added a visible `Agents` strip at the top of workflow-assistant replies, derived from trace/action/proposal metadata.
+- Switched agent badges to compact, non-clipping labels:
+  - `PM`, `Data`, `Vis`, `Proof`, `Train`, `Infer`, `Eval`, `Evidence`;
+  - each chip keeps the full agent name in its hover title and preserves the icon/color encoding.
+- Deployed the rebuilt frontend to `/var/www/demo.seg.bio`; public bundle is now `static/js/main.b4d6fb58.js`.
+- Verification:
+  - `npm test -- --watchAll=false --runTestsByPath src/__tests__/assistantActionCard.test.js src/__tests__/agentProposalCards.test.js src/components/Chatbot.test.js` passed: 3 suites, 30 tests;
+  - `npm run build` passed with the existing hook dependency warnings in proofreading/detection views;
+  - `https://demo.seg.bio/api/health` returned `{"status":"ok"}`;
+  - backend remained healthy as PID `158563` on port `4342`.
+
+## 2026-05-28 - PyTC Worker Proxy Logging and Demo Service Repair
+
+- Investigated a staged training approval failure:
+  - browser/API error was `503: Failed to connect to PyTC worker`;
+  - live API had been manually launched with `PYTC_WORKER_URL=localhost:4343`;
+  - the actual PyTC worker was on `localhost:4243`.
+- Added structured API-to-worker proxy events in `server_api/main.py`:
+  - `api_runtime_configured` logs API/worker/neuroglancer runtime settings on startup;
+  - `worker_proxy_request_started` logs each proxied worker call;
+  - `worker_proxy_request_completed` logs latency and status;
+  - `worker_proxy_request_failed` logs connection failures, timeouts, and upstream request errors.
+- Added focused test coverage for connection-refused logging on `/training_status`.
+- Repaired the live demo process topology:
+  - killed the stale detached May 4 worker that was occupying `4243`;
+  - killed the manually detached API process;
+  - restarted `pytc-worker-demo2.service` and `pytc-demo@pytc-client-demo2.service` under systemd;
+  - confirmed the deployed env file uses `PYTC_WORKER_URL=localhost:4243`.
+- Verification:
+  - `pytc-worker-demo2.service` active on port `4243`;
+  - `pytc-demo@pytc-client-demo2.service` active on port `4342`;
+  - `http://localhost:4243/hello` returned `["hello"]`;
+  - `https://demo.seg.bio/api/health` returned `{"status":"ok"}`;
+  - `https://demo.seg.bio/api/training_status` returned idle worker state through the API proxy;
+  - app event log now records the full API proxy request path and worker latency.
+
+## 2026-06-03 - Yixiao Case-Study Finish-Line Reorientation
+
+- Re-read the current Yixiao case-study runbook, prototype readiness protocol,
+  backlog, and progress log after returning to the project.
+- Re-ran the live Yixiao smoke harness against the demo backend:
+  - command: `.venv/bin/python scripts/run_yixiao_case_study_smoke.py --report /tmp/yixiao-case-study-smoke-report-latest.json --verbose`;
+  - first sandboxed attempt was blocked from localhost HTTP;
+  - reran with approved local API access.
+- Smoke result: passed.
+- Current verified workflow: `181`.
+- Current verified viewer:
+  `https://demo.seg.bio/neuroglancer/v/33755065f156f05d7d4ba86918a641c02d8d90de/`.
+- Verified gates:
+  - Yixiao project root and manifest exist;
+  - manifest has 10 volumes: 6 ground truth, 2 needs proofreading, 2 missing segmentation;
+  - backend health passes;
+  - Yixiao project suggestion is mounted;
+  - profile resolves `data/raw`, `data/seg`, and `configs/TapeReader-Fiber-BCS-AppCompat-Sanity.yaml`;
+  - progress summary reports 60% complete and 80% segmentation coverage;
+  - project memory schema and `tapereader_xri_fiber` preset are present;
+  - Neuroglancer viewer generation succeeds for the first image/mask pair;
+  - agent correctly identifies Yixiao/XRI/CytoTape project context;
+  - agent stages an approval-gated training action using 6 GT volumes, leaving 2 draft masks and 2 image-only targets out;
+  - PyTC subset resolver maps staged training directories to 6 concrete image/label files;
+  - staged training config validates without launching a full GPU job.
+
+## 2026-06-04 - Evidence Bundle Hygiene For Yixiao Case Study
+
+- Hardened workflow evidence export to avoid repeated raw-volume copies by default:
+  - added raw-image path detection (`.../raw/...` and `*_raw*` patterns),
+  - added separate `raw_copy_max_bytes` policy (default `0`),
+  - retained general `copy_max_bytes` cap for non-raw artifacts,
+  - added manifest-only mode via `copy_manifest_only=true`.
+- Exposed export copy controls on `POST /api/workflows/{workflow_id}/export-bundle`:
+  - `copy_max_bytes`
+  - `raw_copy_max_bytes`
+  - `copy_manifest_only`
+- Included `copy_settings` in bundle metadata and `workflow.bundle_exported` audit
+  event payload.
+- Added focused regression coverage in `tests/test_workflow_export_bundle.py` to verify
+  raw-like paths are skipped by default and manifest-only export skips binary copies.
+- Updated `docs/manual-yixiao-case-study-demo.md` and
+  `docs/research/workflow-evidence-export.md` with operator guidance for large-volume
+  case-study exports.
+- Verification:
+  - `.venv/bin/python -m pytest tests/test_workflow_export_bundle.py -q` passed.
+
+## 2026-06-04 - Yixiao Pre-Demo Gate Fastening
+
+- Extended `scripts/run_yixiao_case_study_smoke.py` with a deterministic pre-demo mode:
+  - added `--pre-demo-gate` orchestration that runs baseline smoke, promotion smoke, and final restore smoke,
+  - optionally performs lightweight readiness and export checks (`/case-study-readiness`, `/export-bundle`) and records residual caveats in the JSON output,
+  - writes per-step reports at deterministic sibling paths and a composite report at `--report`.
+- Added focused unit tests in `tests/test_yixiao_pre_demo_smoke.py` with mocked `run` and `SmokeHarness.request_json`:
+  - verifies step ordering and pass/fail aggregation,
+  - verifies residual readiness caveat behavior,
+  - verifies export payload failure is surfaced as a gate failure.
+- Updated `docs/manual-yixiao-case-study-demo.md` with the new fast pre-demo command and defaults,
+  including readiness/export skip options.
+- Updated `docs/research/subagent-reliability-qa-2026-05-27.md` to document the new pre-demo gate in the Yixiao QA flow.
+- Verification:
+  - `.venv/bin/python -m py_compile scripts/run_yixiao_case_study_smoke.py` passed;
+  - `uv run pytest tests/test_yixiao_pre_demo_smoke.py -q` passed.
+  - pre-demo gate error handling is covered for readiness/export endpoint failures and reports them as residual caveats.
+
+## 2026-06-04 - Deployment Runtime Diagnostics Helper
+
+- Added `scripts/inspect_demo_instance.py` as a fast operator-only diagnostics script for
+  case-study readiness triage.
+- Checks implemented:
+  - API health and `/app/log-path` connectivity;
+  - API runtime config log reconciliation (`api_runtime_configured`);
+  - worker direct `GET /hello` and API `GET /training_status`;
+  - worker URL mismatch detection from runtime log/proxy observations;
+  - current workflow read for active-state visibility (`/api/workflows/current`);
+  - Neuroglancer reachability and public-base/url alignment checks;
+  - Ollama model/chat reachability checks with env-variable diagnostics;
+  - workflow bundle disk usage and recent app-log ERROR count from log tail.
+- Updated `docs/manual-yixiao-case-study-demo.md` with an operator section including
+  pre-demo command (`inspect_demo_instance.py`) and failure interpretation.
+- Added focused unit coverage in `tests/test_inspect_demo_instance.py` covering:
+  - API health/workflow auth-state checks,
+  - runtime-config worker mismatch check,
+  - worker mismatch detection via proxy log target,
+  - Neuroglancer connectivity checks with mocked socket failure,
+  - disk/error tail behavior.
+- Verification:
+  - `.venv/bin/python -m py_compile scripts/inspect_demo_instance.py tests/test_inspect_demo_instance.py` passed;
+  - `.venv/bin/pytest -q tests/test_inspect_demo_instance.py` passed.
+
+## 2026-06-04 - Demo2 API Runtime Manager
+
+- Added `scripts/manage_demo_instance.py` for safe, scoped control of demo2 API:
+  - supports `start|stop|restart|status` with `nohup` + `setsid`;
+  - discovers matching processes by repo checkout path and `server_api.main` command, and
+    requires `PYTC_API_PORT` match (defaults to `4342`) to avoid touching demo3/user-seg-bio;
+  - verifies persistence with `/health` and prints recent startup log output when a fresh start does not become ready;
+  - uses graceful SIGTERM then SIGKILL fallback on stop.
+- Added `tests/test_manage_demo_instance.py` with unit coverage for:
+  - process discovery filtering by root/port,
+  - command composition including required `nohup setsid`,
+  - env override parsing,
+  - stop path behavior and status when no process exists.
+- Updated `docs/manual-yixiao-case-study-demo.md` with an operator restart command for demo2.
+- Verification:
+  - `uv run pytest tests/test_manage_demo_instance.py -q` passed.
+
+## 2026-06-04 - Agent Bounded-Action Audit for TapeReader Workflow
+
+- Audited `server_api/workflows/router.py` for TapeReader/TapeReader-XRI routing gaps and enforced bounded routines:
+  - explicit workflow pair selection is used for visualization when concrete image/label paths are set;
+  - proofreading keeps preferring draft/corrected masks first;
+  - TapeReader training now requires trusted label sources (confirmed labels or saved proofreading edits) before launch, and does not accept raw predictions as training labels;
+  - inference still requires a checkpoint before launch;
+  - evaluation requires previous result, new result, and reference mask before comparison.
+- Added focused backend coverage in `tests/test_workflow_routes.py` for:
+  - explicit visualization pair selection;
+  - TapeReader training trust-boundary blocker and recovery with corrected edits;
+  - checkpoint requirement for image-only inference requests;
+  - evaluation blocker when reference mask is missing.
+- Updated `docs/agent-role-spec.md` with a TapeReader bounded-action contract section.
+- Verification:
+  - `.venv/bin/python -m py_compile server_api/workflows/router.py`
+  - `.venv/bin/pytest tests/test_workflow_routes.py -k 'agent_visualize_request_uses_explicit_selected_pair or agent_train_on_trusted_masks_only_for_tapereader_context or agent_infer_on_image_only_projects_only_with_checkpoint or agent_evaluation_blocks_when_reference_mask_missing' -q`
+
+## 2026-06-04 - Workflow Session Continuity and Training Proposal Hardening
+
+- Hardened workflow chat/proposal continuity for browser refresh and reopen:
+  - workflow session hydration now merges server-side proposal status into persisted local chat entries so approved/reviewed runs keep correct card state after reload,
+  - proposal cards now render approval state and action visibility from proposal status,
+  - proposal payload now carries action-card/agent context through card rendering.
+- Added durable runtime resume support for training monitoring:
+  - `approveAgentAction` stores a `monitor_training` pending action after durable training approval,
+  - `WorkflowContext` restores monitor actions from sessionStorage with workflow-scoped TTL,
+  - stale/invalid persisted actions are cleared, preventing cross-workflow bleed-through.
+- Reduced action-card clipping/clarity risks:
+  - wrapped proposal field and rationale text in `AgentProposalCard` and `App.css`.
+- Added focused React verification:
+  - `client/src/contexts/WorkflowContext.test.js` covers restore/persist pending runtime actions.
+  - `client/src/components/Chatbot.test.js` covers proposal-status reconciliation across reopen plus routing guard for non-workflow conceptual questions.
+  - `client/src/components/chat/AgentProposalCard.test.js` covers disabled action state after approval.
+- Verification:
+  - `npm --prefix client test -- --watchAll=false --runInBand --runTestsByPath src/contexts/WorkflowContext.test.js src/components/Chatbot.test.js src/components/chat/AgentProposalCard.test.js`
+
+## 2026-06-04 - Yixiao Closed-Loop Evaluation Rehearsal Guard
+
+- Added a Yixiao-specific closed-loop rehearsal mode to
+  `scripts/run_yixiao_case_study_smoke.py`:
+  - `--closed-loop-rehearsal` runs the existing local closed-loop evidence harness
+    for image-only targets `6_1` and `6_2`;
+  - the mode requires explicit external withheld masks and refuses mounted-project
+    truth for the image-only targets;
+  - rehearsal now enforces explicit holdout usage for real-artifact evaluation
+    (`require_explicit_ground_truth`) and records per-target source checkpoints,
+    model versions, and runtime sync summaries;
+  - the default crop is `0:8,0:128,0:128` so it is fast enough for operator checks;
+  - defaults now include dry-run iteration overrides
+    (`--closed-loop-training-iterations`, `--closed-loop-inference-iterations`);
+  - reports are written under `/tmp/yixiao-closed-loop-rehearsal-report.json` by default.
+- Updated `docs/manual-yixiao-case-study-demo.md` with the command and clear
+  scope boundaries: this validates closed-loop training/inference/evaluation
+  wiring, checkpoint/model-version capture, and explicit holdout constraints.
+- Added focused test coverage in `tests/test_yixiao_pre_demo_smoke.py` verifying
+  that the rehearsal passes external withheld masks for `6_1` and `6_2`, and that
+  rehearsal fails when holdout paths are not outside the mounted project.
+- Added focused test coverage in `tests/test_closed_loop_smoke_script.py` for
+  runtime sync/report shape and explicit ground-truth requirements in real-artifact mode.
+
+## 2026-06-04 - Parallel Finish-Line Integration Pass
+
+- Re-ran the finish-line heuristic for the Yixiao case-study prototype and split the remaining work across six focused subagents:
+  - closed-loop rehearsal/execution evidence,
+  - browser-facing QA harness,
+  - approval-card editing UX,
+  - workflow memory/provenance export,
+  - demo deployment survivability,
+  - paper/case-study readiness gates.
+- Integrated the subagent results into the main demo2 checkout and verified the combined system:
+  - `.venv/bin/python -m py_compile ...` passed for touched smoke scripts and workflow backend modules;
+  - focused backend suite passed: `102 passed`;
+  - focused React suite passed: `50 passed`;
+  - `npm --prefix client run build` completed with only pre-existing React hook warnings in `DetectionWorkflow.js` and `ProofreadingEditor.js`;
+  - closed-loop rehearsal passed for Yixiao image-only targets `6_1` and `6_2`;
+  - post-deploy Yixiao pre-demo gate passed all 5 steps: normal smoke, promotion roundtrip, restore state, readiness check, export sanity;
+  - demo2 API was restarted with `scripts/manage_demo_instance.py` and came back healthy as PID `976573`;
+  - final `inspect_demo_instance.py` passed API, worker proxy, current workflow, Neuroglancer, app-error, and disk checks against configured Neuroglancer port `4244`.
+- Remaining known gaps:
+  - browser smoke is implemented but requires installing Playwright before it can run end-to-end in this checkout;
+  - real GPU train/infer/eval remains outside the automated paper-strength gate and should be run manually before any performance claims;
+  - evidence export still has deeper schema polish remaining around strict response models and durable proposal-to-approval foreign-key edges.
+
+## 2026-06-04 - Literature-Informed Third Finish-Line Pass
+
+- Ran a new HCI/VIS-oriented scan and captured the resulting task taxonomy in
+  `docs/codex-working-memory/third-finish-line-lit-and-task-taxonomy.md`.
+  Source anchors included common-ground workflow schemas, agentic visualization
+  patterns, multimodal visual-analytics agents, feedback-barrier work, and a
+  recent human-AI collaboration review.
+- Split implementation across six focused workers:
+  - common-ground project facts in Files setup,
+  - visible operational traces in chat/proposal/timeline UI,
+  - backend action policy/freshness regressions,
+  - evidence/export contract strengthening,
+  - browser certification and proposal-edit smoke coverage,
+  - runtime/deploy observability.
+- Integrated the worker outputs:
+  - setup now shows a compact "Shared project facts" surface for modality,
+    target, voxel size, volume split, task family, and training policy;
+  - proposal cards and timeline entries now expose concise operational traces
+    with inspected facts, policy decision, approval/execution status, affected
+    artifacts, and project-memory updates;
+  - evidence export now includes stronger copy-policy/provenance metadata and a
+    proposal -> approval -> command/run/progress graph;
+  - browser smoke now checks editable proposal behavior and reports exact
+    Playwright installation commands when the dependency is missing;
+  - inspector now reports a unified runtime-config check and treats transient
+    training-status timeouts as warnings rather than hard failures;
+  - backend route tests now cover existing policy/freshness payloads around
+    missing/stale project context and approval-required actions.
+- Integration fixes:
+  - updated `_build_proofreading_action` to pass through `policy_decision`,
+    `blocking_reasons`, and `freshness` to action cards;
+  - removed fresh frontend lint warnings from the operational-trace changes.
+- Verification before deploy:
+  - `git diff --check` passed;
+  - py_compile passed for changed scripts and workflow backend modules;
+  - backend integration slice passed: `97 passed`;
+  - React integration slice passed: `69 passed`;
+  - focused proposal/timeline tests passed: `42 passed`;
+  - production build passed with only pre-existing hook warnings in
+    `DetectionWorkflow.js` and `ProofreadingEditor.js`.
+- Remaining known gaps:
+  - Playwright is still not installed in this checkout, so browser smoke is
+    ready but not executed end-to-end here;
+  - real GPU train/infer/eval remains required before claiming model-performance
+    improvement;
+  - evidence payloads are more structured but still not fully typed with
+    strict Pydantic nested models.

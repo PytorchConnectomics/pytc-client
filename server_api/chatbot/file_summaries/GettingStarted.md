@@ -1,6 +1,6 @@
 # Getting Started with PyTC Client
 
-PyTC Client (PyTorch Connectomics Client) is a desktop application for biomedical image segmentation. It provides tools for managing files, visualizing data in Neuroglancer, training and running inference with deep learning models, monitoring experiments, and reviewing image masks.
+PyTC Client (PyTorch Connectomics Client) is a desktop application for biomedical image segmentation. It provides tools for managing files, visualizing data in Neuroglancer, training and running inference with deep learning models, tracking project progress, and reviewing image masks.
 
 ## Launching the Application
 
@@ -10,7 +10,8 @@ When you first open PyTC Client, the main workflows are available immediately in
 - **Visualization** — View image and label data in Neuroglancer
 - **Train Model** — Configure and launch training jobs
 - **Run Model** — Generate predictions with trained models
-- **Tensorboard** — Monitor training metrics in real time
+- **Progress** — Track which volumes have ground truth, draft segmentations, or no segmentation yet
+- **Train Model Runtime** — Check training status/logs and open TensorBoard from the Train Model page
 - **Mask Proofreading** — Review and edit mask layers in image stacks
 
 ## Application Layout
@@ -33,16 +34,9 @@ The chat panel appears as a sliding drawer on the right. To use it:
 
 The chat supports markdown formatting, including tables, code blocks, and lists.
 
-### Conversation History
+### Workflow Chat
 
-The chat drawer includes a **sidebar** on the left that lists your saved conversations:
-
-- **New chat (+)** — Click the **+** button at the top to start a fresh conversation.
-- **Switch conversations** — Click any conversation in the sidebar to load it.
-- **Delete a conversation** — Click the trash icon next to a conversation and confirm.
-- **Collapse/expand sidebar** — Use the fold/unfold button to hide or show the conversation list.
-
-Conversations are saved automatically as you chat. When you reopen the drawer, your past chats are still available.
+The main assistant drawer keeps one continuous workflow chat for the current browser session. Closing and reopening the drawer preserves the same thread so the assistant can keep referring to the current project state and recent decisions.
 
 ### Inline Help ("?" Buttons)
 

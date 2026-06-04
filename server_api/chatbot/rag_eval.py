@@ -133,9 +133,9 @@ QUESTIONS = [
         "hard",
     ),
     # ── Monitoring.md ───────────────────────────────────────────────────
-    ("How do I monitor training progress?", "Monitoring.md", "easy"),
+    ("How do I check training progress?", "Monitoring.md", "easy"),
     ("What is TensorBoard used for?", "Monitoring.md", "easy"),
-    ("How does the monitoring page work?", "Monitoring.md", "easy"),
+    ("Where do runtime logs live?", "Monitoring.md", "easy"),
     (
         "Where can I see training loss curves and metrics in real-time?",
         "Monitoring.md",
