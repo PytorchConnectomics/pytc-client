@@ -20,9 +20,11 @@ function EHTool({
 
   // Sync prop changes if they occur (e.g. from parent state update)
   useEffect(() => {
-    if (savedSessionId && savedSessionId !== sessionId) {
-      setSessionId(savedSessionId);
-    }
+    setSessionId((currentSessionId) =>
+      savedSessionId && savedSessionId !== currentSessionId
+        ? savedSessionId
+        : currentSessionId,
+    );
   }, [savedSessionId]);
 
   // Notify parent when session changes internally

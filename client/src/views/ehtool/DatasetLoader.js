@@ -1,7 +1,13 @@
-import React from "react";
-import { Card, Form, Input, Button, Modal, Space, Typography } from "antd";
+import React, { useMemo } from "react";
+import { Card, Form, Input, Button, Modal, Space, Typography, Tag } from "antd";
 import { FolderOpenOutlined, UploadOutlined } from "@ant-design/icons";
 import UnifiedFileInput from "../../components/UnifiedFileInput";
+import {
+  basename,
+  getProofreadingImagePath,
+  getProofreadingMaskPath,
+  getProofreadingProjectName,
+} from "./proofreadingPaths";
 
 const { Title, Text } = Typography;
 
@@ -9,7 +15,7 @@ const { Title, Text } = Typography;
  * Dataset Loader Component
  * Interface for loading image datasets
  */
-function DatasetLoader({ onLoad, loading }) {
+function DatasetLoader({ onLoad, loading, workflow }) {
   const [form] = Form.useForm();
 
   const resolvePath = (value) => {
@@ -65,9 +71,51 @@ function DatasetLoader({ onLoad, loading }) {
     }
   };
 
+  const currentPair = useMemo(() => {
+    if (!workflow) return null;
+    const imagePath = getProofreadingImagePath(workflow);
+    const maskPath = getProofreadingMaskPath(workflow);
+
+    if (!imagePath) return null;
+    return {
+      imagePath,
+      maskPath,
+      projectName: getProofreadingProjectName(workflow),
+    };
+  }, [workflow]);
+
+  const fillCurrentPair = () => {
+    if (!currentPair) return;
+    form.setFieldsValue({
+      projectName: currentPair.projectName,
+      datasetPath: {
+        path: currentPair.imagePath,
+        display: basename(currentPair.imagePath),
+      },
+      maskPath: currentPair.maskPath
+        ? { path: currentPair.maskPath, display: basename(currentPair.maskPath) }
+        : undefined,
+    });
+  };
+
+  const startCurrentPair = () => {
+    if (!currentPair || loading) return;
+    form.setFieldsValue({
+      projectName: currentPair.projectName,
+      datasetPath: {
+        path: currentPair.imagePath,
+        display: basename(currentPair.imagePath),
+      },
+      maskPath: currentPair.maskPath
+        ? { path: currentPair.maskPath, display: basename(currentPair.maskPath) }
+        : undefined,
+    });
+    onLoad(currentPair.imagePath, currentPair.maskPath, currentPair.projectName);
+  };
+
   return (
     <Card
-      bordered={false}
+      variant="borderless"
       style={{
         maxWidth: "720px",
         margin: "0 auto",
@@ -77,18 +125,49 @@ function DatasetLoader({ onLoad, loading }) {
     >
       <Space direction="vertical" size={4} style={{ width: "100%" }}>
         <Space align="center">
-          <FolderOpenOutlined style={{ color: "#1677ff", fontSize: 18 }} />
+          <FolderOpenOutlined
+            style={{ color: "var(--seg-accent-primary, #3f37c9)", fontSize: 18 }}
+          />
           <Title level={4} style={{ margin: 0 }}>
-            Start a Mask Proofreading Session
+            What should I proofread?
           </Title>
         </Space>
-        <Text type="secondary">
-          Load a volume (single file, folder, or glob). Add a mask if you have
-          one.
-        </Text>
       </Space>
 
       <div style={{ height: 16 }} />
+
+      {currentPair && (
+        <div
+          style={{
+            border: "1px solid #dedbfd",
+            background: "#fafaff",
+            borderRadius: 12,
+            padding: 12,
+            marginBottom: 16,
+            display: "grid",
+            gap: 8,
+          }}
+        >
+          <Space size="small" wrap>
+            <Tag color="blue" style={{ margin: 0 }}>
+              current project
+            </Tag>
+            <Text strong>{currentPair.projectName}</Text>
+            <Text type="secondary">
+              {basename(currentPair.imagePath)}
+              {currentPair.maskPath ? ` + ${basename(currentPair.maskPath)}` : ""}
+            </Text>
+          </Space>
+          <Space size="small" wrap>
+            <Button size="small" type="primary" onClick={startCurrentPair} loading={loading}>
+              Start with current data
+            </Button>
+            <Button size="small" onClick={fillCurrentPair}>
+              Fill form
+            </Button>
+          </Space>
+        </div>
+      )}
 
       <Form
         form={form}
@@ -99,23 +178,29 @@ function DatasetLoader({ onLoad, loading }) {
         }}
       >
         <Form.Item
-          label="Project Name"
+          label="Review name"
           name="projectName"
-          rules={[{ required: true, message: "Please enter a project name" }]}
+          rules={[{ required: true, message: "Name this review" }]}
         >
           <Input placeholder="My EM volume" />
         </Form.Item>
 
         <Form.Item
-          label="Dataset Path"
+          label="Image to proofread"
           name="datasetPath"
-          rules={[{ required: true, message: "Please enter dataset path" }]}
+          rules={[{ required: true, message: "Choose the image volume" }]}
         >
-          <UnifiedFileInput placeholder="/path/to/dataset" />
+          <UnifiedFileInput
+            placeholder="/path/to/image"
+            selectionType="fileOrDirectory"
+          />
         </Form.Item>
 
-        <Form.Item label="Mask Path (Optional)" name="maskPath">
-          <UnifiedFileInput placeholder="/path/to/masks" />
+        <Form.Item label="Mask to edit (optional)" name="maskPath">
+          <UnifiedFileInput
+            placeholder="/path/to/mask"
+            selectionType="fileOrDirectory"
+          />
         </Form.Item>
 
         <Form.Item style={{ marginBottom: 0 }}>
@@ -124,10 +209,10 @@ function DatasetLoader({ onLoad, loading }) {
             htmlType="submit"
             loading={loading}
             icon={<UploadOutlined />}
-            block
-            size="large"
-          >
-            Load Dataset
+          block
+          size="large"
+        >
+            Start proofreading
           </Button>
         </Form.Item>
       </Form>

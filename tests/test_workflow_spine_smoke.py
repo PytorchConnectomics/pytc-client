@@ -3,6 +3,7 @@ import tempfile
 import unittest
 
 import pytest
+
 pytest.importorskip("sqlalchemy")
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
@@ -12,6 +13,7 @@ from fastapi.testclient import TestClient
 
 from server_api.auth import database as auth_database
 from server_api.auth import models
+import server_api.main as server_api_main
 from server_api.main import app as server_api_app
 
 
@@ -42,6 +44,9 @@ class WorkflowSpineSmokeTests(unittest.TestCase):
         self.engine.dispose()
         self.temp_dir.cleanup()
 
+    def test_chatbot_backend_import_contract_is_available(self):
+        self.assertIsNotNone(server_api_main.build_chain)
+
     def test_spine_loop_load_proofread_stage_and_export_evidence(self):
         workflow_response = self.client.get("/api/workflows/current")
         self.assertEqual(workflow_response.status_code, 200)
@@ -53,7 +58,19 @@ class WorkflowSpineSmokeTests(unittest.TestCase):
 
         self.client.patch(
             f"/api/workflows/{workflow_id}",
-            json={"stage": "proofreading", "corrected_mask_path": str(export_path)},
+            json={
+                "title": "mito25-paper-loop-smoke",
+                "stage": "proofreading",
+                "image_path": "/projects/mito25/data/image/mito25_im.h5",
+                "corrected_mask_path": str(export_path),
+                "metadata": {
+                    "project_context": {
+                        "imaging_modality": "EM",
+                        "target_structure": "mitochondria",
+                        "optimization_priority": "speed",
+                    }
+                },
+            },
         )
         self.client.post(
             f"/api/workflows/{workflow_id}/events",
@@ -71,8 +88,15 @@ class WorkflowSpineSmokeTests(unittest.TestCase):
             json={"query": "stage corrected masks for retraining"},
         )
         self.assertEqual(query_response.status_code, 200)
-        proposals = query_response.json()["proposals"]
+        query_payload = query_response.json()
+        proposals = query_payload["proposals"]
         self.assertEqual(len(proposals), 1)
+        self.assertGreaterEqual(len(query_payload["actions"]), 1)
+        self.assertEqual(query_payload["commands"], [])
+        self.assertEqual(
+            query_payload["actions"][0]["client_effects"]["navigate_to"],
+            "training",
+        )
         proposal_id = proposals[0]["id"]
 
         approve_response = self.client.post(
@@ -83,8 +107,39 @@ class WorkflowSpineSmokeTests(unittest.TestCase):
             approve_response.json()["workflow"]["stage"], "retraining_staged"
         )
 
+        launch_query_response = self.client.post(
+            f"/api/workflows/{workflow_id}/agent/query",
+            json={"query": "start training"},
+        )
+        self.assertEqual(launch_query_response.status_code, 200)
+        launch_query_payload = launch_query_response.json()
+        self.assertEqual(
+            launch_query_payload["actions"][0]["client_effects"]["runtime_action"][
+                "kind"
+            ],
+            "start_training",
+        )
+        training_effects = launch_query_payload["actions"][0]["client_effects"]
+        self.assertEqual(
+            training_effects["set_training_config_preset"],
+            "configs/MitoEM/Mito-CaseStudy-BC.yaml",
+        )
+        self.assertEqual(
+            training_effects["set_training_image_path"],
+            "/projects/mito25/data/image/mito25_im.h5",
+        )
+        self.assertTrue(
+            training_effects["runtime_action"]["autopick_parameters"],
+        )
+        self.assertEqual(
+            launch_query_payload["actions"][0]["client_effects"]["navigate_to"],
+            "training",
+        )
+
         hotspots_response = self.client.get(f"/api/workflows/{workflow_id}/hotspots")
-        impact_response = self.client.get(f"/api/workflows/{workflow_id}/impact-preview")
+        impact_response = self.client.get(
+            f"/api/workflows/{workflow_id}/impact-preview"
+        )
         metrics_response = self.client.get(f"/api/workflows/{workflow_id}/metrics")
         bundle_response = self.client.post(
             f"/api/workflows/{workflow_id}/export-bundle"

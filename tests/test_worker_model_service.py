@@ -1,6 +1,8 @@
+import os
 import pathlib
 import tempfile
 import unittest
+from unittest.mock import MagicMock, patch
 
 from server_pytc.services import model as model_service
 
@@ -65,6 +67,44 @@ class WorkerModelServiceTests(unittest.TestCase):
         model_service.cleanup_temp_files("inference")
 
         self.assertFalse(pathlib.Path(inference_file.name).exists())
+
+    def test_ollama_unload_is_disabled_by_default(self):
+        with patch.dict(
+            os.environ,
+            {
+                "OLLAMA_MODEL": "qwen3.6:27b",
+                "PYTC_HELPER_OLLAMA_MODEL": "",
+                "OLLAMA_HELPER_MODEL": "",
+            },
+            clear=False,
+        ):
+            os.environ.pop("PYTC_UNLOAD_OLLAMA_BEFORE_TRAINING", None)
+            with patch("server_pytc.services.model.subprocess.run") as run_mock:
+                unloaded = model_service._unload_ollama_before_gpu_training()
+
+        self.assertEqual(unloaded, [])
+        run_mock.assert_not_called()
+
+    def test_ollama_unload_can_be_enabled_explicitly(self):
+        run_result = MagicMock(returncode=0, stdout="")
+        with patch.dict(
+            os.environ,
+            {
+                "PYTC_UNLOAD_OLLAMA_BEFORE_TRAINING": "1",
+                "OLLAMA_MODEL": "qwen3.6:27b",
+                "PYTC_HELPER_OLLAMA_MODEL": "",
+                "OLLAMA_HELPER_MODEL": "",
+            },
+            clear=False,
+        ):
+            with patch(
+                "server_pytc.services.model.subprocess.run",
+                return_value=run_result,
+            ) as run_mock:
+                unloaded = model_service._unload_ollama_before_gpu_training()
+
+        self.assertEqual(unloaded, ["qwen3.6:27b"])
+        run_mock.assert_called_once()
 
 
 if __name__ == "__main__":

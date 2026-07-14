@@ -1,7 +1,12 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import ReactDOM from "react-dom";
 import { Button, Input, Space, Spin, Typography } from "antd";
-import { QuestionCircleOutlined, SendOutlined } from "@ant-design/icons";
+import {
+  ArrowsAltOutlined,
+  QuestionCircleOutlined,
+  SendOutlined,
+  ShrinkOutlined,
+} from "@ant-design/icons";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { queryHelperChat } from "../api";
@@ -21,7 +26,7 @@ const buildInitialPrompt = ({
   taskContext,
 }) => {
   return [
-    `Explain this setting and recommend a concrete value if possible:`,
+    `Give concise help for this setting:`,
     `- Label: ${label}`,
     yamlKey ? `- YAML key: ${yamlKey}` : null,
     value !== undefined && value !== null && value !== ""
@@ -29,7 +34,7 @@ const buildInitialPrompt = ({
       : null,
     projectContext ? `- Project context: ${projectContext}` : null,
     taskContext ? `- Task context: ${taskContext}` : null,
-    `Use plain language for non-technical users and give a recommended setting.`,
+    `Answer in at most 3 short bullets. Put the recommended action first. Do not paste documentation excerpts or headings.`,
   ]
     .filter(Boolean)
     .join("\n");
@@ -60,20 +65,28 @@ function InlineHelpChat({
 }) {
   const anchorRef = useRef(null);
   const panelRef = useRef(null);
+  const savedPanelPosRef = useRef(null);
   const dragState = useRef({ dragging: false, offsetX: 0, offsetY: 0 });
+  const resizeState = useRef({
+    resizing: false,
+    startX: 0,
+    startY: 0,
+    width: 430,
+    height: 340,
+  });
   const messagesEndRef = useRef(null);
 
   const [open, setOpen] = useState(false);
   const [messages, setMessages] = useState([]);
   const [inputValue, setInputValue] = useState("");
   const [isSending, setIsSending] = useState(false);
+  const [expanded, setExpanded] = useState(false);
   const [panelPos, setPanelPos] = useState({
     top: 0,
     left: 0,
-    width: 360,
-    height: 300,
+    width: 430,
+    height: 340,
   });
-  const [anchorPoint, setAnchorPoint] = useState({ x: 0, y: 0 });
 
   const initialPrompt = useMemo(
     () =>
@@ -117,6 +130,10 @@ function InlineHelpChat({
         helperTaskKey,
         text,
         fieldContext,
+        messages.slice(-8).map((message) => ({
+          role: message.isUser ? "user" : "assistant",
+          content: message.text,
+        })),
       );
       setMessages((prev) => [
         ...prev,
@@ -142,14 +159,10 @@ function InlineHelpChat({
   const openPanel = () => {
     if (!anchorRef.current) return;
     const rect = anchorRef.current.getBoundingClientRect();
-    const anchor = {
-      x: rect.left + rect.width / 2,
-      y: rect.top + rect.height / 2,
-    };
     const viewportW = window.innerWidth;
     const viewportH = window.innerHeight;
-    const width = panelPos.width || 360;
-    const height = panelPos.height || 300;
+    const width = panelPos.width || 430;
+    const height = panelPos.height || 340;
 
     // Prefer placing panel to the right of the "?" icon
     let left = rect.right + 12;
@@ -165,7 +178,6 @@ function InlineHelpChat({
     }
     if (top < 16) top = 16;
 
-    setAnchorPoint(anchor);
     setPanelPos((prev) => ({ ...prev, top, left }));
     setOpen(true);
 
@@ -187,6 +199,26 @@ function InlineHelpChat({
   useEffect(() => {
     if (!open) return;
     const onMove = (event) => {
+      if (resizeState.current.resizing) {
+        const viewportMaxWidth = Math.max(340, window.innerWidth - panelPos.left - 8);
+        const viewportMaxHeight = Math.max(280, window.innerHeight - panelPos.top - 8);
+        const nextWidth = clamp(
+          resizeState.current.width + event.clientX - resizeState.current.startX,
+          340,
+          viewportMaxWidth,
+        );
+        const nextHeight = clamp(
+          resizeState.current.height + event.clientY - resizeState.current.startY,
+          280,
+          viewportMaxHeight,
+        );
+        setPanelPos((prev) => ({
+          ...prev,
+          width: nextWidth,
+          height: nextHeight,
+        }));
+        return;
+      }
       if (!dragState.current.dragging) return;
       const nextLeft = clamp(
         event.clientX - dragState.current.offsetX,
@@ -202,6 +234,7 @@ function InlineHelpChat({
     };
     const onUp = () => {
       dragState.current.dragging = false;
+      resizeState.current.resizing = false;
     };
     window.addEventListener("mousemove", onMove);
     window.addEventListener("mouseup", onUp);
@@ -209,78 +242,83 @@ function InlineHelpChat({
       window.removeEventListener("mousemove", onMove);
       window.removeEventListener("mouseup", onUp);
     };
-  }, [open, panelPos.width, panelPos.height]);
+  }, [open, panelPos.height, panelPos.left, panelPos.top, panelPos.width]);
 
   const startDrag = (event) => {
     if (!panelRef.current) return;
+    if (expanded) return;
     dragState.current.dragging = true;
     dragState.current.offsetX = event.clientX - panelPos.left;
     dragState.current.offsetY = event.clientY - panelPos.top;
   };
 
-  // Track panel resize via CSS resize: both
-  const handlePanelMouseUp = () => {
-    const newRect = panelRef.current?.getBoundingClientRect();
-    if (newRect) {
-      setPanelPos((prev) => ({
-        ...prev,
-        width: newRect.width,
-        height: newRect.height,
-      }));
-    }
+  const startResize = (event) => {
+    if (expanded) return;
+    event.preventDefault();
+    event.stopPropagation();
+    resizeState.current = {
+      resizing: true,
+      startX: event.clientX,
+      startY: event.clientY,
+      width: panelPos.width,
+      height: panelPos.height,
+    };
   };
+
+  const toggleExpanded = () => {
+    if (expanded) {
+      setExpanded(false);
+      if (savedPanelPosRef.current) {
+        setPanelPos(savedPanelPosRef.current);
+      }
+      return;
+    }
+    savedPanelPosRef.current = panelPos;
+    setExpanded(true);
+  };
+
+  const resolvedPanelStyle = expanded
+    ? {
+        top: 24,
+        left: 24,
+        width: "calc(100vw - 48px)",
+        height: "calc(100vh - 48px)",
+      }
+    : {
+        top: panelPos.top,
+        left: panelPos.left,
+        width: panelPos.width,
+        height: panelPos.height,
+      };
 
   // ------- Render the floating panel via portal -------
   const panel = open ? (
     <>
-      {/* SVG tether line from "?" icon to the panel */}
-      <svg
-        style={{
-          position: "fixed",
-          top: 0,
-          left: 0,
-          width: "100vw",
-          height: "100vh",
-          pointerEvents: "none",
-          zIndex: 1000,
-        }}
-      >
-        <line
-          x1={anchorPoint.x}
-          y1={anchorPoint.y}
-          x2={panelPos.left}
-          y2={panelPos.top}
-          stroke="#bfbfbf"
-          strokeDasharray="4 4"
-        />
-      </svg>
-
       {/* The floating panel */}
       <div
         ref={panelRef}
         style={{
           position: "fixed",
-          top: panelPos.top,
-          left: panelPos.left,
-          width: panelPos.width,
-          height: panelPos.height,
+          ...resolvedPanelStyle,
+          minWidth: 340,
+          minHeight: 280,
+          maxWidth: "calc(100vw - 16px)",
+          maxHeight: "calc(100vh - 16px)",
           zIndex: 1001,
           background: "#fff",
-          border: "1px dashed #d9d9d9",
-          borderRadius: 12,
-          boxShadow: "0 12px 28px rgba(0,0,0,0.12)",
+          border: "1px solid #e5e7eb",
+          borderRadius: 10,
+          boxShadow: "0 10px 24px rgba(15, 23, 42, 0.14)",
           display: "flex",
           flexDirection: "column",
-          resize: "both",
-          overflow: "auto",
+          overflow: "hidden",
         }}
-        onMouseUp={handlePanelMouseUp}
       >
         {/* Draggable header */}
         <div
           onMouseDown={startDrag}
           style={{
-            cursor: "move",
+            cursor: expanded ? "default" : "move",
             padding: "8px 12px",
             borderBottom: "1px solid #f0f0f0",
             fontWeight: 600,
@@ -291,10 +329,25 @@ function InlineHelpChat({
             userSelect: "none",
           }}
         >
-          <span>{label}</span>
-          <Button type="text" size="small" onClick={() => setOpen(false)}>
-            Close
-          </Button>
+          <span>Help: {label}</span>
+          <Space size={4}>
+            <Button
+              type="text"
+              size="small"
+              icon={expanded ? <ShrinkOutlined /> : <ArrowsAltOutlined />}
+              onMouseDown={(event) => event.stopPropagation()}
+              onClick={toggleExpanded}
+              aria-label={expanded ? "Restore helper size" : "Expand helper"}
+            />
+            <Button
+              type="text"
+              size="small"
+              onMouseDown={(event) => event.stopPropagation()}
+              onClick={() => setOpen(false)}
+            >
+              Close
+            </Button>
+          </Space>
         </div>
 
         {/* Messages area */}
@@ -312,7 +365,9 @@ function InlineHelpChat({
                 marginBottom: 8,
                 padding: "8px 10px",
                 borderRadius: 10,
-                background: msg.isUser ? "#e6f7ff" : "#fafafa",
+                background: msg.isUser
+                  ? "var(--seg-accent-primary-soft, #f0efff)"
+                  : "#fafafa",
               }}
             >
               {msg.isUser ? (
@@ -426,7 +481,12 @@ function InlineHelpChat({
         </div>
 
         {/* Input area */}
-        <div style={{ padding: "8px 12px", borderTop: "1px solid #f0f0f0" }}>
+        <div
+          style={{
+            padding: "8px 34px 8px 12px",
+            borderTop: "1px solid #f0f0f0",
+          }}
+        >
           <Space.Compact style={{ width: "100%" }}>
             <TextArea
               value={inputValue}
@@ -448,6 +508,44 @@ function InlineHelpChat({
             />
           </Space.Compact>
         </div>
+        <button
+          type="button"
+          aria-label={expanded ? "Restore helper size" : "Resize helper"}
+          title="Drag to resize. Double-click to expand or restore."
+          onMouseDown={startResize}
+          onDoubleClick={toggleExpanded}
+          style={{
+            position: "absolute",
+            right: 0,
+            bottom: 0,
+            width: 34,
+            height: 34,
+            border: 0,
+            padding: 0,
+            zIndex: 4,
+            background:
+              "linear-gradient(135deg, transparent 0 46%, rgba(248, 250, 252, 0.96) 47% 100%)",
+            cursor: expanded ? "zoom-out" : "nwse-resize",
+          }}
+        >
+          {[0, 1, 2].map((index) => (
+            <span
+              key={index}
+              aria-hidden="true"
+              style={{
+                position: "absolute",
+                right: 7 + index * 5,
+                bottom: 6,
+                width: 2,
+                height: 18 - index * 5,
+                borderRadius: 1,
+                background: index === 0 ? "#4b5563" : "#9ca3af",
+                transform: "rotate(45deg)",
+                transformOrigin: "bottom center",
+              }}
+            />
+          ))}
+        </button>
       </div>
     </>
   ) : null;
@@ -460,6 +558,7 @@ function InlineHelpChat({
         size="small"
         icon={<QuestionCircleOutlined />}
         onClick={() => (open ? setOpen(false) : openPanel())}
+        aria-label={`Help for ${label}`}
         style={{ color: "#8c8c8c" }}
       />
       {open ? ReactDOM.createPortal(panel, document.body) : null}

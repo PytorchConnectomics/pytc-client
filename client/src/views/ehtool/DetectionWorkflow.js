@@ -1,27 +1,47 @@
-import React, { useContext, useState, useEffect, useMemo, useRef } from "react";
+import React, { useContext, useState, useEffect, useRef } from "react";
 import {
+  Card,
+  Divider,
   Layout,
   message,
   Space,
   Typography,
   Button,
-  Slider,
-  Drawer,
-  Collapse,
   Modal,
-  Input,
-  Dropdown,
+  Slider,
+  InputNumber,
+  Popover,
   Tag,
+  Spin,
+  Tooltip,
 } from "antd";
-import { MoreOutlined } from "@ant-design/icons";
+import {
+  ClearOutlined,
+  DragOutlined,
+  EditOutlined,
+  EyeInvisibleOutlined,
+  EyeOutlined,
+  SaveOutlined,
+  ZoomInOutlined,
+  ZoomOutOutlined,
+} from "@ant-design/icons";
 import DatasetLoader from "./DatasetLoader";
-import ProgressTracker from "./ProgressTracker";
 import InstanceNavigator from "./InstanceNavigator";
 import ProofreadingEditor from "./ProofreadingEditor";
+import Instance3DPreview from "./Instance3DPreview";
 import SliceScheduler from "./SliceScheduler";
-import { apiClient } from "../../api";
+import {
+  apiClient,
+  getInstanceMeshPreview,
+} from "../../api";
 import { AppContext } from "../../contexts/GlobalContext";
 import { useWorkflow } from "../../contexts/WorkflowContext";
+import { logClientEvent } from "../../logging/appEventLog";
+import {
+  getProofreadingImagePath,
+  getProofreadingMaskPath,
+  getTrainingReadyCorrectedMask,
+} from "./proofreadingPaths";
 
 const { Sider, Content } = Layout;
 const { Title, Text } = Typography;
@@ -56,6 +76,209 @@ const SCRUB_IDLE_MS = parsePositiveInt(
   process.env.REACT_APP_EH_SCRUB_IDLE_MS,
   120,
 );
+const WHEEL_SLICE_DELTA_PX = 72;
+const WHEEL_SLICE_IDLE_MS = 140;
+const DEFAULT_OVERLAY_ALL_ALPHA = 0.24;
+const DEFAULT_OVERLAY_ACTIVE_ALPHA = 0.8;
+
+const supportsAllInstanceOverlay = (mode) =>
+  mode === "instance" || mode === "semantic";
+
+const AXIS_LABELS = {
+  xy: "XY",
+  zy: "YZ",
+  zx: "XZ",
+};
+
+const ORTHO_PANES = [
+  { axis: "xy", label: "XY" },
+  { axis: "zy", label: "YZ" },
+  { axis: "zx", label: "XZ" },
+];
+
+const formatAxisLabel = (axis) => AXIS_LABELS[axis] || String(axis).toUpperCase();
+
+function OrthoviewPane({
+  axis,
+  label,
+  payload,
+  loading,
+  active,
+  editable,
+  onActivate,
+  onSliceWheel,
+  children,
+}) {
+  const rootRef = useRef(null);
+  const wheelHandlerRef = useRef(onSliceWheel);
+
+  useEffect(() => {
+    wheelHandlerRef.current = onSliceWheel;
+  }, [onSliceWheel]);
+
+  useEffect(() => {
+    const node = rootRef.current;
+    if (!node) return undefined;
+    const handleWheel = (event) => {
+      if (!wheelHandlerRef.current || event.ctrlKey || event.metaKey) return;
+      event.preventDefault();
+      event.stopPropagation();
+      wheelHandlerRef.current({
+        deltaY: event.deltaY,
+        deltaMode: event.deltaMode,
+      });
+    };
+    node.addEventListener("wheel", handleWheel, {
+      capture: true,
+      passive: false,
+    });
+    return () => {
+      node.removeEventListener("wheel", handleWheel, { capture: true });
+    };
+  }, []);
+
+  return (
+    <section
+      ref={rootRef}
+      onMouseDownCapture={() => {
+        if (!active) onActivate?.();
+      }}
+      style={{
+        minHeight: 0,
+        position: "relative",
+        display: "block",
+        border: active ? "1px solid #64748b" : "1px solid #1f2937",
+        borderRadius: 6,
+        background: "#0f172a",
+        overflow: "hidden",
+        overscrollBehavior: "contain",
+        touchAction: "none",
+        boxShadow: "none",
+      }}
+    >
+      <button
+        type="button"
+        onClick={onActivate}
+        style={{
+          position: "absolute",
+          top: 8,
+          left: 8,
+          zIndex: 6,
+          border: 0,
+          borderRadius: 6,
+          background: active
+            ? "rgba(226, 232, 240, 0.94)"
+            : "rgba(15, 23, 42, 0.66)",
+          color: "#f8fafc",
+          display: "inline-flex",
+          alignItems: "center",
+          minHeight: 24,
+          padding: "3px 9px",
+          cursor: active ? "default" : "pointer",
+          textAlign: "left",
+          boxShadow: active
+            ? "0 0 0 1px rgba(148, 163, 184, 0.65), 0 6px 18px rgba(2, 6, 23, 0.22)"
+            : "0 6px 18px rgba(2, 6, 23, 0.18)",
+        }}
+      >
+        <span
+          style={{
+            fontWeight: 700,
+            fontSize: 12,
+            color: active ? "#0f172a" : "#f8fafc",
+          }}
+        >
+          {label}
+        </span>
+      </button>
+      <div style={{ position: "absolute", inset: 0, minHeight: 0 }}>
+        {editable ? (
+          children
+        ) : payload?.imageBase64 ? (
+          <div
+            style={{
+              position: "absolute",
+              inset: 0,
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              overflow: "hidden",
+              background: "#0f172a",
+            }}
+          >
+            <img
+              src={payload.imageBase64}
+              alt={`${label} slice`}
+              draggable={false}
+              style={{
+                position: "absolute",
+                maxWidth: "100%",
+                maxHeight: "100%",
+                imageRendering: "pixelated",
+              }}
+            />
+            {payload.maskAllBase64 && (
+              <img
+                src={payload.maskAllBase64}
+                alt=""
+                draggable={false}
+                style={{
+                  position: "absolute",
+                  maxWidth: "100%",
+                  maxHeight: "100%",
+                  imageRendering: "pixelated",
+                  pointerEvents: "none",
+                }}
+              />
+            )}
+            {payload.maskActiveBase64 && (
+              <img
+                src={payload.maskActiveBase64}
+                alt=""
+                draggable={false}
+                style={{
+                  position: "absolute",
+                  maxWidth: "100%",
+                  maxHeight: "100%",
+                  imageRendering: "pixelated",
+                  pointerEvents: "none",
+                }}
+              />
+            )}
+          </div>
+        ) : (
+          <div
+            style={{
+              position: "absolute",
+              inset: 0,
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              color: "#cbd5e1",
+              background: "#0f172a",
+            }}
+          >
+            {loading ? <Spin /> : <span>{formatAxisLabel(axis)} preview</span>}
+          </div>
+        )}
+        {!editable && loading && payload?.imageBase64 && (
+          <div
+            style={{
+              position: "absolute",
+              right: 10,
+              bottom: 10,
+              background: "rgba(15, 23, 42, 0.72)",
+              borderRadius: 8,
+              padding: 6,
+            }}
+          >
+            <Spin size="small" />
+          </div>
+        )}
+      </div>
+    </section>
+  );
+}
 
 function DetectionWorkflow({
   sessionId,
@@ -65,6 +288,9 @@ function DetectionWorkflow({
 }) {
   const appContext = useContext(AppContext);
   const workflowContext = useWorkflow();
+  const pendingRuntimeAction = workflowContext?.pendingRuntimeAction;
+  const consumeRuntimeAction = workflowContext?.consumeRuntimeAction;
+  const activeWorkflow = workflowContext?.workflow;
   const [projectName, setProjectName] = useState("");
   const [totalLayers, setTotalLayers] = useState(0);
   const [instances, setInstances] = useState([]);
@@ -74,6 +300,20 @@ function DetectionWorkflow({
   const [filterText, setFilterText] = useState("");
   const [loadingInstances, setLoadingInstances] = useState(false);
   const [loadingView, setLoadingView] = useState(false);
+  const [volumePreview, setVolumePreview] = useState(null);
+  const [loadingVolumePreview, setLoadingVolumePreview] = useState(false);
+  const [meshRevision, setMeshRevision] = useState(0);
+  const [liveMaskDraft, setLiveMaskDraft] = useState(null);
+  const [orthoviewPayloads, setOrthoviewPayloads] = useState({});
+  const [loadingOrthoviews, setLoadingOrthoviews] = useState(false);
+  const [activeToolState, setActiveToolState] = useState({
+    tool: "paint",
+    showMask: true,
+    hasUnsavedEdits: false,
+    zoom: 1,
+    canEdit: true,
+    activeBrushSize: 10,
+  });
   const [viewAxis, setViewAxis] = useState("xy");
   const [axisTotal, setAxisTotal] = useState(0);
   const [viewState, setViewState] = useState({
@@ -84,6 +324,7 @@ function DetectionWorkflow({
     zIndex: 0,
     axis: "xy",
     total: 0,
+    instanceId: null,
   });
   const [sliderZ, setSliderZ] = useState(0);
   const [committedZ, setCommittedZ] = useState(0);
@@ -101,28 +342,25 @@ function DetectionWorkflow({
   const isScrubbingRef = useRef(false);
   const scrubTrackRef = useRef({ zIndex: 0, at: 0 });
   const isFastScrubRef = useRef(false);
-  const [overlayAllAlpha, setOverlayAllAlpha] = useState(0.08);
-  const [overlayActiveAlpha, setOverlayActiveAlpha] = useState(0.8);
+  const [overlayAllAlpha, setOverlayAllAlpha] = useState(
+    DEFAULT_OVERLAY_ALL_ALPHA,
+  );
+  const [overlayActiveAlpha, setOverlayActiveAlpha] = useState(
+    DEFAULT_OVERLAY_ACTIVE_ALPHA,
+  );
   const [savingMask, setSavingMask] = useState(false);
-  const [classificationPending, setClassificationPending] = useState(false);
   const [windowWidth, setWindowWidth] = useState(
     typeof window !== "undefined" ? window.innerWidth : 1440,
   );
-  const [showInstanceBrowser, setShowInstanceBrowser] = useState(false);
-  const [showInspector, setShowInspector] = useState(true);
-  const [inspectorSections, setInspectorSections] = useState([
-    "review",
-    "instances",
-  ]);
+  const [showQueue, setShowQueue] = useState(true);
   const [persistence, setPersistence] = useState(null);
-  const [showExportModal, setShowExportModal] = useState(false);
-  const [exportPath, setExportPath] = useState("");
-  const [lastExportPath, setLastExportPath] = useState("");
-  const [exportingMasks, setExportingMasks] = useState(false);
-  const [overwritingSource, setOverwritingSource] = useState(false);
   const lastPersistenceErrorRef = useRef(null);
   const lastFullRequestKeyRef = useRef(null);
   const fullRequestInFlightRef = useRef(null);
+  const lastProofreadingLogRef = useRef({});
+  const orthoviewPayloadsRef = useRef({});
+  const editorRefs = useRef({});
+  const sliceWheelRef = useRef({});
 
   const schedulerRef = useRef(
     new SliceScheduler({
@@ -134,6 +372,7 @@ function DetectionWorkflow({
   const viewCache = useRef(new Map());
   const viewCacheOrder = useRef([]);
   const viewCacheLimit = 80;
+  const handledRuntimeActionIdsRef = useRef(new Set());
 
   const ensurePerfState = () => {
     if (typeof window === "undefined") return null;
@@ -192,14 +431,35 @@ function DetectionWorkflow({
     window.__proofreadPerf = perfState;
   };
 
-  const axisOptions = useMemo(
-    () => [
-      { label: "XY", value: "xy" },
-      { label: "ZX", value: "zx" },
-      { label: "ZY", value: "zy" },
-    ],
-    [],
-  );
+  const logProofreadingEvent = (event, data = {}, options = {}) => {
+    const now =
+      typeof performance !== "undefined" ? performance.now() : Date.now();
+    const throttleMs = Number.isFinite(options.throttleMs)
+      ? options.throttleMs
+      : 0;
+    const throttleKey = options.throttleKey || event;
+    if (
+      throttleMs > 0 &&
+      lastProofreadingLogRef.current[throttleKey] &&
+      now - lastProofreadingLogRef.current[throttleKey] < throttleMs
+    ) {
+      return;
+    }
+    lastProofreadingLogRef.current[throttleKey] = now;
+    logClientEvent(event, {
+      level: options.level || "INFO",
+      message: options.message || event,
+      source: "proofreading",
+      data: {
+        sessionId,
+        activeInstanceId,
+        axis: viewAxis,
+        sliderZ,
+        committedZ,
+        ...data,
+      },
+    });
+  };
 
   const getErrorMessage = (error, fallback) => {
     const detail = error?.response?.data?.detail;
@@ -235,6 +495,33 @@ function DetectionWorkflow({
   }, [sessionId, refreshTrigger]);
 
   useEffect(() => {
+    if (!sessionId || !activeInstanceId) {
+      setVolumePreview(null);
+      setLiveMaskDraft(null);
+      return undefined;
+    }
+    let cancelled = false;
+    setLoadingVolumePreview(true);
+    setLiveMaskDraft(null);
+    getInstanceMeshPreview(sessionId, activeInstanceId, 60000)
+      .then((preview) => {
+        if (!cancelled) setVolumePreview(preview || null);
+      })
+      .catch((error) => {
+        if (!cancelled) {
+          console.warn("Failed to load 3D instance preview:", error);
+          setVolumePreview(null);
+        }
+      })
+      .finally(() => {
+        if (!cancelled) setLoadingVolumePreview(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [activeInstanceId, meshRevision, sessionId]);
+
+  useEffect(() => {
     const persistenceError = persistence?.last_error;
     if (!persistenceError) return;
     if (lastPersistenceErrorRef.current === persistenceError) return;
@@ -247,41 +534,10 @@ function DetectionWorkflow({
   }, [persistence?.last_error]);
 
   useEffect(() => {
-    const storedAll = Number(
-      localStorage.getItem("mask-proofreading-overlay-all"),
-    );
-    const storedActive = Number(
-      localStorage.getItem("mask-proofreading-overlay-active"),
-    );
-    const storedAxis = localStorage.getItem("mask-proofreading-axis");
-    if (!Number.isNaN(storedAll)) {
-      setOverlayAllAlpha(Math.min(Math.max(storedAll, 0), 1));
-    }
-    if (!Number.isNaN(storedActive)) {
-      setOverlayActiveAlpha(Math.min(Math.max(storedActive, 0), 1));
-    }
-    if (storedAxis && ["xy", "zx", "zy"].includes(storedAxis)) {
-      setViewAxis(storedAxis);
-    }
-  }, []);
-
-  useEffect(() => {
-    localStorage.setItem(
-      "mask-proofreading-overlay-all",
-      overlayAllAlpha.toString(),
-    );
-  }, [overlayAllAlpha]);
-
-  useEffect(() => {
-    localStorage.setItem(
-      "mask-proofreading-overlay-active",
-      overlayActiveAlpha.toString(),
-    );
-  }, [overlayActiveAlpha]);
-
-  useEffect(() => {
+    const scheduler = schedulerRef.current;
     return () => {
-      schedulerRef.current.clear();
+      scheduler.clear();
+      clearSliceWheelTimers();
       if (previewDebounceRef.current) {
         clearTimeout(previewDebounceRef.current);
       }
@@ -292,7 +548,29 @@ function DetectionWorkflow({
   }, []);
 
   useEffect(() => {
-    if (!sessionId || !activeInstanceId || instanceMode !== "instance") return;
+    if (typeof document === "undefined") return undefined;
+    const lockViewerWheel = (event) => {
+      if (!event.target?.closest?.("[data-proofreader-wheel-lock='true']")) {
+        return;
+      }
+      event.preventDefault();
+    };
+    document.addEventListener("wheel", lockViewerWheel, {
+      capture: true,
+      passive: false,
+    });
+    return () => {
+      document.removeEventListener("wheel", lockViewerWheel, { capture: true });
+    };
+  }, []);
+
+  useEffect(() => {
+    if (
+      !sessionId ||
+      !activeInstanceId ||
+      !supportsAllInstanceOverlay(instanceMode)
+    )
+      return;
     if (isScrubbingRef.current) return;
     const includeAll = overlayAllAlpha > 0.001;
     const includeActive = overlayActiveAlpha > 0.001;
@@ -342,7 +620,8 @@ function DetectionWorkflow({
   useEffect(() => {
     if (!sessionId || !activeInstanceId) return;
     if (isScrubbingRef.current) return;
-    const includeAll = instanceMode === "instance" && overlayAllAlpha > 0.001;
+    const includeAll =
+      supportsAllInstanceOverlay(instanceMode) && overlayAllAlpha > 0.001;
     const includeActive = overlayActiveAlpha > 0.001;
     const requestIdentity = [
       activeInstanceId,
@@ -396,19 +675,10 @@ function DetectionWorkflow({
           handleAxisChange("xy");
           break;
         case "2":
-          handleAxisChange("zx");
-          break;
-        case "3":
           handleAxisChange("zy");
           break;
-        case "c":
-          handleInstanceClassify("correct");
-          break;
-        case "x":
-          handleInstanceClassify("incorrect");
-          break;
-        case "u":
-          handleInstanceClassify("unsure");
+        case "3":
+          handleAxisChange("zx");
           break;
         case "arrowright":
           goToNextInstance();
@@ -425,35 +695,14 @@ function DetectionWorkflow({
     return () => window.removeEventListener("keydown", handleKeyPress);
   }, [sessionId, activeInstanceId, instances]);
 
-  const stats = useMemo(() => {
-    const total = instances.length;
-    const correct = instances.filter(
-      (i) => i.classification === "correct",
-    ).length;
-    const incorrect = instances.filter(
-      (i) => i.classification === "incorrect",
-    ).length;
-    const unsure = instances.filter(
-      (i) => i.classification === "unsure",
-    ).length;
-    const error = instances.filter((i) => i.classification === "error").length;
-    const reviewed = total - error;
-    const progress_percent = total > 0 ? (reviewed / total) * 100 : 0;
-
-    return {
-      correct,
-      incorrect,
-      unsure,
-      error,
-      total,
-      reviewed,
-      progress_percent: Math.round(progress_percent * 100) / 100,
-    };
-  }, [instances]);
-
   const handleDatasetLoad = async (datasetPath, maskPath, projectName) => {
     setLoadingInstances(true);
     try {
+      logProofreadingEvent("proofreading_dataset_load_started", {
+        datasetPath,
+        maskPath,
+        projectName,
+      });
       const response = await apiClient.post("/eh/detection/load", {
         dataset_path: datasetPath,
         mask_path: maskPath || null,
@@ -464,12 +713,22 @@ function DetectionWorkflow({
       setSessionId(response.data.session_id);
       setProjectName(response.data.project_name);
       setTotalLayers(response.data.total_layers);
+      logProofreadingEvent("proofreading_dataset_load_completed", {
+        nextSessionId: response.data.session_id,
+        totalLayers: response.data.total_layers,
+        projectName: response.data.project_name,
+      });
       message.success(
         `Loaded ${response.data.total_layers} slices successfully`,
       );
       await loadInstances(response.data.session_id, true);
     } catch (error) {
       console.error("Failed to load dataset:", error);
+      logProofreadingEvent(
+        "proofreading_dataset_load_failed",
+        { error: getErrorMessage(error, "Failed to load dataset") },
+        { level: "ERROR" },
+      );
       Modal.error({
         title: "Dataset load failed",
         content: getErrorMessage(
@@ -482,6 +741,47 @@ function DetectionWorkflow({
       setLoadingInstances(false);
     }
   };
+
+  useEffect(() => {
+    if (pendingRuntimeAction?.kind !== "start_proofreading") return;
+    const action = pendingRuntimeAction;
+    const actionKey =
+      action.id ||
+      `${action.kind}:${action.created_at || action.createdAt || JSON.stringify(action.overrides || {})}`;
+    if (handledRuntimeActionIdsRef.current.has(actionKey)) return;
+    handledRuntimeActionIdsRef.current.add(actionKey);
+    consumeRuntimeAction?.(action.id);
+    if (sessionId) return;
+
+    const overrides = action.overrides || {};
+    const datasetPath =
+      overrides.datasetPath || getProofreadingImagePath(activeWorkflow);
+    const maskPath =
+      overrides.maskPath || getProofreadingMaskPath(activeWorkflow);
+    const nextProjectName =
+      overrides.projectName || activeWorkflow?.title || "Proofreading review";
+
+    if (!datasetPath) {
+      message.warning("Choose image data before proofreading.");
+      return;
+    }
+
+    handleDatasetLoad(datasetPath, maskPath, nextProjectName);
+    // Runtime actions are one-shot messages consumed above; handleDatasetLoad is
+    // intentionally not a dependency because it is defined in this large legacy component.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [
+    activeWorkflow?.corrected_mask_path,
+    activeWorkflow?.dataset_path,
+    activeWorkflow?.image_path,
+    activeWorkflow?.inference_output_path,
+    activeWorkflow?.label_path,
+    activeWorkflow?.mask_path,
+    activeWorkflow?.title,
+    consumeRuntimeAction,
+    pendingRuntimeAction,
+    sessionId,
+  ]);
 
   const isAbortError = (error) => {
     if (!error) return false;
@@ -526,11 +826,20 @@ function DetectionWorkflow({
     previewCacheOrder.current = [];
     filmstripBatchCacheOrder.current = [];
     filmstripFrameCacheOrder.current = [];
+    logProofreadingEvent(
+      "proofreading_frame_caches_cleared",
+      {},
+      { throttleMs: 1000 },
+    );
   };
 
   useEffect(() => {
     return () => {
       clearFrameCaches();
+      Object.values(orthoviewPayloadsRef.current).forEach((payload) =>
+        revokePayloadUrls(payload),
+      );
+      orthoviewPayloadsRef.current = {};
     };
   }, []);
 
@@ -663,10 +972,17 @@ function DetectionWorkflow({
       // blank between preview frames.
       maskAllBase64: payload.maskAllBase64 ?? prev.maskAllBase64,
       maskActiveBase64: payload.maskActiveBase64 ?? prev.maskActiveBase64,
-      maskRawBase64: payload.maskRawBase64 ?? prev.maskRawBase64,
+      maskRawBase64:
+        payload.maskRawBase64 ??
+        (payload.zIndex === prev.zIndex &&
+        payload.axis === prev.axis &&
+        payload.instanceId === prev.instanceId
+          ? prev.maskRawBase64
+          : null),
       zIndex: payload.zIndex,
       axis: payload.axis,
       total: payload.total,
+      instanceId: payload.instanceId ?? prev.instanceId,
     }));
     setAxisTotal(payload.total);
   };
@@ -848,6 +1164,7 @@ function DetectionWorkflow({
       zIndex: resolvedIndex,
       axis: resolvedAxis,
       total,
+      instanceId,
       batchStart: resolvedIndex,
       batchCount: 1,
       quality,
@@ -964,6 +1281,7 @@ function DetectionWorkflow({
       zIndex: resolvedStart + frameOffset,
       axis: resolvedAxis,
       total,
+      instanceId,
       batchStart: resolvedStart,
       batchCount: resolvedCount,
       quality,
@@ -1002,7 +1320,7 @@ function DetectionWorkflow({
     preferFilmstrip = ENABLE_FILMSTRIP_PREVIEW,
     signal,
   }) => {
-    const kinds = ["image"];
+    const kinds = ["image", "mask_active_binary"];
     if (!imageOnly) {
       if (includeActive) kinds.push("mask_active");
       if (includeAll) kinds.push("mask_all");
@@ -1070,17 +1388,52 @@ function DetectionWorkflow({
       setAxisTotal(nextTotalLayers);
       setPersistence(persistenceStatus);
 
-      if (uiState && shouldRestore) {
-        setOverlayAllAlpha(
-          clampAlpha(uiState.overlay_all_alpha, overlayAllAlpha),
-        );
-        setOverlayActiveAlpha(
-          clampAlpha(uiState.overlay_active_alpha, overlayActiveAlpha),
-        );
+      let nextOverlayAllAlpha =
+        uiState && shouldRestore
+          ? clampAlpha(uiState.overlay_all_alpha, overlayAllAlpha)
+          : overlayAllAlpha;
+      let nextOverlayActiveAlpha =
+        uiState && shouldRestore
+          ? clampAlpha(uiState.overlay_active_alpha, overlayActiveAlpha)
+          : overlayActiveAlpha;
+      let overlayVisibilityChanged = false;
+
+      if (
+        shouldRestore &&
+        nextInstanceMode !== "none"
+      ) {
+        if (
+          nextOverlayAllAlpha <= 0.001 &&
+          nextOverlayActiveAlpha <= 0.001
+        ) {
+          nextOverlayAllAlpha = DEFAULT_OVERLAY_ALL_ALPHA;
+          nextOverlayActiveAlpha = DEFAULT_OVERLAY_ACTIVE_ALPHA;
+          overlayVisibilityChanged = true;
+        } else {
+          if (
+            supportsAllInstanceOverlay(nextInstanceMode) &&
+            nextOverlayAllAlpha > 0.001 &&
+            nextOverlayAllAlpha < DEFAULT_OVERLAY_ALL_ALPHA
+          ) {
+            nextOverlayAllAlpha = DEFAULT_OVERLAY_ALL_ALPHA;
+            overlayVisibilityChanged = true;
+          }
+          if (
+            nextOverlayActiveAlpha > 0.001 &&
+            nextOverlayActiveAlpha < DEFAULT_OVERLAY_ACTIVE_ALPHA
+          ) {
+            nextOverlayActiveAlpha = DEFAULT_OVERLAY_ACTIVE_ALPHA;
+            overlayVisibilityChanged = true;
+          }
+        }
+      }
+
+      if (shouldRestore || overlayVisibilityChanged) {
+        setOverlayAllAlpha(nextOverlayAllAlpha);
+        setOverlayActiveAlpha(nextOverlayActiveAlpha);
       }
 
       setViewAxis(axisToUse);
-      localStorage.setItem("mask-proofreading-axis", axisToUse);
 
       const firstUnreviewed = instanceList.find(
         (inst) => inst.classification === "error",
@@ -1107,6 +1460,11 @@ function DetectionWorkflow({
           zIndex: resolvedIndex,
           axis: axisToUse,
           total: nextTotalLayers,
+          instanceId: initialInstance.id,
+          imageBase64: null,
+          maskAllBase64: null,
+          maskActiveBase64: null,
+          maskRawBase64: null,
         }));
         setSliderZ(resolvedIndex);
         setCommittedZ(resolvedIndex);
@@ -1153,7 +1511,7 @@ function DetectionWorkflow({
         Math.min(zIndex + 1, totalForAxis - 1),
       ]),
     );
-    const kinds = ["image"];
+    const kinds = ["image", "mask_active_binary"];
     if (includeActive) kinds.push("mask_active");
     if (includeAll) kinds.push("mask_all");
     if (includeRaw) kinds.push("mask_active_binary");
@@ -1267,6 +1625,7 @@ function DetectionWorkflow({
     const maxDim = parsePositiveInt(options.maxDim, PREVIEW_MAX_DIM);
     const qualityLabel = options.qualityLabel || `preview-${maxDim}`;
     const imageOnly = options.imageOnly === true;
+    const includeAllContext = options.includeAllContext !== false;
     const shouldPrefetch =
       options.prefetchNeighbors !== false && !isFastScrubRef.current;
     const prefetchDistance =
@@ -1274,7 +1633,10 @@ function DetectionWorkflow({
       (isFastScrubRef.current ? 0 : PREVIEW_PREFETCH_RADIUS);
     const priority = Number.isFinite(options.priority) ? options.priority : 120;
     const includeAll =
-      !imageOnly && instanceMode === "instance" && overlayAllAlpha > 0.001;
+      !imageOnly &&
+      includeAllContext &&
+      supportsAllInstanceOverlay(instanceMode) &&
+      overlayAllAlpha > 0.001;
     const includeActive = !imageOnly && overlayActiveAlpha > 0.001;
     const cacheKey = buildCacheKey({
       instanceId,
@@ -1287,6 +1649,17 @@ function DetectionWorkflow({
     const cached = previewCache.current.get(cacheKey);
     if (cached) {
       perfCount("preview-cache-hit");
+      logProofreadingEvent(
+        "proofreading_slice_preview_cache_hit",
+        {
+          instanceId,
+          zIndex,
+          axis: axisToUse,
+          quality: qualityLabel,
+          imageOnly,
+        },
+        { throttleMs: 500 },
+      );
       setPreviewView(cached);
       setSliderZ(cached.zIndex ?? zIndex);
       setAxisTotal(cached.total ?? axisTotal);
@@ -1298,6 +1671,18 @@ function DetectionWorkflow({
     const startedAt = performance.now();
     try {
       perfCount("request_start");
+      logProofreadingEvent(
+        "proofreading_slice_preview_requested",
+        {
+          instanceId,
+          zIndex,
+          axis: axisToUse,
+          quality: qualityLabel,
+          imageOnly,
+          maxDim,
+        },
+        { throttleMs: 250 },
+      );
       const previewPayload = await schedulerRef.current.run({
         key: requestKey,
         lane: "interactive",
@@ -1322,6 +1707,18 @@ function DetectionWorkflow({
       setSliderZ(previewPayload.zIndex);
       setAxisTotal(previewPayload.total);
       perfLog("first_preview_paint", startedAt);
+      logProofreadingEvent(
+        "proofreading_slice_preview_loaded",
+        {
+          instanceId,
+          zIndex: previewPayload.zIndex,
+          axis: axisToUse,
+          quality: qualityLabel,
+          imageOnly,
+          elapsedMs: Number((performance.now() - startedAt).toFixed(1)),
+        },
+        { throttleMs: 250 },
+      );
       if (shouldPrefetch && prefetchDistance > 0) {
         prefetchPreviewNeighbors(
           instanceId,
@@ -1356,7 +1753,8 @@ function DetectionWorkflow({
     if (!sessionToUse || !instanceId) return;
     const axisToUse = axisOverride ?? viewAxis;
     const includeAll =
-      (modeOverride ?? instanceMode) === "instance" && overlayAllAlpha > 0.001;
+      supportsAllInstanceOverlay(modeOverride ?? instanceMode) &&
+      overlayAllAlpha > 0.001;
     const includeActive = overlayActiveAlpha > 0.001;
     const requestIdentity = [
       instanceId,
@@ -1380,6 +1778,12 @@ function DetectionWorkflow({
     const cached = viewCache.current.get(cacheKey);
     if (cached && (!includeRaw || cached.maskRawBase64)) {
       perfCount("full-cache-hit");
+      logProofreadingEvent("proofreading_slice_full_cache_hit", {
+        instanceId,
+        zIndex,
+        axis: axisToUse,
+        includeRaw,
+      });
       lastFullRequestKeyRef.current = requestIdentity;
       setViewState(cached);
       setAxisTotal(cached.total ?? axisTotal);
@@ -1421,6 +1825,14 @@ function DetectionWorkflow({
     const startedAt = performance.now();
     try {
       perfCount("request_start");
+      logProofreadingEvent("proofreading_slice_full_requested", {
+        instanceId,
+        zIndex,
+        axis: axisToUse,
+        includeRaw,
+        includeAll,
+        includeActive,
+      });
       const fullPayload = await schedulerRef.current.run({
         key: requestKey,
         lane: "interactive",
@@ -1451,6 +1863,13 @@ function DetectionWorkflow({
       setAxisTotal(fullPayload.total);
       setSliderZ(fullPayload.zIndex);
       perfLog("full_paint", startedAt);
+      logProofreadingEvent("proofreading_slice_full_loaded", {
+        instanceId,
+        zIndex: fullPayload.zIndex,
+        axis: axisToUse,
+        includeRaw,
+        elapsedMs: Number((performance.now() - startedAt).toFixed(1)),
+      });
       prefetchAdjacent(
         instanceId,
         fullPayload.zIndex,
@@ -1466,6 +1885,16 @@ function DetectionWorkflow({
         perfCount("dropped_request");
       } else {
         console.error("Failed to load instance view:", error);
+        logProofreadingEvent(
+          "proofreading_slice_full_failed",
+          {
+            instanceId,
+            zIndex,
+            axis: axisToUse,
+            error: getErrorMessage(error, "Failed to load instance view"),
+          },
+          { level: "ERROR" },
+        );
         message.error(getErrorMessage(error, "Failed to load instance view"));
       }
     } finally {
@@ -1487,8 +1916,18 @@ function DetectionWorkflow({
     }
   };
 
+  const clearSliceWheelTimers = () => {
+    Object.values(sliceWheelRef.current || {}).forEach((state) => {
+      if (state?.commitTimer) {
+        clearTimeout(state.commitTimer);
+      }
+    });
+    sliceWheelRef.current = {};
+  };
+
   const selectInstance = (instance) => {
     clearScrubTimers();
+    clearSliceWheelTimers();
     isScrubbingRef.current = false;
     isFastScrubRef.current = false;
     const axisIndex = clampSliceIndex(
@@ -1497,22 +1936,17 @@ function DetectionWorkflow({
     );
     setActiveInstanceId(instance.id);
     setActiveInstance(instance);
-    setViewState((prev) => ({ ...prev, zIndex: axisIndex }));
+    setViewState((prev) => ({
+      ...prev,
+      zIndex: axisIndex,
+      instanceId: instance.id,
+      imageBase64: null,
+      maskAllBase64: null,
+      maskActiveBase64: null,
+      maskRawBase64: null,
+    }));
     setSliderZ(axisIndex);
     setCommittedZ(axisIndex);
-  };
-
-  const goToNextUnreviewed = () => {
-    if (instances.length === 0) return;
-    const pool = instances.filter((inst) => inst.classification === "error");
-    if (pool.length === 0) return;
-    if (!activeInstanceId) {
-      selectInstance(pool[0]);
-      return;
-    }
-    const currentIdx = pool.findIndex((inst) => inst.id === activeInstanceId);
-    const next = pool[(currentIdx + 1 + pool.length) % pool.length];
-    if (next) selectInstance(next);
   };
 
   const goToNextInstance = () => {
@@ -1527,58 +1961,6 @@ function DetectionWorkflow({
     const index = instances.findIndex((inst) => inst.id === activeInstanceId);
     const prev = instances[index - 1] || instances[instances.length - 1];
     if (prev) selectInstance(prev);
-  };
-
-  const handleInstanceClassify = async (classification) => {
-    if (!activeInstanceId) return;
-    if (classificationPending) return;
-
-    const instanceId = activeInstanceId;
-    const previousClassification =
-      activeInstance?.classification ||
-      instances.find((inst) => inst.id === instanceId)?.classification ||
-      "error";
-
-    const applyLocalClassification = (instanceToUpdate, nextClassification) => {
-      setInstances((prev) =>
-        prev.map((inst) =>
-          inst.id === instanceToUpdate
-            ? { ...inst, classification: nextClassification }
-            : inst,
-        ),
-      );
-      setActiveInstance((prev) =>
-        prev && prev.id === instanceToUpdate
-          ? { ...prev, classification: nextClassification }
-          : prev,
-      );
-    };
-
-    // Optimistic update to keep the interaction snappy.
-    applyLocalClassification(instanceId, classification);
-    setClassificationPending(true);
-
-    try {
-      await apiClient.post("/eh/detection/instance-classify", {
-        session_id: sessionId,
-        instance_ids: [instanceId],
-        classification,
-        ui_state: {
-          axis: viewAxis,
-          overlay_all_alpha: overlayAllAlpha,
-          overlay_active_alpha: overlayActiveAlpha,
-          last_instance_id: instanceId,
-          last_slice_index: viewState.zIndex,
-        },
-      });
-    } catch (error) {
-      console.error("Failed to classify instance:", error);
-      // Roll back local optimistic state if save fails.
-      applyLocalClassification(instanceId, previousClassification);
-      message.error(getErrorMessage(error, "Failed to classify instance"));
-    } finally {
-      setClassificationPending(false);
-    }
   };
 
   const handleSliceChange = (value) => {
@@ -1598,7 +1980,7 @@ function DetectionWorkflow({
 
     const axisToUse = viewAxis;
     const fullIncludeAll =
-      instanceMode === "instance" && overlayAllAlpha > 0.001;
+      supportsAllInstanceOverlay(instanceMode) && overlayAllAlpha > 0.001;
     const fullIncludeActive = overlayActiveAlpha > 0.001;
     const includeAll = false;
     const includeActive = false;
@@ -1681,6 +2063,7 @@ function DetectionWorkflow({
         prefetchNeighbors: !isFastScrubRef.current,
         prefetchDistance: isFastScrubRef.current ? 0 : 1,
         imageOnly: false,
+        includeAllContext: false,
         priority: 110,
       });
     }, SCRUB_IDLE_MS);
@@ -1698,147 +2081,193 @@ function DetectionWorkflow({
       zIndex: nextIndex,
       at: typeof performance !== "undefined" ? performance.now() : Date.now(),
     };
+    logProofreadingEvent("proofreading_slice_committed", {
+      zIndex: nextIndex,
+      axis: viewAxis,
+    });
+    loadInstanceView(activeInstanceId, nextIndex, true, undefined, viewAxis);
   };
 
   const handleAxisChange = (nextAxis) => {
     clearScrubTimers();
+    clearSliceWheelTimers();
     const axisValue = nextAxis || "xy";
     isScrubbingRef.current = false;
     isFastScrubRef.current = false;
-    localStorage.setItem("mask-proofreading-axis", axisValue);
     setViewAxis(axisValue);
-    const axisIndex = clampSliceIndex(
-      getAxisIndexForInstance(activeInstance, axisValue),
-      axisTotal || totalLayers,
-    );
-    setViewState((prev) => ({ ...prev, zIndex: axisIndex, axis: axisValue }));
+    const cachedPlane = orthoviewPayloadsRef.current?.[axisValue];
+    const cachedTotal = Number(cachedPlane?.total) || 0;
+    const axisIndex = Number.isFinite(Number(cachedPlane?.zIndex))
+      ? Number(cachedPlane.zIndex)
+      : Math.max(
+          0,
+          Math.round(Number(getAxisIndexForInstance(activeInstance, axisValue)) || 0),
+        );
+    if (cachedTotal) {
+      setAxisTotal(cachedTotal);
+    }
+    setViewState((prev) => ({
+      ...prev,
+      ...(cachedPlane || {}),
+      zIndex: axisIndex,
+      axis: axisValue,
+      imageBase64: cachedPlane?.imageBase64 || null,
+      maskAllBase64: cachedPlane?.maskAllBase64 || null,
+      maskActiveBase64: cachedPlane?.maskActiveBase64 || null,
+      maskRawBase64: cachedPlane?.maskRawBase64 || null,
+      total: cachedTotal || prev.total,
+      instanceId: activeInstanceId,
+    }));
     setSliderZ(axisIndex);
     setCommittedZ(axisIndex);
   };
 
-  const handleSaveMask = async (maskBase64) => {
+  const reloadOrthoviewAxis = async (axis, zIndex) => {
+    if (!sessionId || !activeInstanceId || axis === viewAxis) return;
+    const includeAll =
+      supportsAllInstanceOverlay(instanceMode) && overlayAllAlpha > 0.001;
+    const includeActive = overlayActiveAlpha > 0.001;
+    const kinds = ["image", "mask_active_binary"];
+    if (includeActive) kinds.push("mask_active");
+    if (includeAll) kinds.push("mask_all");
+    setLoadingOrthoviews(true);
+    try {
+      const payload = await fetchInstanceBundle({
+        sessionId,
+        instanceId: activeInstanceId,
+        axis,
+        zIndex,
+        kinds,
+        maxDim: null,
+        quality: "full",
+      });
+      setOrthoviewPayloads((prev) => {
+        if (prev[axis]) revokePayloadUrls(prev[axis]);
+        const next = { ...prev, [axis]: payload };
+        orthoviewPayloadsRef.current = next;
+        return next;
+      });
+    } catch (error) {
+      if (!isAbortError(error)) {
+        console.warn("Failed to reload orthogonal editable plane:", error);
+      }
+    } finally {
+      setLoadingOrthoviews(false);
+    }
+  };
+
+  const handleSaveMaskForAxis = async (axis, zIndex, planeState, maskBase64) => {
     if (!sessionId || !activeInstanceId) return;
+    const targetIndex = clampSliceIndex(
+      zIndex,
+      axisTotal || totalLayers,
+    );
+    const rawMaskMatchesCurrentSlice =
+      planeState?.axis === axis &&
+      planeState?.zIndex === targetIndex &&
+      planeState?.instanceId === activeInstanceId &&
+      Boolean(planeState?.maskRawBase64);
+    if (!rawMaskMatchesCurrentSlice) {
+      logProofreadingEvent(
+        "proofreading_mask_save_blocked_stale_mask",
+        {
+          targetIndex,
+          viewStateIndex: planeState?.zIndex,
+          viewStateAxis: planeState?.axis,
+          viewStateInstanceId: planeState?.instanceId,
+          hasRawMask: Boolean(planeState?.maskRawBase64),
+        },
+        { level: "WARNING" },
+      );
+      message.warning("Wait for the editable mask for this slice to load.");
+      if (axis === viewAxis) {
+        loadInstanceView(
+          activeInstanceId,
+          targetIndex,
+          true,
+          undefined,
+          viewAxis,
+        );
+      } else {
+        reloadOrthoviewAxis(axis, targetIndex);
+      }
+      throw new Error("Editable mask is not loaded for the current slice");
+    }
     setSavingMask(true);
     try {
-      await apiClient.post("/eh/detection/instance-mask", {
+      logProofreadingEvent("proofreading_mask_save_started", {
+        instanceId: activeInstanceId,
+        axis,
+        zIndex: targetIndex,
+      });
+      const response = await apiClient.post("/eh/detection/instance-mask", {
         session_id: sessionId,
         instance_id: activeInstanceId,
-        axis: viewAxis,
-        z_index: viewState.zIndex,
+        axis,
+        z_index: targetIndex,
         mask_base64: maskBase64,
         ui_state: {
-          axis: viewAxis,
+          axis,
           overlay_all_alpha: overlayAllAlpha,
           overlay_active_alpha: overlayActiveAlpha,
           last_instance_id: activeInstanceId,
-          last_slice_index: sliderZ ?? viewState.zIndex,
+          last_slice_index: targetIndex,
         },
       });
+      clearFrameCaches();
+      if (response.data?.persistence) {
+        setPersistence(response.data.persistence);
+      }
+      setMeshRevision((revision) => revision + 1);
       message.success("Instance mask updated");
+      logProofreadingEvent("proofreading_mask_save_completed", {
+        instanceId: activeInstanceId,
+        axis,
+        zIndex: targetIndex,
+        pixelsChanged: response.data?.edit?.pixels_changed,
+        artifactPath: response.data?.persistence?.artifact_path,
+        artifactExists: response.data?.persistence?.artifact_exists,
+      });
       refreshPersistenceStatus();
-      loadInstanceView(
-        activeInstanceId,
-        viewState.zIndex,
-        true,
-        undefined,
-        viewAxis,
-      );
+      if (axis === viewAxis) {
+        loadInstanceView(
+          activeInstanceId,
+          targetIndex,
+          true,
+          undefined,
+          viewAxis,
+        );
+      } else {
+        reloadOrthoviewAxis(axis, targetIndex);
+      }
     } catch (error) {
       console.error("Failed to save mask:", error);
+      logProofreadingEvent(
+        "proofreading_mask_save_failed",
+        {
+          instanceId: activeInstanceId,
+          axis,
+          zIndex: targetIndex,
+          error: getErrorMessage(error, "Failed to save mask"),
+        },
+        { level: "ERROR" },
+      );
       message.error(getErrorMessage(error, "Failed to save mask"));
+      throw error;
     } finally {
       setSavingMask(false);
     }
   };
 
-  const openExportModal = () => {
-    const artifactPath = persistence?.artifact_path;
-    if (artifactPath && artifactPath.endsWith(".tif")) {
-      setExportPath(artifactPath.replace(".tif", ".exported.tif"));
-    } else if (artifactPath && artifactPath.endsWith(".tiff")) {
-      setExportPath(artifactPath.replace(".tiff", ".exported.tif"));
-    } else {
-      setExportPath("");
-    }
-    setShowExportModal(true);
-  };
-
-  const handleExportMasks = async () => {
-    const output = exportPath?.trim();
-    if (!output) {
-      message.warning("Enter an output path to export edited masks.");
-      return;
-    }
-    setExportingMasks(true);
-    try {
-      const response = await apiClient.post("/eh/detection/export-masks", {
-        session_id: sessionId,
-        mode: "new_file",
-        output_path: output,
-        create_backup: true,
-      });
-      setShowExportModal(false);
-      setLastExportPath(response.data.written_path);
-      message.success(`Exported masks to ${response.data.written_path}`);
-      if (response.data.backup_path) {
-        message.info(`Backup created at ${response.data.backup_path}`);
-      }
-      refreshPersistenceStatus();
-    } catch (error) {
-      Modal.error({
-        title: "Export failed",
-        content: getErrorMessage(error, "Unable to export edited masks."),
-        okText: "OK",
-      });
-    } finally {
-      setExportingMasks(false);
-    }
-  };
-
-  const handleOverwriteSource = () => {
-    Modal.confirm({
-      title: "Overwrite source masks?",
-      content:
-        "This writes your edited masks back to the original source and always creates a timestamped backup first.",
-      okText: "Overwrite with backup",
-      okButtonProps: { danger: true, loading: overwritingSource },
-      cancelText: "Cancel",
-      onOk: async () => {
-        setOverwritingSource(true);
-        try {
-          const response = await apiClient.post("/eh/detection/export-masks", {
-            session_id: sessionId,
-            mode: "overwrite_source",
-            create_backup: true,
-          });
-          message.success(
-            `Source masks updated at ${response.data.written_path}`,
-          );
-          if (response.data.backup_path) {
-            message.info(`Backup created at ${response.data.backup_path}`);
-          }
-          setLastExportPath(response.data.written_path);
-          refreshPersistenceStatus();
-        } catch (error) {
-          Modal.error({
-            title: "Overwrite failed",
-            content: getErrorMessage(
-              error,
-              "Unable to overwrite source masks safely.",
-            ),
-            okText: "OK",
-          });
-        } finally {
-          setOverwritingSource(false);
-        }
-      },
-    });
-  };
-
   const handleStageForRetraining = async () => {
-    const correctedMaskPath = lastExportPath || persistence?.last_export_path;
+    const { path: correctedMaskPath, source } = getTrainingReadyCorrectedMask({
+      persistence,
+      workflow: activeWorkflow,
+    });
     if (!correctedMaskPath) {
-      message.warning("Export corrected masks before staging retraining.");
+      message.warning(
+        "Save an edit or export corrected masks before staging for training.",
+      );
       return;
     }
     if (!workflowContext?.workflow?.id) {
@@ -1859,7 +2288,7 @@ function DetectionWorkflow({
         payload: {
           corrected_mask_path: correctedMaskPath,
           ehtool_session_id: sessionId,
-          source: "proofreading_export",
+          source,
         },
       });
       if (appContext?.trainingState?.setInputLabel) {
@@ -1868,193 +2297,713 @@ function DetectionWorkflow({
       message.success("Corrected masks staged for retraining.");
     } catch (error) {
       message.error(
-        getErrorMessage(error, "Failed to stage corrected masks for retraining"),
+        getErrorMessage(
+          error,
+          "Failed to stage corrected masks for retraining",
+        ),
       );
     }
   };
 
+  const resetProofreadingSession = () => {
+    clearFrameCaches();
+    setSessionId(null);
+    setActiveInstanceId(null);
+    setActiveInstance(null);
+    setInstances([]);
+    setPersistence(null);
+    setVolumePreview(null);
+    setLiveMaskDraft(null);
+    setOrthoviewPayloads((prev) => {
+      Object.values(prev).forEach((payload) => revokePayloadUrls(payload));
+      orthoviewPayloadsRef.current = {};
+      return {};
+    });
+  };
+
+  const formatCount = (value) => {
+    const parsed = Number(value);
+    return Number.isFinite(parsed) ? parsed.toLocaleString() : value || 0;
+  };
+
+  const currentAxisTotal = axisTotal || totalLayers;
+  const currentSliceIndex = clampSliceIndex(
+    sliderZ ?? viewState.zIndex,
+    currentAxisTotal,
+  );
+  const isEditableMaskReady =
+    Boolean(viewState.maskRawBase64) &&
+    viewState.axis === viewAxis &&
+    viewState.zIndex === currentSliceIndex &&
+    viewState.instanceId === activeInstanceId;
+
+  useEffect(() => {
+    if (
+      !sessionId ||
+      !activeInstanceId ||
+      !activeInstance ||
+      instanceMode === "none"
+    ) {
+      setLoadingOrthoviews(false);
+      setOrthoviewPayloads((prev) => {
+        Object.values(prev).forEach((payload) => revokePayloadUrls(payload));
+        orthoviewPayloadsRef.current = {};
+        return {};
+      });
+      return undefined;
+    }
+
+    let cancelled = false;
+    const controller = new AbortController();
+    const axesToLoad = ORTHO_PANES.filter((pane) => pane.axis !== viewAxis);
+    const includeAll =
+      supportsAllInstanceOverlay(instanceMode) && overlayAllAlpha > 0.001;
+    const includeActive = overlayActiveAlpha > 0.001;
+    const kinds = ["image", "mask_active_binary"];
+    if (includeActive) kinds.push("mask_active");
+    if (includeAll) kinds.push("mask_all");
+
+    setLoadingOrthoviews(true);
+    Promise.allSettled(
+      axesToLoad.map(async (pane) => {
+        const zIndex = Math.max(
+          0,
+          Math.round(Number(getAxisIndexForInstance(activeInstance, pane.axis)) || 0),
+        );
+        const payload = await fetchInstanceBundle({
+          sessionId,
+          instanceId: activeInstanceId,
+          axis: pane.axis,
+          zIndex,
+          kinds,
+          maxDim: null,
+          quality: "full",
+          signal: controller.signal,
+        });
+        return { axis: pane.axis, payload };
+      }),
+    )
+      .then((results) => {
+        const next = {};
+        results.forEach((result) => {
+          if (result.status !== "fulfilled") return;
+          next[result.value.axis] = result.value.payload;
+        });
+        if (cancelled) {
+          Object.values(next).forEach((payload) => revokePayloadUrls(payload));
+          return;
+        }
+        setOrthoviewPayloads((prev) => {
+          Object.values(prev).forEach((payload) => revokePayloadUrls(payload));
+          orthoviewPayloadsRef.current = next;
+          return next;
+        });
+      })
+      .catch((error) => {
+        if (!isAbortError(error)) {
+          console.warn("Failed to load orthogonal previews:", error);
+        }
+      })
+      .finally(() => {
+        if (!cancelled) setLoadingOrthoviews(false);
+      });
+
+    return () => {
+      cancelled = true;
+      controller.abort();
+    };
+    // fetchInstanceBundle is recreated each render; the request is keyed by the
+    // explicit session, instance, axis, and overlay state above.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [
+    activeInstance,
+    activeInstanceId,
+    currentAxisTotal,
+    instanceMode,
+    meshRevision,
+    overlayActiveAlpha,
+    overlayAllAlpha,
+    sessionId,
+    totalLayers,
+    viewAxis,
+  ]);
+
   if (!sessionId) {
     return (
       <div style={{ padding: "24px 0" }}>
-        <DatasetLoader onLoad={handleDatasetLoad} loading={loadingInstances} />
+        <DatasetLoader
+          onLoad={handleDatasetLoad}
+          loading={loadingInstances}
+          workflow={activeWorkflow}
+        />
       </div>
     );
   }
 
-  const currentSliceIndex = clampSliceIndex(
-    sliderZ ?? viewState.zIndex,
-    axisTotal || totalLayers,
-  );
-  const exportedMaskPath = lastExportPath || persistence?.last_export_path || "";
+  const compactWorkbench = windowWidth < 980;
+  const queuePanelVisible = showQueue && !compactWorkbench;
+  const compactQueueVisible = showQueue && compactWorkbench;
+  const persistenceColor = persistence?.last_error
+    ? "red"
+    : persistence?.artifact_exists
+      ? "green"
+      : persistence?.enabled
+        ? "blue"
+        : "default";
+  const persistenceLabel = persistence?.last_error
+    ? "Save issue"
+    : persistence?.artifact_exists
+      ? "Edits saved"
+      : persistence?.enabled
+        ? "Ready to save"
+        : "No persistence";
 
-  const reviewControls =
+  const activeInstanceMeta =
     activeInstance && instanceMode !== "none" ? (
-      <div style={{ display: "grid", gap: 8 }}>
-        <Text style={{ fontSize: 13, fontWeight: 600 }}>
-          Instance #{activeInstance.id}
-        </Text>
-        <Space size="small" wrap>
-          <Button
-            size="small"
-            type="primary"
-            loading={classificationPending}
-            disabled={classificationPending}
-            onClick={() => handleInstanceClassify("correct")}
-          >
-            Looks good
-          </Button>
-          <Button
-            size="small"
-            danger
-            loading={classificationPending}
-            disabled={classificationPending}
-            onClick={() => handleInstanceClassify("incorrect")}
-          >
-            Needs fix
-          </Button>
-          <Button
-            size="small"
-            style={{ background: "#f59e0b", color: "#fff" }}
-            loading={classificationPending}
-            disabled={classificationPending}
-            onClick={() => handleInstanceClassify("unsure")}
-          >
-            Unsure
-          </Button>
-        </Space>
-      </div>
+      <Tag color="cyan" style={{ margin: 0 }}>
+        Instance #{activeInstance.id}
+      </Tag>
     ) : (
       <Text type="secondary" style={{ fontSize: 12 }}>
-        Select an instance to review.
+        Select an instance.
       </Text>
     );
 
-  const viewControls = (
-    <div style={{ display: "grid", gap: 6 }}>
-      <Text type="secondary" style={{ fontSize: 12 }}>
-        Opacity controls
+  const progressPanel = (
+    <div style={{ display: "grid", gap: 4 }}>
+      <Text strong style={{ fontSize: 13 }}>
+        {instances.length} instances
       </Text>
-      <Space
-        size="small"
-        style={{ width: "100%", justifyContent: "space-between" }}
-      >
-        <Text style={{ fontSize: 12 }}>Other instances</Text>
-        <Text type="secondary" style={{ fontSize: 12 }}>
-          {Math.round(overlayAllAlpha * 100)}%
-        </Text>
-      </Space>
-      <Slider
-        min={0}
-        max={100}
-        value={Math.round(overlayAllAlpha * 100)}
-        onChange={(value) => setOverlayAllAlpha(value / 100)}
-      />
-      <Space
-        size="small"
-        style={{ width: "100%", justifyContent: "space-between" }}
-      >
-        <Text style={{ fontSize: 12 }}>Selected instance</Text>
-        <Text type="secondary" style={{ fontSize: 12 }}>
-          {Math.round(overlayActiveAlpha * 100)}%
-        </Text>
-      </Space>
-      <Slider
-        min={0}
-        max={100}
-        value={Math.round(overlayActiveAlpha * 100)}
-        onChange={(value) => setOverlayActiveAlpha(value / 100)}
-      />
+      <Text type="secondary" style={{ fontSize: 12 }}>
+        {activeInstance
+          ? `Selected #${activeInstance.id}`
+          : "Select an instance to inspect."}
+      </Text>
     </div>
   );
 
-  const instanceControls =
-    instanceMode !== "none" && instances.length > 0 ? (
-      <div style={{ display: "grid", gap: 8 }}>
-        <Space size="small" wrap>
+  const queuePanel = (
+    <Card
+      size="small"
+      title="Review queue"
+      extra={
+        <Tag color="blue" style={{ margin: 0 }}>
+          {instances.length} total
+        </Tag>
+      }
+      bodyStyle={{ display: "grid", gap: 12 }}
+      style={{ height: "100%", borderRadius: 14 }}
+    >
+      {progressPanel}
+      <Divider style={{ margin: "4px 0" }} />
+        <InstanceNavigator
+          instances={instances}
+          activeInstanceId={activeInstanceId}
+          onSelect={selectInstance}
+          filterText={filterText}
+          onFilterText={setFilterText}
+          showClassification={false}
+        />
+      </Card>
+  );
+
+  const activeInstanceCoordinates = activeInstance
+    ? `XYZ ${formatCount(activeInstance.com_x)}, ${formatCount(
+        activeInstance.com_y,
+      )}, ${formatCount(activeInstance.com_z)}`
+    : "XYZ --";
+
+  const viewerToolbar = (
+    <div
+      style={{
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "space-between",
+        gap: 12,
+        flexWrap: "wrap",
+        padding: "12px 16px",
+        borderBottom: "1px solid #e5e7eb",
+        background: "#ffffff",
+      }}
+    >
+      <Space size="small" wrap>
+        <Text strong style={{ fontSize: 13 }}>
+          {formatAxisLabel(viewAxis)} {currentSliceIndex + 1} /{" "}
+          {Math.max(currentAxisTotal, 1)}
+        </Text>
+        <div style={{ width: 220, maxWidth: "42vw" }}>
+          <Slider
+            min={0}
+            max={Math.max(currentAxisTotal - 1, 0)}
+            value={currentSliceIndex}
+            disabled={currentAxisTotal <= 1}
+            tooltip={{ formatter: (value) => `Slice ${Number(value) + 1}` }}
+            onChange={handleSliceChange}
+            onChangeComplete={handleSliceCommit}
+          />
+        </div>
+        <Tag color="default" style={{ margin: 0 }}>
+          {activeInstanceCoordinates}
+        </Tag>
+        {activeInstanceMeta}
+        {!isEditableMaskReady && (
+          <Tag color="blue" style={{ margin: 0 }}>
+            loading mask
+          </Tag>
+        )}
+        {savingMask && (
+          <Tag color="processing" style={{ margin: 0 }}>
+            saving
+          </Tag>
+        )}
+      </Space>
+      <Space size="small" wrap>
+        <Button size="small" onClick={goToNextInstance}>
+          Next instance
+        </Button>
+        <Button size="small" type="primary" onClick={handleStageForRetraining}>
+          Use edits for training
+        </Button>
+      </Space>
+    </div>
+  );
+
+  const getActiveEditor = () => editorRefs.current[viewAxis] || null;
+  const setActiveTool = (nextTool) => {
+    getActiveEditor()?.setTool?.(nextTool);
+    setActiveToolState((prev) => ({ ...prev, tool: nextTool }));
+  };
+  const setActiveBrushSize = (value) => {
+    const numeric = Number(value);
+    if (!Number.isFinite(numeric)) return;
+    const nextSize = Math.max(1, Math.min(50, Math.round(numeric)));
+    getActiveEditor()?.setBrushSize?.(nextSize);
+    setActiveToolState((prev) => ({ ...prev, activeBrushSize: nextSize }));
+  };
+  const brushSizeControl = (
+    <div style={{ width: 220, padding: "2px 4px" }}>
+      <Text strong style={{ display: "block", marginBottom: 8 }}>
+        Brush size
+      </Text>
+      <div
+        style={{
+          display: "grid",
+          gridTemplateColumns: "1fr 64px",
+          gap: 10,
+          alignItems: "center",
+        }}
+      >
+        <Slider
+          min={1}
+          max={50}
+          value={activeToolState.activeBrushSize || 10}
+          onChange={setActiveBrushSize}
+          tooltip={{ formatter: (value) => `${value}px` }}
+        />
+        <InputNumber
+          min={1}
+          max={50}
+          size="small"
+          value={activeToolState.activeBrushSize || 10}
+          onChange={setActiveBrushSize}
+        />
+      </div>
+    </div>
+  );
+  const normalizeWheelDelta = (wheel) => {
+    const deltaY = Number(wheel?.deltaY ?? wheel ?? 0);
+    const deltaMode = Number(wheel?.deltaMode ?? 0);
+    if (deltaMode === 1) return deltaY * 32;
+    if (deltaMode === 2) return deltaY * 240;
+    return deltaY;
+  };
+
+  const stepAxisSlice = (
+    axis,
+    currentIndex,
+    delta,
+    totalOverride,
+    options = {},
+  ) => {
+    const totalForPlane =
+      Number(totalOverride) ||
+      (axis === viewAxis ? currentAxisTotal : 0) ||
+      currentAxisTotal ||
+      totalLayers;
+    const nextIndex = clampSliceIndex(
+      currentIndex + delta,
+      totalForPlane,
+    );
+    if (nextIndex === currentIndex) return nextIndex;
+    if (axis === viewAxis) {
+      if (options.previewOnly) {
+        handleSliceChange(nextIndex);
+      } else {
+        handleSliceCommit(nextIndex);
+      }
+    } else {
+      reloadOrthoviewAxis(axis, nextIndex);
+    }
+    return nextIndex;
+  };
+  const handlePaneSliceWheel = (axis, currentIndex, wheel, totalOverride) => {
+    const deltaPixels = normalizeWheelDelta(wheel);
+    if (Math.abs(deltaPixels) < 1) return;
+    const now =
+      typeof performance !== "undefined" ? performance.now() : Date.now();
+    const state = sliceWheelRef.current[axis] || {};
+    const baseIndex =
+      now - (state.at || 0) > 320
+        ? currentIndex
+        : Number.isFinite(state.index)
+          ? state.index
+          : currentIndex;
+    const nextRemainder =
+      (now - (state.at || 0) > 320 ? 0 : state.remainder || 0) + deltaPixels;
+    let steps = Math.trunc(nextRemainder / WHEEL_SLICE_DELTA_PX);
+    if (!steps) {
+      sliceWheelRef.current[axis] = {
+        ...state,
+        index: baseIndex,
+        remainder: nextRemainder,
+        at: now,
+      };
+      return;
+    }
+    steps = Math.max(-4, Math.min(4, steps));
+    const usedDelta = steps * WHEEL_SLICE_DELTA_PX;
+    const nextIndex = stepAxisSlice(axis, baseIndex, steps, totalOverride, {
+      previewOnly: axis === viewAxis,
+    });
+    if (state.commitTimer) {
+      clearTimeout(state.commitTimer);
+    }
+    const nextState = {
+      index: nextIndex,
+      remainder: nextRemainder - usedDelta,
+      at: now,
+      commitTimer: null,
+    };
+    if (axis === viewAxis) {
+      nextState.commitTimer = setTimeout(() => {
+        handleSliceCommit(nextIndex);
+        if (sliceWheelRef.current[axis]) {
+          sliceWheelRef.current[axis].remainder = 0;
+          sliceWheelRef.current[axis].commitTimer = null;
+        }
+      }, WHEEL_SLICE_IDLE_MS);
+    }
+    sliceWheelRef.current[axis] = nextState;
+  };
+  const toolButtonStyle = {
+    width: 36,
+    height: 36,
+    display: "inline-flex",
+    alignItems: "center",
+    justifyContent: "center",
+  };
+  const sharedToolRail = (
+    <aside
+      style={{
+        display: "flex",
+        flexDirection: "column",
+        alignItems: "center",
+        gap: 8,
+        padding: "8px 6px",
+        borderRight: "1px solid #1f2937",
+        background: "#0b1220",
+      }}
+    >
+      <Tag color="blue" style={{ margin: 0, fontSize: 10 }}>
+        {formatAxisLabel(viewAxis)}
+      </Tag>
+      <div
+        style={{
+          width: 28,
+          height: 1,
+          background: "rgba(148, 163, 184, 0.28)",
+          margin: "2px 0",
+        }}
+      />
+      <Tooltip title="Paint">
+        <Button
+          size="small"
+          type={activeToolState.tool === "paint" ? "primary" : "default"}
+          icon={<EditOutlined />}
+          disabled={!activeToolState.canEdit}
+          onClick={() => setActiveTool("paint")}
+          style={toolButtonStyle}
+        />
+      </Tooltip>
+      <Tooltip title="Erase">
+        <Button
+          size="small"
+          type={activeToolState.tool === "erase" ? "primary" : "default"}
+          icon={<ClearOutlined />}
+          disabled={!activeToolState.canEdit}
+          onClick={() => setActiveTool("erase")}
+          style={toolButtonStyle}
+        />
+      </Tooltip>
+      <Popover
+        content={brushSizeControl}
+        trigger="click"
+        placement="right"
+        overlayStyle={{ width: 252 }}
+      >
+        <Tooltip title="Brush size">
           <Button
             size="small"
-            type="primary"
-            onClick={() => setShowInstanceBrowser(true)}
-          >
-            Browse...
-          </Button>
-          <Button size="small" onClick={goToNextUnreviewed}>
-            Next unreviewed
-          </Button>
-          {exportedMaskPath && (
-            <Button
-              size="small"
-              type="primary"
-              onClick={handleStageForRetraining}
-            >
-              Stage for retraining
-            </Button>
-          )}
-          <Dropdown
-            trigger={["click"]}
-            menu={{
-              items: [
-                {
-                  key: "export",
-                  label: "Export edited masks...",
-                  onClick: openExportModal,
-                },
-                {
-                  key: "overwrite",
-                  label: "Overwrite source masks...",
-                  danger: true,
-                  onClick: handleOverwriteSource,
-                },
-              ],
+            disabled={!activeToolState.canEdit}
+            style={{
+              ...toolButtonStyle,
+              fontSize: 11,
+              fontWeight: 700,
+              padding: 0,
             }}
           >
-            <Button size="small" icon={<MoreOutlined />} />
-          </Dropdown>
-        </Space>
-        <Space size="small" align="center">
-          <Text type="secondary" style={{ fontSize: 12 }}>
-            Instances
-          </Text>
-          <Tag style={{ margin: 0 }}>{instances.length}</Tag>
-        </Space>
-      </div>
-    ) : (
-      <Text type="secondary" style={{ fontSize: 12 }}>
-        No instances available.
-      </Text>
-    );
-
-  const inspectorItems = [
-    { key: "review", label: "Review", children: reviewControls },
-    { key: "instances", label: "Instances", children: instanceControls },
-    { key: "view", label: "Overlay", children: viewControls },
-    {
-      key: "progress",
-      label: "Progress",
-      children: (
-        <ProgressTracker
-          stats={stats}
-          projectName={projectName}
-          totalLayers={instances.length}
-          unitLabel="instances"
-          compact
-          onNewSession={() => {
-            setSessionId(null);
-            setActiveInstanceId(null);
-            setInstances([]);
-            setPersistence(null);
-          }}
-          onJumpToNext={goToNextUnreviewed}
+            {activeToolState.activeBrushSize || 10}
+          </Button>
+        </Tooltip>
+      </Popover>
+      <Tooltip title="Pan">
+        <Button
+          size="small"
+          type={activeToolState.tool === "hand" ? "primary" : "default"}
+          icon={<DragOutlined />}
+          onClick={() => setActiveTool("hand")}
+          style={toolButtonStyle}
         />
-      ),
-    },
-  ];
+      </Tooltip>
+      <Tooltip title={activeToolState.showMask ? "Hide mask" : "Show mask"}>
+        <Button
+          size="small"
+          icon={
+            activeToolState.showMask ? (
+              <EyeInvisibleOutlined />
+            ) : (
+              <EyeOutlined />
+            )
+          }
+          onClick={() => getActiveEditor()?.toggleMask?.()}
+          style={toolButtonStyle}
+        />
+      </Tooltip>
+      <Tooltip title="Save active plane">
+        <Button
+          size="small"
+          type={activeToolState.hasUnsavedEdits ? "primary" : "default"}
+          icon={<SaveOutlined />}
+          disabled={!activeToolState.canEdit}
+          onClick={() => getActiveEditor()?.save?.()}
+          style={toolButtonStyle}
+        />
+      </Tooltip>
+      <div
+        style={{
+          width: 28,
+          height: 1,
+          background: "rgba(148, 163, 184, 0.28)",
+          margin: "2px 0",
+        }}
+      />
+      <Tooltip title="Zoom in">
+        <Button
+          size="small"
+          icon={<ZoomInOutlined />}
+          onClick={() => getActiveEditor()?.zoomIn?.()}
+          style={toolButtonStyle}
+        />
+      </Tooltip>
+      <Tooltip title="Zoom out">
+        <Button
+          size="small"
+          icon={<ZoomOutOutlined />}
+          onClick={() => getActiveEditor()?.zoomOut?.()}
+          style={toolButtonStyle}
+        />
+      </Tooltip>
+    </aside>
+  );
+
+  const editorSurface =
+    loadingInstances && instances.length === 0 ? (
+      <Card style={{ minHeight: 420, borderRadius: 14 }}>
+        <div style={{ padding: 32, textAlign: "center" }}>
+          <Title level={4}>Preparing instances...</Title>
+          <Text type="secondary">
+            Building the review queue and loading the first editable slice.
+          </Text>
+        </div>
+      </Card>
+    ) : instanceMode === "none" ? (
+      <Card style={{ minHeight: 420, borderRadius: 14 }}>
+        <div style={{ padding: 32, textAlign: "center" }}>
+          <Title level={4}>Mask required</Title>
+          <Text type="secondary">
+            Load a dataset with a mask to enable instance proofreading.
+          </Text>
+        </div>
+      </Card>
+    ) : (
+      <section
+        data-proofreader-wheel-lock="true"
+        style={{
+          display: "grid",
+          overflow: "hidden",
+          borderRadius: 18,
+          border: "1px solid #d8e1dc",
+          background: "#ffffff",
+          boxShadow: "0 18px 45px rgba(15, 23, 42, 0.08)",
+        }}
+      >
+        {viewerToolbar}
+        <div
+          style={{
+            display: "grid",
+            gridTemplateColumns: "50px minmax(0, 1fr)",
+            background: "#111827",
+            minHeight: 0,
+            overscrollBehavior: "contain",
+          }}
+        >
+          {sharedToolRail}
+          <div
+            style={{
+              display: "grid",
+              gridTemplateColumns:
+                windowWidth < 1180
+                  ? "minmax(0, 1fr)"
+                  : "minmax(0, 1fr) minmax(0, 1fr)",
+              gridAutoRows:
+                windowWidth < 1180 ? "360px" : "minmax(260px, 1fr)",
+              height:
+                windowWidth < 1180
+                  ? "auto"
+                  : "clamp(560px, calc(100vh - 270px), 860px)",
+              gap: 2,
+              padding: 2,
+              minWidth: 0,
+              minHeight: 0,
+              background: "#111827",
+              overscrollBehavior: "contain",
+            }}
+          >
+            {ORTHO_PANES.map((pane) => {
+              const activePane = pane.axis === viewAxis;
+              const payload = activePane
+                ? viewState
+                : orthoviewPayloads[pane.axis];
+              const planeReady = Boolean(payload?.imageBase64);
+              const planeIndex = clampSliceIndex(
+                payload?.zIndex ??
+                  getAxisIndexForInstance(activeInstance, pane.axis),
+                payload?.total ||
+                  (activePane ? currentAxisTotal : 0) ||
+                  currentAxisTotal,
+              );
+              const planeTotal =
+                Number(payload?.total) ||
+                (activePane ? currentAxisTotal : 0) ||
+                currentAxisTotal ||
+                totalLayers;
+              const planeCanEdit =
+                Boolean(payload?.maskRawBase64) &&
+                payload?.axis === pane.axis &&
+                payload?.instanceId === activeInstanceId;
+              return (
+                <OrthoviewPane
+                  key={pane.axis}
+                  axis={pane.axis}
+                  label={pane.label}
+                  payload={payload}
+                  loading={
+                    activePane
+                      ? loadingView || loadingInstances
+                      : loadingOrthoviews
+                  }
+                  active={activePane}
+                  editable={planeReady}
+                  onActivate={() => {
+                    if (!activePane) handleAxisChange(pane.axis);
+                  }}
+                  onSliceWheel={(wheel) =>
+                    handlePaneSliceWheel(
+                      pane.axis,
+                      planeIndex,
+                      wheel,
+                      planeTotal,
+                    )
+                  }
+                >
+                  {planeReady && (
+                    <ProofreadingEditor
+                      ref={(node) => {
+                        if (node) editorRefs.current[pane.axis] = node;
+                        else delete editorRefs.current[pane.axis];
+                      }}
+                      imageBase64={payload.imageBase64}
+                      maskBase64={payload.maskRawBase64}
+                      overlayAllBase64={payload.maskAllBase64}
+                      overlayActiveBase64={payload.maskActiveBase64}
+                      overlayAllAlpha={overlayAllAlpha}
+                      overlayActiveAlpha={overlayActiveAlpha}
+                      loading={
+                        activePane
+                          ? loadingView || loadingInstances
+                          : loadingOrthoviews
+                      }
+                      axis={pane.axis}
+                      activeInstanceId={activeInstanceId}
+                      onSave={(maskBase64) =>
+                        handleSaveMaskForAxis(
+                          pane.axis,
+                          planeIndex,
+                          payload,
+                          maskBase64,
+                        )
+                      }
+                      onMaskDraftChange={setLiveMaskDraft}
+                      currentLayer={planeIndex}
+                      totalLayers={planeTotal}
+                      layerName={`${pane.label} ${planeIndex + 1}`}
+                      canEdit={planeCanEdit}
+                      saveDisabledReason="Editable mask for this slice is still loading."
+                      minimalChrome
+                      hideLayerToolbar
+                      editorHeightOverride="100%"
+                      keyboardEnabled={activePane}
+                      hideToolPanel
+                      onToolStateChange={
+                        activePane ? setActiveToolState : undefined
+                      }
+                    />
+                  )}
+                </OrthoviewPane>
+              );
+            })}
+            <Instance3DPreview
+              preview={volumePreview}
+              liveSlice={liveMaskDraft}
+              axis={liveMaskDraft?.axis || viewAxis}
+              layerIndex={liveMaskDraft?.layerIndex ?? currentSliceIndex}
+              activeInstanceId={activeInstanceId}
+              loading={loadingVolumePreview}
+              fill
+            />
+          </div>
+        </div>
+      </section>
+    );
 
   return (
     <Layout
       style={{
-        minHeight: "calc(100vh - 210px)",
-        background: "transparent",
+        minHeight: "calc(100vh - 180px)",
+        background:
+          "linear-gradient(135deg, rgba(240,247,244,0.95), rgba(245,241,232,0.95))",
+        borderRadius: 18,
+        padding: 12,
       }}
     >
       <Content style={{ padding: 0 }}>
@@ -2063,186 +3012,68 @@ function DetectionWorkflow({
             display: "flex",
             justifyContent: "space-between",
             alignItems: "center",
-            marginBottom: 10,
+            gap: 12,
+            flexWrap: "wrap",
+            padding: "4px 2px 14px",
           }}
         >
-          <Title level={5} style={{ margin: 0 }}>
-            Instance proofreading
-          </Title>
-          <Space size="small">
+          <Space size="small" wrap>
+            <Title level={4} style={{ margin: 0 }}>
+              Mask proofreading
+            </Title>
+            <Tag color="geekblue" style={{ margin: 0 }}>
+              {projectName || "Untitled project"}
+            </Tag>
+            <Tag color={persistenceColor} style={{ margin: 0 }}>
+              {persistenceLabel}
+            </Tag>
+          </Space>
+          <Space size="small" wrap>
+            <Button size="small" onClick={resetProofreadingSession}>
+              Change data
+            </Button>
             <Button
               size="small"
-              type={showInspector ? "default" : "primary"}
-              onClick={() => setShowInspector((prev) => !prev)}
+              type={queuePanelVisible ? "default" : "primary"}
+              onClick={() => setShowQueue((prev) => !prev)}
             >
-              {showInspector ? "Focus canvas" : "Show sidebar"}
+              {queuePanelVisible ? "Focus view" : "Show queue"}
             </Button>
           </Space>
         </div>
 
-        <Layout style={{ background: "transparent", position: "relative" }}>
-          <Content style={{ padding: showInspector ? "0 14px 0 0" : 0 }}>
-            {loadingInstances && instances.length === 0 ? (
-              <div style={{ padding: 32, textAlign: "center" }}>
-                <Title level={4}>Preparing instances…</Title>
-                <Text type="secondary">
-                  Building the instance list and loading the first view.
-                </Text>
-              </div>
-            ) : instanceMode === "none" ? (
-              <div style={{ padding: 32, textAlign: "center" }}>
-                <Title level={4}>Mask required</Title>
-                <Text type="secondary">
-                  Load a dataset with a mask to enable instance proofreading.
-                </Text>
-              </div>
-            ) : (
-              <>
-                <ProofreadingEditor
-                  imageBase64={viewState.imageBase64}
-                  maskBase64={viewState.maskRawBase64}
-                  overlayAllBase64={viewState.maskAllBase64}
-                  overlayActiveBase64={viewState.maskActiveBase64}
-                  overlayAllAlpha={overlayAllAlpha}
-                  overlayActiveAlpha={overlayActiveAlpha}
-                  loading={loadingView || loadingInstances}
-                  axis={viewAxis}
-                  axisOptions={axisOptions}
-                  onAxisChange={handleAxisChange}
-                  activeInstanceId={activeInstanceId}
-                  onSave={handleSaveMask}
-                  onNext={() =>
-                    handleSliceCommit(
-                      Math.min(
-                        currentSliceIndex + 1,
-                        (axisTotal || totalLayers) - 1,
-                      ),
-                    )
-                  }
-                  onPrevious={() =>
-                    handleSliceCommit(Math.max(currentSliceIndex - 1, 0))
-                  }
-                  currentLayer={currentSliceIndex}
-                  totalLayers={axisTotal || totalLayers}
-                  layerName={`${viewAxis.toUpperCase()} ${currentSliceIndex + 1}`}
-                  minimalChrome
-                />
-                <div style={{ marginTop: 16 }}>
-                  <Slider
-                    min={0}
-                    max={Math.max((axisTotal || totalLayers) - 1, 0)}
-                    value={currentSliceIndex}
-                    onChange={handleSliceChange}
-                    onAfterChange={handleSliceCommit}
-                    tooltip={{
-                      formatter: (value) =>
-                        `${viewAxis.toUpperCase()} ${value + 1}`,
-                    }}
-                  />
-                </div>
-                {savingMask && (
-                  <div style={{ marginTop: 8 }}>
-                    <Text type="secondary">Saving mask…</Text>
-                  </div>
-                )}
-              </>
-            )}
-          </Content>
-
-          {showInspector && (
+        <Layout
+          style={{
+            background: "transparent",
+            display: "flex",
+            gap: 12,
+          }}
+        >
+          {queuePanelVisible && (
             <Sider
-              width={Math.max(260, Math.min(360, windowWidth * 0.3))}
+              width={280}
               theme="light"
-              style={{
-                borderLeft: "1px solid #eef2f7",
-                background: "transparent",
-              }}
+              style={{ background: "transparent" }}
             >
-              <div style={{ padding: "12px 12px", display: "grid", gap: 12 }}>
-                <div
-                  style={{
-                    display: "flex",
-                    alignItems: "center",
-                    justifyContent: "space-between",
-                    padding: "0 2px 2px",
-                    borderBottom: "1px solid #eef2f7",
-                  }}
-                >
-                  <Space size={8} align="center">
-                    <Text
-                      type="secondary"
-                      style={{
-                        fontSize: 11,
-                        letterSpacing: 0.6,
-                        textTransform: "uppercase",
-                      }}
-                    >
-                      {viewAxis.toUpperCase()}
-                    </Text>
-                    <Text style={{ fontSize: 14, fontWeight: 500 }}>
-                      Slice {currentSliceIndex + 1}
-                    </Text>
-                  </Space>
-                  <Text type="secondary" style={{ fontSize: 12 }}>
-                    {axisTotal || totalLayers} slices
-                  </Text>
-                </div>
-                <Collapse
-                  bordered={false}
-                  size="small"
-                  activeKey={inspectorSections}
-                  onChange={(keys) =>
-                    setInspectorSections(Array.isArray(keys) ? keys : [keys])
-                  }
-                  items={inspectorItems}
-                />
-              </div>
+              {queuePanel}
             </Sider>
           )}
+          <Content style={{ minWidth: 0 }}>{editorSurface}</Content>
         </Layout>
-      </Content>
 
-      {/* Editor is now inline to keep context */}
-      <Drawer
-        title="Browse instances"
-        open={showInstanceBrowser}
-        onClose={() => setShowInstanceBrowser(false)}
-        width={380}
-      >
-        <InstanceNavigator
-          instances={instances}
-          activeInstanceId={activeInstanceId}
-          onSelect={(inst) => {
-            selectInstance(inst);
-            setShowInstanceBrowser(false);
-          }}
-          onPrev={goToPreviousInstance}
-          onNext={goToNextInstance}
-          filterText={filterText}
-          onFilterText={setFilterText}
-          instanceMode={instanceMode}
-        />
-      </Drawer>
-      <Modal
-        title="Export edited masks"
-        open={showExportModal}
-        onCancel={() => setShowExportModal(false)}
-        onOk={handleExportMasks}
-        confirmLoading={exportingMasks}
-        okText="Export"
-      >
-        <div style={{ display: "grid", gap: 8 }}>
-          <Text type="secondary" style={{ fontSize: 12 }}>
-            Choose where to write a TIFF containing the current edited instance
-            volume.
-          </Text>
-          <Input
-            value={exportPath}
-            onChange={(event) => setExportPath(event.target.value)}
-            placeholder="/path/to/edited_masks.tif"
-          />
-        </div>
-      </Modal>
+        {compactQueueVisible && (
+          <div
+            style={{
+              display: "grid",
+              gridTemplateColumns: "repeat(auto-fit, minmax(320px, 1fr))",
+              gap: 12,
+              marginTop: 12,
+            }}
+          >
+            {queuePanel}
+          </div>
+        )}
+      </Content>
     </Layout>
   );
 }

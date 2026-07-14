@@ -72,7 +72,7 @@ function UnifiedImageEditor({
 
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [visible, currentLabel]);
+  }, [visible, currentLabel, showClassification, onClose]);
 
   if (!layer) return null;
 

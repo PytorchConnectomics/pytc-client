@@ -6,6 +6,7 @@
 # - Inference Agent: Handles checkpoint listing and inference command generation
 # - RAG: Documentation search via FAISS vector store
 
+import json
 import os
 from pathlib import Path
 
@@ -14,20 +15,154 @@ from langchain_community.vectorstores import FAISS
 from langchain_core.tools import tool
 from langchain.agents import create_agent
 from server_api.utils.utils import process_path
-from server_api.chatbot.update_faiss import ensure_faiss_index
+from server_api.chatbot.update_faiss import (
+    DEFAULT_OLLAMA_BASE_URL,
+    DEFAULT_OLLAMA_EMBED_MODEL,
+    ensure_faiss_index,
+)
 from server_api.chatbot.tools import (
     list_training_configs,
     read_config,
     list_checkpoints,
 )
 
-TRAINING_AGENT_PROMPT = """You are a **Training Agent** for PyTorch Connectomics.
+DEFAULT_OLLAMA_MODEL = "qwen3.6:27b"
+DEFAULT_HELPER_OLLAMA_MODEL = "qwen3.6:27b"
+
+AGENT_RESPONSE_STYLE = """
+RESPONSE STYLE FOR BIOLOGISTS:
+- Sound like a normal, helpful labmate. Keep visible replies conversational.
+- Default to one short paragraph or 3 bullets or fewer. Maximum 90 words unless the user asks for detail.
+- Put the recommended next action early, but avoid rigid labels like `Do this`, `Why`, and `Watch out`.
+- Avoid long background explanations, exhaustive lists, and implementation details.
+- Do not mention internal tools, agents, RAG, prompts, APIs, or code unless explicitly asked.
+- If a command is requested, provide one command plus at most one sentence of context.
+- If uncertainty matters, state the missing input in one sentence and stop.
+"""
+
+
+def _format_admin_llm_error(error: Exception) -> str:
+    return (
+        "The AI assistant could not connect to its configured language model. "
+        "Please contact your system administrator with this error: "
+        f"{str(error).strip() or error.__class__.__name__}"
+    )
+
+
+def _compact_agent_response(response: str, *, max_words: int = 120) -> str:
+    text = str(response or "").strip()
+    if not text:
+        return text
+
+    lines = [line.rstrip() for line in text.splitlines()]
+    content_lines = [line for line in lines if line.strip()]
+    words = text.split()
+    if len(words) <= max_words and len(content_lines) <= 8:
+        return text
+    if "```" in text and len(words) <= (max_words * 2) and len(content_lines) <= 8:
+        return text
+
+    kept = []
+    word_count = 0
+    for line in content_lines:
+        line_words = line.split()
+        if word_count + len(line_words) > max_words:
+            break
+        kept.append(line)
+        word_count += len(line_words)
+        if len(kept) >= 6:
+            break
+    compacted = "\n".join(kept).strip()
+    if not compacted:
+        compacted = " ".join(words[:max_words]).strip()
+    return f"{compacted}\n\nAsk for details if you want the full version."
+
+
+_PROMPT_LEAK_MARKERS = [
+    "you are the **supervisor agent**",
+    "you are the supervisor agent",
+    "response style for biologists",
+    "routing — decide which tool",
+    "routing - decide which tool",
+    "critical rules:",
+    "sub-agents:",
+    "tools:",
+    "search_documentation:",
+    "delegate_to_training_agent",
+    "delegate_to_inference_agent",
+    "system_prompt",
+    "internal tools",
+]
+
+
+def _looks_like_prompt_leak(response: str) -> bool:
+    text = str(response or "").lower()
+    return any(marker in text for marker in _PROMPT_LEAK_MARKERS)
+
+
+def _looks_like_raw_tool_call(response: str) -> bool:
+    text = str(response or "").strip()
+    if not (text.startswith("{") and text.endswith("}")):
+        return False
+    try:
+        parsed = json.loads(text)
+    except Exception:
+        return False
+    return isinstance(parsed, dict) and isinstance(parsed.get("name"), str)
+
+
+def _sanitize_agent_response(response: str) -> str:
+    text = str(response or "").strip()
+    if not text:
+        return text
+    if _looks_like_raw_tool_call(text):
+        return (
+            "I should not have shown that internal command. "
+            "Tell me the workflow job in plain language, and I will offer a safe app action."
+        )
+    if not _looks_like_prompt_leak(text):
+        return text
+    return (
+        "I can help with the PyTC workflow. Tell me whether you want to run the model, "
+        "proofread masks, use saved edits for training, or compare results. "
+        "I will ask before running long jobs or changing artifacts."
+    )
+
+
+def _resolve_ollama_settings(*, helper: bool = False):
+    if helper:
+        base_url = (
+            os.getenv("PYTC_HELPER_OLLAMA_BASE_URL")
+            or os.getenv("OLLAMA_HELPER_BASE_URL")
+            or os.getenv("OLLAMA_BASE_URL", DEFAULT_OLLAMA_BASE_URL)
+        )
+        model = (
+            os.getenv("PYTC_HELPER_OLLAMA_MODEL")
+            or os.getenv("OLLAMA_HELPER_MODEL")
+            or DEFAULT_HELPER_OLLAMA_MODEL
+        )
+        embed_model = (
+            os.getenv("PYTC_HELPER_OLLAMA_EMBED_MODEL")
+            or os.getenv("OLLAMA_HELPER_EMBED_MODEL")
+            or os.getenv("OLLAMA_EMBED_MODEL", DEFAULT_OLLAMA_EMBED_MODEL)
+        )
+        return base_url, model, embed_model
+    return (
+        os.getenv("OLLAMA_BASE_URL", DEFAULT_OLLAMA_BASE_URL),
+        os.getenv("OLLAMA_MODEL", DEFAULT_OLLAMA_MODEL),
+        os.getenv("OLLAMA_EMBED_MODEL", DEFAULT_OLLAMA_EMBED_MODEL),
+    )
+
+
+TRAINING_AGENT_PROMPT = f"""You are a **Training Agent** for PyTorch Connectomics.
+
+{AGENT_RESPONSE_STYLE}
 
 RULES:
 1. Only report values that your tools return. Do NOT invent config names, paths, or settings.
 2. Never tell the user to write a YAML from scratch. Always start from an existing config.
 3. If the task is unsupported, say so. PyTC only does segmentation.
-4. Be concise. State the facts, generate the command, stop.
+4. Be concise. State the facts and stop. Generate a CLI command only if the user explicitly asks for one.
 
 WORKFLOW: The available configs are provided in your task message. Pick the best match, then:
 1. Call read_config on the chosen config path to see its YAML overrides.
@@ -47,15 +182,17 @@ Common override keys (ALWAYS use these exact keys, never search for alternatives
 
 NEVER invent keys like TRAIN.MAX_ITER, TRAINING.BATCH_SIZE, or CLI flags like --batch-size, --checkpoint-interval — these do not exist.
 
-Command format: `python scripts/main.py --config-file <path> [SECTION.KEY=value ...]`
-Always generate commands for the user to run — never execute directly."""
+Command format, only when explicitly requested: `python scripts/main.py --config-file <path> [SECTION.KEY=value ...]`
+Default app workflow: recommend agent-selected preset/defaults plus approval-gated training inside PyTC Client, not manual YAML tuning."""
 
 
-INFERENCE_AGENT_PROMPT = """You are an **Inference Agent** for PyTorch Connectomics.
+INFERENCE_AGENT_PROMPT = f"""You are an **Inference Agent** for PyTorch Connectomics.
+
+{AGENT_RESPONSE_STYLE}
 
 RULES:
 1. Only report values that your tools return. Do NOT invent checkpoint paths, config names, or settings.
-2. Be concise. State the facts, generate the command, stop.
+2. Be concise. State the facts and stop. Generate a CLI command only if the user explicitly asks for one.
 
 WORKFLOW:
 1. If the user did NOT provide a checkpoint path, call list_checkpoints first to see available checkpoints.
@@ -72,16 +209,18 @@ Here is the correct override key mapping (use these exact keys):
 - Process volumes one at a time → INFERENCE.DO_SINGLY
 - Batch size → INFERENCE.SAMPLES_PER_BATCH
 
-Command format: `python scripts/main.py --config-file <path> --inference --checkpoint <ckpt> [SECTION.KEY=value ...]`
+Command format, only when explicitly requested: `python scripts/main.py --config-file <path> --inference --checkpoint <ckpt> [SECTION.KEY=value ...]`
 
 IMPORTANT: Overrides use SECTION.KEY=value format (NO -- prefix). Example:
   ✅ CORRECT: INFERENCE.AUG_NUM=8
   ❌ WRONG: --inference.AUG_NUM=8
 
-Always generate commands for the user to run — never execute directly."""
+Default app workflow: recommend approval-gated inference inside PyTC Client, not manual stride/blending/chunking setup."""
 
 
-SUPERVISOR_PROMPT = """You are the **Supervisor Agent** for PyTorch Connectomics (PyTC Client).
+SUPERVISOR_PROMPT = f"""You are the **Supervisor Agent** for PyTorch Connectomics (PyTC Client).
+
+{AGENT_RESPONSE_STYLE}
 
 You help end users navigate and use the PyTC Client application.
 
@@ -90,6 +229,7 @@ ROUTING — decide which tool to use BEFORE calling anything:
 - **General PyTC questions** (what architectures are supported, what augmentations exist, what loss functions are available, etc.) → search_documentation
 - **Generate a specific training/inference command** → delegate_to_training_agent or delegate_to_inference_agent
 - **General/greeting/off-topic** → answer directly, no tool needed
+- **Run/segment/proofread/train/compare/export workflow jobs** → answer briefly that the app can do this through approval-gated workflow actions. Do not provide low-level tuning advice by default.
 
 CRITICAL RULES:
 1. **ALWAYS search documentation first for UI questions.** If the user asks "how do I train", "what do I need to provide", "how do I start", "where do I configure", etc., use search_documentation to find the UI workflow in the docs. Do NOT delegate to sub-agents for these questions.
@@ -98,6 +238,7 @@ CRITICAL RULES:
 4. **Do not fabricate specifics.** Never make up keyboard shortcuts, button labels, or step-by-step instructions unless they come from retrieved docs or a sub-agent response.
 4a. **NEVER use command-line instructions for UI questions.** The PyTC Client is a desktop GUI application. If the user asks how to do something, explain the UI workflow (buttons, tabs, forms) from the documentation. Do NOT provide Python scripts, bash commands, or CLI examples unless the sub-agent explicitly generates them.
 4b. **NEVER fabricate file paths or scripts.** Do NOT invent scripts like `scripts/evaluate.py`, `scripts/resume_training.py`, or any other files that don't exist. If evaluation requires Python code, show inline code using `connectomics.utils.evaluate`, not fake script paths.
+4c. **Do not lead with low-level YAML parameters for biologists.** For ordinary training or inference requests, say the assistant should infer safe defaults from the current project and ask for approval before running. Mention stride, blending, chunking, GPUs, CPUs, or iterations only when asked to override or debug.
 5. **Answer every part of the user's question.** If they ask about two things, address both.
 6. **Use retrieved content even if wording differs.** If the documentation describes relevant features or workflows, use that information to answer the question. Don't claim something isn't documented just because it uses different terminology than the user's question.
 7. **HARD LIMIT: You may call search_documentation at most 3 times yourself.** Sub-agents also have access to search_documentation. If the tool returns "Search limit reached", immediately stop and answer based on what you already have.
@@ -114,10 +255,17 @@ Tools:
 
 def build_chain():
     """Build the multi-agent system with supervisor, training, and inference agents."""
-    ollama_base_url = os.getenv("OLLAMA_BASE_URL", "http://cscigpu08.bc.edu:4443")
-    ollama_model = os.getenv("OLLAMA_MODEL", "gpt-oss:20b")
-    ollama_embed_model = os.getenv("OLLAMA_EMBED_MODEL", "qwen3-embedding:8b")
-    llm = ChatOllama(model=ollama_model, base_url=ollama_base_url, temperature=0)
+    ollama_base_url, ollama_model, ollama_embed_model = _resolve_ollama_settings()
+    print(
+        "[CHATBOT] Building main chain with "
+        f"model={ollama_model} embed_model={ollama_embed_model} base_url={ollama_base_url}"
+    )
+    llm = ChatOllama(
+        model=ollama_model,
+        base_url=ollama_base_url,
+        temperature=0,
+        reasoning=False,
+    )
     embeddings = OllamaEmbeddings(model=ollama_embed_model, base_url=ollama_base_url)
     faiss_path = process_path("server_api/chatbot/faiss_index")
     if ensure_faiss_index(
@@ -224,7 +372,9 @@ def build_chain():
         # Auto-inject available configs so the agent doesn't need to call list_training_configs
         configs = list_training_configs.invoke({})
         config_summary = "\n".join(
-            f"- {c['name']} ({c['model']}) → {c['path']}" for c in configs if isinstance(c, dict) and 'name' in c
+            f"- {c['name']} ({c['model']}) → {c['path']}"
+            for c in configs
+            if isinstance(c, dict) and "name" in c
         )
         enriched_task = (
             f"{task}\n\n"
@@ -238,6 +388,7 @@ def build_chain():
         response = (
             messages[-1].content if messages else "Training agent did not respond."
         )
+        response = _compact_agent_response(response)
         print(f"[TOOL] training_agent responded ({len(response)} chars)")
         return response
 
@@ -261,6 +412,7 @@ def build_chain():
         response = (
             messages[-1].content if messages else "Inference agent did not respond."
         )
+        response = _compact_agent_response(response)
         print(f"[TOOL] inference_agent responded ({len(response)} chars)")
         return response
 
@@ -284,32 +436,114 @@ def build_chain():
 # Has access to search_documentation only — cannot start training/inference.
 # ---------------------------------------------------------------------------
 
-HELPER_PROMPT = """You are a concise UI helper for PyTorch Connectomics (PyTC Client).
+HELPER_PROMPT = f"""You are a concise UI helper for PyTorch Connectomics (PyTC Client).
 
 You answer questions about a SPECIFIC field or setting the user is looking at.
-You have access to the application documentation via the search_documentation tool.
 
 RULES:
-1. Lead with a concrete recommendation or explanation (2-4 sentences max).
+1. Lead with a concrete recommendation or explanation (3 short bullets or fewer).
 2. Use plain, non-technical language — the user has no programming knowledge.
 3. Describe things in terms of what users can see and click in the interface.
 4. If you have enough context, recommend a specific value or action.
 5. Do NOT mention API endpoints, code, environment variables, or internal implementation.
-6. You may call search_documentation up to 2 times per question — then answer with what you have.
-7. You CANNOT start training or inference jobs. If the user asks, tell them to use the main AI Chat panel instead."""
+6. Do NOT paste documentation headings, excerpts, or "Relevant local docs" blocks.
+7. You CANNOT start training or inference jobs. If the user asks, tell them to use the main AI Chat panel instead.
+8. Stay scoped to the current field. Do not answer as the main workflow agent.
+9. Use the provided field context and local documentation snippets. If they are not enough, say what is missing in one sentence."""
+
+
+class FieldHelperChain:
+    """Small direct helper for inline field-level chat.
+
+    This intentionally avoids the general LangChain agent/tool loop used by the
+    main chat. Retrieval happens here, then the helper model receives only the
+    current field context, a short conversation tail, and compact docs snippets.
+    """
+
+    def __init__(self, llm, retriever, docs_by_name: dict[str, str]):
+        self.llm = llm
+        self.retriever = retriever
+        self.docs_by_name = docs_by_name
+
+    def _keyword_docs(self, query: str, *, limit: int = 2) -> list[str]:
+        query_lower = query.lower()
+        query_words = [word for word in query_lower.split() if len(word) > 2]
+        scored = []
+        for filename, content in self.docs_by_name.items():
+            content_lower = content.lower()
+            name_lower = filename.replace(".md", "").lower()
+            word_hits = sum(1 for word in query_words if word in content_lower)
+            name_hits = sum(3 for word in query_words if word in name_lower)
+            score = word_hits + name_hits
+            if score > 0:
+                scored.append((score, filename, content))
+        scored.sort(key=lambda item: item[0], reverse=True)
+        return [content for _, _, content in scored[:limit]]
+
+    def _retrieve_docs(self, query: str) -> str:
+        snippets = []
+        try:
+            docs = self.retriever.invoke(query)
+        except Exception:
+            docs = []
+        for doc in docs[:2]:
+            content = str(getattr(doc, "page_content", "") or "").strip()
+            if content:
+                snippets.append(content)
+        if not snippets:
+            snippets.extend(self._keyword_docs(query, limit=2))
+        compact = "\n\n".join(snippets[:2]).strip()
+        if len(compact) > 2200:
+            compact = compact[:2200].rsplit(" ", 1)[0].strip()
+        return compact or "No local documentation snippet matched this field."
+
+    def invoke(self, payload):
+        messages = payload.get("messages") or []
+        current = messages[-1] if messages else {"content": ""}
+        current_content = str(current.get("content", "") if isinstance(current, dict) else current)
+        history_tail = messages[-5:-1]
+        history_text = "\n".join(
+            f"{item.get('role', 'user')}: {item.get('content', '')}"
+            for item in history_tail
+            if isinstance(item, dict)
+        )
+        docs_text = self._retrieve_docs(current_content)
+        user_prompt = (
+            f"Current field question:\n{current_content}\n\n"
+            f"Recent same-field chat:\n{history_text or 'None'}\n\n"
+            f"Local documentation snippets:\n{docs_text}\n\n"
+            "Answer only for this field. Use at most 3 short bullets."
+        )
+        response = self.llm.invoke(
+            [
+                ("system", HELPER_PROMPT),
+                ("human", user_prompt),
+            ]
+        )
+        return {"messages": [response]}
 
 
 def build_helper_chain():
     """
     Build a lightweight helper agent for inline field-level help.
-    This agent has access to the same search_documentation tool as the main
-    chatbot but has NO access to training/inference sub-agents.
+    This is intentionally not the main workflow/chat agent. It has no tools and
+    no training/inference delegates; it receives only field-local context plus
+    compact local documentation snippets.
     Returns ``(agent, reset_search_counter)`` — same interface as ``build_chain``.
     """
-    ollama_base_url = os.getenv("OLLAMA_BASE_URL", "http://cscigpu08.bc.edu:4443")
-    ollama_model = os.getenv("OLLAMA_MODEL", "gpt-oss:20b")
-    ollama_embed_model = os.getenv("OLLAMA_EMBED_MODEL", "qwen3-embedding:8b")
-    llm = ChatOllama(model=ollama_model, base_url=ollama_base_url, temperature=0)
+    ollama_base_url, ollama_model, ollama_embed_model = _resolve_ollama_settings(
+        helper=True
+    )
+    print(
+        "[CHATBOT] Building helper chain with "
+        f"model={ollama_model} embed_model={ollama_embed_model} base_url={ollama_base_url}"
+    )
+    llm = ChatOllama(
+        model=ollama_model,
+        base_url=ollama_base_url,
+        temperature=0,
+        reasoning=False,
+    )
     embeddings = OllamaEmbeddings(model=ollama_embed_model, base_url=ollama_base_url)
     faiss_path = process_path("server_api/chatbot/faiss_index")
     if ensure_faiss_index(
@@ -330,53 +564,9 @@ def build_helper_chain():
     for md_file in summaries_dir.rglob("*.md"):
         _all_docs[md_file.name] = md_file.read_text(encoding="utf-8")
 
-    _search_call_count = [0]
-
     def reset_search_counter():
-        _search_call_count[0] = 0
+        return None
 
-    @tool
-    def search_documentation(query: str) -> str:
-        """Search PyTC documentation for UI guides, field explanations, and feature descriptions.
-
-        Args:
-            query: The user's question
-
-        Returns:
-            Relevant documentation content
-        """
-        _search_call_count[0] += 1
-        if _search_call_count[0] > 2:
-            return (
-                "Search limit reached. Answer with the documentation already retrieved."
-            )
-
-        docs = retriever.invoke(query)
-        if docs:
-            return "\n\n".join([doc.page_content for doc in docs])
-
-        # Keyword fallback
-        query_lower = query.lower()
-        query_words = [w for w in query_lower.split() if len(w) > 2]
-        scored = []
-        for filename, content in _all_docs.items():
-            content_lower = content.lower()
-            name_lower = filename.replace(".md", "").lower()
-            word_hits = sum(1 for w in query_words if w in content_lower)
-            name_hits = sum(3 for w in query_words if w in name_lower)
-            score = word_hits + name_hits
-            if score > 0:
-                scored.append((score, filename, content))
-        scored.sort(key=lambda x: x[0], reverse=True)
-        if scored:
-            return "\n\n".join([s[2] for s in scored[:3]])
-
-        return "No relevant documentation found."
-
-    helper_agent = create_agent(
-        model=llm,
-        tools=[search_documentation],
-        system_prompt=HELPER_PROMPT,
-    )
+    helper_agent = FieldHelperChain(llm, retriever, _all_docs)
 
     return helper_agent, reset_search_counter

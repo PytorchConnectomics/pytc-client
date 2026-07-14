@@ -1,5 +1,5 @@
 import React, { useState } from "react";
-import { Input, message } from "antd";
+import { Button, Input, message, Space, Tooltip } from "antd";
 import { FolderOpenOutlined } from "@ant-design/icons";
 import FilePickerModal from "./FilePickerModal";
 
@@ -88,6 +88,12 @@ const UnifiedFileInput = ({
     onChange({ path: val, display: val });
   };
 
+  const handlePrefixBrowse = (event) => {
+    event.preventDefault();
+    event.stopPropagation();
+    handleBrowse();
+  };
+
   // Extract display value
   const getDisplayValue = () => {
     if (!value) return "";
@@ -108,27 +114,47 @@ const UnifiedFileInput = ({
           ...style,
         }}
       >
-        <Input
-          value={getDisplayValue()}
-          onChange={handleInputChange}
-          placeholder={placeholder}
-          disabled={disabled}
-          style={{
-            borderColor: isDragOver ? "#1890ff" : undefined,
-            boxShadow: isDragOver
-              ? "0 0 0 2px rgba(24, 144, 255, 0.2)"
-              : undefined,
-          }}
-          prefix={
-            <FolderOpenOutlined
-              style={{
-                cursor: disabled ? "not-allowed" : "pointer",
-                color: disabled ? "#ccc" : "#1890ff",
-              }}
-              onClick={handleBrowse}
-            />
-          }
-        />
+        <Space.Compact style={{ width: "100%" }}>
+          <Input
+            value={getDisplayValue()}
+            onChange={handleInputChange}
+            placeholder={placeholder}
+            disabled={disabled}
+            style={{
+              borderColor: isDragOver
+                ? "var(--seg-accent-primary, #3f37c9)"
+                : undefined,
+              boxShadow: isDragOver
+                ? "0 0 0 2px var(--seg-focus-ring, rgba(63, 55, 201, 0.22))"
+                : undefined,
+            }}
+            prefix={
+              <Tooltip title="Browse files">
+                <Button
+                  type="text"
+                  size="small"
+                  aria-label="Browse files"
+                  disabled={disabled}
+                  icon={<FolderOpenOutlined />}
+                  onClick={handlePrefixBrowse}
+                  style={{
+                    color: disabled
+                      ? "#ccc"
+                      : "var(--seg-accent-primary, #3f37c9)",
+                    height: 22,
+                    width: 22,
+                    minWidth: 22,
+                    padding: 0,
+                    marginInlineStart: -4,
+                  }}
+                />
+              </Tooltip>
+            }
+          />
+          <Button onClick={handleBrowse} disabled={disabled}>
+            Browse
+          </Button>
+        </Space.Compact>
         {isDragOver && (
           <div
             style={{
@@ -137,13 +163,14 @@ const UnifiedFileInput = ({
               left: 0,
               right: 0,
               bottom: 0,
-              background: "rgba(24, 144, 255, 0.1)",
+              background:
+                "var(--seg-selection-fill, rgba(63, 55, 201, 0.12))",
               pointerEvents: "none",
               zIndex: 10,
               display: "flex",
               alignItems: "center",
               justifyContent: "center",
-              color: "#1890ff",
+              color: "var(--seg-accent-primary, #3f37c9)",
               fontWeight: "bold",
             }}
           >

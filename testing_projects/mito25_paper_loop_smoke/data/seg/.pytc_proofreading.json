@@ -1,0 +1,222 @@
+{
+  "schema_version": 3,
+  "updated_at": "2026-04-25T17:25:17.877002+00:00",
+  "project": {
+    "name": "mito25-paper-loop-smoke",
+    "dataset_path": "/Users/adamg/seg.bio/pytc-client/testing_projects/mito25_paper_loop_smoke/data/image/mito25_smoke_13312-15360_im.h5",
+    "mask_path": "/Users/adamg/seg.bio/pytc-client/testing_projects/mito25_paper_loop_smoke/data/seg/mito25_smoke_13312-15360_seg.h5",
+    "instance_mode": "instance"
+  },
+  "review": {
+    "total_instances": 14,
+    "reviewed_instances": 0,
+    "progress": 0.0,
+    "counts": {
+      "correct": 0,
+      "incorrect": 0,
+      "unsure": 0,
+      "error": 14
+    }
+  },
+  "instances": {
+    "373": {
+      "classification": "error",
+      "reviewed_at": null,
+      "notes": "",
+      "metadata": {
+        "voxel_count": 46238,
+        "com_z": 30,
+        "com_y": 364,
+        "com_x": 32
+      },
+      "edits": {
+        "last_edit_at": "2026-04-25T17:25:17.876418+00:00",
+        "count": 1,
+        "pixels_added": 1388,
+        "pixels_removed": 0,
+        "pixels_changed": 1388,
+        "pixels_blocked": 0,
+        "by_axis": {
+          "xy": 1388
+        }
+      },
+      "history": [
+        {
+          "at": "2026-04-25T17:25:17.876418+00:00",
+          "by": "local",
+          "type": "mask_edit",
+          "axis": "xy",
+          "z_index": 39,
+          "pixels_added": 1388,
+          "pixels_removed": 0,
+          "pixels_changed": 1388,
+          "pixels_blocked": 0
+        }
+      ]
+    },
+    "374": {
+      "classification": "error",
+      "reviewed_at": null,
+      "notes": "",
+      "metadata": {
+        "voxel_count": 19208,
+        "com_z": 39,
+        "com_y": 319,
+        "com_x": 253
+      }
+    },
+    "388": {
+      "classification": "error",
+      "reviewed_at": null,
+      "notes": "",
+      "metadata": {
+        "voxel_count": 19085,
+        "com_z": 27,
+        "com_y": 95,
+        "com_x": 77
+      }
+    },
+    "401": {
+      "classification": "error",
+      "reviewed_at": null,
+      "notes": "",
+      "metadata": {
+        "voxel_count": 14194,
+        "com_z": 30,
+        "com_y": 292,
+        "com_x": 202
+      }
+    },
+    "414": {
+      "classification": "error",
+      "reviewed_at": null,
+      "notes": "",
+      "metadata": {
+        "voxel_count": 14052,
+        "com_z": 24,
+        "com_y": 85,
+        "com_x": 457
+      }
+    },
+    "385": {
+      "classification": "error",
+      "reviewed_at": null,
+      "notes": "",
+      "metadata": {
+        "voxel_count": 11567,
+        "com_z": 47,
+        "com_y": 488,
+        "com_x": 12
+      }
+    },
+    "398": {
+      "classification": "error",
+      "reviewed_at": null,
+      "notes": "",
+      "metadata": {
+        "voxel_count": 8935,
+        "com_z": 29,
+        "com_y": 369,
+        "com_x": 157
+      }
+    },
+    "399": {
+      "classification": "error",
+      "reviewed_at": null,
+      "notes": "",
+      "metadata": {
+        "voxel_count": 7979,
+        "com_z": 23,
+        "com_y": 364,
+        "com_x": 191
+      }
+    },
+    "375": {
+      "classification": "error",
+      "reviewed_at": null,
+      "notes": "",
+      "metadata": {
+        "voxel_count": 4300,
+        "com_z": 53,
+        "com_y": 358,
+        "com_x": 172
+      }
+    },
+    "400": {
+      "classification": "error",
+      "reviewed_at": null,
+      "notes": "",
+      "metadata": {
+        "voxel_count": 1835,
+        "com_z": 4,
+        "com_y": 299,
+        "com_x": 163
+      }
+    },
+    "413": {
+      "classification": "error",
+      "reviewed_at": null,
+      "notes": "",
+      "metadata": {
+        "voxel_count": 1304,
+        "com_z": 1,
+        "com_y": 43,
+        "com_x": 427
+      }
+    },
+    "432": {
+      "classification": "error",
+      "reviewed_at": null,
+      "notes": "",
+      "metadata": {
+        "voxel_count": 629,
+        "com_z": 16,
+        "com_y": 251,
+        "com_x": 204
+      }
+    },
+    "451": {
+      "classification": "error",
+      "reviewed_at": null,
+      "notes": "",
+      "metadata": {
+        "voxel_count": 523,
+        "com_z": 4,
+        "com_y": 129,
+        "com_x": 161
+      }
+    },
+    "443": {
+      "classification": "error",
+      "reviewed_at": null,
+      "notes": "",
+      "metadata": {
+        "voxel_count": 486,
+        "com_z": 1,
+        "com_y": 22,
+        "com_x": 508
+      }
+    }
+  },
+  "extensions": {},
+  "artifact": {
+    "enabled": true,
+    "artifact_path": "/Users/adamg/seg.bio/pytc-client/testing_projects/mito25_paper_loop_smoke/data/seg/.pytc_instance_labels.tif",
+    "artifact_exists": true,
+    "dirty": false,
+    "writable": true,
+    "last_saved_at": "2026-04-25T17:25:17.876254+00:00",
+    "last_error": null,
+    "last_export_at": null,
+    "last_export_mode": null,
+    "last_export_path": null,
+    "last_backup_path": null
+  },
+  "ui_state": {
+    "axis": "xy",
+    "overlay_all_alpha": 0.08,
+    "overlay_active_alpha": 0.8,
+    "last_instance_id": 373,
+    "last_slice_index": 39
+  }
+}

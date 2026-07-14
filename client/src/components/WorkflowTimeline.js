@@ -2,28 +2,52 @@ import React, { useMemo, useState } from "react";
 import { Button, Empty, Input, List, Select, Space, Tag, Typography } from "antd";
 import { useWorkflow } from "../contexts/WorkflowContext";
 import AgentProposalCard from "./chat/AgentProposalCard";
+import StageHeader from "./workflow/StageHeader";
 import {
   DEFAULT_TIMELINE_FILTERS,
   filterTimelineEvents,
   normalizeTimelineFilters,
   TIMELINE_ACTOR_OPTIONS,
 } from "../contexts/workflow/timelineFilters";
+import {
+  getApprovalMeta,
+  getSeverityMeta,
+} from "../design/workflowDesignSystem";
 
 const { Text } = Typography;
+const toList = (value) => (Array.isArray(value) ? value : []);
 
-const STAGE_LABELS = {
-  setup: "Setup",
-  visualization: "Visualization",
-  inference: "Inference",
-  proofreading: "Proofreading",
-  retraining_staged: "Retraining staged",
-  evaluation: "Evaluation",
+const parsePayload = (payload) => {
+  if (!payload) return {};
+  if (typeof payload === "string") {
+    try {
+      const parsed = JSON.parse(payload);
+      return parsed && typeof parsed === "object" ? parsed : {};
+    } catch {
+      return {};
+    }
+  }
+  if (typeof payload === "object" && !Array.isArray(payload)) return payload;
+  return {};
 };
 
-const SEVERITY_COLORS = {
-  low: "default",
-  medium: "orange",
-  high: "red",
+const toProposalPayload = (event = {}) => {
+  const rawPayload = parsePayload(event.payload || event.payload_json);
+  const params = parsePayload(rawPayload?.params);
+  return {
+    ...rawPayload,
+    ...(params || {}),
+    action_card: rawPayload.action_card || params.action_card || null,
+    specialist_agent: rawPayload.specialist_agent || params.specialist_agent,
+    orchestrator_agent: rawPayload.orchestrator_agent || params.orchestrator_agent,
+    trace: toList(
+      params.trace ||
+        rawPayload.trace ||
+        params.action_card?.trace ||
+        rawPayload?.action_card?.trace,
+    ),
+    type: rawPayload.action || rawPayload.type || "agent_proposal",
+  };
 };
 
 function formatEventTime(value) {
@@ -33,7 +57,7 @@ function formatEventTime(value) {
   return date.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
 }
 
-function WorkflowTimeline({ limit = 8 }) {
+function WorkflowTimeline({ limit = 8, showFilters = true }) {
   const workflowContext = useWorkflow();
   const workflow = workflowContext?.workflow;
   const events = workflowContext?.events;
@@ -48,7 +72,6 @@ function WorkflowTimeline({ limit = 8 }) {
   const visibleEvents = useMemo(() => {
     return filterTimelineEvents(reversedEvents, filters).slice(0, limit);
   }, [reversedEvents, filters, limit]);
-  const stageLabel = STAGE_LABELS[workflow?.stage] || workflow?.stage || "Loading";
   const topHotspot = hotspots[0] || null;
 
   if (!workflowContext) return null;
@@ -57,56 +80,31 @@ function WorkflowTimeline({ limit = 8 }) {
     <div
       data-testid="workflow-timeline"
       style={{
-        borderTop: "1px solid #f0f0f0",
-        borderBottom: "1px solid #f0f0f0",
+        borderTop: "1px solid var(--seg-border-subtle)",
+        borderBottom: "1px solid var(--seg-border-subtle)",
         padding: "10px 16px",
-        background: "#fbfbfb",
+        background: "var(--seg-bg-canvas)",
       }}
     >
-      <Space
-        size="small"
-        style={{ display: "flex", justifyContent: "space-between" }}
-      >
-        <Space size="small">
-          <Text strong style={{ fontSize: 13 }}>
-            Workflow
-          </Text>
-          <Tag color="blue" style={{ margin: 0 }}>
-            {stageLabel}
-          </Tag>
-        </Space>
-        <Space size="small">
-          <Text type="secondary" style={{ fontSize: 12 }}>
-            {workflow?.title || "Segmentation Workflow"}
-          </Text>
-          <Button
-            size="small"
-            type="text"
-            onClick={() => refreshInsights?.()}
-            style={{ paddingInline: 4 }}
-          >
-            Refresh Insights
-          </Button>
-        </Space>
-      </Space>
+      <StageHeader
+        stage={workflow?.stage}
+        title={workflow?.title || "Segmentation Workflow"}
+        actionLabel="Refresh Insights"
+        onAction={() => refreshInsights?.()}
+      />
 
       {(topHotspot || impactPreview) && (
-        <div
-          style={{
-            marginTop: 8,
-            padding: "6px 8px",
-            background: "#fff",
-            border: "1px solid #f0f0f0",
-            borderRadius: 6,
-          }}
-        >
+        <div className="workflow-insight-card">
           {topHotspot && (
             <Space size="small" wrap>
               <Text style={{ fontSize: 12 }} strong>
                 Hotspot
               </Text>
-              <Tag color={SEVERITY_COLORS[topHotspot.severity] || "default"}>
-                {topHotspot.severity}
+              <Tag
+                color={getSeverityMeta(topHotspot.severity).color}
+                style={{ margin: 0 }}
+              >
+                {getSeverityMeta(topHotspot.severity).label}
               </Tag>
               <Text style={{ fontSize: 12 }}>{topHotspot.summary}</Text>
             </Space>
@@ -124,39 +122,46 @@ function WorkflowTimeline({ limit = 8 }) {
         </div>
       )}
 
-      <Space size="small" style={{ marginTop: 8, display: "flex" }} wrap>
-        <Select
-          aria-label="Actor filter"
-          size="small"
-          value={filters.actor}
-          style={{ minWidth: 124 }}
-          options={TIMELINE_ACTOR_OPTIONS.map((value) => ({
-            value,
-            label: value === "all" ? "All actors" : value,
-          }))}
-          onChange={(value) =>
-            setFilters((prev) => normalizeTimelineFilters({ ...prev, actor: value }))
-          }
-        />
-        <Input
-          aria-label="Event type filter"
-          size="small"
-          value={filters.eventType}
-          placeholder="Filter event type"
-          style={{ maxWidth: 180 }}
-          onChange={(event) =>
-            setFilters((prev) =>
-              normalizeTimelineFilters({ ...prev, eventType: event.target.value }),
-            )
-          }
-        />
-        <Button
-          size="small"
-          onClick={() => setFilters(DEFAULT_TIMELINE_FILTERS)}
-        >
-          Clear
-        </Button>
-      </Space>
+      {showFilters && (
+        <Space size="small" style={{ marginTop: 8, display: "flex" }} wrap>
+          <Select
+            aria-label="Actor filter"
+            size="small"
+            value={filters.actor}
+            style={{ minWidth: 124 }}
+            options={TIMELINE_ACTOR_OPTIONS.map((value) => ({
+              value,
+              label: value === "all" ? "All actors" : value,
+            }))}
+            onChange={(value) =>
+              setFilters((prev) =>
+                normalizeTimelineFilters({ ...prev, actor: value }),
+              )
+            }
+          />
+          <Input
+            aria-label="Event type filter"
+            size="small"
+            value={filters.eventType}
+            placeholder="Filter event type"
+            style={{ maxWidth: 180 }}
+            onChange={(event) =>
+              setFilters((prev) =>
+                normalizeTimelineFilters({
+                  ...prev,
+                  eventType: event.target.value,
+                }),
+              )
+            }
+          />
+          <Button
+            size="small"
+            onClick={() => setFilters(DEFAULT_TIMELINE_FILTERS)}
+          >
+            Clear
+          </Button>
+        </Space>
+      )}
 
       {visibleEvents.length === 0 ? (
         <Empty
@@ -173,6 +178,9 @@ function WorkflowTimeline({ limit = 8 }) {
             const isPendingProposal =
               event.event_type === "agent.proposal_created" &&
               event.approval_status === "pending";
+            const proposalPayload = isPendingProposal
+              ? toProposalPayload(event)
+              : null;
             return (
               <List.Item
                 style={{
@@ -195,8 +203,11 @@ function WorkflowTimeline({ limit = 8 }) {
                     <Space size="small" wrap>
                       <Text style={{ fontSize: 12 }}>{event.summary}</Text>
                       {event.approval_status !== "not_required" && (
-                        <Tag style={{ margin: 0 }}>
-                          {event.approval_status}
+                        <Tag
+                          color={getApprovalMeta(event.approval_status).color}
+                          style={{ margin: 0 }}
+                        >
+                          {getApprovalMeta(event.approval_status).label}
                         </Tag>
                       )}
                     </Space>
@@ -214,15 +225,21 @@ function WorkflowTimeline({ limit = 8 }) {
                           {formatEventTime(event.created_at)}
                         </Text>
                       </Space>
-                      {isPendingProposal && (
+                      {proposalPayload && (
                         <AgentProposalCard
                           proposal={{
-                            ...(event.payload || {}),
-                            type: event.payload?.action || "agent_proposal",
+                            ...proposalPayload,
+                            type: proposalPayload.type,
                             rationale: event.summary,
-                            ...(event.payload?.params || {}),
                           }}
-                          onApprove={() => approveAgentAction?.(event.id)}
+                          trace={proposalPayload.trace}
+                          onApprove={(_proposal, overrides) => {
+                            if (overrides && Object.keys(overrides).length > 0) {
+                              approveAgentAction?.(event.id, overrides);
+                              return;
+                            }
+                            approveAgentAction?.(event.id);
+                          }}
                           onReject={() => rejectAgentAction?.(event.id)}
                         />
                       )}

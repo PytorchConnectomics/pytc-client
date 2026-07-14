@@ -133,9 +133,9 @@ QUESTIONS = [
         "hard",
     ),
     # ── Monitoring.md ───────────────────────────────────────────────────
-    ("How do I monitor training progress?", "Monitoring.md", "easy"),
+    ("How do I check training progress?", "Monitoring.md", "easy"),
     ("What is TensorBoard used for?", "Monitoring.md", "easy"),
-    ("How does the monitoring page work?", "Monitoring.md", "easy"),
+    ("Where do runtime logs live?", "Monitoring.md", "easy"),
     (
         "Where can I see training loss curves and metrics in real-time?",
         "Monitoring.md",
@@ -512,7 +512,7 @@ QUESTIONS = [
 
 def main():
     embed_model = os.getenv("OLLAMA_EMBED_MODEL", "qwen3-embedding:8b")
-    base_url = os.getenv("OLLAMA_BASE_URL", "http://cscigpu08.bc.edu:4443")
+    base_url = os.getenv("OLLAMA_BASE_URL", "http://127.0.0.1:11434")
 
     print(f"Embeddings: {embed_model}  |  Ollama: {base_url}")
     print(f"FAISS dir:  {FAISS_DIR}")

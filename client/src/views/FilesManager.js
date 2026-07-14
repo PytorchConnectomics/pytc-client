@@ -27,15 +27,32 @@ import {
 } from "@ant-design/icons";
 import { apiClient } from "../api";
 import FileTreeSidebar from "../components/FileTreeSidebar";
-import { openLocalFile, revealInFinder } from "../electronApi";
+import FilePickerModal from "../components/FilePickerModal";
+import { canOpenLocalFile, openLocalFile, revealInFinder } from "../electronApi";
 import { AppContext } from "../contexts/GlobalContext";
+import { useWorkflow } from "../contexts/WorkflowContext";
+import { logClientEvent } from "../logging/appEventLog";
+import {
+  buildWorkflowPatchFromConfirmedProjectRoles,
+  describeProjectContextAssessment,
+  evaluateProjectContextCompleteness,
+  formatVoxelSizeNm,
+  getProjectAuditFromSuggestion,
+  getProjectContextDefaultsFromSuggestion,
+  getProjectVolumeSetsFromSuggestion,
+  getProjectRoleDefaultsFromSuggestion,
+} from "../utils/projectSuggestions";
 
 const HIDDEN_SYSTEM_FILES = new Set([
   "workflow_preference.json",
   ".pytc_proofreading.json",
+  ".pytc_instance_labels.tif",
   ".ds_store",
   "thumbs.db",
 ]);
+const DEFAULT_REMOTE_PROJECT_PATH =
+  process.env.REACT_APP_DEFAULT_PROJECT_PATH ||
+  "/home/weidf/demo_data/yixiao_tapereader_xri_case_study";
 const IMAGE_EXTENSIONS = new Set([
   ".png",
   ".jpg",
@@ -45,7 +62,594 @@ const IMAGE_EXTENSIONS = new Set([
   ".tif",
   ".tiff",
   ".webp",
+  ".h5",
+  ".hdf5",
+  ".npy",
+  ".npz",
+  ".zarr",
+  ".n5",
+  ".nii",
+  ".nii.gz",
+  ".mrc",
+  ".mrcs",
 ]);
+const PROJECT_CONFIRMATION_ROLES = [
+  {
+    key: "image",
+    label: "Image data",
+    required: true,
+    placeholder: "/path/to/image-folder-or-volume",
+  },
+  {
+    key: "label",
+    label: "Mask / label data",
+    required: false,
+    placeholder: "/path/to/mask-label-folder-or-file",
+  },
+  {
+    key: "prediction",
+    label: "Existing predictions",
+    required: false,
+    placeholder: "/path/to/prediction-folder-or-file",
+  },
+  {
+    key: "checkpoint",
+    label: "Checkpoint",
+    required: false,
+    placeholder: "/path/to/model-checkpoint",
+  },
+  {
+    key: "config",
+    label: "Config preset",
+    required: false,
+    placeholder: "/path/to/config.yaml",
+    provenanceOnly: true,
+  },
+];
+
+const getSelectedFilePath = (item) => {
+  if (!item) return "";
+  if (item.physical_path) return item.physical_path;
+  if (item.logical_path) return item.logical_path;
+  if (item.path && item.path !== "root" && item.name) {
+    return `${item.path}/${item.name}`;
+  }
+  return item.name || item.path || "";
+};
+
+const stripProjectRoot = (rootPath, path) => {
+  if (!rootPath || !path) return path || "";
+  const normalizedRoot = String(rootPath).replace(/\/+$/, "");
+  const normalizedPath = String(path);
+  return normalizedPath.startsWith(`${normalizedRoot}/`)
+    ? normalizedPath.slice(normalizedRoot.length + 1)
+    : normalizedPath;
+};
+
+const toProjectRelativeRoles = (rootPath, roles = {}) =>
+  Object.fromEntries(
+    Object.entries(roles).map(([key, value]) => [
+      key,
+      stripProjectRoot(rootPath, value),
+    ]),
+  );
+
+const basename = (path) => {
+  const parts = String(path || "")
+    .split(/[\\/]/)
+    .filter(Boolean);
+  return parts[parts.length - 1] || "";
+};
+
+const pluralize = (count, word) => `${count} ${word}${count === 1 ? "" : "s"}`;
+
+const cleanRoleOverridePath = (value) =>
+  String(value || "")
+    .trim()
+    .replace(/^["'`]+|["'`.,;]+$/g, "");
+
+const extractRoleOverridesFromFeedback = (feedback) => {
+  const rolePatterns = [
+    {
+      role: "label",
+      pattern:
+        /\b(?:label|labels|mask|masks|seg|segmentation)\b[^,;\n]*?\b(?:in|at|is|are|to|=)\s+([^,;\n]+)/i,
+    },
+    {
+      role: "image",
+      pattern:
+        /\b(?:image|images|raw|volume|volumes)\b[^,;\n]*?\b(?:in|at|is|are|to|=)\s+([^,;\n]+)/i,
+    },
+    {
+      role: "prediction",
+      pattern:
+        /\b(?:prediction|predictions|output|outputs)\b[^,;\n]*?\b(?:in|at|is|are|to|=)\s+([^,;\n]+)/i,
+    },
+    {
+      role: "checkpoint",
+      pattern:
+        /\b(?:checkpoint|model)\b[^,;\n]*?\b(?:in|at|is|are|to|=)\s+([^,;\n]+)/i,
+    },
+    {
+      role: "config",
+      pattern: /\b(?:config|preset|yaml)\b[^,;\n]*?\b(?:in|at|is|are|to|=)\s+([^,;\n]+)/i,
+    },
+  ];
+
+  return rolePatterns.reduce((acc, { role, pattern }) => {
+    const match = String(feedback || "").match(pattern);
+    if (match?.[1]) {
+      acc[role] = cleanRoleOverridePath(match[1]);
+    }
+    return acc;
+  }, {});
+};
+
+const findVolumeSetForFeedback = (feedback, volumeSets) => {
+  const lower = String(feedback || "").toLowerCase();
+  const asksForSwitch =
+    /\b(use|switch|select|choose|prefer|start with|instead|not train|not val|not test)\b/.test(
+      lower,
+    );
+  if (!asksForSwitch) return null;
+
+  return (volumeSets || []).find((set) => {
+    const candidates = [
+      set.name,
+      basename(set.image_root),
+      basename(set.label_root),
+      set.image_root,
+      set.label_root,
+    ]
+      .filter(Boolean)
+      .map((item) => String(item).toLowerCase());
+    return candidates.some((candidate) => lower.includes(candidate));
+  });
+};
+
+const buildProjectSetupFeedbackResult = (setup) => {
+  const feedback = String(
+    setup?.mappingFeedback ?? setup?.projectContext ?? "",
+  ).trim();
+  const suggestion = setup?.suggestion || {};
+  const volumeSets = getProjectVolumeSetsFromSuggestion(suggestion);
+  const currentRoles = setup?.roles || {};
+  const nextRoles = { ...currentRoles };
+  const appliedChanges = {};
+
+  const selectedSet = findVolumeSetForFeedback(feedback, volumeSets);
+  if (selectedSet) {
+    if (selectedSet.image_root) {
+      nextRoles.image = selectedSet.image_root;
+      appliedChanges.image = selectedSet.image_root;
+    }
+    if (selectedSet.label_root) {
+      nextRoles.label = selectedSet.label_root;
+      appliedChanges.label = selectedSet.label_root;
+    }
+  }
+
+  const explicitOverrides = extractRoleOverridesFromFeedback(feedback);
+  Object.entries(explicitOverrides).forEach(([role, value]) => {
+    if (value) {
+      nextRoles[role] = value;
+      appliedChanges[role] = value;
+    }
+  });
+
+  const isQuestion = /\?/.test(feedback) || /^(what|why|which|how)\b/i.test(feedback);
+  const chosenImage = basename(nextRoles.image);
+  const chosenLabel = basename(nextRoles.label);
+  let response = "";
+
+  if (Object.keys(appliedChanges).length > 0) {
+    response = `Updated the mapping. I will use ${chosenImage || "the selected image data"}${
+      chosenLabel ? ` with ${chosenLabel}` : ""
+    }. Check the fields below before starting.`;
+  } else if (isQuestion && chosenImage && chosenLabel && chosenImage === chosenLabel) {
+    response = `${chosenImage} appears twice because the image and label folders use the same split name. I mapped image data to the image-side ${chosenImage} folder and masks to the label-side ${chosenLabel} folder.`;
+  } else if (isQuestion) {
+    response =
+      "I treated this as a question, so I did not change the mapping. To change it, say something like “use val split” or edit the fields below.";
+  } else {
+    response =
+      "I recorded that context. I did not see a path correction, so the mapping is unchanged.";
+  }
+
+  return {
+    feedback,
+    response,
+    nextRoles,
+    appliedChanges,
+  };
+};
+
+const PROJECT_CONTEXT_LABELS = {
+  imaging_modality: "Imaging modality",
+  target_structure: "Target structure",
+  voxel_size_nm: "Voxel size (z, y, x)",
+  task_family: "Task family",
+  training_policy: "Training policy",
+  volume_split: "Volume split",
+};
+
+const EDITABLE_PROJECT_CONTEXT_FIELDS = [
+  {
+    key: "imaging_modality",
+    label: "Imaging modality",
+    placeholder: "electron microscopy, fluorescence, micro-CT",
+  },
+  {
+    key: "target_structure",
+    label: "Target structure",
+    placeholder: "mitochondria, nuclei, membranes",
+  },
+  {
+    key: "voxel_size_nm",
+    label: "Voxel size (z, y, x nm)",
+    placeholder: "30, 6, 6",
+  },
+];
+
+const normalizeVolumeSplitCount = (value) => {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) && parsed >= 0 ? Math.trunc(parsed) : null;
+};
+
+const formatVolumeSplitText = (summary) => {
+  if (!summary) return "";
+  const groundTruth = normalizeVolumeSplitCount(summary.ground_truth);
+  const needsProofreading = normalizeVolumeSplitCount(summary.needs_proofreading);
+  const missingSegmentation = normalizeVolumeSplitCount(
+    summary.missing_segmentation,
+  );
+  if (
+    groundTruth === null ||
+    needsProofreading === null ||
+    missingSegmentation === null
+  ) {
+    return "";
+  }
+  return `${groundTruth} ground-truth / ${needsProofreading} draft masks / ${missingSegmentation} image-only`;
+};
+
+const parseVolumeSplitFromMaskStatusText = (text) => {
+  const source = String(text || "").toLowerCase();
+  const groundTruth = source.match(
+    /(\d+)\s*(?:ground-truth|ground truth)\s*(?:mask|masks)?/,
+  );
+  const needsProofreading = source.match(
+    /(\d+)\s*(?:draft|proofread|needs proofreading|needs-proofreading)/,
+  );
+  const imageOnly = source.match(
+    /(\d+)\s*(?:image-only|no segmentation|missing segmentation)/,
+  );
+  if (!groundTruth && !needsProofreading && !imageOnly) {
+    return "";
+  }
+  const parsed = {
+    ground_truth: normalizeVolumeSplitCount(groundTruth?.[1]),
+    needs_proofreading: normalizeVolumeSplitCount(needsProofreading?.[1]),
+    missing_segmentation: normalizeVolumeSplitCount(imageOnly?.[1]),
+  };
+  return formatVolumeSplitText(parsed);
+};
+
+const getProjectVolumeSplitFromSuggestion = (suggestion) => {
+  const profile = suggestion?.profile || {};
+  const candidates = [
+    profile.schema?.manifest?.initial_progress_summary,
+    profile.manifest?.initial_progress_summary,
+  ].filter(Boolean);
+  const splitFromSummary = candidates
+    .map(formatVolumeSplitText)
+    .find(Boolean);
+  if (splitFromSummary) {
+    return splitFromSummary;
+  }
+  const maskHints = [
+    profile.context_hints?.mask_status,
+    profile.schema?.context_hints?.mask_status,
+  ].filter(Boolean);
+  const splitFromMasks = maskHints.map(parseVolumeSplitFromMaskStatusText).find(Boolean);
+  if (splitFromMasks) {
+    return splitFromMasks;
+  }
+  return "";
+};
+
+const parseEditableVoxelSizeNm = (value) => {
+  if (Array.isArray(value)) {
+    const numeric = value.slice(0, 3).map((item) => Number(item));
+    return numeric.length === 3 &&
+      numeric.every((item) => Number.isFinite(item) && item > 0)
+      ? numeric
+      : null;
+  }
+  const values = String(value || "").match(/\d+(?:\.\d+)?/g);
+  if (!values || values.length < 3) return null;
+  const numeric = values.slice(0, 3).map((item) => Number(item));
+  return numeric.every((item) => Number.isFinite(item) && item > 0)
+    ? numeric
+    : null;
+};
+
+const formatEditableVoxelSize = (value) => {
+  const parsed = parseEditableVoxelSizeNm(value);
+  return parsed ? parsed.join(", ") : String(value || "");
+};
+
+const cleanEditableProjectContext = (context, fallbackDescription = "") => {
+  const source = context && typeof context === "object" ? context : {};
+  const next = {};
+  const freeformNote = String(
+    source.freeform_note || fallbackDescription || "",
+  ).trim();
+  if (freeformNote) {
+    next.freeform_note = freeformNote.slice(0, 1000);
+  }
+  ["imaging_modality", "target_structure"].forEach((key) => {
+    const value = String(source[key] || "").trim();
+    if (value) next[key] = value;
+  });
+  [
+    "task_family",
+    "mask_status",
+    "image_only_strategy",
+    "training_policy",
+    "volume_split",
+  ].forEach((key) => {
+    const value = String(source[key] || "").trim();
+    if (value) next[key] = value;
+  });
+  const voxelSizeNm = parseEditableVoxelSizeNm(source.voxel_size_nm);
+  if (voxelSizeNm) {
+    next.voxel_size_nm = voxelSizeNm;
+    next.voxel_size_source = source.voxel_size_source || "project_setup_confirmation";
+  }
+  if (source.use_defaults) {
+    next.use_defaults = true;
+  }
+  return next;
+};
+
+const editableProjectContextMissingFields = (context) => {
+  const missing = [];
+  if (!context?.imaging_modality) missing.push("imaging modality");
+  if (!context?.target_structure) missing.push("target structure");
+  if (!parseEditableVoxelSizeNm(context?.voxel_size_nm)) {
+    missing.push("imaging resolution");
+  }
+  return missing;
+};
+
+const buildProjectContextMetadata = (
+  description,
+  _existingMetadata = {},
+  options = {},
+) => {
+  void _existingMetadata;
+  const assessment = evaluateProjectContextCompleteness(description, options);
+  const contextSource =
+    options.projectContextDraft && typeof options.projectContextDraft === "object"
+      ? options.projectContextDraft
+      : assessment.context;
+  const projectContext = cleanEditableProjectContext(
+    contextSource,
+    description,
+  );
+  if (!projectContext || Object.keys(projectContext).length === 0) return null;
+  const missing = editableProjectContextMissingFields(projectContext);
+  return {
+    ...projectContext,
+    completeness: {
+      complete: missing.length === 0,
+      missing,
+    },
+    source: "project_setup_confirmation",
+    updated_at: new Date().toISOString(),
+  };
+};
+
+const getProjectContextDraftWithSharedFacts = (
+  setup,
+  descriptionOverride = "",
+  context = null,
+) => {
+  const baseContext = cleanEditableProjectContext(
+    context || {},
+    descriptionOverride,
+  );
+  const splitText = getProjectVolumeSplitFromSuggestion(setup?.suggestion);
+  if (splitText && !baseContext.volume_split) {
+    baseContext.volume_split = splitText;
+  }
+  return baseContext;
+};
+
+const compactProjectPath = (pathValue) => {
+  const text = String(pathValue || "").trim();
+  if (!text) return "";
+  const normalized = text.replace(/\\/g, "/");
+  const parts = normalized.split("/").filter(Boolean);
+  if (parts.length <= 3) return normalized;
+  return parts.slice(-3).join("/");
+};
+
+const formatAuditFactValue = (fact) => {
+  if (!fact) return "";
+  if (fact.key === "voxel_size_nm") {
+    return formatVoxelSizeNm(fact.value);
+  }
+  if (Array.isArray(fact.value)) {
+    return fact.value.join(", ");
+  }
+  return String(fact.value ?? "");
+};
+
+const compactAuditSource = (source) => {
+  const text = String(source || "").trim();
+  if (!text) return "";
+  return text.replace(/^volume_metadata:/, "").replace(/^content_spot_check:/, "");
+};
+
+const auditFindingStyles = {
+  error: {
+    background: "#fff1f0",
+    border: "#ffccc7",
+    color: "#a8071a",
+  },
+  warning: {
+    background: "#fff7e6",
+    border: "#ffd591",
+    color: "#ad6800",
+  },
+  info: {
+    background: "#f6ffed",
+    border: "#b7eb8f",
+    color: "#237804",
+  },
+};
+
+const buildProjectBrief = ({ context, roles, suggestion, volumeSets }) => {
+  const projectContext = context || {};
+  const target = String(projectContext.target_structure || "").trim();
+  const modality = String(projectContext.imaging_modality || "").trim();
+  const resolution = formatVoxelSizeNm(projectContext.voxel_size_nm);
+  const imagePath = compactProjectPath(roles?.image);
+  const labelPath = compactProjectPath(roles?.label || roles?.mask);
+  const configPath = compactProjectPath(roles?.config);
+  const predictionPath = compactProjectPath(roles?.prediction);
+  const pairCounts = (volumeSets || []).map((set) => Number(set.pair_count || 0));
+  const pairCount = pairCounts.length > 0 ? Math.max(...pairCounts) : 0;
+  const subject = [modality, target].filter(Boolean).join(" ");
+  const summary = subject
+    ? `${subject} project${resolution ? ` at ${resolution}` : ""}.`
+    : `Project${resolution ? ` at ${resolution}` : ""}.`;
+  const nextMoves = [
+    imagePath ? `Use ${imagePath} as the active image data.` : "",
+    labelPath
+      ? `Use ${labelPath} for masks, proofreading seeds, and evaluation.`
+      : "Start image-only; ask before training or metric comparison.",
+    resolution
+      ? `Use ${resolution} as the z/y/x voxel size for visualization and model defaults.`
+      : "",
+    configPath ? `Start from ${configPath} as the config preset.` : "",
+    predictionPath ? `Treat ${predictionPath} as the existing prediction.` : "",
+    pairCount > 1
+      ? `Keep this as a multi-volume project with ${pairCount} detected image/mask pairs.`
+      : "",
+  ].filter(Boolean);
+  const uncertainties = [];
+  if (projectContext.completeness?.complete === false) {
+    uncertainties.push(
+      `Context still missing: ${projectContext.completeness.missing.join(", ")}.`,
+    );
+  }
+  if (!labelPath) {
+    uncertainties.push("No mask/label path is confirmed yet.");
+  }
+  if (!configPath) {
+    uncertainties.push("No config preset is confirmed yet.");
+  }
+  return {
+    project_name: suggestion?.name || "Mounted project",
+    summary,
+    fields: Object.entries(PROJECT_CONTEXT_LABELS)
+      .map(([key, label]) => ({
+        key,
+        label,
+        value:
+          key === "voxel_size_nm"
+            ? formatVoxelSizeNm(projectContext[key])
+            : projectContext[key],
+      }))
+      .filter((item) => Boolean(item.value)),
+    next_moves: nextMoves,
+    uncertainties,
+  };
+};
+
+const buildProjectMemoryProfile = ({
+  suggestion,
+  roles,
+  workflowPatch,
+  projectDescription,
+  projectContext,
+  projectBrief,
+  projectAudit,
+  semanticTurns,
+  mappingTurns,
+  source,
+  existingProfile,
+}) => {
+  const now = new Date().toISOString();
+  return {
+    ...(existingProfile && typeof existingProfile === "object" ? existingProfile : {}),
+    schema_version: "pytc-project-context/v1",
+    project_name: suggestion?.name || "Mounted project",
+    project_directory: suggestion?.directory_path || null,
+    semantic_context: projectContext || {
+      freeform_note: String(projectDescription || "").trim(),
+    },
+    project_brief: projectBrief || null,
+    project_audit: projectAudit || null,
+    context_facts: projectAudit?.context_facts || [],
+    mechanistic_mapping: roles || {},
+    workflow_memory: {
+      current_stage: "setup",
+      last_completed_step: "project_setup_confirmed",
+      known_blockers: [],
+      agent_recommendation: "Start from the confirmed project data.",
+      workflow_patch_keys: Object.keys(workflowPatch || {}),
+    },
+    setup_turns: {
+      semantic: semanticTurns || [],
+      mapping: mappingTurns || [],
+    },
+    source,
+    updated_at: now,
+  };
+};
+
+const GUIDED_PROJECT_CONTEXT_GROUPS = [
+  {
+    key: "task_family",
+    label: "What are we working over?",
+    helper: "Example: XRI fibre instance segmentation, mitochondria segmentation, proofreading masks",
+    placeholder: "XRI fibre instance segmentation",
+  },
+  {
+    key: "mask_status",
+    label: "What mask data exists?",
+    helper: "Example: 6 ground-truth masks, 2 draft masks, 2 image-only volumes",
+    placeholder: "mixed: 6 ground-truth masks, 2 draft masks, 2 image-only targets",
+  },
+  {
+    key: "image_only_strategy",
+    label: "What should happen to image-only volumes?",
+    helper: "Tell the agent whether to infer, ignore, or ask first.",
+    placeholder: "run inference on image-only volumes later",
+  },
+  {
+    key: "training_policy",
+    label: "Which masks are safe for training?",
+    helper: "Example: train only on confirmed ground-truth masks",
+    placeholder: "train only on confirmed ground-truth masks",
+  },
+];
+
+const appendProjectContextAnswer = (existingText, nextAnswer) => {
+  const existing = String(existingText || "").trim();
+  const next = String(nextAnswer || "").trim();
+  if (!next) return existing;
+  if (!existing) return next;
+  const existingLower = existing.toLowerCase();
+  const nextLower = next.toLowerCase();
+  if (nextLower.includes(existingLower)) return next;
+  if (existingLower.includes(nextLower)) return existing;
+  return `${existing}\n${next}`;
+};
 
 const collectDescendantFolderIds = (folderList, rootIds) => {
   const removed = new Set();
@@ -70,7 +674,8 @@ const isFolderWithinSubtree = (folderList, rootId, targetId) => {
     return false;
   }
 
-  let current = folderList.find((folder) => folder.key === targetId);
+  const folderByKey = new Map(folderList.map((folder) => [folder.key, folder]));
+  let current = folderByKey.get(targetId);
   while (current) {
     if (current.key === rootId) {
       return true;
@@ -78,7 +683,7 @@ const isFolderWithinSubtree = (folderList, rootId, targetId) => {
     if (!current.parent || current.parent === "root") {
       break;
     }
-    current = folderList.find((folder) => folder.key === current.parent);
+    current = folderByKey.get(current.parent);
   }
   return false;
 };
@@ -118,11 +723,13 @@ const transformFiles = (fileList) => {
 
 function FilesManager() {
   const context = useContext(AppContext);
+  const workflowContext = useWorkflow();
   const [folders, setFolders] = useState([]);
   const [files, setFiles] = useState({});
   const foldersRef = useRef([]);
   const filesRef = useRef({});
   const [currentFolder, setCurrentFolder] = useState("root");
+  const currentFolderRef = useRef("root");
   const [loadedParents, setLoadedParents] = useState([]);
   const [loadingParents, setLoadingParents] = useState([]);
   const loadedParentsRef = useRef(new Set());
@@ -142,15 +749,34 @@ function FilesManager() {
   const [serverUnavailable, setServerUnavailable] = useState(false);
   const [hasShownServerWarning, setHasShownServerWarning] = useState(false);
   const [previewStatus, setPreviewStatus] = useState({});
+  const [projectSuggestions, setProjectSuggestions] = useState([]);
+  const [pendingProjectSetup, setPendingProjectSetup] = useState(null);
+  const [projectSetupSaving, setProjectSetupSaving] = useState(false);
+  const [projectSetupFeedbackSaving, setProjectSetupFeedbackSaving] =
+    useState(false);
+  const [rolePickerTarget, setRolePickerTarget] = useState(null);
+  const folderByKey = React.useMemo(
+    () => new Map(folders.map((folder) => [folder.key, folder])),
+    [folders],
+  );
+  const pendingProjectSetupRef = useRef(null);
+  const autoProjectSetupOpenedRef = useRef(false);
+  const handledChooseDataActionRef = useRef(null);
+  const chooseProjectDataRef = useRef(null);
   const containerRef = useRef(null);
   const itemRefs = useRef({});
   const isDragSelecting = useRef(false);
+  const keyHandlerStateRef = useRef({});
   const previewBaseUrl = apiClient.defaults.baseURL || "http://localhost:4242";
 
   // Sidebar Resize Logic
   const [sidebarWidth, setSidebarWidth] = useState(250);
   const [isResizing, setIsResizing] = useState(false);
   const [isSidebarVisible, setIsSidebarVisible] = useState(true);
+
+  useEffect(() => {
+    pendingProjectSetupRef.current = pendingProjectSetup;
+  }, [pendingProjectSetup]);
 
   const startResizing = React.useCallback(() => setIsResizing(true), []);
   const stopResizing = React.useCallback(() => setIsResizing(false), []);
@@ -191,6 +817,10 @@ function FilesManager() {
   useEffect(() => {
     filesRef.current = files;
   }, [files]);
+
+  useEffect(() => {
+    currentFolderRef.current = currentFolder;
+  }, [currentFolder]);
 
   const syncLoadedParents = React.useCallback((nextParents) => {
     loadedParentsRef.current = new Set(nextParents);
@@ -277,6 +907,31 @@ function FilesManager() {
       setFolders(mergedFolders);
       setFiles(mergedFiles);
       markParentLoaded(normalizedParent);
+
+      const activeFolder = currentFolderRef.current;
+      if (
+        activeFolder !== "root" &&
+        !mergedFolders.some((folder) => folder.key === activeFolder)
+      ) {
+        const fallbackFolder =
+          normalizedParent !== activeFolder &&
+          mergedFolders.some((folder) => folder.key === normalizedParent)
+            ? normalizedParent
+            : "root";
+        setCurrentFolder(fallbackFolder);
+        setSelectedItems([]);
+        setEditingItem(null);
+        setNewItemType(null);
+        logClientEvent("files_active_folder_reconciled", {
+          source: "files_manager",
+          message: "Active folder was removed by a fresh file index load.",
+          data: {
+            previousFolder: activeFolder,
+            fallbackFolder,
+            refreshedParent: normalizedParent,
+          },
+        });
+      }
     },
     [markParentLoaded],
   );
@@ -347,6 +1002,37 @@ function FilesManager() {
         return res.data;
       } catch (err) {
         const isNetworkError = !err.response;
+        const isMissingParent =
+          err.response?.status === 404 && normalizedParent !== "root";
+        if (isMissingParent) {
+          logClientEvent("files_parent_missing_refreshed", {
+            level: "WARN",
+            source: "files_manager",
+            message: "File index parent was stale; refreshing the root project tree.",
+            data: {
+              parent: normalizedParent,
+              activeFolder: currentFolderRef.current,
+              detail: err.response?.data?.detail || err.message,
+            },
+          });
+          const activeFolderWasStale =
+            currentFolderRef.current === normalizedParent ||
+            isFolderWithinSubtree(
+              foldersRef.current,
+              normalizedParent,
+              currentFolderRef.current,
+            );
+          removeFolderSubtrees([normalizedParent]);
+          if (activeFolderWasStale) {
+            setCurrentFolder("root");
+            setSelectedItems([]);
+          }
+          await fetchFolderContents("root", {
+            force: true,
+            silentNetworkError: true,
+          });
+          return null;
+        }
         if (isNetworkError) {
           setServerUnavailable(true);
           if (!hasShownServerWarning && !silentNetworkError) {
@@ -365,6 +1051,7 @@ function FilesManager() {
     [
       hasShownServerWarning,
       replaceFolderChildren,
+      removeFolderSubtrees,
       setParentLoadingState,
     ],
   );
@@ -375,9 +1062,9 @@ function FilesManager() {
 
     const loadVisibleFolders = async () => {
       if (!isMounted) return;
-      await fetchFolderContents("root");
+      await fetchFolderContents("root", { force: true });
       if (currentFolder !== "root") {
-        await fetchFolderContents(currentFolder);
+        await fetchFolderContents(currentFolder, { force: true });
       }
     };
 
@@ -404,9 +1091,31 @@ function FilesManager() {
     };
   }, [currentFolder, fetchFolderContents, serverUnavailable]); // Retry when server unavailable
 
-  const getCurrentFolderObj = () =>
-    folders.find((f) => f.key === currentFolder);
-  // eslint-disable-next-line no-loop-func
+  useEffect(() => {
+    const refreshVisibleFolders = () => {
+      if (document.visibilityState === "hidden") return;
+      fetchFolderContents("root", {
+        force: true,
+        silentNetworkError: true,
+      });
+      const activeFolder = currentFolderRef.current;
+      if (activeFolder && activeFolder !== "root") {
+        fetchFolderContents(activeFolder, {
+          force: true,
+          silentNetworkError: true,
+        });
+      }
+    };
+
+    window.addEventListener("focus", refreshVisibleFolders);
+    document.addEventListener("visibilitychange", refreshVisibleFolders);
+    return () => {
+      window.removeEventListener("focus", refreshVisibleFolders);
+      document.removeEventListener("visibilitychange", refreshVisibleFolders);
+    };
+  }, [fetchFolderContents]);
+
+  const getCurrentFolderObj = () => folderByKey.get(currentFolder);
   const getBreadcrumbs = () => {
     const path = [{ key: "root", title: "Projects", parent: null }];
     if (currentFolder === "root") {
@@ -417,7 +1126,7 @@ function FilesManager() {
     while (curr) {
       chain.unshift(curr);
       if (!curr.parent || curr.parent === "root") break;
-      curr = folders.find((f) => f.key === curr.parent);
+      curr = folderByKey.get(curr.parent);
     }
     return path.concat(chain);
   };
@@ -435,13 +1144,32 @@ function FilesManager() {
     setNewItemType(null);
   };
 
+  const loadProjectSuggestions = React.useCallback(async () => {
+    try {
+      const response = await apiClient.get("/files/project-suggestions", {
+        withCredentials: true,
+      });
+      const suggestions = response.data || [];
+      setProjectSuggestions(suggestions);
+      return suggestions;
+    } catch (error) {
+      // Suggestions are convenience only; normal mounting must keep working.
+      console.warn("Could not load project suggestions", error);
+      setProjectSuggestions([]);
+      return [];
+    }
+  }, []);
+
+  useEffect(() => {
+    loadProjectSuggestions();
+  }, [loadProjectSuggestions]);
+
   const isImageFile = (file) => {
     if (!file || file.is_folder) return false;
     if (file.type && file.type.startsWith("image/")) return true;
-    const ext = `.${String(file.name || "")
-      .split(".")
-      .pop()}`.toLowerCase();
-    return IMAGE_EXTENSIONS.has(ext);
+    const name = String(file.name || "").toLowerCase();
+    const ext = `.${name.split(".").pop()}`;
+    return IMAGE_EXTENSIONS.has(ext) || name.endsWith(".nii.gz");
   };
 
   const getPreviewUrl = (fileKey) =>
@@ -769,7 +1497,7 @@ function FilesManager() {
 
             const childFiles = files[parentId] || [];
             descendantFileCount += childFiles.length;
-            childFiles.forEach((f) => {
+            for (const f of childFiles) {
               const sizeStr = String(f.size || "");
               const match = sizeStr.match(/([0-9.]+)\s*(KB|MB|GB|B)/i);
               if (match) {
@@ -780,7 +1508,7 @@ function FilesManager() {
                 if (unit === "MB") descendantSizeKb += value * 1024;
                 if (unit === "GB") descendantSizeKb += value * 1024 * 1024;
               }
-            });
+            }
           }
         }
 
@@ -1028,13 +1756,34 @@ function FilesManager() {
 
   const handleMouseUp = () => setSelectionBox(null);
 
+  useEffect(() => {
+    keyHandlerStateRef.current = {
+      clipboard,
+      currentFolder,
+      editingItem,
+      files,
+      finishCreateFolder,
+      finishRename,
+      folders,
+      handleCopy,
+      handleCut,
+      handleDelete,
+      handlePaste,
+      newItemType,
+      selectedItems,
+      tempName,
+    };
+  });
+
   // Keyboard shortcuts
-  // eslint-disable-next-line react-hooks/exhaustive-deps
   useEffect(() => {
     const handleKeyDown = (e) => {
-      if (editingItem) {
+      const state = keyHandlerStateRef.current;
+      if (state.editingItem) {
         if (e.key === "Enter")
-          newItemType ? finishCreateFolder() : finishRename();
+          state.newItemType
+            ? state.finishCreateFolder?.()
+            : state.finishRename?.();
         if (e.key === "Escape") {
           setEditingItem(null);
           setNewItemType(null);
@@ -1049,33 +1798,24 @@ function FilesManager() {
           target.isContentEditable)
       )
         return;
-      if (e.key === "Delete") handleDelete();
-      if (e.ctrlKey && e.key === "c") handleCopy();
-      if (e.ctrlKey && e.key === "x") handleCut();
-      if (e.ctrlKey && e.key === "v") handlePaste();
+      if (e.key === "Delete") state.handleDelete?.();
+      if (e.ctrlKey && e.key === "c") state.handleCopy?.();
+      if (e.ctrlKey && e.key === "x") state.handleCut?.();
+      if (e.ctrlKey && e.key === "v") state.handlePaste?.();
       if ((e.ctrlKey || e.metaKey) && e.key === "a") {
         e.preventDefault();
         const allKeys = [
-          ...folders
-            .filter((f) => f.parent === currentFolder)
+          ...(state.folders || [])
+            .filter((f) => f.parent === state.currentFolder)
             .map((f) => f.key),
-          ...(files[currentFolder] || []).map((f) => f.key),
+          ...((state.files || {})[state.currentFolder] || []).map((f) => f.key),
         ];
         setSelectedItems(allKeys);
       }
     };
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [
-    selectedItems,
-    clipboard,
-    currentFolder,
-    folders,
-    files,
-    editingItem,
-    newItemType,
-    tempName,
-  ]);
+  }, []);
 
   // Context menu handling
   const handleContextMenu = (e, type, key) => {
@@ -1140,7 +1880,12 @@ function FilesManager() {
         )}
       </div>
     ) : type === "folder" ? (
-      <FolderFilled style={{ fontSize: iconSize, color: "#1890ff" }} />
+      <FolderFilled
+        style={{
+          fontSize: iconSize,
+          color: "var(--seg-accent-primary, #3f37c9)",
+        }}
+      />
     ) : (
       <FileOutlined style={{ fontSize: iconSize, color: "#555" }} />
     );
@@ -1179,8 +1924,12 @@ function FilesManager() {
           textAlign: viewMode === "grid" ? "center" : "left",
           cursor: "pointer",
           borderRadius: 4,
-          backgroundColor: isSelected ? "#e6f7ff" : "transparent",
-          border: isSelected ? "1px solid #1890ff" : "1px solid transparent",
+          backgroundColor: isSelected
+            ? "var(--seg-selection-fill, rgba(63, 55, 201, 0.12))"
+            : "transparent",
+          border: isSelected
+            ? "1px solid var(--seg-accent-primary, #3f37c9)"
+            : "1px solid transparent",
           display: viewMode === "list" ? "flex" : "block",
           alignItems: "center",
           userSelect: "none",
@@ -1229,9 +1978,10 @@ function FilesManager() {
                     padding: "2px 6px",
                     fontSize: 10,
                     borderRadius: 10,
-                    background: "#f0f5ff",
-                    color: "#2f54eb",
-                    border: "1px solid #adc6ff",
+                    background: "var(--seg-accent-primary-soft, #f0efff)",
+                    color: "var(--seg-accent-primary, #3f37c9)",
+                    border:
+                      "1px solid var(--seg-accent-primary-border, #c7c2ff)",
                   }}
                 >
                   Mounted
@@ -1253,7 +2003,7 @@ function FilesManager() {
           margin: viewMode === "grid" ? 8 : 0,
           textAlign: viewMode === "grid" ? "center" : "left",
           borderRadius: 4,
-          border: "1px solid #1890ff",
+          border: "1px solid var(--seg-accent-primary, #3f37c9)",
           display: viewMode === "list" ? "flex" : "block",
           alignItems: "center",
         }}
@@ -1270,7 +2020,7 @@ function FilesManager() {
           <FolderFilled
             style={{
               fontSize: viewMode === "grid" ? 48 : 24,
-              color: "#1890ff",
+              color: "var(--seg-accent-primary, #3f37c9)",
             }}
           />
         </div>
@@ -1297,6 +2047,1517 @@ function FilesManager() {
 
   const currentFolders = folders.filter((f) => f.parent === currentFolder);
   const currentFiles = files[currentFolder] || [];
+
+  const readStoredProjectMemory = async (directoryPath) => {
+    if (!directoryPath) return null;
+    try {
+      const response = await apiClient.get("/files/project-context", {
+        params: { directory_path: directoryPath },
+      });
+      return response?.data?.profile || null;
+    } catch (error) {
+      logClientEvent("project_context_profile_read_failed", {
+        level: "WARN",
+        source: "files_manager",
+        message: "Stored project context could not be read",
+        data: {
+          directoryPath,
+          error: error?.message || String(error),
+        },
+      });
+      return null;
+    }
+  };
+
+  const openProjectSetupConfirmation = async (suggestion, source) => {
+    const roles = toProjectRelativeRoles(
+      suggestion?.directory_path,
+      getProjectRoleDefaultsFromSuggestion(suggestion),
+    );
+    const volumeSets = getProjectVolumeSetsFromSuggestion(suggestion);
+    const projectAudit = getProjectAuditFromSuggestion(suggestion);
+  const storedProjectMemory = await readStoredProjectMemory(
+      suggestion?.directory_path,
+    );
+    const storedSemanticContext = storedProjectMemory?.semantic_context || {};
+    const storedDescription =
+      storedSemanticContext.freeform_note ||
+      storedProjectMemory?.project_description ||
+      "";
+    const projectContextDefaults = getProjectContextDefaultsFromSuggestion(suggestion);
+    const initialProjectContextDraft = getProjectContextDraftWithSharedFacts(
+      {
+        suggestion,
+      },
+      storedDescription,
+      {
+        ...projectContextDefaults,
+        ...storedSemanticContext,
+      },
+    );
+    const missingInitialContextFields = editableProjectContextMissingFields(
+      initialProjectContextDraft,
+    );
+    const startsWithMapping =
+      missingInitialContextFields.length === 0 && Boolean(roles.image);
+    setPendingProjectSetup({
+      source,
+      suggestion,
+      roles,
+      setupStep: startsWithMapping ? "mapping" : "semantic",
+      projectDescription: storedDescription,
+      projectDescriptionDraft: storedDescription,
+      projectContextDraft: initialProjectContextDraft,
+      projectContextDefaults,
+      projectAudit,
+      useContextDefaults:
+        startsWithMapping || Boolean(storedSemanticContext.use_defaults),
+      semanticFeedbackTurns: [],
+      lastSemanticResponse: storedDescription
+        ? "I found saved project context. Review it before continuing."
+        : startsWithMapping
+          ? "I filled the project basics from the files I checked."
+          : "",
+      mappingFeedback: "",
+      feedbackTurns: [],
+      lastFeedbackResponse: "",
+      storedProjectMemory,
+    });
+    logClientEvent("project_role_confirmation_opened", {
+      source: "files_manager",
+      message: "Project role confirmation opened",
+      data: {
+        setupSource: source,
+        suggestionId: suggestion?.id || null,
+        projectName: suggestion?.name || null,
+        profileMode: suggestion?.profile?.schema?.mode || null,
+        volumeSetCount: volumeSets.length,
+        auditSummary: projectAudit?.summary || null,
+        projectContextDefaults,
+        missingInitialContextFields,
+        skippedSemanticSetup: startsWithMapping,
+        hasImage: Boolean(roles.image),
+        hasLabel: Boolean(roles.label),
+        hasPrediction: Boolean(roles.prediction),
+        hasCheckpoint: Boolean(roles.checkpoint),
+        hasStoredProjectMemory: Boolean(storedProjectMemory),
+      },
+    });
+  };
+
+  const setPendingProjectDescription = (nextValue) => {
+    setPendingProjectSetup((current) => {
+      if (!current) return current;
+      return {
+        ...current,
+        projectDescriptionDraft: nextValue,
+        useContextDefaults: false,
+      };
+    });
+  };
+
+  const setPendingMappingFeedback = (nextValue) => {
+    setPendingProjectSetup((current) => {
+      if (!current) return current;
+      return {
+        ...current,
+        mappingFeedback: nextValue,
+      };
+    });
+  };
+
+  const setPendingRoleValue = (roleKey, nextValue) => {
+    setPendingProjectSetup((current) => {
+      if (!current) return current;
+      return {
+        ...current,
+        roles: {
+          ...current.roles,
+          [roleKey]: nextValue,
+        },
+      };
+    });
+  };
+
+  const setPendingProjectContextValue = (contextKey, nextValue) => {
+    setPendingProjectSetup((current) => {
+      if (!current) return current;
+      const currentDraft = current.projectContextDraft || {};
+      return {
+        ...current,
+        projectContextDraft: {
+          ...currentDraft,
+          [contextKey]: nextValue,
+          ...(contextKey === "voxel_size_nm"
+            ? { voxel_size_source: "project_setup_confirmation" }
+            : {}),
+        },
+      };
+    });
+  };
+
+  const setPendingSetupStep = (setupStep) => {
+    setPendingProjectSetup((current) =>
+      current ? { ...current, setupStep } : current,
+    );
+  };
+
+  const getPendingProjectContextDefaults = (setup) =>
+    setup?.projectContextDefaults ||
+    getProjectContextDefaultsFromSuggestion(setup?.suggestion);
+
+  const handleProjectContextContinue = (options = {}) => {
+    const setupSnapshot = pendingProjectSetupRef.current || pendingProjectSetup;
+    if (!setupSnapshot) return;
+    const useDefaults = Boolean(options.useDefaults);
+    const currentAnswer = useDefaults
+      ? ""
+      : String(setupSnapshot.projectDescriptionDraft || "").trim();
+    const combinedProjectDescription = appendProjectContextAnswer(
+      setupSnapshot.projectDescription,
+      currentAnswer,
+    );
+    const hasProjectDescription = Boolean(combinedProjectDescription);
+    const defaultContext = getProjectContextDraftWithSharedFacts(
+      setupSnapshot,
+      combinedProjectDescription,
+      getPendingProjectContextDefaults(setupSnapshot),
+    );
+    const draftContext = getProjectContextDraftWithSharedFacts(
+      setupSnapshot,
+      combinedProjectDescription,
+      setupSnapshot.projectContextDraft,
+    );
+    const draftMissing = editableProjectContextMissingFields(draftContext);
+    const hasCompleteDraft = draftMissing.length === 0;
+    let assessment = evaluateProjectContextCompleteness(
+      combinedProjectDescription,
+      {
+        useDefaults: useDefaults || setupSnapshot.useContextDefaults,
+        defaultContext: hasCompleteDraft ? draftContext : defaultContext,
+      },
+    );
+    if (hasCompleteDraft) {
+      assessment = {
+        ...assessment,
+        complete: true,
+        context: {
+          ...assessment.context,
+          ...draftContext,
+          ...(useDefaults || setupSnapshot.useContextDefaults
+            ? { use_defaults: true }
+            : {}),
+        },
+        known: {
+          ...(assessment.known || {}),
+          ...draftContext,
+        },
+        missing: [],
+        next_question: "",
+      };
+    }
+    if (!useDefaults && !hasProjectDescription && !hasCompleteDraft) {
+      message.warning("Fill the project basics or add a note.");
+      return;
+    }
+    const response = describeProjectContextAssessment(assessment);
+    const shouldAdvance =
+      assessment.complete || useDefaults || setupSnapshot.useContextDefaults;
+    const turn = {
+      user: currentAnswer,
+      agent: response,
+      missing: assessment.missing,
+      complete: assessment.complete,
+      use_defaults: useDefaults || setupSnapshot.useContextDefaults,
+      accumulated_context: combinedProjectDescription,
+      timestamp: new Date().toISOString(),
+    };
+
+    logClientEvent("project_context_reviewed", {
+      source: "files_manager",
+      message: "Project context reviewed before mapping confirmation",
+      data: {
+        suggestionId: setupSnapshot.suggestion?.id || null,
+        projectName: setupSnapshot.suggestion?.name || null,
+        complete: assessment.complete,
+        missing: assessment.missing,
+        nextQuestion: assessment.next_question,
+        context: assessment.context,
+        accumulatedContextPreview: combinedProjectDescription.slice(0, 400),
+        useDefaults: useDefaults || setupSnapshot.useContextDefaults,
+      },
+    });
+
+    setPendingProjectSetup((current) => {
+      if (!current) return current;
+      return {
+        ...current,
+        projectDescription: combinedProjectDescription,
+        projectDescriptionDraft: "",
+        projectContextDraft: cleanEditableProjectContext(
+          assessment.context,
+          combinedProjectDescription,
+        ),
+        setupStep: shouldAdvance ? "mapping" : "semantic",
+        useContextDefaults: useDefaults || current.useContextDefaults,
+        semanticFeedbackTurns: [
+          ...(current.semanticFeedbackTurns || []),
+          turn,
+        ],
+        lastSemanticResponse: shouldAdvance ? "" : response,
+      };
+    });
+  };
+
+  const handleProjectSetupFeedbackSubmit = async () => {
+    const setupSnapshot = pendingProjectSetupRef.current || pendingProjectSetup;
+    if (!setupSnapshot) return;
+    const feedback = String(setupSnapshot.mappingFeedback || "").trim();
+    if (!feedback) return;
+
+    const result = buildProjectSetupFeedbackResult(setupSnapshot);
+    const turn = {
+      user: result.feedback,
+      agent: result.response,
+      applied_changes: result.appliedChanges,
+      timestamp: new Date().toISOString(),
+    };
+
+    setProjectSetupFeedbackSaving(true);
+    setPendingProjectSetup((current) => {
+      if (!current) return current;
+      return {
+        ...current,
+        roles: result.nextRoles,
+        mappingFeedback: "",
+        feedbackTurns: [...(current.feedbackTurns || []), turn],
+        lastFeedbackResponse: result.response,
+      };
+    });
+    pendingProjectSetupRef.current = {
+      ...setupSnapshot,
+      roles: result.nextRoles,
+      mappingFeedback: "",
+      feedbackTurns: [...(setupSnapshot.feedbackTurns || []), turn],
+      lastFeedbackResponse: result.response,
+    };
+
+    logClientEvent("project_role_confirmation_feedback_submitted", {
+      source: "files_manager",
+      message: "Project setup feedback submitted",
+      data: {
+        setupSource: setupSnapshot.source,
+        suggestionId: setupSnapshot.suggestion?.id || null,
+        projectName: setupSnapshot.suggestion?.name || null,
+        feedback: result.feedback,
+        response: result.response,
+        appliedChanges: result.appliedChanges,
+      },
+    });
+
+    Promise.resolve(
+      workflowContext.appendEvent?.({
+        actor: "user",
+        event_type: "dataset.setup_feedback",
+        stage: workflowContext.workflow?.stage || "setup",
+        summary: "Project setup feedback reviewed before confirmation.",
+        payload: {
+          source: "file_management_project_confirmation",
+          setup_source: setupSnapshot.source,
+          suggestion_id: setupSnapshot.suggestion?.id || null,
+          directory_path: setupSnapshot.suggestion?.directory_path || null,
+          feedback: result.feedback,
+          agent_response: result.response,
+          applied_changes: result.appliedChanges,
+          roles_after_feedback: result.nextRoles,
+        },
+      }),
+    ).finally(() => setProjectSetupFeedbackSaving(false));
+  };
+
+  const closeProjectSetupConfirmation = () => {
+    setPendingProjectSetup(null);
+    setRolePickerTarget(null);
+  };
+
+  const handleRolePickerSelect = (item) => {
+    if (!rolePickerTarget) return;
+    const rootPath = pendingProjectSetup?.suggestion?.directory_path || "";
+    setPendingRoleValue(
+      rolePickerTarget,
+      stripProjectRoot(rootPath, getSelectedFilePath(item)),
+    );
+    setRolePickerTarget(null);
+  };
+
+  const handleConfirmProjectSetup = async () => {
+    if (!pendingProjectSetup || projectSetupSaving) return;
+    const { suggestion, roles, source, projectDescription } = pendingProjectSetup;
+    if (!String(roles.image || "").trim()) {
+      message.warning("Choose an image volume before starting the project.");
+      return;
+    }
+    if (!workflowContext?.updateWorkflow) {
+      message.warning("Workflow state is not ready yet.");
+      return;
+    }
+
+    const rootPath = suggestion?.directory_path || "";
+    const profile = suggestion?.profile || {};
+    const volumeSets = getProjectVolumeSetsFromSuggestion(suggestion);
+    const feedbackTurns = pendingProjectSetup.feedbackTurns || [];
+    const semanticFeedbackTurns = pendingProjectSetup.semanticFeedbackTurns || [];
+    const projectDescriptionText = String(projectDescription || "").trim();
+    const existingMetadata = workflowContext.workflow?.metadata || {};
+    const projectContextMetadata = buildProjectContextMetadata(
+      projectDescriptionText,
+      existingMetadata,
+      {
+        useDefaults: pendingProjectSetup.useContextDefaults,
+        defaultContext: getPendingProjectContextDefaults(pendingProjectSetup),
+        projectContextDraft: pendingProjectSetup.projectContextDraft,
+      },
+    );
+    const contextAssessment = evaluateProjectContextCompleteness(
+      projectDescriptionText,
+      {
+        useDefaults: pendingProjectSetup.useContextDefaults,
+        defaultContext: getPendingProjectContextDefaults(pendingProjectSetup),
+      },
+    );
+    const projectBrief = buildProjectBrief({
+      context: projectContextMetadata,
+      roles,
+      suggestion,
+      volumeSets,
+    });
+    if (!contextAssessment.complete && !projectDescriptionText) {
+      setPendingProjectSetup((current) =>
+        current
+          ? {
+              ...current,
+              setupStep: "semantic",
+              lastSemanticResponse: describeProjectContextAssessment(
+                contextAssessment,
+              ),
+            }
+          : current,
+      );
+      message.warning("Describe the project or use defaults.");
+      return;
+    }
+    const workflowPatch = buildWorkflowPatchFromConfirmedProjectRoles({
+      rootPath,
+      roles,
+      metadata: projectContextMetadata
+        ? {
+            ...existingMetadata,
+            project_context: projectContextMetadata,
+          }
+        : null,
+    });
+    const patch = workflowPatch;
+    if (!patch.image_path) {
+      message.warning("Choose an image volume before starting the project.");
+      return;
+    }
+
+    setProjectSetupSaving(true);
+    try {
+      await workflowContext.updateWorkflow(workflowPatch);
+      const projectMemoryProfile = buildProjectMemoryProfile({
+        suggestion,
+        roles,
+        workflowPatch,
+        projectDescription: projectDescriptionText,
+        projectContext: projectContextMetadata,
+        projectBrief,
+        projectAudit: pendingProjectSetup.projectAudit,
+        semanticTurns: semanticFeedbackTurns,
+        mappingTurns: feedbackTurns,
+        source,
+        existingProfile: pendingProjectSetup.storedProjectMemory,
+      });
+      try {
+        await apiClient.put("/files/project-context", {
+          directory_path: rootPath,
+          profile: projectMemoryProfile,
+        });
+      } catch (storageError) {
+        console.warn("Failed to persist project context profile", storageError);
+        logClientEvent("project_context_profile_write_failed", {
+          level: "WARN",
+          source: "files_manager",
+          message: "Project context profile could not be written",
+          data: {
+            suggestionId: suggestion?.id || null,
+            projectName: suggestion?.name || null,
+            directoryPath: rootPath,
+            error: storageError?.message || String(storageError),
+          },
+        });
+      }
+      await workflowContext.appendEvent?.({
+        actor: "user",
+        event_type: "dataset.loaded",
+        stage: workflowContext.workflow?.stage || "setup",
+        summary: `Confirmed project data for ${suggestion.name}.`,
+        payload: {
+          source: "file_management_project_confirmation",
+          setup_source: source,
+          suggestion_id: suggestion.id,
+          directory_path: rootPath,
+          mounted_root_id: suggestion.mounted_root_id || null,
+          profile_mode: suggestion.profile?.schema?.mode || null,
+          profile_schema_version:
+            suggestion.profile?.schema?.schema_version || null,
+          project_description: projectDescriptionText,
+          project_context: projectContextMetadata,
+          project_brief: projectBrief,
+          project_audit: pendingProjectSetup.projectAudit || null,
+          context_facts: pendingProjectSetup.projectAudit?.context_facts || [],
+          semantic_context_assessment: contextAssessment,
+          semantic_context_turns: semanticFeedbackTurns,
+          setup_feedback_turns: feedbackTurns,
+          detected_role_counts: profile.counts || {},
+          detected_role_directories:
+            profile.role_directories || profile.schema?.role_directories || {},
+          detected_volume_sets: volumeSets,
+          confirmed_roles: roles,
+          workflow_patch: workflowPatch,
+        },
+      });
+      await Promise.allSettled([
+        workflowContext.refreshPreflight?.(),
+        workflowContext.refreshAgentRecommendation?.(),
+      ]);
+      logClientEvent("project_role_confirmation_completed", {
+        source: "files_manager",
+        message: "Project roles confirmed and registered",
+        data: {
+          setupSource: source,
+          suggestionId: suggestion?.id || null,
+          projectName: suggestion?.name || null,
+          projectDescription: projectDescriptionText,
+          projectContext: projectContextMetadata,
+          projectBrief,
+          contextComplete: contextAssessment.complete,
+          workflowPatchKeys: Object.keys(workflowPatch),
+        },
+      });
+      message.success("Project data confirmed.");
+      closeProjectSetupConfirmation();
+    } catch (error) {
+      console.warn("Failed to register confirmed project roles", error);
+      logClientEvent("project_role_confirmation_failed", {
+        level: "ERROR",
+        source: "files_manager",
+        message: error.message || "Project role confirmation failed",
+        data: {
+          suggestionId: suggestion?.id || null,
+          projectName: suggestion?.name || null,
+        },
+      });
+      message.error("Failed to register project data.");
+    } finally {
+      setProjectSetupSaving(false);
+    }
+  };
+
+  const renderDetectedProjectStructure = () => {
+    if (!pendingProjectSetup) return null;
+    const suggestion = pendingProjectSetup.suggestion || {};
+    const profile = suggestion.profile || {};
+    const volumeSets = getProjectVolumeSetsFromSuggestion(suggestion);
+    const roleDirectories =
+      profile.role_directories || profile.schema?.role_directories || {};
+    const roleSummaries = ["image", "label", "prediction"]
+      .map((role) => {
+        const directory = roleDirectories[role]?.[0];
+        if (!directory) return null;
+        return {
+          role,
+          label:
+            role === "image"
+              ? "Images"
+              : role === "label"
+                ? "Labels"
+                : "Predictions",
+          ...directory,
+        };
+      })
+      .filter(Boolean);
+
+    const activeRoles = pendingProjectSetup.roles || {};
+    const chosenImage = activeRoles.image ? basename(activeRoles.image) : "";
+    const chosenLabel = activeRoles.label ? basename(activeRoles.label) : "";
+    let detectedSentence = "";
+
+    if (volumeSets.length > 0) {
+      const shownSets = volumeSets.slice(0, 3).map((set) => {
+        const setName = set.name || basename(set.image_root) || "batch";
+        const labelText = set.label_root
+          ? ` and ${pluralize(set.label_count || 0, "label")}`
+          : "";
+        const pairText = set.pair_count
+          ? `; ${pluralize(set.pair_count, "matched pair")}`
+          : "";
+        return `${setName} (${pluralize(set.image_count || 0, "image")}${labelText}${pairText})`;
+      });
+      detectedSentence = `I found ${pluralize(
+        volumeSets.length,
+        "candidate image set",
+      )}: ${shownSets.join(", ")}${
+        volumeSets.length > shownSets.length ? ", and more" : ""
+      }. I will start with ${
+        chosenImage || "the selected image data"
+      }${chosenLabel ? ` and ${chosenLabel}` : ""}. Is that correct?`;
+    } else if (roleSummaries.length > 0) {
+      const summaryText = roleSummaries
+        .map((item) => `${item.label.toLowerCase()} in ${basename(item.path)}`)
+        .join(", ");
+      detectedSentence = `I found ${summaryText}. I will use ${
+        chosenImage || "the selected image data"
+      }${chosenLabel ? ` with ${chosenLabel}` : ""}. Is that correct?`;
+    } else {
+      detectedSentence =
+        "I found a workable project, but I need you to confirm the image data before I use it. Is this mapping correct?";
+    }
+
+    return (
+      <div
+        style={{
+          marginBottom: 14,
+          padding: "12px",
+          borderRadius: 10,
+          border: "1px solid #ddd6fe",
+          background: "#fbfaff",
+        }}
+      >
+        <div style={{ fontWeight: 700, fontSize: 13, marginBottom: 4 }}>
+          What I found
+        </div>
+        <div style={{ fontSize: 13, color: "#4b5563", lineHeight: 1.45 }}>
+          {detectedSentence}
+        </div>
+      </div>
+    );
+  };
+
+  const renderProjectRoleFields = () => (
+    <div style={{ display: "grid", gap: 10 }}>
+      {PROJECT_CONFIRMATION_ROLES.map((role) => (
+        <div
+          key={role.key}
+          style={{
+            display: "grid",
+            gridTemplateColumns: "145px minmax(0, 1fr) auto auto",
+            gap: 8,
+            alignItems: "center",
+          }}
+        >
+          <div style={{ fontWeight: 700, fontSize: 13 }}>
+            {role.label}
+            {role.required ? (
+              <span style={{ color: "#d4380d" }}> *</span>
+            ) : null}
+            {role.provenanceOnly ? (
+              <span
+                style={{
+                  marginLeft: 6,
+                  color: "#8c8c8c",
+                  fontWeight: 500,
+                  fontSize: 11,
+                }}
+              >
+                optional
+              </span>
+            ) : null}
+          </div>
+          <Input
+            value={pendingProjectSetup.roles?.[role.key] || ""}
+            placeholder={role.placeholder}
+            onChange={(event) =>
+              setPendingRoleValue(role.key, event.target.value)
+            }
+          />
+          <Button
+            icon={<FolderOpenOutlined />}
+            onClick={() => setRolePickerTarget(role.key)}
+          >
+            Browse
+          </Button>
+          <Button
+            onClick={() => setPendingRoleValue(role.key, "")}
+            disabled={role.required && !pendingProjectSetup.roles?.[role.key]}
+          >
+            Clear
+          </Button>
+        </div>
+      ))}
+    </div>
+  );
+
+  const renderEditableProjectContextFields = (options = {}) => {
+    const {
+      title = "Editable project context",
+      description =
+        "These are the concrete assumptions the agent absorbed. Edit or clear each one before starting.",
+      includeNotes = true,
+      marginBottom = 12,
+    } = options;
+    const draft = pendingProjectSetup.projectContextDraft || {};
+    return (
+      <div
+        style={{
+          padding: "10px 12px",
+          borderRadius: 10,
+          border: "1px solid #e5e7eb",
+          background: "#ffffff",
+          marginBottom,
+        }}
+      >
+        <div style={{ fontWeight: 700, fontSize: 13, marginBottom: 4 }}>
+          {title}
+        </div>
+        {description ? (
+          <div style={{ color: "#6b7280", fontSize: 12, marginBottom: 10 }}>
+            {description}
+          </div>
+        ) : null}
+        <div style={{ display: "grid", gap: 8 }}>
+          {EDITABLE_PROJECT_CONTEXT_FIELDS.map((field) => (
+            <div
+              key={field.key}
+              style={{
+                display: "grid",
+                gridTemplateColumns: "155px minmax(0, 1fr) auto",
+                gap: 8,
+                alignItems: "center",
+              }}
+            >
+              <div style={{ fontWeight: 700, fontSize: 13 }}>{field.label}</div>
+              <Input
+                value={
+                  field.key === "voxel_size_nm"
+                    ? formatEditableVoxelSize(draft[field.key])
+                    : draft[field.key] || ""
+                }
+                placeholder={field.placeholder}
+                onChange={(event) =>
+                  setPendingProjectContextValue(field.key, event.target.value)
+                }
+              />
+              <Button
+                onClick={() => setPendingProjectContextValue(field.key, "")}
+                disabled={!draft[field.key]}
+              >
+                Clear
+              </Button>
+            </div>
+          ))}
+          {includeNotes ? (
+            <div
+              style={{
+                display: "grid",
+                gridTemplateColumns: "155px minmax(0, 1fr)",
+                gap: 8,
+                alignItems: "start",
+              }}
+            >
+              <div style={{ fontWeight: 700, fontSize: 13 }}>Notes</div>
+              <Input.TextArea
+                rows={2}
+                value={draft.freeform_note || ""}
+                placeholder="Short project note for the agent memory."
+                onChange={(event) =>
+                  setPendingProjectContextValue(
+                    "freeform_note",
+                    event.target.value,
+                  )
+                }
+              />
+            </div>
+          ) : null}
+        </div>
+      </div>
+    );
+  };
+
+  const renderProjectAuditPanel = () => {
+    const audit = pendingProjectSetup?.projectAudit;
+    if (!audit) return null;
+    const summary = audit.summary || {};
+    const facts = (audit.context_facts || [])
+      .map((fact) => ({
+        ...fact,
+        displayValue: formatAuditFactValue(fact),
+      }))
+      .filter((fact) => fact.displayValue)
+      .slice(0, 4);
+    const findings = (audit.findings || []).slice(0, 5);
+    const checkedText = [
+      summary.audited_volumes
+        ? `${summary.audited_volumes} volume${summary.audited_volumes === 1 ? "" : "s"}`
+        : "",
+      summary.pair_checks
+        ? `${summary.pair_checks} image/mask pair${summary.pair_checks === 1 ? "" : "s"}`
+        : "",
+    ]
+      .filter(Boolean)
+      .join(" and ");
+
+    return (
+      <div
+        style={{
+          padding: "10px 12px",
+          borderRadius: 10,
+          border: "1px solid #bae6fd",
+          background: "#f0f9ff",
+          marginBottom: 12,
+        }}
+      >
+        <div style={{ fontWeight: 700, fontSize: 13, marginBottom: 4 }}>
+          What I checked automatically
+        </div>
+        <div style={{ color: "#374151", fontSize: 13, lineHeight: 1.45 }}>
+          {checkedText
+            ? `I inspected ${checkedText} directly from disk.`
+            : "I checked project files directly from disk."}{" "}
+          {summary.warnings || summary.errors
+            ? `${summary.warnings || 0} warning(s), ${summary.errors || 0} error(s).`
+            : "No blocking file issues were found in the sampled files."}
+        </div>
+        {facts.length > 0 && (
+          <div
+            style={{
+              display: "grid",
+              gridTemplateColumns: "repeat(auto-fit, minmax(160px, 1fr))",
+              gap: 8,
+              marginTop: 10,
+            }}
+          >
+            {facts.map((fact) => (
+              <div
+                key={`${fact.key}-${fact.source || fact.displayValue}`}
+                style={{
+                  background: "#fff",
+                  border: "1px solid #dbeafe",
+                  borderRadius: 8,
+                  padding: "7px 8px",
+                }}
+              >
+                <div
+                  style={{
+                    color: "#6b7280",
+                    fontSize: 11,
+                    textTransform: "uppercase",
+                    letterSpacing: 0,
+                  }}
+                >
+                  {fact.label || fact.key}
+                </div>
+                <div style={{ color: "#111827", fontSize: 13 }}>
+                  {fact.displayValue}
+                </div>
+                <div style={{ color: "#6b7280", fontSize: 11 }}>
+                  {compactProjectPath(compactAuditSource(fact.source)) ||
+                    fact.confidence ||
+                    "file metadata"}
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+        {findings.length > 0 && (
+          <div style={{ display: "grid", gap: 6, marginTop: 10 }}>
+            {findings.map((finding, index) => {
+              const tone =
+                auditFindingStyles[finding.level] || auditFindingStyles.info;
+              return (
+                <div
+                  key={`${finding.code || "finding"}-${finding.path || index}-${index}`}
+                  style={{
+                    display: "grid",
+                    gridTemplateColumns: "82px minmax(0, 1fr)",
+                    gap: 8,
+                    alignItems: "start",
+                    fontSize: 12,
+                    lineHeight: 1.4,
+                  }}
+                >
+                  <span
+                    style={{
+                      display: "inline-flex",
+                      justifyContent: "center",
+                      border: `1px solid ${tone.border}`,
+                      background: tone.background,
+                      color: tone.color,
+                      borderRadius: 999,
+                      padding: "1px 7px",
+                      fontWeight: 700,
+                      textTransform: "capitalize",
+                    }}
+                  >
+                    {finding.level || "info"}
+                  </span>
+                  <span style={{ color: "#374151" }}>
+                    {finding.message}
+                    {finding.path ? (
+                      <span style={{ color: "#6b7280" }}>
+                        {" "}
+                        {compactProjectPath(finding.path)}
+                      </span>
+                    ) : null}
+                  </span>
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </div>
+    );
+  };
+
+  const renderProjectSharedFactsPanel = () => {
+    if (!pendingProjectSetup) return null;
+    const draft = pendingProjectSetup.projectContextDraft || {};
+    const volumeSplit =
+      draft.volume_split || getProjectVolumeSplitFromSuggestion(pendingProjectSetup.suggestion);
+    const factRows = [
+      {
+        key: "imaging_modality",
+        label: "Modality",
+        value: draft.imaging_modality || "Not set",
+      },
+      {
+        key: "target_structure",
+        label: "Target",
+        value: draft.target_structure || "Not set",
+      },
+      {
+        key: "voxel_size_nm",
+        label: "Voxel size",
+        value: formatEditableVoxelSize(draft.voxel_size_nm) || "Not set",
+      },
+      {
+        key: "volume_split",
+        label: "Volume split",
+        value: volumeSplit || "Not set",
+      },
+      {
+        key: "task_family",
+        label: "Task family",
+        value: draft.task_family || "Not set",
+      },
+      {
+        key: "training_policy",
+        label: "Training policy",
+        value: draft.training_policy || "Not set",
+      },
+    ];
+
+    return (
+      <div
+        style={{
+          padding: "10px 12px",
+          borderRadius: 10,
+          border: "1px solid #e5e7eb",
+          background: "#f8fafc",
+          marginBottom: 12,
+        }}
+      >
+        <div style={{ fontWeight: 700, fontSize: 13, marginBottom: 4 }}>
+          Shared project facts
+        </div>
+        <div style={{ color: "#6b7280", fontSize: 12, marginBottom: 10 }}>
+          These are the facts the agent will use to interpret this project. Edit or
+          confirm them in the controls below.
+        </div>
+        <div
+          style={{
+            display: "grid",
+            gridTemplateColumns: "repeat(auto-fit, minmax(120px, 1fr))",
+            gap: 8,
+          }}
+        >
+          {factRows.map((fact) => (
+            <div
+              key={fact.key}
+              style={{
+                border: "1px solid #eef2ff",
+                borderRadius: 8,
+                padding: "7px 8px",
+                background: "#fff",
+              }}
+            >
+              <div
+                style={{
+                  color: "#6b7280",
+                  fontSize: 11,
+                  textTransform: "uppercase",
+                  letterSpacing: "0.03em",
+                }}
+              >
+                {fact.label}
+              </div>
+              <div style={{ color: "#111827", fontSize: 13 }}>
+                {fact.value}
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
+    );
+  };
+
+  const renderDetectedDataSummary = () => {
+    const profile = pendingProjectSetup?.suggestion?.profile || {};
+    const counts = profile.counts || {};
+    const volumeSets = getProjectVolumeSetsFromSuggestion(
+      pendingProjectSetup?.suggestion,
+    );
+    const bestSet = volumeSets
+      .slice()
+      .sort((a, b) => Number(b.pair_count || 0) - Number(a.pair_count || 0))[0];
+    const items = [
+      ["Images", counts.image || counts.volume || 0],
+      ["Masks", counts.label || 0],
+      ["Predictions", counts.prediction || 0],
+      ["Configs", counts.config || 0],
+      ["Checkpoints", counts.checkpoint || 0],
+    ];
+    return (
+      <div
+        style={{
+          padding: "10px 12px",
+          borderRadius: 10,
+          border: "1px solid #e5e7eb",
+          background: "#ffffff",
+          marginBottom: 12,
+        }}
+      >
+        <div style={{ fontWeight: 700, fontSize: 13, marginBottom: 8 }}>
+          Detected data
+        </div>
+        <div
+          style={{
+            display: "grid",
+            gridTemplateColumns: "repeat(auto-fit, minmax(94px, 1fr))",
+            gap: 8,
+          }}
+        >
+          {items.map(([label, value]) => (
+            <div
+              key={label}
+              style={{
+                border: "1px solid #eef0f4",
+                borderRadius: 8,
+                padding: "7px 8px",
+                background: "#fafafa",
+              }}
+            >
+              <div style={{ color: "#6b7280", fontSize: 11 }}>{label}</div>
+              <div style={{ color: "#111827", fontWeight: 800, fontSize: 18 }}>
+                {value}
+              </div>
+            </div>
+          ))}
+        </div>
+        {bestSet ? (
+          <div style={{ color: "#6b7280", fontSize: 12, marginTop: 8 }}>
+            Best detected pairing: {bestSet.name || "image + mask"} with{" "}
+            {bestSet.pair_count || 0} pair
+            {Number(bestSet.pair_count || 0) === 1 ? "" : "s"}.
+          </div>
+        ) : null}
+      </div>
+    );
+  };
+
+  const renderGuidedContextConfirmations = () => {
+    const draft = pendingProjectSetup?.projectContextDraft || {};
+    return (
+      <div
+        style={{
+          padding: "10px 12px",
+          borderRadius: 10,
+          border: "1px solid #ddd6fe",
+          background: "#fbfaff",
+          marginBottom: 12,
+        }}
+      >
+        <div style={{ fontWeight: 700, fontSize: 13, marginBottom: 4 }}>
+          Workflow notes
+        </div>
+        <div style={{ color: "#6b7280", fontSize: 12, marginBottom: 10 }}>
+          I prefilled these from the mounted folder. Edit them in your own
+          words; they become durable agent context, not just UI labels.
+        </div>
+        <div style={{ display: "grid", gap: 12 }}>
+          {GUIDED_PROJECT_CONTEXT_GROUPS.map((group) => {
+            const selectedValue = String(draft[group.key] || "");
+            return (
+              <div key={group.key}>
+                <div
+                  style={{
+                    display: "flex",
+                    justifyContent: "space-between",
+                    gap: 8,
+                    alignItems: "baseline",
+                    marginBottom: 6,
+                  }}
+                >
+                  <span style={{ fontWeight: 700, fontSize: 13 }}>
+                    {group.label}
+                  </span>
+                  <span style={{ color: "#6b7280", fontSize: 11 }}>
+                    {group.helper}
+                  </span>
+                </div>
+                <div
+                  style={{
+                    display: "grid",
+                    gridTemplateColumns: "minmax(0, 1fr) auto",
+                    gap: 8,
+                    alignItems: "center",
+                  }}
+                >
+                  <Input
+                    value={selectedValue}
+                    placeholder={group.placeholder}
+                    onChange={(event) =>
+                      setPendingProjectContextValue(
+                        group.key,
+                        event.target.value,
+                      )
+                    }
+                  />
+                  <Button
+                    onClick={() => setPendingProjectContextValue(group.key, "")}
+                    disabled={!selectedValue}
+                  >
+                    Clear
+                  </Button>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      </div>
+    );
+  };
+
+  const renderProjectSetupSemanticStep = () => {
+    const draft = pendingProjectSetup.projectContextDraft || {};
+    const missingFields = editableProjectContextMissingFields(draft);
+    const missingText = missingFields.length
+      ? `Still needed: ${missingFields.join(", ")}.`
+      : "The basics are filled. You can continue or add an optional note.";
+    return (
+      <div>
+        <div style={{ marginBottom: 10, color: "#4b5563", fontSize: 13 }}>
+          I checked the folder first. Confirm what I found, then fill only the
+          basics I could not infer.
+        </div>
+        {renderDetectedDataSummary()}
+        {renderProjectAuditPanel()}
+        {renderProjectSharedFactsPanel()}
+        {renderGuidedContextConfirmations()}
+        {renderEditableProjectContextFields({
+          title: "Project basics",
+          description:
+            "These three fields give the agent enough context to choose sensible workflow defaults.",
+          includeNotes: false,
+        })}
+        {pendingProjectSetup.lastSemanticResponse && (
+          <div
+            style={{
+              padding: "8px 10px",
+              borderRadius: 8,
+              border: "1px solid #d9d6ff",
+              background: "#fff",
+              color: "#2b2f36",
+              fontSize: 13,
+              lineHeight: 1.45,
+              marginBottom: 8,
+            }}
+          >
+            {pendingProjectSetup.lastSemanticResponse}
+          </div>
+        )}
+        <div style={{ fontWeight: 700, fontSize: 13, marginBottom: 4 }}>
+          Anything else I should know?
+        </div>
+        <Input.TextArea
+          rows={3}
+          value={pendingProjectSetup.projectDescriptionDraft || ""}
+          placeholder={
+            pendingProjectSetup.lastSemanticResponse
+              ? "Add an answer here. Press Enter to continue; Shift+Enter for a new line."
+              : "Optional: tissue, species, acquisition quirks, what should count as good enough."
+          }
+          onChange={(event) => setPendingProjectDescription(event.target.value)}
+          onKeyDown={(event) => {
+            if (event.key === "Enter" && !event.shiftKey) {
+              event.preventDefault();
+              handleProjectContextContinue();
+            }
+          }}
+          style={{ marginBottom: 0 }}
+        />
+        <div style={{ color: "#6b7280", fontSize: 12, marginTop: 8 }}>
+          {missingText}
+        </div>
+      </div>
+    );
+  };
+
+  const renderProjectBriefCard = () => {
+    const projectContext = buildProjectContextMetadata(
+      pendingProjectSetup.projectDescription,
+      workflowContext.workflow?.metadata || {},
+      {
+        useDefaults: pendingProjectSetup.useContextDefaults,
+        defaultContext: getPendingProjectContextDefaults(pendingProjectSetup),
+        projectContextDraft: pendingProjectSetup.projectContextDraft,
+      },
+    );
+    const projectBrief = buildProjectBrief({
+      context: projectContext,
+      roles: pendingProjectSetup.roles,
+      suggestion: pendingProjectSetup.suggestion,
+      volumeSets: getProjectVolumeSetsFromSuggestion(pendingProjectSetup.suggestion),
+    });
+    return (
+      <div
+        style={{
+          padding: "10px 12px",
+          borderRadius: 10,
+          border: "1px solid #ddd6fe",
+          background: "#fbfaff",
+          marginBottom: 12,
+        }}
+      >
+        <div style={{ fontWeight: 700, fontSize: 13, marginBottom: 4 }}>
+          Project brief
+        </div>
+        <div style={{ color: "#111827", fontSize: 14, lineHeight: 1.45 }}>
+          {projectBrief.summary}
+        </div>
+        {projectBrief.fields.length > 0 && (
+          <div
+            style={{
+              display: "grid",
+              gridTemplateColumns: "repeat(auto-fit, minmax(120px, 1fr))",
+              gap: 8,
+              marginTop: 10,
+            }}
+          >
+            {projectBrief.fields.map((field) => (
+              <div
+                key={field.key}
+                style={{
+                  background: "#fff",
+                  border: "1px solid #ecebff",
+                  borderRadius: 8,
+                  padding: "7px 8px",
+                }}
+              >
+                <div
+                  style={{
+                    color: "#6b7280",
+                    fontSize: 11,
+                    textTransform: "uppercase",
+                    letterSpacing: "0.03em",
+                  }}
+                >
+                  {field.label}
+                </div>
+                <div style={{ color: "#111827", fontSize: 13 }}>
+                  {String(field.value)}
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+        {projectBrief.next_moves.length > 0 && (
+          <div style={{ marginTop: 12 }}>
+            <div
+              style={{
+                color: "#6b7280",
+                fontSize: 11,
+                textTransform: "uppercase",
+                letterSpacing: "0.03em",
+                marginBottom: 5,
+              }}
+            >
+              How the agent will use this
+            </div>
+            <ul
+              style={{
+                margin: 0,
+                paddingLeft: 18,
+                color: "#374151",
+                fontSize: 13,
+                lineHeight: 1.5,
+              }}
+            >
+              {projectBrief.next_moves.slice(0, 6).map((move) => (
+                <li key={move}>{move}</li>
+              ))}
+            </ul>
+          </div>
+        )}
+        {projectBrief.uncertainties.length > 0 && (
+          <div
+            style={{
+              marginTop: 10,
+              padding: "8px 10px",
+              borderRadius: 8,
+              background: "#fff7ed",
+              color: "#7c2d12",
+              fontSize: 12,
+              lineHeight: 1.45,
+            }}
+          >
+            {projectBrief.uncertainties[0]}
+          </div>
+        )}
+      </div>
+    );
+  };
+
+  const renderProjectSetupMappingStep = () => (
+    <div>
+      <div style={{ marginBottom: 10, color: "#4b5563", fontSize: 13 }}>
+        Confirm the project context and file mapping before starting.
+      </div>
+      {renderDetectedProjectStructure()}
+      {renderDetectedDataSummary()}
+      {renderProjectAuditPanel()}
+      {renderProjectSharedFactsPanel()}
+      {renderGuidedContextConfirmations()}
+      {renderEditableProjectContextFields()}
+      {renderProjectBriefCard()}
+      <div style={{ fontWeight: 700, fontSize: 13, marginBottom: 4 }}>
+        Correct my file mapping
+      </div>
+      <Input.TextArea
+        rows={3}
+        value={pendingProjectSetup.mappingFeedback || ""}
+        placeholder="Example correction: use the val split, not train; labels are in data/seg; predictions are in outputs/baseline."
+        onChange={(event) => setPendingMappingFeedback(event.target.value)}
+        onKeyDown={(event) => {
+          if (event.key === "Enter" && !event.shiftKey) {
+            event.preventDefault();
+            handleProjectSetupFeedbackSubmit();
+          }
+        }}
+        style={{ marginBottom: 8 }}
+      />
+      <div
+        style={{
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "space-between",
+          gap: 12,
+          marginBottom: pendingProjectSetup.lastFeedbackResponse ? 8 : 12,
+        }}
+      >
+        <span style={{ color: "#8c8c8c", fontSize: 12 }}>
+          Press Enter to ask/apply a mapping correction. Shift+Enter adds a
+          line.
+        </span>
+        <Button
+          size="small"
+          onClick={handleProjectSetupFeedbackSubmit}
+          loading={projectSetupFeedbackSaving}
+          disabled={!String(pendingProjectSetup.mappingFeedback || "").trim()}
+        >
+          Ask/apply
+        </Button>
+      </div>
+      {pendingProjectSetup.lastFeedbackResponse && (
+        <div
+          style={{
+            marginBottom: 12,
+            padding: "8px 10px",
+            borderRadius: 8,
+            background: "#f6f6ff",
+            border: "1px solid #ddd6fe",
+            color: "#4b5563",
+            fontSize: 13,
+            lineHeight: 1.45,
+          }}
+        >
+          {pendingProjectSetup.lastFeedbackResponse}
+        </div>
+      )}
+      {renderProjectRoleFields()}
+    </div>
+  );
+
+  const renderProjectSetupBody = () => {
+    if (!pendingProjectSetup) return null;
+    if (pendingProjectSetup.setupStep === "mapping") {
+      return renderProjectSetupMappingStep();
+    }
+    return renderProjectSetupSemanticStep();
+  };
+
+  const renderProjectSetupFooter = () => {
+    if (!pendingProjectSetup) return null;
+    const step = pendingProjectSetup.setupStep || "semantic";
+    const footer = [
+      <Button
+        key="cancel"
+        onClick={closeProjectSetupConfirmation}
+        disabled={projectSetupSaving}
+      >
+        Cancel
+      </Button>,
+    ];
+    if (step !== "semantic") {
+      footer.push(
+        <Button
+          key="back"
+          onClick={() => setPendingSetupStep("semantic")}
+          disabled={projectSetupSaving}
+        >
+          Back
+        </Button>,
+      );
+    }
+    if (step === "semantic") {
+      const hasDraft = Boolean(
+        String(pendingProjectSetup.projectDescriptionDraft || "").trim(),
+      );
+      const hasReviewableContext = Boolean(
+        String(pendingProjectSetup.projectDescription || "").trim() &&
+          !pendingProjectSetup.lastSemanticResponse,
+      );
+      const hasCompleteDraft =
+        editableProjectContextMissingFields(
+          pendingProjectSetup.projectContextDraft || {},
+        ).length === 0;
+      footer.push(
+        <Button
+          key="defaults"
+          onClick={() => handleProjectContextContinue({ useDefaults: true })}
+          disabled={projectSetupSaving}
+        >
+          {hasCompleteDraft ? "Use detected context" : "Use safe defaults"}
+        </Button>,
+        <Button
+          key="continue"
+          type="primary"
+          onClick={() => handleProjectContextContinue()}
+          disabled={
+            projectSetupSaving ||
+            (!hasDraft && !hasReviewableContext && !hasCompleteDraft)
+          }
+        >
+          Continue
+        </Button>,
+      );
+      return footer;
+    }
+    if (step === "mapping") {
+      footer.push(
+        <Button
+          key="start"
+          type="primary"
+          onClick={handleConfirmProjectSetup}
+          loading={projectSetupSaving}
+          disabled={!pendingProjectSetup?.roles?.image || projectSetupSaving}
+        >
+          Start project
+        </Button>,
+      );
+      return footer;
+    }
+    footer.push(
+      <Button
+        key="start"
+        type="primary"
+        onClick={handleConfirmProjectSetup}
+        loading={projectSetupSaving}
+        disabled={!pendingProjectSetup?.roles?.image}
+      >
+        Start project
+      </Button>,
+    );
+    return footer;
+  };
+
+  const renderProjectInitializationEmptyState = () => {
+    if (currentFolder !== "root") return null;
+    if (currentFolders.length > 0 || currentFiles.length > 0 || newItemType) {
+      return null;
+    }
+    return (
+      <div
+        style={{
+          width: "100%",
+          minHeight: "70%",
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
+          pointerEvents: "auto",
+        }}
+      >
+        <div
+          style={{
+            width: "min(620px, 92%)",
+            padding: "28px",
+            borderRadius: 18,
+            background: "#fff",
+            boxShadow: "0 18px 48px rgba(17,24,39,0.08)",
+            border: "1px solid #e5e7eb",
+          }}
+        >
+          <div
+            style={{
+              fontSize: 24,
+              fontWeight: 800,
+              marginBottom: 8,
+              color: "#111827",
+            }}
+          >
+            Start a segmentation project
+          </div>
+          <div
+            style={{
+              color: "#6b7280",
+              fontSize: 14,
+              lineHeight: 1.5,
+              marginBottom: 20,
+            }}
+          >
+            Choose a project directory. I’ll ask what the dataset is, inspect
+            the folder, then ask you to confirm the image and mask mapping
+            before anything enters workflow state.
+          </div>
+          <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
+            <Button
+              type="primary"
+              icon={<FolderOpenOutlined />}
+              onClick={handleMountProjectDirectory}
+            >
+              Choose project directory
+            </Button>
+            <Button
+              onClick={handleSuggestedProject}
+              disabled={projectSuggestions.length === 0}
+            >
+              Use suggested project
+            </Button>
+          </div>
+        </div>
+      </div>
+    );
+  };
 
   const getContextMenuItems = () => {
     if (contextMenu?.type === "container") {
@@ -1416,36 +3677,224 @@ function FilesManager() {
     input.click();
   };
 
+  const mountProjectPath = async (directoryPath, source = "manual_mount") => {
+    const mountPath = String(directoryPath || "").trim();
+    if (!mountPath) return;
+
+    const res = await apiClient.post(
+      "/files/mount",
+      {
+        directory_path: mountPath,
+        destination_path: "root",
+      },
+      { withCredentials: true },
+    );
+
+    await fetchFolderContents("root", { force: true });
+    await loadProjectSuggestions();
+    if (res?.data?.mounted_root_id) {
+      const mountedRootId = String(res.data.mounted_root_id);
+      await fetchFolderContents(mountedRootId, { force: true });
+      handleNavigate(mountedRootId);
+    }
+    await openProjectSetupConfirmation(
+      {
+        id: res?.data?.mounted_root_id
+          ? `mounted-${res.data.mounted_root_id}`
+          : "mounted-project",
+        name:
+          res?.data?.mount_name ||
+          mountPath.split(/[\\/]/).filter(Boolean).pop() ||
+          "Mounted project",
+        directory_path: res?.data?.directory_path || mountPath,
+        already_mounted: true,
+        mounted_root_id: res?.data?.mounted_root_id || null,
+        profile: res?.data?.profile || {},
+      },
+      source,
+    );
+    message.success(res?.data?.message || "Project mounted.");
+  };
+
   const handleMountProjectDirectory = async () => {
     try {
+      if (!canOpenLocalFile()) {
+        await mountProjectPath(DEFAULT_REMOTE_PROJECT_PATH, "remote_default_mount");
+        return;
+      }
       const selectedDirectory = await openLocalFile({
         properties: ["openDirectory"],
       });
       if (!selectedDirectory) return;
 
-      // Mount builds a stable project index now; later this same flow can point to
-      // cloud-backed project storage while keeping picker + workflow behavior unchanged.
+      await mountProjectPath(selectedDirectory, "manual_mount");
+    } catch (err) {
+      console.error("Mount directory error", err);
+      if (err?.message !== "Project path required") {
+        message.error("Failed to mount project");
+      }
+    }
+  };
+
+  const handleSuggestedProject = async (preferredSuggestion = null) => {
+    const explicitSuggestion =
+      preferredSuggestion &&
+      typeof preferredSuggestion === "object" &&
+      preferredSuggestion.directory_path
+        ? preferredSuggestion
+        : null;
+    const suggestion =
+      explicitSuggestion ||
+      projectSuggestions.find((item) => item.recommended) || projectSuggestions[0];
+    if (!suggestion) {
+      message.info("No suggested local project is available.");
+      return;
+    }
+    if (suggestion.already_mounted && suggestion.mounted_root_id) {
+      const mountedRootId = String(suggestion.mounted_root_id);
+      await fetchFolderContents(mountedRootId, { force: true });
+      handleNavigate(mountedRootId);
+      await openProjectSetupConfirmation(suggestion, "suggested_existing");
+      message.success(`${suggestion.name} is already mounted.`);
+      return;
+    }
+    try {
       const res = await apiClient.post(
         "/files/mount",
         {
-          directory_path: selectedDirectory,
+          directory_path: suggestion.directory_path,
           destination_path: "root",
+          mount_name: suggestion.name,
         },
         { withCredentials: true },
       );
-
       await fetchFolderContents("root", { force: true });
+      await loadProjectSuggestions();
       if (res?.data?.mounted_root_id) {
         const mountedRootId = String(res.data.mounted_root_id);
         await fetchFolderContents(mountedRootId, { force: true });
         handleNavigate(mountedRootId);
       }
-      message.success(res?.data?.message || "Project directory mounted.");
-    } catch (err) {
-      console.error("Mount directory error", err);
-      message.error("Failed to mount project directory");
+      await openProjectSetupConfirmation(
+        {
+          ...suggestion,
+          already_mounted: true,
+          mounted_root_id: res?.data?.mounted_root_id || suggestion.mounted_root_id,
+          profile: res?.data?.profile || suggestion.profile || {},
+        },
+        "suggested_mount",
+      );
+      message.success(res?.data?.message || `${suggestion.name} mounted.`);
+    } catch (error) {
+      console.error("Suggested project mount error", error);
+      message.error(`Failed to mount ${suggestion.name}`);
     }
   };
+
+  chooseProjectDataRef.current = async (source = "assistant_choose_data") => {
+    const suggestions = await loadProjectSuggestions();
+    const suggestion =
+      suggestions.find((item) => item.recommended && item.already_mounted) ||
+      suggestions.find((item) => item.already_mounted) ||
+      suggestions.find((item) => item.recommended) ||
+      suggestions[0];
+
+    if (suggestion) {
+      await handleSuggestedProject(suggestion);
+      return;
+    }
+
+    await fetchFolderContents("root", { force: true });
+    const mountedRoot = foldersRef.current.find(
+      (folder) => folder.parent === "root" && folder.physical_path,
+    );
+    if (mountedRoot) {
+      await fetchFolderContents(mountedRoot.key, { force: true });
+      handleNavigate(mountedRoot.key);
+      await openProjectSetupConfirmation(
+        {
+          id: `mounted-${mountedRoot.key}`,
+          name: mountedRoot.title,
+          directory_path: mountedRoot.physical_path,
+          already_mounted: true,
+          mounted_root_id: Number(mountedRoot.key),
+          profile: {},
+        },
+        source,
+      );
+      return;
+    }
+
+    message.info("Mount a project directory first.");
+  };
+
+  const pendingRuntimeAction = workflowContext?.pendingRuntimeAction;
+  const consumeRuntimeAction = workflowContext?.consumeRuntimeAction;
+
+  useEffect(() => {
+    const action = pendingRuntimeAction;
+    if (!action || action.kind !== "choose_project_data") return;
+    if (handledChooseDataActionRef.current === action.id) return;
+    handledChooseDataActionRef.current = action.id;
+
+    const run = async () => {
+      logClientEvent("files_choose_project_data_started", {
+        source: "files_manager",
+        message: "Assistant requested project data selection.",
+        data: { actionId: action.id || null },
+      });
+      try {
+        await chooseProjectDataRef.current?.("assistant_choose_data");
+        logClientEvent("files_choose_project_data_completed", {
+          source: "files_manager",
+          message: "Assistant project data selection action was opened.",
+          data: { actionId: action.id || null },
+        });
+        consumeRuntimeAction?.(action.id);
+      } catch (error) {
+        logClientEvent("files_choose_project_data_failed", {
+          level: "ERROR",
+          source: "files_manager",
+          message: error?.message || "Could not open project data selection.",
+          data: { actionId: action.id || null },
+        });
+        message.error("Could not open project data selection.");
+        consumeRuntimeAction?.(action.id);
+      }
+    };
+
+    run();
+  }, [
+    consumeRuntimeAction,
+    pendingRuntimeAction,
+  ]);
+
+  useEffect(() => {
+    const workflowMetadata = workflowContext.workflow?.metadata || {};
+    const hasProjectContext = Boolean(workflowMetadata.project_context);
+    const shouldCollectProjectContext =
+      workflowMetadata.needs_project_context || !hasProjectContext;
+    const suggestedProject =
+      projectSuggestions.find((item) => item.recommended) || projectSuggestions[0];
+    if (
+      autoProjectSetupOpenedRef.current ||
+      pendingProjectSetup ||
+      !shouldCollectProjectContext ||
+      !suggestedProject ||
+      !suggestedProject.already_mounted
+    ) {
+      return;
+    }
+    autoProjectSetupOpenedRef.current = true;
+    handleSuggestedProject();
+    // This should run once after the fixed demo project is mounted and the
+    // workflow has no project context yet.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [
+    pendingProjectSetup,
+    projectSuggestions,
+    workflowContext.workflow?.metadata,
+  ]);
 
   const handleResetWorkspace = () => {
     Modal.confirm({
@@ -1766,6 +4215,19 @@ function FilesManager() {
           >
             Mount Project
           </Button>
+          <Button
+            onClick={handleSuggestedProject}
+            disabled={projectSuggestions.length === 0}
+            title={
+              projectSuggestions.length
+                ? projectSuggestions[0].description
+                : "No suggested local projects found"
+            }
+          >
+            {projectSuggestions.some((item) => item.already_mounted)
+              ? "Open suggested project"
+              : "Use suggested project"}
+          </Button>
           <Dropdown
             menu={{
               items: workspaceMenuItems,
@@ -1780,7 +4242,6 @@ function FilesManager() {
             <Button icon={<MoreOutlined />} title="More file actions" />
           </Dropdown>
         </div>
-
         {/* Content Area */}
         <div
           ref={containerRef}
@@ -1814,8 +4275,11 @@ function FilesManager() {
             </div>
           )}
           {!loadingParents.includes(currentFolder) &&
+            renderProjectInitializationEmptyState()}
+          {!loadingParents.includes(currentFolder) &&
             currentFolders.length === 0 &&
             currentFiles.length === 0 &&
+            currentFolder !== "root" &&
             !newItemType && (
             <div
               style={{ width: "100%", marginTop: 64, pointerEvents: "none" }}
@@ -1834,8 +4298,9 @@ function FilesManager() {
                 top: Math.min(selectionBox.startY, selectionBox.currentY),
                 width: Math.abs(selectionBox.currentX - selectionBox.startX),
                 height: Math.abs(selectionBox.currentY - selectionBox.startY),
-                backgroundColor: "rgba(24, 144, 255, 0.2)",
-                border: "1px solid #1890ff",
+                backgroundColor:
+                  "var(--seg-selection-fill, rgba(63, 55, 201, 0.12))",
+                border: "1px solid var(--seg-accent-primary, #3f37c9)",
                 pointerEvents: "none",
                 zIndex: 100,
               }}
@@ -1900,6 +4365,35 @@ function FilesManager() {
             />
           </div>
         )}
+
+        {/* Project role confirmation */}
+        <Modal
+          title={
+            pendingProjectSetup?.setupStep === "mapping"
+              ? "Start project"
+              : pendingProjectSetup?.setupStep === "confirm"
+                ? "Start project"
+                : "Confirm project basics"
+          }
+          open={!!pendingProjectSetup}
+          onCancel={closeProjectSetupConfirmation}
+          width={780}
+          footer={renderProjectSetupFooter()}
+        >
+          {renderProjectSetupBody()}
+        </Modal>
+
+        <FilePickerModal
+          visible={!!rolePickerTarget}
+          onCancel={() => setRolePickerTarget(null)}
+          onSelect={handleRolePickerSelect}
+          title={`Select ${
+            PROJECT_CONFIRMATION_ROLES.find(
+              (role) => role.key === rolePickerTarget,
+            )?.label || "project file"
+          }`}
+          selectionType="fileOrDirectory"
+        />
 
         {/* Preview Modal */}
         <Modal
@@ -1971,7 +4465,12 @@ function FilesManager() {
                 }}
               >
                 {propertiesData.isFolder ? (
-                  <FolderFilled style={{ fontSize: 48, color: "#1890ff" }} />
+                  <FolderFilled
+                    style={{
+                      fontSize: 48,
+                      color: "var(--seg-accent-primary, #3f37c9)",
+                    }}
+                  />
                 ) : (
                   <FileOutlined style={{ fontSize: 48, color: "#555" }} />
                 )}

@@ -1,20 +1,22 @@
-# TensorBoard Monitoring Page
+# Train Model Runtime and TensorBoard
 
-The Monitoring page displays a live TensorBoard dashboard embedded directly inside the application. TensorBoard is used to track and visualize training metrics such as loss curves, learning rate schedules, and validation scores.
+The standalone Monitor tab has been retired. Training status, runtime logs, and TensorBoard entry points now live on the Train Model page.
 
 ## How It Works
 
-1. Navigate to the **Tensorboard** tab in the top navigation bar.
-2. If a training job is running (or has been run), TensorBoard will load automatically and display inside the page.
-3. The dashboard shows the standard TensorBoard interface with all its features — scalar plots, image samples, histograms, etc.
+1. Navigate to **Train Model**.
+2. Use the Train Model Runtime panel to check whether training is idle, running, complete, or failed.
+3. Use **Show log** or **Details** to inspect failures.
+4. After a successful run, use **TensorBoard** to open curves for the training output directory.
+5. Use **Open Run Model** when the latest checkpoint is ready for inference.
 
 ## Requirements
 
 - TensorBoard monitoring requires an active or completed training run with logs saved to the output directory.
-- The server automatically starts a TensorBoard instance pointed at your training output directory when you launch training from the Model Training page.
+- Runtime status should be interpreted from the Train Model panel, not from a separate Monitor tab.
 
 ## Tips
 
-- If the TensorBoard panel appears blank, make sure a training job has been started at least once and that the output path was set correctly in the Model Training configuration.
+- If TensorBoard fails to open, make sure a training job has been started at least once and that the output path was set correctly in Train Model.
 - TensorBoard updates in real time as new training data is written, so you can watch loss curves evolve during training.
-- You can interact with TensorBoard normally — zoom into charts, toggle runs on/off, and switch between the Scalars, Images, and other TensorBoard tabs within the embedded view.
+- You can interact with TensorBoard normally in the opened TensorBoard page.

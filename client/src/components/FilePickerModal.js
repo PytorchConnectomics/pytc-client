@@ -1,5 +1,5 @@
-import React, { useState, useEffect } from "react";
-import { Modal, List, Breadcrumb, Button, Spin, message } from "antd";
+import React, { useState, useEffect, useMemo } from "react";
+import { Modal, List, Breadcrumb, Button, Spin, message, Progress } from "antd";
 import {
   FolderFilled,
   FileOutlined,
@@ -11,6 +11,7 @@ import { apiClient } from "../api";
 const HIDDEN_SYSTEM_FILES = new Set([
   "workflow_preference.json",
   ".pytc_proofreading.json",
+  ".pytc_instance_labels.tif",
   ".ds_store",
   "thumbs.db",
 ]);
@@ -23,6 +24,16 @@ const IMAGE_EXTENSIONS = new Set([
   ".tif",
   ".tiff",
   ".webp",
+  ".h5",
+  ".hdf5",
+  ".npy",
+  ".npz",
+  ".zarr",
+  ".n5",
+  ".nii",
+  ".nii.gz",
+  ".mrc",
+  ".mrcs",
 ]);
 
 const FilePickerModal = ({
@@ -37,16 +48,28 @@ const FilePickerModal = ({
   const [loading, setLoading] = useState(false);
   const [previewStatus, setPreviewStatus] = useState({});
   const [onlyImages, setOnlyImages] = useState(false);
+  const [uploading, setUploading] = useState(false);
+  const [uploadProgress, setUploadProgress] = useState(null);
   const previewBaseUrl = apiClient.defaults.baseURL || "http://localhost:4242";
 
   // Refactored fetch to get all files once
   const [allData, setAllData] = useState([]);
+  const folderById = useMemo(() => {
+    const map = new Map();
+    allData.forEach((item) => {
+      if (item?.is_folder) {
+        map.set(String(item.id), item);
+      }
+    });
+    return map;
+  }, [allData]);
 
   useEffect(() => {
     if (visible) {
       setCurrentPath("root");
       setOnlyImages(false);
       setPreviewStatus({});
+      setUploadProgress(null);
       loadAllData();
     }
   }, [visible]);
@@ -86,7 +109,7 @@ const FilePickerModal = ({
 
   const getParentPath = () => {
     if (currentPath === "root") return null;
-    const currentFolderObj = allData.find((f) => String(f.id) === currentPath);
+    const currentFolderObj = folderById.get(String(currentPath));
     return currentFolderObj ? currentFolderObj.path || "root" : "root";
   };
 
@@ -99,7 +122,7 @@ const FilePickerModal = ({
     const parts = [];
     let curr = currentPath;
     while (curr && curr !== "root") {
-      const folder = allData.find((f) => String(f.id) === curr);
+      const folder = folderById.get(String(curr));
       if (folder) {
         parts.unshift({ id: String(folder.id), name: folder.name });
         curr = folder.path;
@@ -121,7 +144,7 @@ const FilePickerModal = ({
     // Safety break to prevent infinite loops
     let attempts = 0;
     while (currParentId && currParentId !== "root" && attempts < 100) {
-      const parent = allData.find((f) => String(f.id) === currParentId);
+      const parent = folderById.get(String(currParentId));
       if (parent) {
         parts.unshift(parent.name);
         currParentId = parent.path;
@@ -147,6 +170,7 @@ const FilePickerModal = ({
   };
 
   const handleUploadFromLocal = () => {
+    if (uploading) return;
     const input = document.createElement("input");
     input.type = "file";
     input.multiple = true;
@@ -154,25 +178,70 @@ const FilePickerModal = ({
       const selectedFiles = Array.from(event.target.files || []);
       if (!selectedFiles.length) return;
       let uploaded = 0;
-      for (const file of selectedFiles) {
-        const form = new FormData();
-        form.append("file", file);
-        form.append("path", currentPath);
-        try {
-          await apiClient.post("/files/upload", form, {
-            headers: { "Content-Type": "multipart/form-data" },
+      let uploadedBytes = 0;
+      const totalBytes = selectedFiles.reduce(
+        (sum, file) => sum + (file.size || 0),
+        0,
+      );
+
+      setUploading(true);
+      try {
+        for (const [index, file] of selectedFiles.entries()) {
+          const form = new FormData();
+          form.append("file", file);
+          form.append("path", currentPath);
+          const bytesBeforeFile = uploadedBytes;
+          setUploadProgress({
+            currentFile: file.name,
+            index: index + 1,
+            total: selectedFiles.length,
+            percent: totalBytes
+              ? Math.round((bytesBeforeFile / totalBytes) * 100)
+              : 0,
           });
-          uploaded += 1;
-        } catch (error) {
-          console.error("Failed to upload file from picker:", error);
-          message.error(`Failed to upload ${file.name}`);
+          try {
+            await apiClient.post("/files/upload", form, {
+              headers: { "Content-Type": "multipart/form-data" },
+              onUploadProgress: (progressEvent) => {
+                const loadedForFile = Math.min(
+                  progressEvent.loaded || 0,
+                  file.size || progressEvent.loaded || 0,
+                );
+                const percent = totalBytes
+                  ? Math.min(
+                      99,
+                      Math.round(
+                        ((bytesBeforeFile + loadedForFile) / totalBytes) * 100,
+                      ),
+                    )
+                  : 0;
+                setUploadProgress({
+                  currentFile: file.name,
+                  index: index + 1,
+                  total: selectedFiles.length,
+                  percent,
+                });
+              },
+            });
+            uploaded += 1;
+            uploadedBytes += file.size || 0;
+          } catch (error) {
+            console.error("Failed to upload file from picker:", error);
+            message.error(`Failed to upload ${file.name}`);
+          }
         }
-      }
-      if (uploaded > 0) {
-        message.success(
-          `Uploaded ${uploaded} file${uploaded > 1 ? "s" : ""} to this folder`,
+        setUploadProgress((current) =>
+          current ? { ...current, percent: 100 } : current,
         );
-        await loadAllData();
+        if (uploaded > 0) {
+          message.success(
+            `Uploaded ${uploaded} file${uploaded > 1 ? "s" : ""} to this folder`,
+          );
+          await loadAllData();
+        }
+      } finally {
+        setUploading(false);
+        setTimeout(() => setUploadProgress(null), 900);
       }
     };
     input.click();
@@ -181,10 +250,9 @@ const FilePickerModal = ({
   const isImageFile = (item) => {
     if (!item || item.is_folder) return false;
     if (item.type && item.type.startsWith("image/")) return true;
-    const ext = `.${String(item.name || "")
-      .split(".")
-      .pop()}`.toLowerCase();
-    return IMAGE_EXTENSIONS.has(ext);
+    const name = String(item.name || "").toLowerCase();
+    const ext = `.${name.split(".").pop()}`;
+    return IMAGE_EXTENSIONS.has(ext) || name.endsWith(".nii.gz");
   };
 
   const getPreviewUrl = (item) => `${previewBaseUrl}/files/preview/${item.id}`;
@@ -214,8 +282,12 @@ const FilePickerModal = ({
             <Button onClick={onCancel} style={{ marginRight: 8 }}>
               Cancel
             </Button>
-            <Button type="primary" onClick={handleSelectCurrentDirectory}>
-              Select Current Directory
+            <Button
+              type="primary"
+              onClick={handleSelectCurrentDirectory}
+              disabled={uploading}
+            >
+              Use Current Folder
             </Button>
           </div>
         ) : null
@@ -240,25 +312,65 @@ const FilePickerModal = ({
         <Breadcrumb>
           {getBreadcrumbs().map((b) => (
             <Breadcrumb.Item key={b.id}>
-              <a onClick={() => setCurrentPath(b.id)}>{b.name}</a>
+              <Button
+                type="link"
+                size="small"
+                onClick={() => setCurrentPath(b.id)}
+                style={{ padding: 0 }}
+              >
+                {b.name}
+              </Button>
             </Breadcrumb.Item>
           ))}
         </Breadcrumb>
         <Button
           icon={<UploadOutlined />}
           onClick={handleUploadFromLocal}
+          disabled={uploading}
           style={{ marginLeft: "auto" }}
         >
-          Upload from Local
+          {uploading ? "Uploading..." : "Upload from Local"}
         </Button>
         <Button
           type={onlyImages ? "primary" : "default"}
           onClick={() => setOnlyImages((prev) => !prev)}
           style={{ marginLeft: 8 }}
         >
-          Images Only
+          Volume files
         </Button>
       </div>
+      {uploadProgress && (
+        <div
+          style={{
+            padding: "10px 16px",
+            borderBottom: "1px solid #f0f0f0",
+            background: "#fbfbfa",
+          }}
+        >
+          <div
+            style={{
+              display: "flex",
+              justifyContent: "space-between",
+              gap: 12,
+              fontSize: 12,
+              color: "#6b7280",
+              marginBottom: 4,
+            }}
+          >
+            <span>
+              Uploading {uploadProgress.index}/{uploadProgress.total}:{" "}
+              {uploadProgress.currentFile}
+            </span>
+            <span>{uploadProgress.percent}%</span>
+          </div>
+          <Progress
+            percent={uploadProgress.percent}
+            size="small"
+            status={uploadProgress.percent >= 100 ? "success" : "active"}
+            showInfo={false}
+          />
+        </div>
+      )}
 
       <div style={{ height: "400px", overflow: "auto" }}>
         {loading ? (
@@ -289,6 +401,18 @@ const FilePickerModal = ({
                   }
                 }}
                 actions={[
+                  item.is_folder && (
+                    <Button
+                      type="link"
+                      size="small"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setCurrentPath(String(item.id));
+                      }}
+                    >
+                      Open
+                    </Button>
+                  ),
                   (selectionType === "file" ||
                     selectionType === "fileOrDirectory") &&
                     !item.is_folder && (
@@ -301,7 +425,7 @@ const FilePickerModal = ({
                           onSelect({ ...item, logical_path: fullPath });
                         }}
                       >
-                        Select
+                        Select file
                       </Button>
                     ),
                   (selectionType === "directory" ||
@@ -316,7 +440,7 @@ const FilePickerModal = ({
                           onSelect({ ...item, logical_path: fullPath });
                         }}
                       >
-                        Select
+                        Use folder
                       </Button>
                     ),
                 ]}
@@ -325,7 +449,10 @@ const FilePickerModal = ({
                   avatar={
                     item.is_folder ? (
                       <FolderFilled
-                        style={{ color: "#1890ff", fontSize: "20px" }}
+                        style={{
+                          color: "var(--seg-accent-primary, #3f37c9)",
+                          fontSize: "20px",
+                        }}
                       />
                     ) : isImageFile(item) ? (
                       <div
@@ -381,9 +508,11 @@ const FilePickerModal = ({
                               padding: "2px 6px",
                               fontSize: 10,
                               borderRadius: 10,
-                              background: "#f0f5ff",
-                              color: "#2f54eb",
-                              border: "1px solid #adc6ff",
+                              background:
+                                "var(--seg-accent-primary-soft, #f0efff)",
+                              color: "var(--seg-accent-primary, #3f37c9)",
+                              border:
+                                "1px solid var(--seg-accent-primary-border, #c7c2ff)",
                             }}
                           >
                             Mounted

@@ -10,7 +10,7 @@ jest.mock("antd", () => ({
     </button>
   ),
   Space: ({ children }) => <div>{children}</div>,
-  Tag: ({ children }) => <span>{children}</span>,
+  Tag: ({ children, ...props }) => <span {...props}>{children}</span>,
   Typography: {
     Text: ({ children }) => <span>{children}</span>,
   },
@@ -43,7 +43,7 @@ describe("AgentProposalCard", () => {
     fireEvent.click(screen.getByRole("button", { name: "Approve" }));
     fireEvent.click(screen.getByRole("button", { name: "Reject" }));
 
-    expect(onApprove).toHaveBeenCalledWith(proposal);
+    expect(onApprove).toHaveBeenCalledWith(proposal, {});
     expect(onReject).toHaveBeenCalledWith(proposal);
   });
 
@@ -74,5 +74,25 @@ describe("AgentProposalCard", () => {
     expect(screen.getByText("Agent Proposal")).toBeTruthy();
     expect(screen.getByText("Keep behavior stable")).toBeTruthy();
     expect(screen.getByText("bar")).toBeTruthy();
+  });
+
+  it("shows specialist agent badges when supplied", () => {
+    render(
+      <AgentProposalCard
+        proposal={{
+          type: "agent_task",
+          rationale: "Specialist routing should be explicit.",
+          specialist_agent: {
+            agent_label: "Inference Specialist",
+            agent_short_label: "INFER",
+            agent_color: "#005f73",
+            agent_icon_key: "eye",
+          },
+        }}
+      />,
+    );
+
+    expect(screen.getByText("INFER")).toBeTruthy();
+    expect(screen.getByText("agent_task")).toBeTruthy();
   });
 });

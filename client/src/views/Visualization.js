@@ -1,60 +1,200 @@
-import React, { useState } from "react";
-import { Button, Tabs, Input, Space, Typography, message } from "antd";
+import React, {
+  useCallback,
+  useContext,
+  useEffect,
+  useRef,
+  useState,
+} from "react";
+import { Button, Tabs, Input, Space, Typography, message, notification } from "antd";
 import {
   ArrowRightOutlined,
   InboxOutlined,
   ReloadOutlined,
 } from "@ant-design/icons";
-import { getNeuroglancerViewer } from "../api";
+import { apiClient, getNeuroglancerViewer } from "../api";
 import UnifiedFileInput from "../components/UnifiedFileInput";
+import StageHeader from "../components/workflow/StageHeader";
+import { AppContext } from "../contexts/GlobalContext";
 import { useWorkflow } from "../contexts/WorkflowContext";
+import { logClientEvent } from "../logging/appEventLog";
 
 const { Title } = Typography;
+
+const formatScales = (value) => {
+  if (!value) return "";
+  if (Array.isArray(value)) return value.join(",");
+  return String(value);
+};
+
+const getPath = (val) => {
+  if (!val) return "";
+  if (typeof val === "string") return val;
+  return val.path || "";
+};
+
+const getDisplay = (val) => {
+  if (!val) return "";
+  if (typeof val === "string") return val;
+  return val.display || val.path || "";
+};
+
+const getViewerTitle = (imageValue, labelValue) => {
+  const getImageName = (val) => {
+    const display = getDisplay(val);
+    if (!display) return "";
+    const parts = display.split(/[/\\]/);
+    return parts[parts.length - 1];
+  };
+
+  return (
+    getImageName(imageValue) + (labelValue ? " & " + getImageName(labelValue) : "")
+  );
+};
+
+const waitForViewerLayout = () =>
+  new Promise((resolve) => {
+    window.requestAnimationFrame(() => {
+      window.requestAnimationFrame(() => {
+        window.setTimeout(resolve, 250);
+      });
+    });
+  });
+
+const appendRefreshParam = (url) => {
+  if (!url) return url;
+  const hashIndex = url.indexOf("#");
+  const base = hashIndex >= 0 ? url.slice(0, hashIndex) : url;
+  const hash = hashIndex >= 0 ? url.slice(hashIndex) : "";
+  const separator = base.includes("?") ? "&" : "?";
+  return `${base}${separator}refresh=${Date.now()}${hash}`;
+};
+
+const isMixedContentUrl = (url) => {
+  if (typeof window === "undefined" || window.location.protocol !== "https:") {
+    return false;
+  }
+  try {
+    return new URL(url, window.location.href).protocol === "http:";
+  } catch {
+    return false;
+  }
+};
 
 function Visualization(props) {
   const { viewers, setViewers } = props;
   const workflowContext = useWorkflow();
+  const appContext = useContext(AppContext);
+  const globalImage = appContext?.currentImage || null;
+  const globalLabel = appContext?.currentLabel || null;
+  const globalScales = appContext?.visualizationScales || "";
+  const workflowScales =
+    workflowContext?.workflow?.metadata?.visualization_scales ||
+    workflowContext?.workflow?.metadata?.project_context?.voxel_size_nm ||
+    null;
+  const handledRuntimeActionRef = useRef(null);
+  const viewerRefreshTimersRef = useRef([]);
   const [activeKey, setActiveKey] = useState(
     viewers.length > 0 ? viewers[0].key : null,
   );
 
   // Input states
-  const [currentImage, setCurrentImage] = useState(null);
-  const [currentLabel, setCurrentLabel] = useState(null);
-  const [scales, setScales] = useState("30,6,6");
+  const [currentImage, setCurrentImage] = useState(globalImage);
+  const [currentLabel, setCurrentLabel] = useState(globalLabel);
+  const [scales, setScales] = useState(
+    formatScales(globalScales) || formatScales(workflowScales) || "",
+  );
   const [isLoading, setIsLoading] = useState(false);
 
+  useEffect(() => {
+    return () => {
+      viewerRefreshTimersRef.current.forEach((timerId) => {
+        window.clearTimeout(timerId);
+      });
+      viewerRefreshTimersRef.current = [];
+    };
+  }, []);
+
   const handleImageChange = (value) => {
-    console.log(`selected image:`, value);
     setCurrentImage(value);
+    appContext?.setCurrentImage?.(value);
   };
 
   const handleLabelChange = (value) => {
-    console.log(`selected label:`, value);
     setCurrentLabel(value);
+    appContext?.setCurrentLabel?.(value);
   };
+
+  useEffect(() => {
+    if (globalImage !== currentImage) {
+      setCurrentImage(globalImage);
+    }
+  }, [globalImage, currentImage]);
+
+  useEffect(() => {
+    if (globalLabel !== currentLabel) {
+      setCurrentLabel(globalLabel);
+    }
+  }, [globalLabel, currentLabel]);
+
+  useEffect(() => {
+    const nextScales = formatScales(globalScales || workflowScales);
+    if (nextScales !== scales) {
+      setScales(nextScales);
+    }
+  }, [globalScales, workflowScales, scales]);
 
   const handleInputScales = (event) => {
-    setScales(event.target.value);
+    const nextScales = event.target.value;
+    setScales(nextScales);
+    appContext?.setVisualizationScales?.(nextScales);
   };
 
-  // Helper to get path string from potential object
-  const getPath = (val) => {
-    if (!val) return "";
-    if (typeof val === "string") return val;
-    return val.path || "";
-  };
+  const parseScalesInput = useCallback((value) => {
+    const parts = (String(value || "").match(/-?\d+(?:\.\d+)?/g) || []).map(
+      Number,
+    );
+    if (
+      parts.length < 3 ||
+      parts.slice(0, 3).some((part) => !Number.isFinite(part) || part <= 0)
+    ) {
+      return null;
+    }
+    return parts.slice(0, 3);
+  }, []);
 
-  // Helper to get display string from potential object
-  const getDisplay = (val) => {
-    if (!val) return "";
-    if (typeof val === "string") return val;
-    return val.display || val.path || "";
-  };
+  const validateManagedUploadSelection = useCallback(async (value, role) => {
+    const selectedPath = getPath(value);
+    if (!selectedPath || !selectedPath.startsWith("uploads/")) {
+      return true;
+    }
 
-  const fetchNeuroglancerViewer = async () => {
-    const imagePath = getPath(currentImage);
-    const labelPath = getPath(currentLabel);
+    const response = await apiClient.get("/files");
+    const exists = (response.data || []).some(
+      (item) => !item.is_folder && item.physical_path === selectedPath,
+    );
+    if (exists) {
+      return true;
+    }
+
+    if (role === "image") {
+      setCurrentImage(null);
+    } else {
+      setCurrentLabel(null);
+    }
+    message.error(
+      `The selected ${role} file is no longer present in app uploads. Please re-select or re-upload it.`,
+    );
+    return false;
+  }, []);
+
+  const loadViewer = useCallback(async (
+    imageValue,
+    labelValue,
+    scalesValue,
+    options = {},
+  ) => {
+    const imagePath = getPath(imageValue);
+    const labelPath = getPath(labelValue);
 
     if (!imagePath) {
       message.error("Please select an image");
@@ -63,8 +203,26 @@ function Visualization(props) {
 
     setIsLoading(true);
     try {
-      const scalesArray = scales.split(",").map(Number);
-      // Use path string for ID generation
+      const imageSelectionOk = await validateManagedUploadSelection(
+        imageValue,
+        "image",
+      );
+      if (!imageSelectionOk) {
+        return;
+      }
+      const labelSelectionOk = await validateManagedUploadSelection(
+        labelValue,
+        "label",
+      );
+      if (!labelSelectionOk) {
+        return;
+      }
+
+      const scalesArray = parseScalesInput(scalesValue);
+      if (!scalesArray) {
+        message.error("Enter voxel scales as z,y,x nanometers before opening the viewer.");
+        return;
+      }
       const viewerId =
         imagePath + (labelPath || "") + JSON.stringify(scalesArray);
 
@@ -75,44 +233,222 @@ function Visualization(props) {
         updatedViewers = viewers.filter((viewer) => viewer.key !== viewerId);
       }
 
-      const res = await getNeuroglancerViewer(
+      const viewerResult = await getNeuroglancerViewer(
         imagePath,
         labelPath,
         scalesArray,
         workflowContext?.workflow?.id,
       );
+      const viewerUrl =
+        typeof viewerResult === "string"
+          ? viewerResult
+          : viewerResult?.url || viewerResult?.neuroglancer_url || "";
 
-      console.log("Current Viewer at ", res);
+      if (!viewerUrl) {
+        throw new Error("Viewer did not return a Neuroglancer URL.");
+      }
+      logClientEvent("visualization_viewer_url_received", {
+        level: "INFO",
+        message: "Received Neuroglancer viewer URL",
+        source: "visualization",
+        data: {
+          viewerUrl,
+          imagePath,
+          labelPath,
+          scales: scalesArray,
+          workflowId: workflowContext?.workflow?.id || null,
+          requestedImagePath: viewerResult?.requested_image_path || imagePath,
+          requestedLabelPath: viewerResult?.requested_label_path || labelPath,
+          resolvedImagePath: viewerResult?.image_path || null,
+          resolvedLabelPath: viewerResult?.label_path || null,
+        },
+      });
+      if (isMixedContentUrl(viewerUrl)) {
+        logClientEvent("visualization_viewer_mixed_content_blocked", {
+          level: "ERROR",
+          message: "Blocked insecure Neuroglancer viewer URL on HTTPS page",
+          source: "visualization",
+          data: {
+            viewerUrl,
+            pageUrl: window.location.href,
+            imagePath,
+            labelPath,
+            scales: scalesArray,
+            workflowId: workflowContext?.workflow?.id || null,
+          },
+        });
+        throw new Error(
+          "Viewer URL is insecure for this HTTPS page. The server must expose Neuroglancer through HTTPS.",
+        );
+      }
 
-      // Extract name from path for title
-      const getImageName = (val) => {
-        const display = getDisplay(val);
-        if (!display) return "";
-        const parts = display.split(/[/\\]/);
-        return parts[parts.length - 1];
-      };
+      const resolvedImagePath = viewerResult?.image_path;
+      const resolvedLabelPath = viewerResult?.label_path;
+      const pairQuestion = viewerResult?.pair_question;
+      if (resolvedImagePath && resolvedImagePath !== imagePath) {
+        setCurrentImage(resolvedImagePath);
+        appContext?.setCurrentImage?.(resolvedImagePath);
+      }
+      if (resolvedLabelPath && resolvedLabelPath !== labelPath) {
+        setCurrentLabel(resolvedLabelPath);
+        appContext?.setCurrentLabel?.(resolvedLabelPath);
+      }
+      if (pairQuestion) {
+        const pairCount = viewerResult?.pair_discovery?.pair_count || 0;
+        const notificationKey = `volume-pairs-${viewerId}`;
+        notification.info({
+          key: notificationKey,
+          message: `Found ${pairCount} image/segmentation pairs`,
+          description:
+            "I opened the first pair. You can use the progress tracker to review which volumes are proofread, draft, or missing masks.",
+          duration: 12,
+          btn: (
+            <Space size={8}>
+              <Button
+                size="small"
+                type="primary"
+                onClick={() => {
+                  notification.close(notificationKey);
+                  workflowContext?.runClientEffects?.({
+                    navigate_to: "project-progress",
+                    refresh_project_progress: true,
+                  });
+                }}
+              >
+                Open Progress
+              </Button>
+              <Button
+                size="small"
+                onClick={() => {
+                  notification.close(notificationKey);
+                  workflowContext?.runClientEffects?.({ navigate_to: "files" });
+                }}
+              >
+                Show Files
+              </Button>
+            </Space>
+          ),
+        });
+      }
 
       const newViewers = [
         ...updatedViewers,
         {
           key: viewerId,
-          title:
-            getImageName(currentImage) +
-            (currentLabel ? " & " + getImageName(currentLabel) : ""),
-          viewer: res,
+          title: getViewerTitle(
+            resolvedImagePath || imageValue,
+            resolvedLabelPath || labelValue,
+          ),
+          viewer: viewerUrl,
         },
       ];
 
       setViewers(newViewers);
       setActiveKey(viewerId);
-
+      logClientEvent("visualization_viewer_mounted", {
+        level: "INFO",
+        message: "Mounted Neuroglancer iframe",
+        source: "visualization",
+        data: {
+          viewerId,
+          viewerUrl,
+          title: getViewerTitle(
+            resolvedImagePath || imageValue,
+            resolvedLabelPath || labelValue,
+          ),
+          imagePath: resolvedImagePath || imagePath,
+          labelPath: resolvedLabelPath || labelPath,
+          scales: scalesArray,
+          workflowId: workflowContext?.workflow?.id || null,
+        },
+      });
+      if (options.refreshAfterMount) {
+        const timerId = window.setTimeout(() => {
+          setViewers((currentViewers) =>
+            currentViewers.map((viewer) =>
+              viewer.key === viewerId
+                ? { ...viewer, viewer: appendRefreshParam(viewer.viewer) }
+                : viewer,
+            ),
+          );
+        }, options.refreshAfterMount);
+        viewerRefreshTimersRef.current.push(timerId);
+      }
+    } catch (error) {
+      console.error("Failed to load Neuroglancer viewer", error);
+      logClientEvent("visualization_viewer_load_failed", {
+        level: "ERROR",
+        message: error?.message || "Failed to load Neuroglancer viewer",
+        source: "visualization",
+        data: {
+          imagePath,
+          labelPath,
+          scalesValue,
+          workflowId: workflowContext?.workflow?.id || null,
+          error,
+        },
+      });
+      message.error(error?.message || "Failed to load viewer");
+    } finally {
       setIsLoading(false);
-    } catch (e) {
-      console.log(e);
-      setIsLoading(false);
-      message.error("Failed to load viewer");
     }
+  }, [
+    appContext,
+    parseScalesInput,
+    setViewers,
+    validateManagedUploadSelection,
+    viewers,
+    workflowContext,
+  ]);
+
+  const fetchNeuroglancerViewer = async () => {
+    await loadViewer(currentImage, currentLabel, scales);
   };
+
+  useEffect(() => {
+    const action = workflowContext?.pendingRuntimeAction;
+    if (!action || action.kind !== "load_visualization") return;
+    if (handledRuntimeActionRef.current === action.id) return;
+    handledRuntimeActionRef.current = action.id;
+
+    const overrideScales = formatScales(action.overrides?.visualizationScales);
+    const imageValue =
+      action.overrides?.visualizationImagePath || currentImage || globalImage;
+    const labelValue =
+      action.overrides?.visualizationLabelPath || currentLabel || globalLabel;
+    const scalesValue = overrideScales || scales;
+    if (overrideScales) {
+      setScales(overrideScales);
+      appContext?.setVisualizationScales?.(overrideScales);
+    }
+    if (imageValue) {
+      setCurrentImage(imageValue);
+      appContext?.setCurrentImage?.(imageValue);
+    }
+    if (labelValue) {
+      setCurrentLabel(labelValue);
+      appContext?.setCurrentLabel?.(labelValue);
+    }
+
+    waitForViewerLayout()
+      .then(() => {
+        return loadViewer(imageValue, labelValue, scalesValue, {
+          refreshAfterMount: 800,
+        });
+      })
+      .finally(() => {
+        workflowContext?.consumeRuntimeAction?.(action.id);
+      });
+  }, [
+    appContext,
+    currentImage,
+    currentLabel,
+    globalImage,
+    globalLabel,
+    loadViewer,
+    scales,
+    workflowContext,
+  ]);
 
   const handleEdit = (targetKey, action) => {
     if (action === "remove") {
@@ -149,7 +485,7 @@ function Visualization(props) {
       if (viewer.key === key) {
         return {
           ...viewer,
-          viewer: viewer.viewer + "?refresh=" + new Date().getTime(),
+          viewer: appendRefreshParam(viewer.viewer),
         };
       }
       return viewer;
@@ -159,6 +495,13 @@ function Visualization(props) {
 
   return (
     <div style={{ height: "100%", display: "flex", flexDirection: "column" }}>
+      <div style={{ marginBottom: 12 }}>
+        <StageHeader
+          stage="visualization"
+          title="Visualization"
+          subtitle="Inspect image and label volumes before routing failures into inference or proofreading."
+        />
+      </div>
       {/* Input Section */}
       <div
         style={{
@@ -198,7 +541,7 @@ function Visualization(props) {
               Scales (z,y,x)
             </Title>
             <Input
-              placeholder="30,6,6"
+              placeholder="z,y,x nm"
               value={scales}
               onChange={handleInputScales}
               style={{ width: "150px" }}
@@ -219,41 +562,91 @@ function Visualization(props) {
       {/* Viewers Section */}
       <div style={{ flex: 1, minHeight: 0 }}>
         {viewers.length > 0 ? (
-          <Tabs
-            closeIcon
-            type="editable-card"
-            hideAdd
-            onEdit={handleEdit}
-            activeKey={activeKey}
-            onChange={handleChange}
-            items={viewers.map((viewer) => ({
-              label: (
-                <span>
-                  {viewer.title}
-                  <Button
-                    type="link"
-                    icon={<ReloadOutlined />}
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      refreshViewer(viewer.key);
+          <div style={{ height: "calc(100vh - 250px)" }}>
+            <Tabs
+              className="visualization-viewer-tabs"
+              closeIcon
+              type="editable-card"
+              tabPosition="bottom"
+              hideAdd
+              onEdit={handleEdit}
+              activeKey={activeKey}
+              onChange={handleChange}
+              style={{ height: "100%" }}
+              items={viewers.map((viewer) => ({
+                label: (
+                  <span
+                    style={{
+                      display: "inline-flex",
+                      alignItems: "center",
+                      gap: 4,
                     }}
-                  />
-                </span>
-              ),
-              key: viewer.key,
-              children: (
-                <iframe
-                  title="Viewer Display"
-                  width="100%"
-                  height="800"
-                  frameBorder="0"
-                  scrolling="no"
-                  src={viewer.viewer}
-                  style={{ height: "calc(100vh - 250px)" }}
-                />
-              ),
-            }))}
-          />
+                  >
+                    <span>{viewer.title}</span>
+                    <Button
+                      type="link"
+                      icon={<ReloadOutlined />}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        refreshViewer(viewer.key);
+                      }}
+                      style={{ paddingInline: 4 }}
+                    />
+                  </span>
+                ),
+                key: viewer.key,
+                children: (
+                  <div
+                    style={{
+                      height: "100%",
+                      overflow: "hidden",
+                      borderRadius: 8,
+                      background: "#000",
+                    }}
+                  >
+                    <iframe
+                      title="Viewer Display"
+                      width="100%"
+                      height="800"
+                      frameBorder="0"
+                      scrolling="no"
+                      src={viewer.viewer}
+                      onLoad={() =>
+                        logClientEvent("visualization_iframe_loaded", {
+                          level: "INFO",
+                          message: "Neuroglancer iframe load event",
+                          source: "visualization",
+                          data: {
+                            viewerKey: viewer.key,
+                            viewerUrl: viewer.viewer,
+                            activeKey,
+                          },
+                        })
+                      }
+                      onError={(event) =>
+                        logClientEvent("visualization_iframe_error", {
+                          level: "ERROR",
+                          message: "Neuroglancer iframe error event",
+                          source: "visualization",
+                          data: {
+                            viewerKey: viewer.key,
+                            viewerUrl: viewer.viewer,
+                            activeKey,
+                            eventType: event?.type,
+                          },
+                        })
+                      }
+                      style={{
+                        width: "100%",
+                        height: "100%",
+                        display: "block",
+                      }}
+                    />
+                  </div>
+                ),
+              }))}
+            />
+          </div>
         ) : (
           <div style={{ textAlign: "center", padding: "40px", color: "#999" }}>
             <InboxOutlined style={{ fontSize: "48px", marginBottom: "16px" }} />
