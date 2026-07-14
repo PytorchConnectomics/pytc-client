@@ -50,6 +50,51 @@ INITIAL_PROJECT_ROOT = os.getenv("PYTC_INITIAL_PROJECT_ROOT", "").rstrip("/")
 def _initial_project_defaults() -> Dict[str, Any]:
     if not INITIAL_PROJECT_ROOT:
         return {}
+    normalized_root = INITIAL_PROJECT_ROOT.lower()
+    if "yixiao" in normalized_root or "tapereader" in normalized_root or "xri" in normalized_root:
+        image_path = os.getenv(
+            "PYTC_INITIAL_IMAGE_PATH",
+            os.path.join(INITIAL_PROJECT_ROOT, "data/raw/1/1-xri_raw.tif"),
+        )
+        label_path = os.getenv(
+            "PYTC_INITIAL_LABEL_PATH",
+            os.path.join(INITIAL_PROJECT_ROOT, "data/seg/1/1-mask.tif"),
+        )
+        config_path = os.getenv(
+            "PYTC_INITIAL_CONFIG_PATH",
+            os.path.join(
+                INITIAL_PROJECT_ROOT,
+                "configs/TapeReader-Fiber-BCS-AppCompat-Sanity.yaml",
+            ),
+        )
+        return {
+            "title": os.getenv(
+                "PYTC_INITIAL_PROJECT_TITLE",
+                "Yixiao TapeReader XRI Case Study",
+            ),
+            "dataset_path": INITIAL_PROJECT_ROOT,
+            "image_path": image_path,
+            "label_path": label_path,
+            "mask_path": os.getenv("PYTC_INITIAL_MASK_PATH", label_path),
+            "config_path": config_path,
+            "metadata": {
+                "created_from": "initial_project_default",
+                "project_context": {
+                    "imaging_modality": "X-ray / XRI volumetric microscopy",
+                    "target_structure": "CytoTape fibres",
+                    "task_family": "XRI fibre instance segmentation",
+                    "task_goal": "instance segmentation, proofreading, and model retraining",
+                    "optimization_priority": "paper-faithful workflow coordination",
+                    "mask_status": "6 confirmed ground-truth volumes, 2 draft masks for proofreading, 2 image-only inference targets",
+                    "training_policy": "train only on confirmed ground-truth masks",
+                    "image_only_strategy": "run inference on image-only volumes later",
+                    "voxel_size_nm": [40, 16.3, 16.3],
+                    "voxel_size_source": "project_manifest.json",
+                },
+                "visualization_scales": [40, 16.3, 16.3],
+                "visualization_scales_source": "project_manifest.json",
+            },
+        }
     return {
         "title": os.getenv("PYTC_INITIAL_PROJECT_TITLE", "MitoEM2.0 Progress Demo"),
         "dataset_path": INITIAL_PROJECT_ROOT,

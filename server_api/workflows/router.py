@@ -5653,6 +5653,31 @@ def _format_project_progress_response(progress: Dict[str, Any]) -> str:
             "I do not see tracked image volumes yet. Mount a project or choose data, "
             "then the workflow overview can count proofread, unproofread, and missing segmentations."
         )
+    volumes = progress.get("volumes") or []
+
+    def names_for(status: str, limit: int = 8) -> str:
+        names = [
+            str(volume.get("name") or volume.get("id") or "").strip()
+            for volume in volumes
+            if volume.get("status") == status
+        ]
+        names = [name for name in names if name]
+        if not names:
+            return ""
+        suffix = "" if len(names) <= limit else f", plus {len(names) - limit} more"
+        return ", ".join(names[:limit]) + suffix
+
+    ground_truth_names = names_for("ground_truth")
+    proofread_names = names_for("needs_proofreading")
+    missing_names = names_for("missing_segmentation")
+    grouped = []
+    if ground_truth_names:
+        grouped.append(f"ready for training: {ground_truth_names}")
+    if proofread_names:
+        grouped.append(f"proofread before training: {proofread_names}")
+    if missing_names:
+        grouped.append(f"image-only/inference targets: {missing_names}")
+    grouped_text = " " + "; ".join(grouped) + "." if grouped else ""
     return (
         "I checked the workflow overview. "
         f"It has {total} tracked image volume(s): "
@@ -5660,6 +5685,7 @@ def _format_project_progress_response(progress: Dict[str, Any]) -> str:
         f"{summary.get('needs_proofreading', 0)} with segmentations that still need proofreading, "
         f"and {summary.get('missing_segmentation', 0)} with no segmentation yet. "
         f"Completion is {summary.get('completion_pct', 0)}%."
+        f"{grouped_text}"
     )
 
 
@@ -6723,6 +6749,42 @@ def _parse_visualization_scales_from_query(query: str) -> Optional[List[float]]:
     return None
 
 
+def _query_mentions_volume_id(lower_query: str) -> bool:
+    return bool(re.search(r"\b\d+_\d+\b", lower_query))
+
+
+def _query_explicitly_mutates_project_context(lower_query: str) -> bool:
+    explicit_phrases = [
+        "set project context",
+        "update project context",
+        "change project context",
+        "save project context",
+        "use project context",
+        "set context",
+        "update context",
+        "change context",
+        "save context",
+        "set voxel",
+        "update voxel",
+        "change voxel",
+        "use voxel",
+        "voxel size is",
+        "voxel spacing is",
+        "resolution is",
+        "set resolution",
+        "update resolution",
+        "change resolution",
+        "use resolution",
+        "this is ",
+        "these are ",
+        "we are ",
+        "we're ",
+        "the dataset is",
+        "the project is",
+    ]
+    return any(phrase in lower_query for phrase in explicit_phrases)
+
+
 def _query_wants_visualization_scales(lower_query: str) -> bool:
     if not any(
         term in lower_query
@@ -6781,6 +6843,12 @@ def _store_visualization_scales(
         metadata = {}
     metadata["visualization_scales"] = scales_nm
     metadata["visualization_scales_source"] = "workflow_agent"
+    project_context = metadata.get("project_context")
+    if not isinstance(project_context, dict):
+        project_context = {}
+    project_context["voxel_size_nm"] = scales_nm
+    project_context["voxel_size_source"] = "workflow_agent_visualization_scales"
+    metadata["project_context"] = project_context
     update_workflow_fields(db, workflow, {"metadata": metadata}, commit=True)
     append_workflow_event(
         db,
@@ -6884,8 +6952,13 @@ def _extract_project_context_from_query(query: str) -> Dict[str, Any]:
     elif any(term in lower for term in ["accurate", "accuracy", "quality", "best"]):
         context["optimization_priority"] = "accuracy"
 
-    voxel_size_nm = _parse_visualization_scales_from_query(query)
-    if voxel_size_nm:
+    voxel_size_nm = (
+        _parse_visualization_scales_from_query(query)
+        if _query_wants_visualization_scales(lower)
+        or _query_explicitly_mutates_project_context(lower)
+        else None
+    )
+    if voxel_size_nm and not _query_mentions_volume_id(lower):
         context["voxel_size_nm"] = voxel_size_nm
         context["voxel_size_source"] = "workflow_agent_context"
 
@@ -9202,6 +9275,20 @@ async def query_workflow_agent(
             "open progress",
             "show progress",
             "how many volumes",
+            "ready for training",
+            "left out",
+            "leave out",
+            "excluded",
+            "exclude",
+            "human attention",
+            "need attention",
+            "needs attention",
+            "need human",
+            "needs human",
+            "what is left",
+            "what's left",
+            "what remains",
+            "remaining",
             "volumes are done",
             "volumes are fully good",
             "fully proofread",
@@ -9510,8 +9597,31 @@ async def query_workflow_agent(
             "use_defaults": True,
             "freeform_note": query[:500],
         }
+    explicit_context_mutation = _query_explicitly_mutates_project_context(lower_query)
+    protected_volume_question = _query_mentions_volume_id(lower_query) and any(
+        marker in lower_query
+        for marker in [
+            "why",
+            "which",
+            "what",
+            "how",
+            "leave out",
+            "left out",
+            "exclude",
+            "excluded",
+            "training",
+            "train",
+        ]
+    )
     context_should_update = bool(context_update) and (
         not command_alias
+        and not protected_volume_question
+        and (
+            explicit_context_mutation
+            or semantic_name == "project_context_update"
+            or wants_use_defaults
+            or action_needs_context
+        )
     )
     if context_should_update:
         _merge_project_context(db, workflow, context_update)

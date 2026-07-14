@@ -52,7 +52,7 @@ const HIDDEN_SYSTEM_FILES = new Set([
 ]);
 const DEFAULT_REMOTE_PROJECT_PATH =
   process.env.REACT_APP_DEFAULT_PROJECT_PATH ||
-  "/home/weidf/demo_data/mitoem2_progress_demo";
+  "/home/weidf/demo_data/yixiao_tapereader_xri_case_study";
 const IMAGE_EXTENSIONS = new Set([
   ".png",
   ".jpg",
@@ -615,45 +615,27 @@ const buildProjectMemoryProfile = ({
 const GUIDED_PROJECT_CONTEXT_GROUPS = [
   {
     key: "task_family",
-    label: "Task",
-    helper: "What kind of segmentation loop should this project use?",
-    options: [
-      "XRI fibre instance segmentation",
-      "mitochondria instance segmentation",
-      "semantic segmentation",
-      "proofreading existing masks",
-    ],
+    label: "What are we working over?",
+    helper: "Example: XRI fibre instance segmentation, mitochondria segmentation, proofreading masks",
+    placeholder: "XRI fibre instance segmentation",
   },
   {
     key: "mask_status",
-    label: "Mask readiness",
-    helper: "How should the agent treat masks it finds?",
-    options: [
-      "mixed: some masks, some image-only volumes",
-      "all masks are ground truth",
-      "masks are draft predictions to proofread",
-      "image-only; no masks found",
-    ],
+    label: "What mask data exists?",
+    helper: "Example: 6 ground-truth masks, 2 draft masks, 2 image-only volumes",
+    placeholder: "mixed: 6 ground-truth masks, 2 draft masks, 2 image-only targets",
   },
   {
     key: "image_only_strategy",
-    label: "Image-only volumes",
-    helper: "What should happen to volumes without masks?",
-    options: [
-      "run inference on image-only volumes later",
-      "ignore image-only volumes for now",
-      "ask before using image-only volumes",
-    ],
+    label: "What should happen to image-only volumes?",
+    helper: "Tell the agent whether to infer, ignore, or ask first.",
+    placeholder: "run inference on image-only volumes later",
   },
   {
     key: "training_policy",
-    label: "Training rule",
-    helper: "Which masks are safe training data?",
-    options: [
-      "train only on confirmed ground-truth masks",
-      "train on proofread masks after approval",
-      "do not train from this project yet",
-    ],
+    label: "Which masks are safe for training?",
+    helper: "Example: train only on confirmed ground-truth masks",
+    placeholder: "train only on confirmed ground-truth masks",
   },
 ];
 
@@ -3106,11 +3088,11 @@ function FilesManager() {
         }}
       >
         <div style={{ fontWeight: 700, fontSize: 13, marginBottom: 4 }}>
-          Quick confirmations
+          Workflow notes
         </div>
         <div style={{ color: "#6b7280", fontSize: 12, marginBottom: 10 }}>
-          Click the options that match the project. These become durable agent
-          context, not just UI labels.
+          I prefilled these from the mounted folder. Edit them in your own
+          words; they become durable agent context, not just UI labels.
         </div>
         <div style={{ display: "grid", gap: 12 }}>
           {GUIDED_PROJECT_CONTEXT_GROUPS.map((group) => {
@@ -3133,30 +3115,25 @@ function FilesManager() {
                     {group.helper}
                   </span>
                 </div>
-                <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
-                  {group.options.map((option) => {
-                    const selected = selectedValue === option;
-                    return (
-                      <Button
-                        key={option}
-                        size="small"
-                        type={selected ? "primary" : "default"}
-                        onClick={() =>
-                          setPendingProjectContextValue(group.key, option)
-                        }
-                      >
-                        {option}
-                      </Button>
-                    );
-                  })}
-                  {selectedValue &&
-                  !group.options.includes(selectedValue) ? (
-                    <Button size="small" type="primary">
-                      {selectedValue}
-                    </Button>
-                  ) : null}
+                <div
+                  style={{
+                    display: "grid",
+                    gridTemplateColumns: "minmax(0, 1fr) auto",
+                    gap: 8,
+                    alignItems: "center",
+                  }}
+                >
+                  <Input
+                    value={selectedValue}
+                    placeholder={group.placeholder}
+                    onChange={(event) =>
+                      setPendingProjectContextValue(
+                        group.key,
+                        event.target.value,
+                      )
+                    }
+                  />
                   <Button
-                    size="small"
                     onClick={() => setPendingProjectContextValue(group.key, "")}
                     disabled={!selectedValue}
                   >

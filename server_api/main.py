@@ -1,3 +1,4 @@
+import inspect as py_inspect
 import json
 import logging
 import math
@@ -267,6 +268,109 @@ app.add_middleware(
 )
 
 logger = logging.getLogger(__name__)
+
+
+UM_NEUROGLANCER_RAW_IMAGE_SHADER = """#uicontrol invlerp normalized
+#uicontrol float brightness slider(min=-1, max=1)
+#uicontrol float contrast slider(min=-3, max=3, step=0.01)
+
+void main() {
+  emitGrayscale((normalized() + brightness) * exp(contrast));
+}
+"""
+
+UM_NEUROGLANCER_MASK_RED_SHADER = """void main() {
+  emitRGB(vec3(1.0, 0.0, 0.0));
+}
+"""
+
+
+def _has_single_neuroglancer_main(shader: str) -> bool:
+    return len(re.findall(r"\bvoid\s+main\s*\(", shader)) == 1
+
+
+def _resolve_raw_image_shader() -> str:
+    # Applied to raw image layers by default for the UM/Yixiao Neuroglancer view.
+    # This is intentionally shared for all raw image layers unless this helper is
+    # tightened later for a narrower demo scope.
+    return UM_NEUROGLANCER_RAW_IMAGE_SHADER
+
+
+def _resolve_mask_image_shader() -> str:
+    # Red mask/prediction image-layer shader. Segmentation layers use
+    # dedicated segmentation rendering instead and should not receive this shader.
+    return UM_NEUROGLANCER_MASK_RED_SHADER
+
+
+def _with_neuroglancer_image_shader(
+    neuroglancer_module,
+    layer_source,
+    shader: str,
+):
+    image_layer = getattr(neuroglancer_module, "ImageLayer", None)
+    if image_layer is None:
+        try:
+            layer_source.shader = shader
+        except Exception:
+            logger.debug("Unable to attach Neuroglancer image shader directly.", exc_info=True)
+        return layer_source
+
+    try:
+        image_init_signature = py_inspect.signature(image_layer.__init__)
+        if "shader" in image_init_signature.parameters:
+            return image_layer(source=layer_source, shader=shader)
+    except Exception:
+        logger.debug("Unable to probe Neuroglancer ImageLayer __init__ signature.", exc_info=True)
+
+    try:
+        return image_layer(source=layer_source, shader=shader)
+    except TypeError:
+        try:
+            layer_source.shader = shader
+        except Exception:
+            logger.debug("Unable to apply Neuroglancer image shader to layer source.", exc_info=True)
+    return layer_source
+
+
+def _build_neuroglancer_local_volume_source(
+    neuroglancer_module,
+    data,
+    dimensions,
+    *,
+    volume_type: str = "image",
+    voxel_offset=(0, 0, 0),
+):
+    return neuroglancer_module.LocalVolume(
+        data,
+        dimensions=dimensions,
+        volume_type=volume_type,
+        voxel_offset=voxel_offset,
+    )
+
+
+def _build_neuroglancer_layer(
+    neuroglancer_module,
+    data,
+    dimensions,
+    *,
+    volume_type: str = "image",
+    voxel_offset=(0, 0, 0),
+    image_shader: Optional[str] = None,
+    segmentation_kwargs: Optional[dict[str, Any]] = None,
+):
+    source = _build_neuroglancer_local_volume_source(
+        neuroglancer_module,
+        data,
+        dimensions,
+        volume_type=volume_type,
+        voxel_offset=voxel_offset,
+    )
+    if volume_type == "segmentation":
+        if segmentation_kwargs is None:
+            return neuroglancer_module.SegmentationLayer(source=source)
+        return neuroglancer_module.SegmentationLayer(source=source, **segmentation_kwargs)
+    shader = image_shader or _resolve_raw_image_shader()
+    return _with_neuroglancer_image_shader(neuroglancer_module, source, shader)
 
 
 class ClientAppLogEvent(BaseModel):
@@ -629,11 +733,46 @@ async def configure_app_event_logging():
     )
 
 
+def _normalize_api_compat_path(path: str) -> Optional[str]:
+    if path.startswith("/api/api/"):
+        return "/api/" + path[len("/api/api/") :]
+    if path == "/api/files":
+        return "/files"
+    if path.startswith("/api/files/"):
+        return "/files/" + path[len("/api/files/") :]
+    if path.startswith("/api/app/"):
+        return "/app/" + path[len("/api/app/") :]
+    if path == "/api/neuroglancer":
+        return "/neuroglancer"
+    if path.startswith("/api/neuroglancer/"):
+        return "/neuroglancer/" + path[len("/api/neuroglancer/") :]
+    if path.startswith("/api/start_model_"):
+        return path[len("/api") :]
+    if path.startswith("/api/stop_model_"):
+        return path[len("/api") :]
+    if path in {
+        "/api/training_status",
+        "/api/training_logs",
+        "/api/inference_status",
+        "/api/inference_logs",
+        "/api/start_tensorboard",
+        "/api/get_tensorboard_url",
+        "/api/get_tensorboard_status",
+    }:
+        return path[len("/api") :]
+    return None
+
+
 @app.middleware("http")
 async def log_http_requests(request: Request, call_next):
     request_id = request_id_from_request(request)
     start_time = time.perf_counter()
     path = request.url.path
+    normalized_path = _normalize_api_compat_path(path)
+    if normalized_path:
+        request.scope["path"] = normalized_path
+        request.scope["raw_path"] = normalized_path.encode("utf-8")
+        path = normalized_path
     method = request.method
     client_host = request.client.host if request.client else None
     is_client_log_endpoint = path == "/app/log-event"
@@ -1636,10 +1775,24 @@ async def neuroglancer(
                 status_code=400, detail=f"Failed to prepare label volume: {str(e)}"
             )
 
-        def ngLayer(data, res, oo=[0, 0, 0], tt="segmentation"):
+        def ngLayer(
+            data,
+            res,
+            tt="image",
+            oo=(0, 0, 0),
+            *,
+            image_shader: Optional[str] = None,
+            segmentation_kwargs: Optional[dict[str, Any]] = None,
+        ):
             try:
-                return neuroglancer.LocalVolume(
-                    data, dimensions=res, volume_type=tt, voxel_offset=oo
+                return _build_neuroglancer_layer(
+                    neuroglancer,
+                    data,
+                    res,
+                    volume_type=tt,
+                    voxel_offset=oo,
+                    image_shader=image_shader or _resolve_raw_image_shader(),
+                    segmentation_kwargs=segmentation_kwargs,
                 )
             except Exception as exc:
                 raise HTTPException(
@@ -1650,7 +1803,14 @@ async def neuroglancer(
         with viewer.txn() as s:
             s.layers.append(name="im", layer=ngLayer(im, res, tt="image"))
             if gt is not None:
-                s.layers.append(name="gt", layer=ngLayer(gt, res, tt="segmentation"))
+                s.layers.append(
+                    name="gt",
+                    layer=ngLayer(
+                        gt,
+                        res,
+                        tt="segmentation",
+                    ),
+                )
 
         internal_viewer_url = str(viewer)
         public_url = _build_neuroglancer_public_url(internal_viewer_url, req)
@@ -1885,13 +2045,14 @@ async def neuroglancer_proofread(
         names=["z", "y", "x"], units=["nm", "nm", "nm"], scales=scales
     )
 
-    def make_local_volume(data, volume_type: str):
+    def make_local_volume(data, volume_type: str, voxel_offset=(0, 0, 0)):
         try:
-            return neuroglancer.LocalVolume(
+            return _build_neuroglancer_local_volume_source(
+                neuroglancer,
                 data,
-                dimensions=dimensions,
+                dimensions,
                 volume_type=volume_type,
-                voxel_offset=[0, 0, 0],
+                voxel_offset=voxel_offset,
             )
         except Exception as exc:
             raise HTTPException(
@@ -1899,7 +2060,13 @@ async def neuroglancer_proofread(
                 detail=f"Failed to prepare Neuroglancer {volume_type} layer: {exc}",
             ) from exc
 
-    image_source = make_local_volume(im, "image")
+    image_layer = _build_neuroglancer_layer(
+        neuroglancer,
+        im,
+        dimensions,
+        volume_type="image",
+        voxel_offset=[0, 0, 0],
+    )
     segmentation_source = make_local_volume(gt, "segmentation") if gt is not None else None
     initial_voxel = _coerce_initial_voxel(
         payload.initial_voxel or payload.initialVoxel,
@@ -2001,7 +2168,7 @@ async def neuroglancer_proofread(
 
     layer_names = ["image"]
     with viewer.txn() as state:
-        state.layers.append(name="image", layer=image_source)
+        state.layers.append(name="image", layer=image_layer)
         if segmentation_source is not None:
             state.layers.append(
                 name="segmentation",

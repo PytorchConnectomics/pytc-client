@@ -19,6 +19,7 @@ import urllib.error
 import urllib.request
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional
+from urllib.parse import urlsplit
 
 
 DEFAULT_BASE_URL = "http://127.0.0.1:4342"
@@ -31,11 +32,14 @@ DEFAULT_PRE_DEMO_GATE_REPORT_PATH = Path("/tmp/yixiao-case-study-pre-demo-gate-r
 DEFAULT_CLOSED_LOOP_REHEARSAL_REPORT_PATH = Path(
     "/tmp/yixiao-closed-loop-rehearsal-report.json"
 )
+DEFAULT_POST_DEPLOY_REPORT_ROOT = Path("docs/case-studies")
 REPO_ROOT = Path(__file__).resolve().parents[1]
 PROJECT_TITLE = "Yixiao TapeReader XRI Case Study"
 PROJECT_SLUG = "yixiao_tapereader_xri_case_study"
 SUGGESTION_ID = "yixiao-tapereader-xri-case-study"
 IMAGE_ONLY_TARGET_IDS = ("6_1", "6_2")
+POST_DEPLOY_WORKFLOW_ID = 199
+POST_DEPLOY_PROJECT_ROOT = "/home/weidf/demo_data/yixiao_tapereader_xri_case_study"
 
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
@@ -50,6 +54,10 @@ class SmokeHarness:
         self.base_url = base_url.rstrip("/")
         self.verbose = verbose
         self.checks: List[Dict[str, Any]] = []
+        self.headers = {
+            "Accept": "application/json",
+            "User-Agent": "Mozilla/5.0 (compatible; pytc-yixiao-smoke)",
+        }
 
     def note(self, message: str) -> None:
         if self.verbose:
@@ -61,6 +69,42 @@ class SmokeHarness:
             raise SmokeFailure(f"{name} failed: {detail}")
         self.note(f"ok - {name}")
 
+    def request_json_with_status(
+        self,
+        method: str,
+        path: str,
+        *,
+        payload: Optional[Dict[str, Any]] = None,
+        timeout: int = 30,
+        expect_json: bool = True,
+    ) -> Any:
+        data = None
+        headers = dict(self.headers)
+        if payload is not None:
+            data = json.dumps(payload).encode("utf-8")
+            headers["Content-Type"] = "application/json"
+        url = f"{self.base_url}{path}"
+        request = urllib.request.Request(url, data=data, method=method, headers=headers)
+        try:
+            with urllib.request.urlopen(request, timeout=timeout) as response:
+                status = response.status
+                raw = response.read().decode("utf-8")
+        except urllib.error.HTTPError as exc:
+            status = exc.code
+            raw = exc.read().decode("utf-8", errors="replace")
+        except urllib.error.URLError as exc:
+            raise SmokeFailure(f"{method} {path} failed: {exc}") from exc
+        if not raw:
+            return status, {}
+        if not expect_json:
+            return status, raw
+        try:
+            return status, json.loads(raw)
+        except json.JSONDecodeError as exc:
+            if status >= 400:
+                raise SmokeFailure(f"{method} {path} returned {status}: {raw[:300]}") from exc
+            raise SmokeFailure(f"{method} {path} returned non-JSON: {raw[:300]}") from exc
+
     def request_json(
         self,
         method: str,
@@ -69,27 +113,16 @@ class SmokeHarness:
         payload: Optional[Dict[str, Any]] = None,
         timeout: int = 30,
     ) -> Any:
-        data = None
-        headers = {"Accept": "application/json"}
-        if payload is not None:
-            data = json.dumps(payload).encode("utf-8")
-            headers["Content-Type"] = "application/json"
-        url = f"{self.base_url}{path}"
-        request = urllib.request.Request(url, data=data, method=method, headers=headers)
-        try:
-            with urllib.request.urlopen(request, timeout=timeout) as response:
-                raw = response.read().decode("utf-8")
-        except urllib.error.HTTPError as exc:
-            body = exc.read().decode("utf-8", errors="replace")
-            raise SmokeFailure(f"{method} {path} returned {exc.code}: {body}") from exc
-        except urllib.error.URLError as exc:
-            raise SmokeFailure(f"{method} {path} failed: {exc}") from exc
-        if not raw:
-            return {}
-        try:
-            return json.loads(raw)
-        except json.JSONDecodeError as exc:
-            raise SmokeFailure(f"{method} {path} returned non-JSON: {raw[:300]}") from exc
+        status, parsed = self.request_json_with_status(
+            method,
+            path,
+            payload=payload,
+            timeout=timeout,
+            expect_json=True,
+        )
+        if status >= 400:
+            raise SmokeFailure(f"{method} {path} returned {status}: {parsed}")
+        return parsed
 
 
 def _load_manifest(project_root: Path) -> Dict[str, Any]:
@@ -543,6 +576,497 @@ def _run_export_bundle_check(
         },
         "payload_missing_keys": missing,
     }
+
+
+def _default_post_deploy_report_paths() -> Dict[str, Path]:
+    stamp = time.strftime("%Y%m%d-%H%M%S")
+    markdown_path = (
+        DEFAULT_POST_DEPLOY_REPORT_ROOT
+        / f"yixiao-postdeploy-smoke-report-{stamp}.md"
+    )
+    return {
+        "markdown_path": markdown_path,
+        "json_path": markdown_path.with_suffix(".json"),
+    }
+
+
+def _normalize_post_deploy_api_base(base_url: str) -> str:
+    base = base_url.rstrip("/")
+    if base.endswith("/api"):
+        return base
+    return f"{base}/api"
+
+
+def _probe_endpoint(
+    harness: SmokeHarness,
+    *,
+    name: str,
+    method: str,
+    path: str,
+    payload: Optional[Dict[str, Any]] = None,
+    timeout: int = 20,
+    expect_json: bool = True,
+) -> Dict[str, Any]:
+    start = time.time()
+    try:
+        status, payload_data = harness.request_json_with_status(
+            method,
+            path,
+            payload=payload,
+            timeout=timeout,
+            expect_json=expect_json,
+        )
+        return {
+            "name": name,
+            "method": method,
+            "path": path,
+            "passed": status == 200,
+            "status_code": status,
+            "duration_seconds": time.time() - start,
+            "payload": payload_data if expect_json else None,
+            "raw_body": payload_data if not expect_json else None,
+        }
+    except Exception as exc:  # pragma: no cover - exercised in integration path
+        return {
+            "name": name,
+            "method": method,
+            "path": path,
+            "passed": False,
+            "status_code": None,
+            "duration_seconds": time.time() - start,
+            "error": str(exc),
+            "payload": None,
+            "raw_body": None,
+        }
+
+
+def _query_agent_action(
+    harness: SmokeHarness,
+    *,
+    workflow_id: int,
+    query: str,
+    timeout: int = 45,
+) -> Dict[str, Any]:
+    step = _probe_endpoint(
+        harness,
+        name=f"agent_query:{query}",
+        method="POST",
+        path=f"/api/workflows/{workflow_id}/agent/query",
+        payload={"query": query},
+        timeout=timeout,
+    )
+    if not step["passed"]:
+        return step
+    payload = step.get("payload") or {}
+    actions = payload.get("actions") or []
+    return {
+        "name": step["name"],
+        "passed": bool(actions),
+        "method": "POST",
+        "path": f"/api/workflows/{workflow_id}/agent/query",
+        "status_code": step["status_code"],
+        "duration_seconds": step["duration_seconds"],
+        "query": query,
+        "intent": payload.get("intent"),
+        "response": payload.get("response"),
+        "actions": [
+            {
+                "id": action.get("id"),
+                "requires_approval": action.get("requires_approval"),
+                "label": action.get("label"),
+            }
+            for action in actions
+            if isinstance(action, dict)
+        ],
+        "action_count": len(actions),
+    }
+
+
+def _expected_progress_summary() -> Dict[str, Any]:
+    return {
+        "total": 10,
+        "tracked_total": 10,
+        "ground_truth": 6,
+        "needs_proofreading": 2,
+        "missing_segmentation": 2,
+        "ignored": 0,
+        "completion_pct": 60.0,
+        "segmentation_coverage_pct": 80.0,
+    }
+
+
+def _compare_progress(
+    observed: Optional[Dict[str, Any]],
+    *,
+    expected: Dict[str, Any],
+) -> List[str]:
+    issues: List[str] = []
+    if not isinstance(observed, dict):
+        return ["progress summary missing"]
+    for key, value in expected.items():
+        if observed.get(key) != value:
+            issues.append(f"summary[{key}] expected {value!r}, got {observed.get(key)!r}")
+    return issues
+
+
+def _build_post_deploy_report(args: argparse.Namespace) -> Dict[str, Any]:
+    start = time.time()
+    api_base = _normalize_post_deploy_api_base(args.base_url)
+    public_root = args.base_url.rstrip("/")
+    harness = SmokeHarness(base_url=api_base, verbose=args.verbose)
+    checks: List[Dict[str, Any]] = []
+    caveats: List[str] = []
+    report: Dict[str, Any] = {
+        "generated_at_unix": time.time(),
+        "base_url": api_base,
+        "public_root_url": public_root,
+        "report_type": "post_deploy_readonly",
+        "checks": checks,
+        "caveats": caveats,
+        "agent_queries": [],
+        "public_endpoints": [],
+        "duration_seconds": 0.0,
+    }
+
+    endpoint_checks: List[Dict[str, Any]] = []
+    report["public_endpoints"] = endpoint_checks
+
+    current = _probe_endpoint(harness, name="workflow_current", method="GET", path="/api/workflows/current")
+    endpoint_checks.append(current)
+    workflow_payload = current.get("payload") or {}
+    current_workflow = workflow_payload.get("workflow") if isinstance(workflow_payload, dict) else None
+    if not isinstance(current_workflow, dict):
+        checks.append(
+            {
+                "name": "workflow_current_payload_shape",
+                "passed": False,
+                "error": "GET /api/workflows/current did not return workflow object",
+            }
+        )
+        return {
+            **report,
+            "passed": False,
+            "checks": checks,
+            "duration_seconds": time.time() - start,
+        }
+
+    workflow_id = current_workflow.get("id")
+    if args.workflow_id is not None:
+        workflow_id = args.workflow_id
+    if workflow_id is None:
+        checks.append({"name": "workflow_id_resolved", "passed": False, "error": "workflow_id unavailable"})
+        report["passed"] = False
+        return {**report, "checks": checks, "duration_seconds": time.time() - start}
+    workflow_id = int(workflow_id)
+
+    if workflow_id != POST_DEPLOY_WORKFLOW_ID:
+        caveats.append(
+            f"Expected workflow id {POST_DEPLOY_WORKFLOW_ID} for the post-deploy fixture, "
+            f"but active workflow is {workflow_id}"
+        )
+
+    checks.append({"name": "workflow_id", "passed": True, "workflow_id": workflow_id})
+    report["workflow_id"] = workflow_id
+    report["workflow_title"] = current_workflow.get("title")
+    report["project_root_detected"] = current_workflow.get("dataset_path")
+    report["expected_project_root"] = POST_DEPLOY_PROJECT_ROOT
+
+    if report["project_root_detected"] != POST_DEPLOY_PROJECT_ROOT:
+        caveats.append(
+            "Detected workflow dataset_path differs from expected mounted Yixiao fixture path."
+        )
+
+    project_progress = _probe_endpoint(
+        harness,
+        name="project_progress",
+        method="GET",
+        path=f"/api/workflows/{workflow_id}/project-progress",
+    )
+    endpoint_checks.append(project_progress)
+    summary = None
+    if project_progress["passed"]:
+        summary = project_progress.get("payload", {}).get("summary")
+        issue_lines = _compare_progress(summary, expected=_expected_progress_summary())
+        if issue_lines:
+            checks.append({"name": "progress_counts", "passed": False, "issues": issue_lines})
+            caveats.append("Progress counts are not the expected 6/2/2 split.")
+        else:
+            checks.append({"name": "progress_counts", "passed": True, "summary": summary})
+    else:
+        checks.append({"name": "progress_counts", "passed": False, "error": project_progress.get("error")})
+
+    memory = _probe_endpoint(
+        harness,
+        name="workflow_memory",
+        method="GET",
+        path=f"/api/workflows/{workflow_id}/memory",
+    )
+    endpoint_checks.append(memory)
+    if memory["passed"] and isinstance(memory.get("payload"), dict):
+        checks.append(
+            {
+                "name": "memory_schema_version",
+                "passed": memory["payload"].get("schema_version")
+                == "pytc-project-memory/v1",
+                "schema_version": memory["payload"].get("schema_version"),
+            }
+        )
+    else:
+        checks.append({"name": "memory_schema_version", "passed": False, "error": memory.get("error")})
+
+    overview = _probe_endpoint(
+        harness,
+        name="workflow_overview",
+        method="GET",
+        path=f"/api/workflows/{workflow_id}/overview",
+    )
+    endpoint_checks.append(overview)
+
+    readiness = _run_readiness_check(harness, workflow_id=workflow_id)
+    checks.append(readiness)
+    report["readiness"] = readiness
+    if readiness.get("passed"):
+        checks.append(
+            {
+                "name": "case_study_readiness_gate",
+                "passed": bool(readiness.get("ready_for_case_study")),
+                "ready_for_case_study": readiness.get("ready_for_case_study"),
+                "next_required_items": readiness.get("next_required_items"),
+            }
+        )
+        if not readiness.get("ready_for_case_study"):
+            caveats.append("Case-study readiness gate is not yet met.")
+
+    export_sanity = _run_export_bundle_check(harness, workflow_id=workflow_id)
+    checks.append(export_sanity)
+    report["export_bundle"] = export_sanity
+
+    suggestions = _probe_endpoint(
+        harness,
+        name="project_suggestions",
+        method="GET",
+        path="/files/project-suggestions",
+    )
+    endpoint_checks.append(suggestions)
+    suggestion_error: Optional[str] = None
+    suggestion = None
+    if suggestions["passed"] and isinstance(suggestions.get("payload"), list):
+        suggestion = _find_yixiao_suggestion(suggestions["payload"])
+        if suggestion:
+            checks.append(
+                {
+                    "name": "yixiao_suggestion",
+                    "passed": bool(suggestion),
+                    "mounted": suggestion.get("already_mounted"),
+                    "directory_path": suggestion.get("directory_path"),
+                }
+            )
+            if suggestion.get("already_mounted") is not True:
+                caveats.append("Yixiao suggestion exists but is not currently mounted.")
+        else:
+            suggestion_error = "Yixiao suggestion not found in files/project-suggestions"
+    else:
+        suggestion_error = suggestion_error or "Could not load project-suggestions"
+    if suggestion_error:
+        checks.append({"name": "yixiao_suggestion", "passed": False, "error": suggestion_error})
+
+    visualization_payload = None
+    if summary and summary.get("total") == 10:
+        visualization_payload = {
+            "workflow_id": workflow_id,
+            "image": f"{POST_DEPLOY_PROJECT_ROOT}/data/raw/1/1-xri_raw.tif",
+            "label": f"{POST_DEPLOY_PROJECT_ROOT}/data/seg/1/1-mask.tif",
+            "scales": [40, 16.3, 16.3],
+        }
+    visualization_steps: List[Dict[str, Any]] = []
+    create_viewer = _probe_endpoint(
+        harness,
+        name="neuroglancer_create",
+        method="POST",
+        path="/neuroglancer",
+        payload=visualization_payload or {},
+        timeout=30,
+    )
+    visualization_steps.append(create_viewer)
+    public_viewer_url = ""
+    if create_viewer.get("passed") and isinstance(create_viewer.get("payload"), dict):
+        public_viewer_url = str(
+            create_viewer["payload"].get("url")
+            or create_viewer["payload"].get("neuroglancer_url")
+            or ""
+        ).strip()
+    if public_viewer_url:
+        public_path = urlsplit(public_viewer_url).path or "/neuroglancer/"
+        public_viewer = _probe_endpoint(
+            SmokeHarness(base_url=public_root, verbose=args.verbose),
+            name="neuroglancer_public_viewer",
+            method="GET",
+            path=public_path,
+            timeout=20,
+            expect_json=False,
+        )
+        public_viewer["url"] = public_viewer_url
+        visualization_steps.append(public_viewer)
+    report["visualization"] = visualization_steps
+    for candidate in visualization_steps:
+        if candidate.get("name") == "neuroglancer_public_viewer" and candidate.get("status_code") == 200:
+            break
+    else:
+        caveats.append(
+            "Public visualization viewer did not return a successful response; "
+            "check demo.seg.bio/neuroglancer runtime health and viewer retention."
+        )
+
+    agent_queries = [
+        "what project are we looking at?",
+        "train on the fully good masks to segment the image-only volumes",
+        "what should I proofread next?",
+        "Can we run inference on image-only targets next?",
+    ]
+    agent_checks: List[Dict[str, Any]] = []
+    for query in agent_queries:
+        agent_checks.append(
+            _query_agent_action(harness, workflow_id=workflow_id, query=query, timeout=args.agent_timeout)
+        )
+    report["agent_queries"] = agent_checks
+    training_query = next((row for row in agent_checks if row.get("query") == agent_queries[1]), {})
+    if training_query.get("passed") and any(action.get("id") == "start-training" for action in training_query.get("actions", [])):
+        checks.append({"name": "training_action_proposal", "passed": True, "action_ids": [a.get("id") for a in training_query.get("actions", [])]})
+    else:
+        checks.append({"name": "training_action_proposal", "passed": False, "error": "start-training action not returned for training prompt"})
+        caveats.append("Training action proposal is not currently returning expected `start-training` behavior.")
+    proofread_query = next((row for row in agent_checks if row.get("query") == agent_queries[2]), {})
+    if proofread_query.get("passed") and any(
+        action.get("id") == "start-proofreading" for action in proofread_query.get("actions", [])
+    ):
+        checks.append({"name": "proofread_action_proposal", "passed": True, "action_ids": [a.get("id") for a in proofread_query.get("actions", [])]})
+    else:
+        checks.append({"name": "proofread_action_proposal", "passed": False, "error": "start-proofreading action not returned"})
+        caveats.append("Proofread action proposal is weak or not returning expected identifier.")
+    inference_query = next((row for row in agent_checks if row.get("query") == agent_queries[3]), {})
+    if inference_query.get("passed") and (
+        any(action.get("id") == "open-inference" for action in inference_query.get("actions", []))
+        or any(action.get("id") == "start-inference" for action in inference_query.get("actions", []))
+    ):
+        checks.append(
+            {
+                "name": "inference_action_proposal",
+                "passed": True,
+                "action_ids": [a.get("id") for a in inference_query.get("actions", [])],
+            }
+        )
+    else:
+        checks.append(
+            {
+                "name": "inference_action_proposal",
+                "passed": False,
+                "error": "Inference proposal action not returned",
+            }
+        )
+        caveats.append("Inference proposal may need checkpoint/agent sequencing before action can be launched.")
+
+    report["checks"] = checks
+    report["caveats"] = caveats
+    participant_start_ready = all(
+        bool(check.get("passed"))
+        for check in checks
+        if check.get("name")
+        not in {
+            "case_study_readiness_gate",
+        }
+    ) and any(
+        row.get("name") == "neuroglancer_public_viewer" and row.get("passed")
+        for row in visualization_steps
+    )
+    report["participant_start_ready"] = participant_start_ready
+    report["passed"] = participant_start_ready
+    report["duration_seconds"] = time.time() - start
+    return report
+
+
+def _write_post_deploy_report_markdown(report: Dict[str, Any], path: Path) -> None:
+    public_endpoints = report.get("public_endpoints") or []
+    checks = report.get("checks") or []
+    readiness = report.get("readiness") or {}
+    viz = report.get("visualization") or []
+    agent_queries = report.get("agent_queries") or []
+    progress = None
+    for check in checks:
+        if check.get("name") == "progress_counts":
+            progress = check.get("summary") or check.get("issues")
+            break
+
+    lines = [
+        "# Yixiao Post-Deploy Smoke Report",
+        "",
+        f"- Timestamp: {time.strftime('%Y-%m-%d %H:%M:%S UTC', time.gmtime(report.get('generated_at_unix', 0)))}",
+        f"- Report type: {report.get('report_type')}",
+        f"- Public root: `{report.get('public_root_url')}`",
+        f"- Workflow endpoint API base: `{report.get('base_url')}`",
+        f"- Workflow id (active): `{report.get('workflow_id')}`",
+        f"- Workflow title: `{report.get('workflow_title')}`",
+        f"- Workflow dataset path: `{report.get('project_root_detected')}`",
+        f"- Expected dataset path: `{report.get('expected_project_root')}`",
+        "",
+        f"- Participant starting fixture: {'READY' if report.get('participant_start_ready') else 'NOT READY'}",
+        f"- Full case-study completion gate: {'PASS' if readiness.get('ready_for_case_study') else 'NOT YET'}",
+    ]
+
+    if readiness:
+        lines.extend(
+            [
+                "",
+                "## Case-Study Readiness",
+                f"- Ready flag: `{readiness.get('ready_for_case_study')}`",
+                f"- Completed count: `{readiness.get('completed_count')}`",
+                f"- Total count: `{readiness.get('total_count')}`",
+                f"- Next required items: {', '.join(readiness.get('next_required_items') or ['(none)'])}",
+            ]
+        )
+
+    lines.extend(
+        [
+            "",
+            "## Progress Summary",
+            f"- {progress if progress is not None else 'Not available'}",
+        ]
+    )
+
+    lines.extend(["", "## Public Endpoint Status", ""])
+    for row in public_endpoints:
+        status = row.get("status_code")
+        lines.append(
+            f"- `{row.get('name')}` `{row.get('method')}` `{row.get('path')}` -> {status} ({'PASS' if row.get('passed') else 'FAIL'})"
+        )
+
+    lines.extend(["", "## Visualization Probe", ""])
+    for row in viz:
+        target = row.get("url") or row.get("path")
+        lines.append(
+            f"- `{row.get('name')}` `{target}` -> {row.get('status_code')} ({'PASS' if row.get('passed') else 'FAIL'})"
+        )
+    lines.append("")
+    lines.extend(["", "## Agent Proposal Probes", ""])
+    for row in agent_queries:
+        lines.append(
+            f"- Q: `{row.get('query')}` -> `{row.get('intent')}` / "
+            f"actions={row.get('action_count')} status={row.get('status_code')}"
+        )
+        if row.get("actions"):
+            lines.append(
+                "  - " + ", ".join(
+                    [f"{action.get('id')} (approval={action.get('requires_approval')})" for action in row.get("actions") if isinstance(action, dict)]
+                )
+            )
+        if row.get("error"):
+            lines.append(f"  - error: `{row.get('error')}`")
+
+    if report.get("caveats"):
+        lines.extend(["", "## Known Risks", ""])
+        for caveat in report["caveats"]:
+            lines.append(f"- {caveat}")
+
+    path.write_text("\n".join(lines), encoding="utf-8")
 
 
 def _volume_id(volume: Dict[str, Any]) -> str:
@@ -1139,6 +1663,14 @@ def main() -> int:
         help="Run normal smoke + promotion roundtrip + restore, with optional readiness/export checks.",
     )
     parser.add_argument(
+        "--post-deploy",
+        action="store_true",
+        help=(
+            "Run a read-only public post-deploy validation sweep for workflow "
+            "state, endpoint health, and dry-run proposal probes."
+        ),
+    )
+    parser.add_argument(
         "--skip-readiness-check",
         action="store_true",
         help="Skip lightweight readiness endpoint check in pre-demo gate mode.",
@@ -1168,16 +1700,26 @@ def main() -> int:
 
     if args.pre_demo_gate and args.report == str(DEFAULT_REPORT_PATH):
         args.report = str(DEFAULT_PRE_DEMO_GATE_REPORT_PATH)
+    if args.post_deploy and args.report == str(DEFAULT_REPORT_PATH):
+        default_paths = _default_post_deploy_report_paths()
+        args.report = str(default_paths["json_path"])
     if args.closed_loop_rehearsal and args.report == str(DEFAULT_REPORT_PATH):
         args.report = str(DEFAULT_CLOSED_LOOP_REHEARSAL_REPORT_PATH)
     if args.closed_loop_crop == "":
         args.closed_loop_crop = None
 
     args = _normalize_smoke_args(args)
+    post_deploy_json_path: Path | None = None
+    post_deploy_markdown_path: Path | None = None
+    if args.post_deploy:
+        post_deploy_json_path = Path(args.report)
+        post_deploy_markdown_path = post_deploy_json_path.with_suffix(".md")
 
     try:
         if args.closed_loop_rehearsal:
             report = _build_closed_loop_rehearsal_report(args)
+        elif args.post_deploy:
+            report = _build_post_deploy_report(args)
         elif args.pre_demo_gate:
             report = _build_pre_demo_gate_report(args)
         else:
@@ -1196,6 +1738,8 @@ def main() -> int:
         return 1
 
     Path(args.report).write_text(json.dumps(report, indent=2, sort_keys=True), encoding="utf-8")
+    if args.post_deploy and post_deploy_markdown_path:
+        _write_post_deploy_report_markdown(report, post_deploy_markdown_path)
     if args.closed_loop_rehearsal:
         status = "passed" if report.get("passed") else "failed"
         print(f"Yixiao closed-loop rehearsal {status}.")
@@ -1205,6 +1749,16 @@ def main() -> int:
                 f" - {target.get('target_id')}: "
                 f"{'pass' if target.get('passed') else 'fail'}"
             )
+    elif args.post_deploy:
+        status = "passed" if report.get("passed") else "failed"
+        print(f"Yixiao post-deploy smoke {status}.")
+        print(f"Workflow: {report.get('workflow_id')}")
+        readiness = report.get("readiness") or {}
+        print(
+            f"Readiness: {readiness.get('ready_for_case_study')}, "
+            f"{len(readiness.get('next_required_items') or [])} pending item(s)"
+        )
+        print(f"Markdown report: {post_deploy_markdown_path}")
     elif args.pre_demo_gate:
         status = "passed" if report.get("passed") else "failed"
         print(f"Yixiao pre-demo gate {status}.")

@@ -1,5 +1,7 @@
 const isLocalHost = (hostname) => /^(localhost|127\.0\.0\.1)$/.test(hostname || "");
 
+const removeTrailingSlash = (value) => value.replace(/\/+$/, "");
+
 const getDefaultBaseUrl = () => {
   if (
     typeof window !== "undefined" &&
@@ -12,7 +14,9 @@ const getDefaultBaseUrl = () => {
   return `${process.env.REACT_APP_SERVER_PROTOCOL || "http"}://${process.env.REACT_APP_SERVER_URL || "localhost:4242"}`;
 };
 
-const BASE_URL = process.env.REACT_APP_API_BASE_URL || getDefaultBaseUrl();
+const BASE_URL = removeTrailingSlash(
+  process.env.REACT_APP_API_BASE_URL || getDefaultBaseUrl(),
+);
 const LOG_ENDPOINT = `${BASE_URL}/app/log-event`;
 const CLIENT_SESSION_ID = `client-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
 const envFlagEnabled = (name, defaultValue = true) => {

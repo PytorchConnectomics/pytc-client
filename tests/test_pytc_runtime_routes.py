@@ -14,6 +14,14 @@ from sqlalchemy.orm import sessionmaker
 from server_api.auth import database as auth_database
 from server_api.auth import models
 from server_api.main import app as server_api_app
+from server_api.main import (
+    UM_NEUROGLANCER_MASK_RED_SHADER,
+    UM_NEUROGLANCER_RAW_IMAGE_SHADER,
+    _build_neuroglancer_layer,
+    _has_single_neuroglancer_main,
+    _resolve_mask_image_shader,
+    _resolve_raw_image_shader,
+)
 from server_api.main import _coerce_neuroglancer_scales
 from server_pytc.main import app as server_pytc_app
 from server_pytc.services import model as model_service
@@ -31,6 +39,91 @@ class FakeResponse:
         return self._payload
 
 
+class DummyLocalVolume:
+    def __init__(self, data, dimensions, volume_type, voxel_offset, **_kwargs):
+        self.data = data
+        self.dimensions = dimensions
+        self.volume_type = volume_type
+        self.voxel_offset = tuple(voxel_offset)
+        self.shader = None
+
+
+class DummyImageLayer:
+    def __init__(self, source, shader=None, **_kwargs):
+        self.source = source
+        self.shader = shader
+
+
+class DummySegmentationLayer:
+    def __init__(self, source, **kwargs):
+        self.source = source
+        self.kwargs = kwargs
+
+
+class DummyNeuroglancerModule:
+    def __init__(self, include_image_layer=True):
+        self.LocalVolume = DummyLocalVolume
+        self.SegmentationLayer = DummySegmentationLayer
+        if include_image_layer:
+            self.ImageLayer = DummyImageLayer
+
+
+class NeuroglancerShaderBehaviorTests(unittest.TestCase):
+    def test_raw_image_shader_resolver_matches_constant(self):
+        self.assertEqual(_resolve_raw_image_shader(), UM_NEUROGLANCER_RAW_IMAGE_SHADER)
+
+    def test_mask_shader_resolver_matches_constant(self):
+        self.assertEqual(_resolve_mask_image_shader(), UM_NEUROGLANCER_MASK_RED_SHADER)
+
+    def test_raw_um_shader_shape_and_controls(self):
+        self.assertIn("#uicontrol invlerp normalized", UM_NEUROGLANCER_RAW_IMAGE_SHADER)
+        self.assertIn(
+            "#uicontrol float contrast slider(min=-3, max=3, step=0.01)",
+            UM_NEUROGLANCER_RAW_IMAGE_SHADER,
+        )
+        self.assertIn("emitGrayscale((normalized() + brightness) * exp(contrast));", UM_NEUROGLANCER_RAW_IMAGE_SHADER)
+        self.assertTrue(_has_single_neuroglancer_main(UM_NEUROGLANCER_RAW_IMAGE_SHADER))
+
+    def test_mask_red_shader_shape_and_controls(self):
+        self.assertIn("emitRGB(vec3(1.0, 0.0, 0.0));", UM_NEUROGLANCER_MASK_RED_SHADER)
+        self.assertTrue(_has_single_neuroglancer_main(UM_NEUROGLANCER_MASK_RED_SHADER))
+
+    def test_shader_builder_keeps_segmentation_layers_without_image_shader(self):
+        module = DummyNeuroglancerModule()
+        source = _build_neuroglancer_layer(
+            module,
+            data="mask",
+            dimensions=(40, 16, 16),
+            volume_type="segmentation",
+            segmentation_kwargs={"object_alpha": 0.4},
+        )
+        self.assertIsInstance(source, DummySegmentationLayer)
+        self.assertEqual(source.source.volume_type, "segmentation")
+        self.assertEqual(source.source.shader, None)
+
+    def test_shader_builder_uses_red_mask_shader_for_image_like_mask_layer(self):
+        module = DummyNeuroglancerModule(include_image_layer=True)
+        source = _build_neuroglancer_layer(
+            module,
+            data="mask",
+            dimensions=(40, 16, 16),
+            volume_type="image",
+            image_shader=UM_NEUROGLANCER_MASK_RED_SHADER,
+        )
+        self.assertIsInstance(source, DummyImageLayer)
+        self.assertEqual(source.shader, UM_NEUROGLANCER_MASK_RED_SHADER)
+
+    def test_shader_builder_fallback_to_source_shader_when_imagelayer_missing(self):
+        module = DummyNeuroglancerModule(include_image_layer=False)
+        source = _build_neuroglancer_layer(
+            module,
+            data="mask",
+            dimensions=(40, 16, 16),
+            volume_type="image",
+            image_shader=UM_NEUROGLANCER_MASK_RED_SHADER,
+        )
+        self.assertIsInstance(source, DummyLocalVolume)
+        self.assertEqual(source.shader, UM_NEUROGLANCER_MASK_RED_SHADER)
 class ServerPytcRouteTests(unittest.TestCase):
     def setUp(self):
         self.client = TestClient(server_pytc_app)

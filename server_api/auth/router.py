@@ -92,14 +92,29 @@ def _project_suggestion_candidates() -> List[dict]:
     workspace_root = os.path.abspath(os.path.join(repo_root, ".."))
     return [
         {
+            "id": "yixiao-tapereader-xri-case-study",
+            "name": "yixiao_tapereader_xri_case_study",
+            "directory_path": "/home/weidf/demo_data/yixiao_tapereader_xri_case_study",
+            "description": "Yixiao TapeReader XRI fibre segmentation case study with GT, draft, and image-only volumes.",
+            "recommended": True,
+            "context_hints": {
+                "imaging_modality": "X-ray / XRI volumetric microscopy",
+                "target_structure": "CytoTape fibres",
+                "task_family": "XRI fibre instance segmentation",
+                "mask_status": "mixed: 6 ground-truth masks, 2 draft masks, 2 image-only targets",
+                "image_only_strategy": "run inference on image-only volumes later",
+                "training_policy": "train only on confirmed ground-truth masks",
+                "task_goal": "instance segmentation, proofreading, and model retraining",
+                "optimization_priority": "paper-faithful workflow coordination",
+                "voxel_size_nm": [40, 16.3, 16.3],
+            },
+        },
+        {
             "id": "mitoem2-progress-demo",
             "name": "mitoem2_progress_demo",
-            "directory_path": os.getenv(
-                "PYTC_INITIAL_PROJECT_ROOT",
-                "/home/weidf/demo_data/mitoem2_progress_demo",
-            ),
+            "directory_path": "/home/weidf/demo_data/mitoem2_progress_demo",
             "description": "MitoEM2.0 progress demo with curated, draft, and missing segmentations.",
-            "recommended": True,
+            "recommended": False,
             "context_hints": {
                 "imaging_modality": "EM / ssSEM",
                 "target_structure": "mitochondria",
@@ -119,24 +134,6 @@ def _project_suggestion_candidates() -> List[dict]:
                 "target_structure": "mitochondria",
                 "task_goal": "segmentation",
                 "optimization_priority": "accuracy",
-            },
-        },
-        {
-            "id": "yixiao-tapereader-xri-case-study",
-            "name": "yixiao_tapereader_xri_case_study",
-            "directory_path": "/home/weidf/demo_data/yixiao_tapereader_xri_case_study",
-            "description": "Yixiao TapeReader XRI fibre segmentation case study with GT, draft, and image-only volumes.",
-            "recommended": False,
-            "context_hints": {
-                "imaging_modality": "X-ray / XRI volumetric microscopy",
-                "target_structure": "CytoTape fibres",
-                "task_family": "XRI fibre instance segmentation",
-                "mask_status": "mixed: some masks, some image-only volumes",
-                "image_only_strategy": "run inference on image-only volumes later",
-                "training_policy": "train only on confirmed ground-truth masks",
-                "task_goal": "instance segmentation, proofreading, and model retraining",
-                "optimization_priority": "paper-faithful workflow coordination",
-                "voxel_size_nm": [40, 16.3, 16.3],
             },
         },
         {

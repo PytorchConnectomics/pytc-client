@@ -11,6 +11,14 @@ import {
   setTrainingOutputPath,
 } from "./configSchema";
 
+const API_LEGACY_PREFIXES = [
+  "/api/workflows",
+  "/api/files",
+  "/api/app",
+];
+
+const removeTrailingSlash = (value) => value.replace(/\/+$/, "");
+
 const getDefaultBaseUrl = () => {
   if (
     typeof window !== "undefined" &&
@@ -23,7 +31,81 @@ const getDefaultBaseUrl = () => {
   return `${process.env.REACT_APP_SERVER_PROTOCOL || "http"}://${process.env.REACT_APP_SERVER_URL || "localhost:4242"}`;
 };
 
-const BASE_URL = process.env.REACT_APP_API_BASE_URL || getDefaultBaseUrl();
+const BASE_URL = removeTrailingSlash(
+  process.env.REACT_APP_API_BASE_URL || getDefaultBaseUrl(),
+);
+
+const getBasePath = (baseUrl) => {
+  if (!baseUrl) return "";
+  const protocolMatch = baseUrl.match(/^[a-z][a-z\d+\-.]*:\/\//i);
+  if (protocolMatch && protocolMatch.index === 0) {
+    try {
+      return new URL(baseUrl).pathname || "";
+    } catch {}
+  }
+
+  const originEnd = baseUrl.indexOf("/");
+  return originEnd === -1 ? "" : baseUrl.slice(originEnd);
+};
+
+const BASE_PATH = getBasePath(BASE_URL);
+const getLegacyApiBasePrefix = (basePath) => {
+  const candidates = [...API_LEGACY_PREFIXES, "/api"];
+  return candidates.find(
+    (prefix) =>
+      basePath === prefix ||
+      basePath.startsWith(`${prefix}/`) ||
+      basePath.startsWith(`${prefix}?`) ||
+      basePath.startsWith(`${prefix}#`),
+  ) || null;
+};
+
+const BASE_LEGACY_API_PREFIX =
+  getLegacyApiBasePrefix(BASE_PATH) || getLegacyApiBasePrefix(BASE_URL);
+
+const shouldStripLegacyApiPrefix = (path) => {
+  const normalizedPath = path.startsWith("/")
+    ? path
+    : `/${String(path || "")}`;
+
+  if (!BASE_LEGACY_API_PREFIX) return false;
+  if (BASE_LEGACY_API_PREFIX === "/api") {
+    return (
+      normalizedPath === "/api" ||
+      normalizedPath.startsWith("/api/") ||
+      normalizedPath.startsWith("/api?") ||
+      normalizedPath.startsWith("/api#")
+    );
+  }
+
+  return (
+    normalizedPath === BASE_LEGACY_API_PREFIX ||
+    normalizedPath.startsWith(`${BASE_LEGACY_API_PREFIX}/`) ||
+    normalizedPath.startsWith(`${BASE_LEGACY_API_PREFIX}?`) ||
+    normalizedPath.startsWith(`${BASE_LEGACY_API_PREFIX}#`)
+  );
+};
+
+const canonicalizeApiPath = (path) => {
+  const normalized = String(path || "");
+  const match = normalized.match(/^([^?#]*)([?#].*)?$/);
+  const rawPath = match?.[1] || "";
+  const suffix = match?.[2] || "";
+  const normalizedPath = rawPath.startsWith("/") ? rawPath : `/${rawPath}`;
+
+  if (!shouldStripLegacyApiPrefix(normalizedPath)) {
+    return `${normalizedPath}${suffix}`;
+  }
+
+  const stripLength = BASE_LEGACY_API_PREFIX?.length || 0;
+  const deduped = normalizedPath.length > stripLength
+    ? normalizedPath.slice(stripLength)
+    : "/";
+  return `${deduped}${suffix}`;
+};
+
+export const buildApiUrl = (path) => `${BASE_URL}${canonicalizeApiPath(path)}`;
+
 const DEBUG_API_LOGS =
   process.env.REACT_APP_DEBUG_API_LOGS === "1" ||
   process.env.REACT_APP_DEBUG_API_LOGS === "true";
@@ -178,7 +260,7 @@ const getErrorDetailMessage = (detail) => {
 
 export async function getNeuroglancerViewer(image, label, scales, workflowId = null) {
   try {
-    const url = `${BASE_URL}/neuroglancer`;
+    const url = buildApiUrl("/neuroglancer");
     if (hasBrowserFile(image)) {
       const formData = new FormData();
       formData.append(
@@ -224,7 +306,7 @@ export async function getNeuroglancerProofreadingViewer({
   initialVoxel = null,
 } = {}) {
   try {
-    const url = `${BASE_URL}/neuroglancer/proofread`;
+    const url = buildApiUrl("/neuroglancer/proofread");
     const res = await axios.post(
       url,
       JSON.stringify({
@@ -249,13 +331,16 @@ export async function getInstanceVolumePreview(
   maxPoints = 30000,
 ) {
   try {
-    const res = await apiClient.get("/eh/detection/instance-volume-preview", {
-      params: {
-        session_id: sessionId,
-        instance_id: instanceId,
-        max_points: maxPoints,
+    const res = await apiClient.get(
+      canonicalizeApiPath("/eh/detection/instance-volume-preview"),
+      {
+        params: {
+          session_id: sessionId,
+          instance_id: instanceId,
+          max_points: maxPoints,
+        },
       },
-    });
+    );
     return res.data;
   } catch (error) {
     handleError(error);
@@ -268,13 +353,16 @@ export async function getInstanceMeshPreview(
   maxFaces = 60000,
 ) {
   try {
-    const res = await apiClient.get("/eh/detection/instance-mesh-preview", {
-      params: {
-        session_id: sessionId,
-        instance_id: instanceId,
-        max_faces: maxFaces,
+    const res = await apiClient.get(
+      canonicalizeApiPath("/eh/detection/instance-mesh-preview"),
+      {
+        params: {
+          session_id: sessionId,
+          instance_id: instanceId,
+          max_faces: maxFaces,
+        },
       },
-    });
+    );
     return res.data;
   } catch (error) {
     handleError(error);
@@ -283,7 +371,7 @@ export async function getInstanceMeshPreview(
 
 export async function checkFile(file) {
   try {
-    const url = `${BASE_URL}/check_files`;
+    const url = buildApiUrl("/check_files");
     const data = JSON.stringify({
       folderPath: file.folderPath || "",
       name: file.name,
@@ -309,7 +397,7 @@ function handleError(error) {
 
 export async function makeApiRequest(url, method, data = null) {
   try {
-    const fullUrl = `${BASE_URL}/${url}`;
+    const fullUrl = buildApiUrl(url);
     const config = {
       method,
       url: fullUrl,
@@ -426,7 +514,7 @@ export async function startModelTraining(
 
 export async function stopModelTraining() {
   try {
-    await axios.post(`${BASE_URL}/stop_model_training`);
+    await axios.post(buildApiUrl("/stop_model_training"));
   } catch (error) {
     handleError(error);
   }
@@ -434,7 +522,7 @@ export async function stopModelTraining() {
 
 export async function getTrainingStatus() {
   try {
-    const res = await axios.get(`${BASE_URL}/training_status`);
+    const res = await axios.get(buildApiUrl("/training_status"));
     return res.data;
   } catch (error) {
     handleError(error);
@@ -443,7 +531,7 @@ export async function getTrainingStatus() {
 
 export async function getTrainingLogs() {
   try {
-    const res = await axios.get(`${BASE_URL}/training_logs`);
+    const res = await axios.get(buildApiUrl("/training_logs"));
     return res.data;
   } catch (error) {
     handleError(error);
@@ -608,7 +696,7 @@ export async function startModelInference(
 
 export async function getInferenceStatus() {
   try {
-    const res = await axios.get(`${BASE_URL}/inference_status`);
+    const res = await axios.get(buildApiUrl("/inference_status"));
     return res.data;
   } catch (error) {
     handleError(error);
@@ -617,7 +705,7 @@ export async function getInferenceStatus() {
 
 export async function getInferenceLogs() {
   try {
-    const res = await axios.get(`${BASE_URL}/inference_logs`);
+    const res = await axios.get(buildApiUrl("/inference_logs"));
     return res.data;
   } catch (error) {
     handleError(error);
@@ -627,7 +715,7 @@ export async function getInferenceLogs() {
 export async function syncWorkflowInferenceRuntime(workflowId, body = {}) {
   try {
     const res = await apiClient.post(
-      `/api/workflows/${workflowId}/sync-inference-runtime`,
+      canonicalizeApiPath(`/api/workflows/${workflowId}/sync-inference-runtime`),
       body,
     );
     return res.data;
@@ -638,7 +726,7 @@ export async function syncWorkflowInferenceRuntime(workflowId, body = {}) {
 
 export async function stopModelInference() {
   try {
-    await axios.post(`${BASE_URL}/stop_model_inference`);
+    await axios.post(buildApiUrl("/stop_model_inference"));
   } catch (error) {
     handleError(error);
   }
@@ -646,7 +734,7 @@ export async function stopModelInference() {
 
 export async function queryChatBot(query, conversationId) {
   try {
-    const res = await axios.post(`${BASE_URL}/chat/query`, {
+    const res = await axios.post(buildApiUrl("/chat/query"), {
       query,
       conversationId,
     });
@@ -658,7 +746,7 @@ export async function queryChatBot(query, conversationId) {
 
 export async function clearChat() {
   try {
-    await axios.post(`${BASE_URL}/chat/clear`);
+    await axios.post(buildApiUrl("/chat/clear"));
   } catch (error) {
     handleError(error);
   }
@@ -668,7 +756,7 @@ export async function clearChat() {
 
 export async function listConversations() {
   try {
-    const res = await axios.get(`${BASE_URL}/chat/conversations`);
+    const res = await axios.get(buildApiUrl("/chat/conversations"));
     return res.data;
   } catch (error) {
     handleError(error);
@@ -677,7 +765,7 @@ export async function listConversations() {
 
 export async function createConversation() {
   try {
-    const res = await axios.post(`${BASE_URL}/chat/conversations`);
+    const res = await axios.post(buildApiUrl("/chat/conversations"));
     return res.data;
   } catch (error) {
     handleError(error);
@@ -686,7 +774,9 @@ export async function createConversation() {
 
 export async function getConversation(convoId) {
   try {
-    const res = await axios.get(`${BASE_URL}/chat/conversations/${convoId}`);
+    const res = await axios.get(
+      buildApiUrl(`/chat/conversations/${convoId}`),
+    );
     return res.data;
   } catch (error) {
     handleError(error);
@@ -695,7 +785,7 @@ export async function getConversation(convoId) {
 
 export async function deleteConversation(convoId) {
   try {
-    await axios.delete(`${BASE_URL}/chat/conversations/${convoId}`);
+    await axios.delete(buildApiUrl(`/chat/conversations/${convoId}`));
   } catch (error) {
     handleError(error);
   }
@@ -703,9 +793,10 @@ export async function deleteConversation(convoId) {
 
 export async function updateConversationTitle(convoId, title) {
   try {
-    const res = await axios.patch(`${BASE_URL}/chat/conversations/${convoId}`, {
-      title,
-    });
+    const res = await axios.patch(
+      buildApiUrl(`/chat/conversations/${convoId}`),
+      { title },
+    );
     return res.data;
   } catch (error) {
     handleError(error);
@@ -714,7 +805,7 @@ export async function updateConversationTitle(convoId, title) {
 
 export async function queryHelperChat(taskKey, query, fieldContext, history = []) {
   try {
-    const res = await axios.post(`${BASE_URL}/chat/helper/query`, {
+    const res = await axios.post(buildApiUrl("/chat/helper/query"), {
       taskKey,
       query,
       fieldContext,
@@ -728,7 +819,7 @@ export async function queryHelperChat(taskKey, query, fieldContext, history = []
 
 export async function clearHelperChat(taskKey) {
   try {
-    await axios.post(`${BASE_URL}/chat/helper/clear`, { taskKey });
+    await axios.post(buildApiUrl("/chat/helper/clear"), { taskKey });
   } catch (error) {
     handleError(error);
   }
@@ -753,7 +844,7 @@ export async function mountProjectDirectory({
   destinationPath = "root",
 }) {
   try {
-    const res = await apiClient.post("/files/mount", {
+    const res = await apiClient.post(canonicalizeApiPath("/files/mount"), {
       directory_path: directoryPath,
       mount_name: mountName,
       destination_path: destinationPath,
@@ -766,7 +857,7 @@ export async function mountProjectDirectory({
 
 export async function resetFileWorkspace() {
   try {
-    const res = await apiClient.delete("/files/workspace");
+    const res = await apiClient.delete(canonicalizeApiPath("/files/workspace"));
     return res.data;
   } catch (error) {
     handleError(error);
@@ -777,7 +868,9 @@ export async function resetFileWorkspace() {
 
 export async function getCurrentWorkflow() {
   try {
-    const res = await apiClient.get("/api/workflows/current");
+    const res = await apiClient.get(
+      canonicalizeApiPath("/api/workflows/current"),
+    );
     return res.data;
   } catch (error) {
     handleError(error);
@@ -786,7 +879,10 @@ export async function getCurrentWorkflow() {
 
 export async function updateWorkflow(workflowId, patch) {
   try {
-    const res = await apiClient.patch(`/api/workflows/${workflowId}`, patch);
+    const res = await apiClient.patch(
+      canonicalizeApiPath(`/api/workflows/${workflowId}`),
+      patch,
+    );
     return res.data;
   } catch (error) {
     handleError(error);
@@ -795,7 +891,9 @@ export async function updateWorkflow(workflowId, patch) {
 
 export async function listWorkflowEvents(workflowId) {
   try {
-    const res = await apiClient.get(`/api/workflows/${workflowId}/events`);
+    const res = await apiClient.get(
+      canonicalizeApiPath(`/api/workflows/${workflowId}/events`),
+    );
     return res.data;
   } catch (error) {
     handleError(error);
@@ -804,7 +902,9 @@ export async function listWorkflowEvents(workflowId) {
 
 export async function getWorkflowHotspots(workflowId) {
   try {
-    const res = await apiClient.get(`/api/workflows/${workflowId}/hotspots`);
+    const res = await apiClient.get(
+      canonicalizeApiPath(`/api/workflows/${workflowId}/hotspots`),
+    );
     return res.data;
   } catch (error) {
     handleError(error);
@@ -813,7 +913,9 @@ export async function getWorkflowHotspots(workflowId) {
 
 export async function getWorkflowImpactPreview(workflowId) {
   try {
-    const res = await apiClient.get(`/api/workflows/${workflowId}/impact-preview`);
+    const res = await apiClient.get(
+      canonicalizeApiPath(`/api/workflows/${workflowId}/impact-preview`),
+    );
     return res.data;
   } catch (error) {
     handleError(error);
@@ -822,7 +924,9 @@ export async function getWorkflowImpactPreview(workflowId) {
 
 export async function getWorkflowMetrics(workflowId) {
   try {
-    const res = await apiClient.get(`/api/workflows/${workflowId}/metrics`);
+    const res = await apiClient.get(
+      canonicalizeApiPath(`/api/workflows/${workflowId}/metrics`),
+    );
     return res.data;
   } catch (error) {
     handleError(error);
@@ -831,7 +935,9 @@ export async function getWorkflowMetrics(workflowId) {
 
 export async function getWorkflowProjectProgress(workflowId) {
   try {
-    const res = await apiClient.get(`/api/workflows/${workflowId}/project-progress`);
+    const res = await apiClient.get(
+      canonicalizeApiPath(`/api/workflows/${workflowId}/project-progress`),
+    );
     return res.data;
   } catch (error) {
     handleError(error);
@@ -840,9 +946,12 @@ export async function getWorkflowProjectProgress(workflowId) {
 
 export async function getWorkflowOverview(workflowId, { refresh = true } = {}) {
   try {
-    const res = await apiClient.get(`/api/workflows/${workflowId}/overview`, {
-      params: { refresh },
-    });
+    const res = await apiClient.get(
+      canonicalizeApiPath(`/api/workflows/${workflowId}/overview`),
+      {
+        params: { refresh },
+      },
+    );
     return res.data;
   } catch (error) {
     handleError(error);
@@ -852,7 +961,7 @@ export async function getWorkflowOverview(workflowId, { refresh = true } = {}) {
 export async function updateWorkflowProjectProgressVolume(workflowId, body) {
   try {
     const res = await apiClient.post(
-      `/api/workflows/${workflowId}/project-progress/volume-status`,
+      canonicalizeApiPath(`/api/workflows/${workflowId}/project-progress/volume-status`),
       body,
     );
     return res.data;
@@ -864,7 +973,7 @@ export async function updateWorkflowProjectProgressVolume(workflowId, body) {
 export async function getWorkflowAgentRecommendation(workflowId) {
   try {
     const res = await apiClient.get(
-      `/api/workflows/${workflowId}/agent/recommendation`,
+      canonicalizeApiPath(`/api/workflows/${workflowId}/agent/recommendation`),
     );
     return res.data;
   } catch (error) {
@@ -874,7 +983,9 @@ export async function getWorkflowAgentRecommendation(workflowId) {
 
 export async function getWorkflowPreflight(workflowId) {
   try {
-    const res = await apiClient.get(`/api/workflows/${workflowId}/preflight`);
+    const res = await apiClient.get(
+      canonicalizeApiPath(`/api/workflows/${workflowId}/preflight`),
+    );
     return res.data;
   } catch (error) {
     handleError(error);
@@ -883,7 +994,9 @@ export async function getWorkflowPreflight(workflowId) {
 
 export async function listWorkflowArtifacts(workflowId) {
   try {
-    const res = await apiClient.get(`/api/workflows/${workflowId}/artifacts`);
+    const res = await apiClient.get(
+      canonicalizeApiPath(`/api/workflows/${workflowId}/artifacts`),
+    );
     return res.data;
   } catch (error) {
     handleError(error);
@@ -892,7 +1005,9 @@ export async function listWorkflowArtifacts(workflowId) {
 
 export async function listWorkflowModelRuns(workflowId) {
   try {
-    const res = await apiClient.get(`/api/workflows/${workflowId}/model-runs`);
+    const res = await apiClient.get(
+      canonicalizeApiPath(`/api/workflows/${workflowId}/model-runs`),
+    );
     return res.data;
   } catch (error) {
     handleError(error);
@@ -901,7 +1016,9 @@ export async function listWorkflowModelRuns(workflowId) {
 
 export async function listWorkflowModelVersions(workflowId) {
   try {
-    const res = await apiClient.get(`/api/workflows/${workflowId}/model-versions`);
+    const res = await apiClient.get(
+      canonicalizeApiPath(`/api/workflows/${workflowId}/model-versions`),
+    );
     return res.data;
   } catch (error) {
     handleError(error);
@@ -910,7 +1027,9 @@ export async function listWorkflowModelVersions(workflowId) {
 
 export async function listWorkflowCorrectionSets(workflowId) {
   try {
-    const res = await apiClient.get(`/api/workflows/${workflowId}/correction-sets`);
+    const res = await apiClient.get(
+      canonicalizeApiPath(`/api/workflows/${workflowId}/correction-sets`),
+    );
     return res.data;
   } catch (error) {
     handleError(error);
@@ -920,7 +1039,7 @@ export async function listWorkflowCorrectionSets(workflowId) {
 export async function listWorkflowEvaluationResults(workflowId) {
   try {
     const res = await apiClient.get(
-      `/api/workflows/${workflowId}/evaluation-results`,
+      canonicalizeApiPath(`/api/workflows/${workflowId}/evaluation-results`),
     );
     return res.data;
   } catch (error) {
@@ -931,7 +1050,9 @@ export async function listWorkflowEvaluationResults(workflowId) {
 export async function computeWorkflowEvaluationResult(workflowId, body) {
   try {
     const res = await apiClient.post(
-      `/api/workflows/${workflowId}/evaluation-results/compute`,
+      canonicalizeApiPath(
+        `/api/workflows/${workflowId}/evaluation-results/compute`,
+      ),
       body,
     );
     return res.data;
@@ -942,7 +1063,9 @@ export async function computeWorkflowEvaluationResult(workflowId, body) {
 
 export async function exportWorkflowBundle(workflowId) {
   try {
-    const res = await apiClient.post(`/api/workflows/${workflowId}/export-bundle`);
+    const res = await apiClient.post(
+      canonicalizeApiPath(`/api/workflows/${workflowId}/export-bundle`),
+    );
     return res.data;
   } catch (error) {
     handleError(error);
@@ -951,7 +1074,10 @@ export async function exportWorkflowBundle(workflowId) {
 
 export async function startNewWorkflow(body = {}) {
   try {
-    const res = await apiClient.post("/api/workflows/current/reset", body);
+    const res = await apiClient.post(
+      canonicalizeApiPath("/api/workflows/current/reset"),
+      body,
+    );
     return res.data;
   } catch (error) {
     handleError(error);
@@ -960,7 +1086,10 @@ export async function startNewWorkflow(body = {}) {
 
 export async function appendWorkflowEvent(workflowId, event) {
   try {
-    const res = await apiClient.post(`/api/workflows/${workflowId}/events`, event);
+    const res = await apiClient.post(
+      canonicalizeApiPath(`/api/workflows/${workflowId}/events`),
+      event,
+    );
     return res.data;
   } catch (error) {
     handleError(error);
@@ -970,7 +1099,7 @@ export async function appendWorkflowEvent(workflowId, event) {
 export async function createAgentAction(workflowId, action) {
   try {
     const res = await apiClient.post(
-      `/api/workflows/${workflowId}/agent-actions`,
+      canonicalizeApiPath(`/api/workflows/${workflowId}/agent-actions`),
       action,
     );
     return res.data;
@@ -984,7 +1113,9 @@ export async function approveAgentAction(workflowId, eventId, overrides = {}) {
     const hasOverrides =
       overrides && typeof overrides === "object" && Object.keys(overrides).length > 0;
     const res = await apiClient.post(
-      `/api/workflows/${workflowId}/agent-actions/${eventId}/approve`,
+      canonicalizeApiPath(
+        `/api/workflows/${workflowId}/agent-actions/${eventId}/approve`,
+      ),
       hasOverrides ? { overrides } : undefined,
     );
     return res.data;
@@ -996,7 +1127,7 @@ export async function approveAgentAction(workflowId, eventId, overrides = {}) {
 export async function runWorkflowCommand(workflowId, commandId) {
   try {
     const res = await apiClient.post(
-      `/api/workflows/${workflowId}/commands/${commandId}/run`,
+      canonicalizeApiPath(`/api/workflows/${workflowId}/commands/${commandId}/run`),
     );
     return res.data;
   } catch (error) {
@@ -1007,7 +1138,9 @@ export async function runWorkflowCommand(workflowId, commandId) {
 export async function rejectAgentAction(workflowId, eventId) {
   try {
     const res = await apiClient.post(
-      `/api/workflows/${workflowId}/agent-actions/${eventId}/reject`,
+      canonicalizeApiPath(
+        `/api/workflows/${workflowId}/agent-actions/${eventId}/reject`,
+      ),
     );
     return res.data;
   } catch (error) {
@@ -1017,10 +1150,13 @@ export async function rejectAgentAction(workflowId, eventId) {
 
 export async function queryWorkflowAgent(workflowId, query, conversationId = null) {
   try {
-    const res = await apiClient.post(`/api/workflows/${workflowId}/agent/query`, {
-      query,
-      conversation_id: conversationId,
-    });
+    const res = await apiClient.post(
+      canonicalizeApiPath(`/api/workflows/${workflowId}/agent/query`),
+      {
+        query,
+        conversation_id: conversationId,
+      },
+    );
     return res.data;
   } catch (error) {
     handleError(error);
@@ -1030,7 +1166,7 @@ export async function queryWorkflowAgent(workflowId, query, conversationId = nul
 export async function getWorkflowAgentConversation(workflowId) {
   try {
     const res = await apiClient.get(
-      `/api/workflows/${workflowId}/agent/conversation`,
+      canonicalizeApiPath(`/api/workflows/${workflowId}/agent/conversation`),
     );
     return res.data;
   } catch (error) {

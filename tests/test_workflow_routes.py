@@ -1714,6 +1714,71 @@ class WorkflowRouteTests(unittest.TestCase):
         self.assertEqual(project_context["target_structure"], "mitochondria")
         self.assertEqual(project_context["optimization_priority"], "speed")
 
+    def test_agent_volume_id_question_does_not_mutate_project_context(self):
+        workflow, _ = self._current_workflow()
+        workflow_id = workflow["id"]
+        patch_response = self.client.patch(
+            f"/api/workflows/{workflow_id}",
+            json={
+                "title": "Yixiao TapeReader XRI Case Study",
+                "stage": "visualization",
+                "dataset_path": "/projects/yixiao",
+                "metadata": {
+                    "project_context": {
+                        "imaging_modality": "X-ray / XRI volumetric microscopy",
+                        "target_structure": "CytoTape fibres",
+                        "voxel_size_nm": [40, 16.3, 16.3],
+                        "training_policy": "train only on confirmed ground-truth masks",
+                    }
+                },
+            },
+        )
+        self.assertEqual(patch_response.status_code, 200)
+
+        response = self.client.post(
+            f"/api/workflows/{workflow_id}/agent/query",
+            json={"query": "Why did you leave out 5_1, 5_2, 6_1, and 6_2?"},
+        )
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertNotEqual(payload["intent"], "project_context_updated")
+
+        current_workflow, _ = self._current_workflow()
+        project_context = current_workflow["metadata"]["project_context"]
+        self.assertEqual(project_context["voxel_size_nm"], [40, 16.3, 16.3])
+        self.assertNotEqual(project_context["voxel_size_nm"], [5, 1, 5])
+
+    def test_project_progress_response_names_volume_groups(self):
+        response = workflows_router_module._format_project_progress_response(
+            {
+                "summary": {
+                    "tracked_total": 10,
+                    "ground_truth": 6,
+                    "needs_proofreading": 2,
+                    "missing_segmentation": 2,
+                    "completion_pct": 60.0,
+                },
+                "volumes": [
+                    {"name": "1-xri_raw.tif", "status": "ground_truth"},
+                    {"name": "5_1-xri-raw.tif", "status": "needs_proofreading"},
+                    {"name": "5_2-xri_raw.tif", "status": "needs_proofreading"},
+                    {"name": "6_1-xri_raw.tif", "status": "missing_segmentation"},
+                    {"name": "6_2-xri-raw.tif", "status": "missing_segmentation"},
+                ],
+            }
+        )
+
+        self.assertIn("ready for training: 1-xri_raw.tif", response)
+        self.assertIn(
+            "proofread before training: 5_1-xri-raw.tif, 5_2-xri_raw.tif",
+            response,
+        )
+        self.assertIn(
+            "image-only/inference targets: 6_1-xri_raw.tif, 6_2-xri-raw.tif",
+            response,
+        )
+
     def test_agent_handles_repair_language_without_repeating_recommendation_cards(self):
         workflow, _ = self._current_workflow()
         workflow_id = workflow["id"]
