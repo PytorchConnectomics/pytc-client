@@ -20,7 +20,9 @@ jest.mock("antd", () => ({
   Space: ({ children }) => <div>{children}</div>,
   Tag: ({ children, ...props }) => <span {...props}>{children}</span>,
   Typography: {
-    Text: ({ children, strong, type, ...props }) => <span {...props}>{children}</span>,
+    Text: ({ children, strong, type, ...props }) => (
+      <span {...props}>{children}</span>
+    ),
   },
 }));
 
@@ -125,7 +127,9 @@ describe("AgentProposalCard", () => {
     );
 
     expect(
-      screen.getByText("specialist_inference_validation_and_retraining_review_pipeline").className,
+      screen.getByText(
+        "specialist_inference_validation_and_retraining_review_pipeline",
+      ).className,
     ).toContain("workflow-proposal-card__type-tag");
     expect(screen.getByText("Inference Specialist")).toBeTruthy();
     expect(screen.getByText("bar")).toBeTruthy();

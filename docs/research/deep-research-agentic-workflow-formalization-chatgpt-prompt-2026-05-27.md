@@ -306,12 +306,13 @@ Answer in concrete, implementation-oriented terms.
    - no hidden arbitrary shell execution.
 
 10. How should the system be evaluated for a paper?
-   - defensible claims;
-   - participant tasks;
-   - baselines;
-   - metrics;
-   - qualitative evidence;
-   - claims to avoid.
+
+- defensible claims;
+- participant tasks;
+- baselines;
+- metrics;
+- qualitative evidence;
+- claims to avoid.
 
 ## Literature And Systems Areas To Review
 
@@ -440,7 +441,7 @@ Cover:
 Use a table:
 
 | Principle | Evidence | App Implication | Priority |
-|---|---|---|---|
+| --------- | -------- | --------------- | -------- |
 
 Each row must cite real papers/docs/systems.
 

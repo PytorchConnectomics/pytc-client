@@ -1,4 +1,10 @@
-import React, { useCallback, useContext, useEffect, useRef, useState } from "react";
+import React, {
+  useCallback,
+  useContext,
+  useEffect,
+  useRef,
+  useState,
+} from "react";
 import { Button, Space } from "antd";
 import {
   getInferenceLogs,
@@ -11,7 +17,10 @@ import RuntimeLogPanel from "../components/RuntimeLogPanel";
 import StageHeader from "../components/workflow/StageHeader";
 import { AppContext } from "../contexts/GlobalContext";
 import { useWorkflow } from "../contexts/WorkflowContext";
-import { getPathValue, launchInferenceFromContext } from "../runtime/modelLaunch";
+import {
+  getPathValue,
+  launchInferenceFromContext,
+} from "../runtime/modelLaunch";
 
 function ModelInference({ isInferring, setIsInferring }) {
   const context = useContext(AppContext);
@@ -111,7 +120,10 @@ function ModelInference({ isInferring, setIsInferring }) {
                   ? `Model run completed and workflow synced: ${syncResult.outputPath || "prediction artifact captured"} ✓`
                   : "Model run completed successfully; workflow sync is pending. ✓",
               );
-            } else if (status.exitCode !== null && status.exitCode !== undefined) {
+            } else if (
+              status.exitCode !== null &&
+              status.exitCode !== undefined
+            ) {
               console.error("Model run failed.", status);
               setInferenceStatus(
                 `Model run finished with exit code: ${status.exitCode}`,
@@ -169,73 +181,76 @@ function ModelInference({ isInferring, setIsInferring }) {
     workflowId,
   ]);
 
-  const startInferenceRun = useCallback(async (runtimeAction = null) => {
-    let checkpointPath = "";
-    if (isInferring) {
-      setInferenceStatus("A model run is already running.");
-      return;
-    }
-    try {
-      setIsInferring(true);
-      setInferenceStatus("Starting model run...");
-      terminalLoggedRef.current = false;
-
-      checkpointPath = getPathValue(
-        runtimeAction?.overrides?.checkpointPath ?? inference.checkpointPath,
-      );
-
-      const res = await launchInferenceFromContext(
-        context,
-        workflowId,
-        runtimeAction?.overrides || {},
-      );
-      console.log(res);
-      await refreshInferenceLogs();
-      setInferenceStatus("Model run started. Monitoring process...");
-    } catch (e) {
-      console.log(e);
-      setIsInferring(false);
-      if (runtimeAction && appendWorkflowEvent) {
-        await appendWorkflowEvent({
-          actor: "system",
-          event_type: "assistant.command_failed",
-          stage: workflowStage,
-          summary: "Assistant could not start the model run.",
-          payload: {
-            error: e.message || "unknown error",
-            runtime_action: runtimeAction.kind,
-          },
-        });
+  const startInferenceRun = useCallback(
+    async (runtimeAction = null) => {
+      let checkpointPath = "";
+      if (isInferring) {
+        setInferenceStatus("A model run is already running.");
+        return;
       }
-      if (!terminalLoggedRef.current && appendWorkflowEvent) {
-        terminalLoggedRef.current = true;
-        await appendWorkflowEvent({
-          actor: "system",
-          event_type: "inference.failed",
-          stage: workflowStage,
-          summary: "Model run failed to start.",
-          payload: {
-            error: e.message || "unknown error",
-            outputPath: getPathValue(inference.outputPath),
-            checkpointPath,
-          },
-        });
+      try {
+        setIsInferring(true);
+        setInferenceStatus("Starting model run...");
+        terminalLoggedRef.current = false;
+
+        checkpointPath = getPathValue(
+          runtimeAction?.overrides?.checkpointPath ?? inference.checkpointPath,
+        );
+
+        const res = await launchInferenceFromContext(
+          context,
+          workflowId,
+          runtimeAction?.overrides || {},
+        );
+        console.log(res);
+        await refreshInferenceLogs();
+        setInferenceStatus("Model run started. Monitoring process...");
+      } catch (e) {
+        console.log(e);
+        setIsInferring(false);
+        if (runtimeAction && appendWorkflowEvent) {
+          await appendWorkflowEvent({
+            actor: "system",
+            event_type: "assistant.command_failed",
+            stage: workflowStage,
+            summary: "Assistant could not start the model run.",
+            payload: {
+              error: e.message || "unknown error",
+              runtime_action: runtimeAction.kind,
+            },
+          });
+        }
+        if (!terminalLoggedRef.current && appendWorkflowEvent) {
+          terminalLoggedRef.current = true;
+          await appendWorkflowEvent({
+            actor: "system",
+            event_type: "inference.failed",
+            stage: workflowStage,
+            summary: "Model run failed to start.",
+            payload: {
+              error: e.message || "unknown error",
+              outputPath: getPathValue(inference.outputPath),
+              checkpointPath,
+            },
+          });
+        }
+        await refreshInferenceLogs();
+        setInferenceStatus(
+          `Model run error: ${e.message || "Please check console for details."}`,
+        );
       }
-      await refreshInferenceLogs();
-      setInferenceStatus(
-        `Model run error: ${e.message || "Please check console for details."}`,
-      );
-    }
-  }, [
-    appendWorkflowEvent,
-    context,
-    inference.checkpointPath,
-    inference.outputPath,
-    isInferring,
-    setIsInferring,
-    workflowId,
-    workflowStage,
-  ]);
+    },
+    [
+      appendWorkflowEvent,
+      context,
+      inference.checkpointPath,
+      inference.outputPath,
+      isInferring,
+      setIsInferring,
+      workflowId,
+      workflowStage,
+    ],
+  );
 
   useEffect(() => {
     if (pendingRuntimeAction?.kind !== "start_inference") return;

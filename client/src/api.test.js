@@ -74,7 +74,9 @@ describe("api canonicalization", () => {
   });
 
   it("canonicalizes training approval/action paths for base URLs with /api/workflows", () => {
-    const { api, apiClientMock } = loadApiModule("https://demo.example/api/workflows");
+    const { api, apiClientMock } = loadApiModule(
+      "https://demo.example/api/workflows",
+    );
     apiClientMock.post.mockResolvedValue({ data: {} });
 
     api.approveAgentAction(99, 123);
@@ -85,6 +87,9 @@ describe("api canonicalization", () => {
     );
 
     api.runWorkflowCommand(99, 321);
-    expect(apiClientMock.post).toHaveBeenNthCalledWith(2, "/99/commands/321/run");
+    expect(apiClientMock.post).toHaveBeenNthCalledWith(
+      2,
+      "/99/commands/321/run",
+    );
   });
 });

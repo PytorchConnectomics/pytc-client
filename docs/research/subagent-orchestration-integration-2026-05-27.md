@@ -8,15 +8,15 @@ The integration rule is simple: subagent reports are advisory. The main implemen
 
 ## Active Subagents
 
-| Lane | Agent | Scope | Expected Output |
-| --- | --- | --- | --- |
-| Backend State | Turing | Composite volume state and project memory backend | Schema/API transition plan, backcompat map, tests |
-| App Agent Capability | Aristotle | Assistant intent routing, action proposals, response style | Capability matrix, routing gaps, trace/action changes |
-| Action Policy | Volta | Action-card schema, risk tiers, approval gates | Strict action schema, policy table, approval tests |
-| Trace/Evidence | Hume | Structured traces and provenance bundles | Trace schema, ledger/export improvements, tests |
-| UI Workflow | Nietzsche | Onboarding, progress, assistant, action cards | UI streamlining plan for coherent manual-agent handoff |
-| Yixiao Case Study | Dirac | First case-study readiness | Demo arc, negative tests, acceptance checklist |
-| Reliability/QA | James | Prototype release gates | Regression, smoke, stale-state, refresh, failed-run checks |
+| Lane                 | Agent     | Scope                                                      | Expected Output                                            |
+| -------------------- | --------- | ---------------------------------------------------------- | ---------------------------------------------------------- |
+| Backend State        | Turing    | Composite volume state and project memory backend          | Schema/API transition plan, backcompat map, tests          |
+| App Agent Capability | Aristotle | Assistant intent routing, action proposals, response style | Capability matrix, routing gaps, trace/action changes      |
+| Action Policy        | Volta     | Action-card schema, risk tiers, approval gates             | Strict action schema, policy table, approval tests         |
+| Trace/Evidence       | Hume      | Structured traces and provenance bundles                   | Trace schema, ledger/export improvements, tests            |
+| UI Workflow          | Nietzsche | Onboarding, progress, assistant, action cards              | UI streamlining plan for coherent manual-agent handoff     |
+| Yixiao Case Study    | Dirac     | First case-study readiness                                 | Demo arc, negative tests, acceptance checklist             |
+| Reliability/QA       | James     | Prototype release gates                                    | Regression, smoke, stale-state, refresh, failed-run checks |
 
 Reliability/QA was queued after the first wave and wrote `docs/research/subagent-reliability-qa-2026-05-27.md`.
 

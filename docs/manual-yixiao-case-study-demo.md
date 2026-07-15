@@ -42,19 +42,19 @@ Reference pipeline and paper:
 
 Expected app state:
 
-| Item | Expected Value |
-| --- | --- |
-| Project title | `Yixiao TapeReader XRI Case Study` |
-| Imaging modality | X-ray / XRI volumetric microscopy |
-| Target | CytoTape fibres |
-| Voxel size | `40,16.3,16.3` nm in z,y,x |
-| Active image root | `data/raw` |
-| Active label root | `data/seg` |
-| Active config | `configs/TapeReader-Fiber-BCS-AppCompat-Sanity.yaml` |
-| Total volumes | `10` |
-| Fully good ground truth | `6` |
-| Needs proofreading | `2` |
-| No segmentation yet | `2` |
+| Item                    | Expected Value                                       |
+| ----------------------- | ---------------------------------------------------- |
+| Project title           | `Yixiao TapeReader XRI Case Study`                   |
+| Imaging modality        | X-ray / XRI volumetric microscopy                    |
+| Target                  | CytoTape fibres                                      |
+| Voxel size              | `40,16.3,16.3` nm in z,y,x                           |
+| Active image root       | `data/raw`                                           |
+| Active label root       | `data/seg`                                           |
+| Active config           | `configs/TapeReader-Fiber-BCS-AppCompat-Sanity.yaml` |
+| Total volumes           | `10`                                                 |
+| Fully good ground truth | `6`                                                  |
+| Needs proofreading      | `2`                                                  |
+| No segmentation yet     | `2`                                                  |
 
 Volume split:
 
@@ -141,6 +141,7 @@ PY
 ```
 
 Useful defaults are also inferred from env:
+
 - `PYTC_API_BASE`
 - `PYTC_WORKER_PROTOCOL`
 - `PYTC_WORKER_URL`

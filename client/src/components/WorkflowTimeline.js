@@ -1,5 +1,14 @@
 import React, { useMemo, useState } from "react";
-import { Button, Empty, Input, List, Select, Space, Tag, Typography } from "antd";
+import {
+  Button,
+  Empty,
+  Input,
+  List,
+  Select,
+  Space,
+  Tag,
+  Typography,
+} from "antd";
 import { useWorkflow } from "../contexts/WorkflowContext";
 import AgentProposalCard from "./chat/AgentProposalCard";
 import StageHeader from "./workflow/StageHeader";
@@ -39,7 +48,8 @@ const toProposalPayload = (event = {}) => {
     ...(params || {}),
     action_card: rawPayload.action_card || params.action_card || null,
     specialist_agent: rawPayload.specialist_agent || params.specialist_agent,
-    orchestrator_agent: rawPayload.orchestrator_agent || params.orchestrator_agent,
+    orchestrator_agent:
+      rawPayload.orchestrator_agent || params.orchestrator_agent,
     trace: toList(
       params.trace ||
         rawPayload.trace ||
@@ -234,7 +244,10 @@ function WorkflowTimeline({ limit = 8, showFilters = true }) {
                           }}
                           trace={proposalPayload.trace}
                           onApprove={(_proposal, overrides) => {
-                            if (overrides && Object.keys(overrides).length > 0) {
+                            if (
+                              overrides &&
+                              Object.keys(overrides).length > 0
+                            ) {
                               approveAgentAction?.(event.id, overrides);
                               return;
                             }

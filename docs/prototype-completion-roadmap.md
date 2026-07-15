@@ -284,21 +284,22 @@ Run the first fresh app-generated before/after loop:
      model/proofreading screens.
 
 10. Paper alignment
-   - Maintain the paper-claim-vs-implementation matrix.
-   - Maintain a paper/prototype additions matrix.
-   - Keep paper claims honest until the real closed loop works.
-   - Refresh the claim wording after each prototype milestone.
+
+- Maintain the paper-claim-vs-implementation matrix.
+- Maintain a paper/prototype additions matrix.
+- Keep paper claims honest until the real closed loop works.
+- Refresh the claim wording after each prototype milestone.
 
 ## Paper-Claim Risk Register
 
-| Claim Area | Current Status | Overclaim Risk | Required Evidence |
-| --- | --- | --- | --- |
-| Closed-loop improvement | Backend/evaluation path and external prediction input mode exist, real app-generated model loop missing | High | Real app-generated baseline inference, correction, retraining, candidate inference, before/after metrics |
-| Human-controlled agent workflow | Proposal/approval substrate exists | Medium | Visible participant workflow controls and auditable approvals over real actions |
-| Biomedical/connectomics relevance | Mito25 data ingestion works | Medium | Real inference/proofreading/retraining on mito/connectomics artifacts |
-| Bounded autonomy | Researcher-only plan/proposal records exist | Medium | Durable interrupt/resume execution if claimed as operational |
-| Reproducible evidence export | Bundle exists | Low/Medium | Bundle generated from real workflow artifacts and paper figures |
-| SOTA alignment | Research notes/plans exist | Medium | Explicit comparison/baseline or clear positioning against relevant systems |
+| Claim Area                        | Current Status                                                                                          | Overclaim Risk | Required Evidence                                                                                        |
+| --------------------------------- | ------------------------------------------------------------------------------------------------------- | -------------- | -------------------------------------------------------------------------------------------------------- |
+| Closed-loop improvement           | Backend/evaluation path and external prediction input mode exist, real app-generated model loop missing | High           | Real app-generated baseline inference, correction, retraining, candidate inference, before/after metrics |
+| Human-controlled agent workflow   | Proposal/approval substrate exists                                                                      | Medium         | Visible participant workflow controls and auditable approvals over real actions                          |
+| Biomedical/connectomics relevance | Mito25 data ingestion works                                                                             | Medium         | Real inference/proofreading/retraining on mito/connectomics artifacts                                    |
+| Bounded autonomy                  | Researcher-only plan/proposal records exist                                                             | Medium         | Durable interrupt/resume execution if claimed as operational                                             |
+| Reproducible evidence export      | Bundle exists                                                                                           | Low/Medium     | Bundle generated from real workflow artifacts and paper figures                                          |
+| SOTA alignment                    | Research notes/plans exist                                                                              | Medium         | Explicit comparison/baseline or clear positioning against relevant systems                               |
 
 ## Researcher-Only Notes
 

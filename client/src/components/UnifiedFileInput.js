@@ -163,8 +163,7 @@ const UnifiedFileInput = ({
               left: 0,
               right: 0,
               bottom: 0,
-              background:
-                "var(--seg-selection-fill, rgba(63, 55, 201, 0.12))",
+              background: "var(--seg-selection-fill, rgba(63, 55, 201, 0.12))",
               pointerEvents: "none",
               zIndex: 10,
               display: "flex",

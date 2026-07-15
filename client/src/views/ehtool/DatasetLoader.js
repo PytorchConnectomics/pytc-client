@@ -93,7 +93,10 @@ function DatasetLoader({ onLoad, loading, workflow }) {
         display: basename(currentPair.imagePath),
       },
       maskPath: currentPair.maskPath
-        ? { path: currentPair.maskPath, display: basename(currentPair.maskPath) }
+        ? {
+            path: currentPair.maskPath,
+            display: basename(currentPair.maskPath),
+          }
         : undefined,
     });
   };
@@ -107,10 +110,17 @@ function DatasetLoader({ onLoad, loading, workflow }) {
         display: basename(currentPair.imagePath),
       },
       maskPath: currentPair.maskPath
-        ? { path: currentPair.maskPath, display: basename(currentPair.maskPath) }
+        ? {
+            path: currentPair.maskPath,
+            display: basename(currentPair.maskPath),
+          }
         : undefined,
     });
-    onLoad(currentPair.imagePath, currentPair.maskPath, currentPair.projectName);
+    onLoad(
+      currentPair.imagePath,
+      currentPair.maskPath,
+      currentPair.projectName,
+    );
   };
 
   return (
@@ -126,7 +136,10 @@ function DatasetLoader({ onLoad, loading, workflow }) {
       <Space direction="vertical" size={4} style={{ width: "100%" }}>
         <Space align="center">
           <FolderOpenOutlined
-            style={{ color: "var(--seg-accent-primary, #3f37c9)", fontSize: 18 }}
+            style={{
+              color: "var(--seg-accent-primary, #3f37c9)",
+              fontSize: 18,
+            }}
           />
           <Title level={4} style={{ margin: 0 }}>
             What should I proofread?
@@ -155,11 +168,18 @@ function DatasetLoader({ onLoad, loading, workflow }) {
             <Text strong>{currentPair.projectName}</Text>
             <Text type="secondary">
               {basename(currentPair.imagePath)}
-              {currentPair.maskPath ? ` + ${basename(currentPair.maskPath)}` : ""}
+              {currentPair.maskPath
+                ? ` + ${basename(currentPair.maskPath)}`
+                : ""}
             </Text>
           </Space>
           <Space size="small" wrap>
-            <Button size="small" type="primary" onClick={startCurrentPair} loading={loading}>
+            <Button
+              size="small"
+              type="primary"
+              onClick={startCurrentPair}
+              loading={loading}
+            >
               Start with current data
             </Button>
             <Button size="small" onClick={fillCurrentPair}>
@@ -209,9 +229,9 @@ function DatasetLoader({ onLoad, loading, workflow }) {
             htmlType="submit"
             loading={loading}
             icon={<UploadOutlined />}
-          block
-          size="large"
-        >
+            block
+            size="large"
+          >
             Start proofreading
           </Button>
         </Form.Item>

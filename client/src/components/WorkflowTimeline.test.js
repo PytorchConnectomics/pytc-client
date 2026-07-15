@@ -188,9 +188,7 @@ describe("WorkflowTimeline", () => {
 
     expect(screen.getByText("z:12 has repeated failures.")).toBeTruthy();
     expect(
-      screen.getByText(
-        /Corrections are ready to stage\. \(confidence: high\)/,
-      ),
+      screen.getByText(/Corrections are ready to stage\. \(confidence: high\)/),
     ).toBeTruthy();
 
     fireEvent.click(screen.getByText("Refresh Insights"));
@@ -229,12 +227,16 @@ describe("WorkflowTimeline", () => {
       target: { value: "agent" },
     });
     expect(screen.queryByText("Loaded dataset.")).toBeNull();
-    expect(screen.getAllByText("Stage corrected masks.").length).toBeGreaterThan(0);
+    expect(
+      screen.getAllByText("Stage corrected masks.").length,
+    ).toBeGreaterThan(0);
 
     fireEvent.change(screen.getByLabelText("Event type filter"), {
       target: { value: "proposal" },
     });
-    expect(screen.getAllByText("Stage corrected masks.").length).toBeGreaterThan(0);
+    expect(
+      screen.getAllByText("Stage corrected masks.").length,
+    ).toBeGreaterThan(0);
     expect(screen.getByText("Stage Retraining From Corrections")).toBeTruthy();
   });
 
@@ -273,7 +275,9 @@ describe("WorkflowTimeline", () => {
       ],
     });
 
-    const traceToggle = screen.getByRole("button", { name: /Operational trace/ });
+    const traceToggle = screen.getByRole("button", {
+      name: /Operational trace/,
+    });
     fireEvent.click(traceToggle);
     expect(screen.getByText(/Inspected facts/i)).toBeTruthy();
     expect(screen.getByText(/Checked training resources/)).toBeTruthy();

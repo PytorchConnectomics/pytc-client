@@ -11,11 +11,7 @@ import {
   setTrainingOutputPath,
 } from "./configSchema";
 
-const API_LEGACY_PREFIXES = [
-  "/api/workflows",
-  "/api/files",
-  "/api/app",
-];
+const API_LEGACY_PREFIXES = ["/api/workflows", "/api/files", "/api/app"];
 
 const removeTrailingSlash = (value) => value.replace(/\/+$/, "");
 
@@ -51,22 +47,22 @@ const getBasePath = (baseUrl) => {
 const BASE_PATH = getBasePath(BASE_URL);
 const getLegacyApiBasePrefix = (basePath) => {
   const candidates = [...API_LEGACY_PREFIXES, "/api"];
-  return candidates.find(
-    (prefix) =>
-      basePath === prefix ||
-      basePath.startsWith(`${prefix}/`) ||
-      basePath.startsWith(`${prefix}?`) ||
-      basePath.startsWith(`${prefix}#`),
-  ) || null;
+  return (
+    candidates.find(
+      (prefix) =>
+        basePath === prefix ||
+        basePath.startsWith(`${prefix}/`) ||
+        basePath.startsWith(`${prefix}?`) ||
+        basePath.startsWith(`${prefix}#`),
+    ) || null
+  );
 };
 
 const BASE_LEGACY_API_PREFIX =
   getLegacyApiBasePrefix(BASE_PATH) || getLegacyApiBasePrefix(BASE_URL);
 
 const shouldStripLegacyApiPrefix = (path) => {
-  const normalizedPath = path.startsWith("/")
-    ? path
-    : `/${String(path || "")}`;
+  const normalizedPath = path.startsWith("/") ? path : `/${String(path || "")}`;
 
   if (!BASE_LEGACY_API_PREFIX) return false;
   if (BASE_LEGACY_API_PREFIX === "/api") {
@@ -98,9 +94,10 @@ const canonicalizeApiPath = (path) => {
   }
 
   const stripLength = BASE_LEGACY_API_PREFIX?.length || 0;
-  const deduped = normalizedPath.length > stripLength
-    ? normalizedPath.slice(stripLength)
-    : "/";
+  const deduped =
+    normalizedPath.length > stripLength
+      ? normalizedPath.slice(stripLength)
+      : "/";
   return `${deduped}${suffix}`;
 };
 
@@ -185,7 +182,9 @@ const attachApiLogging = (instance, source) => {
           url: response.config?.url,
           status: response.status,
           latencyMs:
-            startedAt !== undefined ? Number((endedAt - startedAt).toFixed(2)) : null,
+            startedAt !== undefined
+              ? Number((endedAt - startedAt).toFixed(2))
+              : null,
         },
       });
       return response;
@@ -206,7 +205,9 @@ const attachApiLogging = (instance, source) => {
           url: config.url,
           status: error.response?.status,
           latencyMs:
-            startedAt !== undefined ? Number((endedAt - startedAt).toFixed(2)) : null,
+            startedAt !== undefined
+              ? Number((endedAt - startedAt).toFixed(2))
+              : null,
           detail: error.response?.data?.detail || null,
         },
       });
@@ -258,7 +259,12 @@ const getErrorDetailMessage = (detail) => {
   return String(detail);
 };
 
-export async function getNeuroglancerViewer(image, label, scales, workflowId = null) {
+export async function getNeuroglancerViewer(
+  image,
+  label,
+  scales,
+  workflowId = null,
+) {
   try {
     const url = buildApiUrl("/neuroglancer");
     if (hasBrowserFile(image)) {
@@ -715,7 +721,9 @@ export async function getInferenceLogs() {
 export async function syncWorkflowInferenceRuntime(workflowId, body = {}) {
   try {
     const res = await apiClient.post(
-      canonicalizeApiPath(`/api/workflows/${workflowId}/sync-inference-runtime`),
+      canonicalizeApiPath(
+        `/api/workflows/${workflowId}/sync-inference-runtime`,
+      ),
       body,
     );
     return res.data;
@@ -774,9 +782,7 @@ export async function createConversation() {
 
 export async function getConversation(convoId) {
   try {
-    const res = await axios.get(
-      buildApiUrl(`/chat/conversations/${convoId}`),
-    );
+    const res = await axios.get(buildApiUrl(`/chat/conversations/${convoId}`));
     return res.data;
   } catch (error) {
     handleError(error);
@@ -803,7 +809,12 @@ export async function updateConversationTitle(convoId, title) {
   }
 }
 
-export async function queryHelperChat(taskKey, query, fieldContext, history = []) {
+export async function queryHelperChat(
+  taskKey,
+  query,
+  fieldContext,
+  history = [],
+) {
   try {
     const res = await axios.post(buildApiUrl("/chat/helper/query"), {
       taskKey,
@@ -893,9 +904,7 @@ export async function savePMData(state) {
 
 export async function resetPMData() {
   try {
-    const res = await apiClient.post(
-      canonicalizeApiPath("/api/pm/data/reset"),
-    );
+    const res = await apiClient.post(canonicalizeApiPath("/api/pm/data/reset"));
     return res.data;
   } catch (error) {
     handleError(error);
@@ -1025,7 +1034,9 @@ export async function getWorkflowOverview(workflowId, { refresh = true } = {}) {
 export async function updateWorkflowProjectProgressVolume(workflowId, body) {
   try {
     const res = await apiClient.post(
-      canonicalizeApiPath(`/api/workflows/${workflowId}/project-progress/volume-status`),
+      canonicalizeApiPath(
+        `/api/workflows/${workflowId}/project-progress/volume-status`,
+      ),
       body,
     );
     return res.data;
@@ -1175,7 +1186,9 @@ export async function createAgentAction(workflowId, action) {
 export async function approveAgentAction(workflowId, eventId, overrides = {}) {
   try {
     const hasOverrides =
-      overrides && typeof overrides === "object" && Object.keys(overrides).length > 0;
+      overrides &&
+      typeof overrides === "object" &&
+      Object.keys(overrides).length > 0;
     const res = await apiClient.post(
       canonicalizeApiPath(
         `/api/workflows/${workflowId}/agent-actions/${eventId}/approve`,
@@ -1191,7 +1204,9 @@ export async function approveAgentAction(workflowId, eventId, overrides = {}) {
 export async function runWorkflowCommand(workflowId, commandId) {
   try {
     const res = await apiClient.post(
-      canonicalizeApiPath(`/api/workflows/${workflowId}/commands/${commandId}/run`),
+      canonicalizeApiPath(
+        `/api/workflows/${workflowId}/commands/${commandId}/run`,
+      ),
     );
     return res.data;
   } catch (error) {
@@ -1212,7 +1227,11 @@ export async function rejectAgentAction(workflowId, eventId) {
   }
 }
 
-export async function queryWorkflowAgent(workflowId, query, conversationId = null) {
+export async function queryWorkflowAgent(
+  workflowId,
+  query,
+  conversationId = null,
+) {
   try {
     const res = await apiClient.post(
       canonicalizeApiPath(`/api/workflows/${workflowId}/agent/query`),

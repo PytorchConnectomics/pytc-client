@@ -28,7 +28,11 @@ import {
 import { apiClient } from "../api";
 import FileTreeSidebar from "../components/FileTreeSidebar";
 import FilePickerModal from "../components/FilePickerModal";
-import { canOpenLocalFile, openLocalFile, revealInFinder } from "../electronApi";
+import {
+  canOpenLocalFile,
+  openLocalFile,
+  revealInFinder,
+} from "../electronApi";
 import { AppContext } from "../contexts/GlobalContext";
 import { useWorkflow } from "../contexts/WorkflowContext";
 import { logClientEvent } from "../logging/appEventLog";
@@ -172,7 +176,8 @@ const extractRoleOverridesFromFeedback = (feedback) => {
     },
     {
       role: "config",
-      pattern: /\b(?:config|preset|yaml)\b[^,;\n]*?\b(?:in|at|is|are|to|=)\s+([^,;\n]+)/i,
+      pattern:
+        /\b(?:config|preset|yaml)\b[^,;\n]*?\b(?:in|at|is|are|to|=)\s+([^,;\n]+)/i,
     },
   ];
 
@@ -237,7 +242,8 @@ const buildProjectSetupFeedbackResult = (setup) => {
     }
   });
 
-  const isQuestion = /\?/.test(feedback) || /^(what|why|which|how)\b/i.test(feedback);
+  const isQuestion =
+    /\?/.test(feedback) || /^(what|why|which|how)\b/i.test(feedback);
   const chosenImage = basename(nextRoles.image);
   const chosenLabel = basename(nextRoles.label);
   let response = "";
@@ -246,7 +252,12 @@ const buildProjectSetupFeedbackResult = (setup) => {
     response = `Updated the mapping. I will use ${chosenImage || "the selected image data"}${
       chosenLabel ? ` with ${chosenLabel}` : ""
     }. Check the fields below before starting.`;
-  } else if (isQuestion && chosenImage && chosenLabel && chosenImage === chosenLabel) {
+  } else if (
+    isQuestion &&
+    chosenImage &&
+    chosenLabel &&
+    chosenImage === chosenLabel
+  ) {
     response = `${chosenImage} appears twice because the image and label folders use the same split name. I mapped image data to the image-side ${chosenImage} folder and masks to the label-side ${chosenLabel} folder.`;
   } else if (isQuestion) {
     response =
@@ -299,7 +310,9 @@ const normalizeVolumeSplitCount = (value) => {
 const formatVolumeSplitText = (summary) => {
   if (!summary) return "";
   const groundTruth = normalizeVolumeSplitCount(summary.ground_truth);
-  const needsProofreading = normalizeVolumeSplitCount(summary.needs_proofreading);
+  const needsProofreading = normalizeVolumeSplitCount(
+    summary.needs_proofreading,
+  );
   const missingSegmentation = normalizeVolumeSplitCount(
     summary.missing_segmentation,
   );
@@ -341,9 +354,7 @@ const getProjectVolumeSplitFromSuggestion = (suggestion) => {
     profile.schema?.manifest?.initial_progress_summary,
     profile.manifest?.initial_progress_summary,
   ].filter(Boolean);
-  const splitFromSummary = candidates
-    .map(formatVolumeSplitText)
-    .find(Boolean);
+  const splitFromSummary = candidates.map(formatVolumeSplitText).find(Boolean);
   if (splitFromSummary) {
     return splitFromSummary;
   }
@@ -351,7 +362,9 @@ const getProjectVolumeSplitFromSuggestion = (suggestion) => {
     profile.context_hints?.mask_status,
     profile.schema?.context_hints?.mask_status,
   ].filter(Boolean);
-  const splitFromMasks = maskHints.map(parseVolumeSplitFromMaskStatusText).find(Boolean);
+  const splitFromMasks = maskHints
+    .map(parseVolumeSplitFromMaskStatusText)
+    .find(Boolean);
   if (splitFromMasks) {
     return splitFromMasks;
   }
@@ -405,7 +418,8 @@ const cleanEditableProjectContext = (context, fallbackDescription = "") => {
   const voxelSizeNm = parseEditableVoxelSizeNm(source.voxel_size_nm);
   if (voxelSizeNm) {
     next.voxel_size_nm = voxelSizeNm;
-    next.voxel_size_source = source.voxel_size_source || "project_setup_confirmation";
+    next.voxel_size_source =
+      source.voxel_size_source || "project_setup_confirmation";
   }
   if (source.use_defaults) {
     next.use_defaults = true;
@@ -431,7 +445,8 @@ const buildProjectContextMetadata = (
   void _existingMetadata;
   const assessment = evaluateProjectContextCompleteness(description, options);
   const contextSource =
-    options.projectContextDraft && typeof options.projectContextDraft === "object"
+    options.projectContextDraft &&
+    typeof options.projectContextDraft === "object"
       ? options.projectContextDraft
       : assessment.context;
   const projectContext = cleanEditableProjectContext(
@@ -490,7 +505,9 @@ const formatAuditFactValue = (fact) => {
 const compactAuditSource = (source) => {
   const text = String(source || "").trim();
   if (!text) return "";
-  return text.replace(/^volume_metadata:/, "").replace(/^content_spot_check:/, "");
+  return text
+    .replace(/^volume_metadata:/, "")
+    .replace(/^content_spot_check:/, "");
 };
 
 const auditFindingStyles = {
@@ -520,7 +537,9 @@ const buildProjectBrief = ({ context, roles, suggestion, volumeSets }) => {
   const labelPath = compactProjectPath(roles?.label || roles?.mask);
   const configPath = compactProjectPath(roles?.config);
   const predictionPath = compactProjectPath(roles?.prediction);
-  const pairCounts = (volumeSets || []).map((set) => Number(set.pair_count || 0));
+  const pairCounts = (volumeSets || []).map((set) =>
+    Number(set.pair_count || 0),
+  );
   const pairCount = pairCounts.length > 0 ? Math.max(...pairCounts) : 0;
   const subject = [modality, target].filter(Boolean).join(" ");
   const summary = subject
@@ -585,7 +604,9 @@ const buildProjectMemoryProfile = ({
 }) => {
   const now = new Date().toISOString();
   return {
-    ...(existingProfile && typeof existingProfile === "object" ? existingProfile : {}),
+    ...(existingProfile && typeof existingProfile === "object"
+      ? existingProfile
+      : {}),
     schema_version: "pytc-project-context/v1",
     project_name: suggestion?.name || "Mounted project",
     project_directory: suggestion?.directory_path || null,
@@ -616,14 +637,17 @@ const GUIDED_PROJECT_CONTEXT_GROUPS = [
   {
     key: "task_family",
     label: "What are we working over?",
-    helper: "Example: XRI fibre instance segmentation, mitochondria segmentation, proofreading masks",
+    helper:
+      "Example: XRI fibre instance segmentation, mitochondria segmentation, proofreading masks",
     placeholder: "XRI fibre instance segmentation",
   },
   {
     key: "mask_status",
     label: "What mask data exists?",
-    helper: "Example: 6 ground-truth masks, 2 draft masks, 2 image-only volumes",
-    placeholder: "mixed: 6 ground-truth masks, 2 draft masks, 2 image-only targets",
+    helper:
+      "Example: 6 ground-truth masks, 2 draft masks, 2 image-only volumes",
+    placeholder:
+      "mixed: 6 ground-truth masks, 2 draft masks, 2 image-only targets",
   },
   {
     key: "image_only_strategy",
@@ -870,11 +894,14 @@ function FilesManager() {
       const normalizedParent = String(parentKey || "root");
       const previousFolders = foldersRef.current;
       const previousFiles = filesRef.current;
-      const { folders: nextFolders, files: nextFiles } = transformFiles(fileList);
+      const { folders: nextFolders, files: nextFiles } =
+        transformFiles(fileList);
       const existingDirectChildIds = previousFolders
         .filter((folder) => folder.parent === normalizedParent)
         .map((folder) => folder.key);
-      const nextDirectChildIds = new Set(nextFolders.map((folder) => folder.key));
+      const nextDirectChildIds = new Set(
+        nextFolders.map((folder) => folder.key),
+      );
       const removedFolderIds = collectDescendantFolderIds(
         previousFolders,
         existingDirectChildIds.filter((id) => !nextDirectChildIds.has(id)),
@@ -883,14 +910,19 @@ function FilesManager() {
       const mergedFolders = [
         ...previousFolders.filter(
           (folder) =>
-            folder.parent !== normalizedParent && !removedFolderIds.has(folder.key),
+            folder.parent !== normalizedParent &&
+            !removedFolderIds.has(folder.key),
         ),
         ...nextFolders,
       ].sort((left, right) => {
         if (left.parent === right.parent) {
-          return String(left.title || "").localeCompare(String(right.title || ""));
+          return String(left.title || "").localeCompare(
+            String(right.title || ""),
+          );
         }
-        return String(left.parent || "").localeCompare(String(right.parent || ""));
+        return String(left.parent || "").localeCompare(
+          String(right.parent || ""),
+        );
       });
 
       const mergedFiles = { ...previousFiles };
@@ -1008,7 +1040,8 @@ function FilesManager() {
           logClientEvent("files_parent_missing_refreshed", {
             level: "WARN",
             source: "files_manager",
-            message: "File index parent was stale; refreshing the root project tree.",
+            message:
+              "File index parent was stale; refreshing the root project tree.",
             data: {
               parent: normalizedParent,
               activeFolder: currentFolderRef.current,
@@ -2076,7 +2109,7 @@ function FilesManager() {
     );
     const volumeSets = getProjectVolumeSetsFromSuggestion(suggestion);
     const projectAudit = getProjectAuditFromSuggestion(suggestion);
-  const storedProjectMemory = await readStoredProjectMemory(
+    const storedProjectMemory = await readStoredProjectMemory(
       suggestion?.directory_path,
     );
     const storedSemanticContext = storedProjectMemory?.semantic_context || {};
@@ -2084,7 +2117,8 @@ function FilesManager() {
       storedSemanticContext.freeform_note ||
       storedProjectMemory?.project_description ||
       "";
-    const projectContextDefaults = getProjectContextDefaultsFromSuggestion(suggestion);
+    const projectContextDefaults =
+      getProjectContextDefaultsFromSuggestion(suggestion);
     const initialProjectContextDraft = getProjectContextDraftWithSharedFacts(
       {
         suggestion,
@@ -2300,10 +2334,7 @@ function FilesManager() {
         ),
         setupStep: shouldAdvance ? "mapping" : "semantic",
         useContextDefaults: useDefaults || current.useContextDefaults,
-        semanticFeedbackTurns: [
-          ...(current.semanticFeedbackTurns || []),
-          turn,
-        ],
+        semanticFeedbackTurns: [...(current.semanticFeedbackTurns || []), turn],
         lastSemanticResponse: shouldAdvance ? "" : response,
       };
     });
@@ -2392,7 +2423,8 @@ function FilesManager() {
 
   const handleConfirmProjectSetup = async () => {
     if (!pendingProjectSetup || projectSetupSaving) return;
-    const { suggestion, roles, source, projectDescription } = pendingProjectSetup;
+    const { suggestion, roles, source, projectDescription } =
+      pendingProjectSetup;
     if (!String(roles.image || "").trim()) {
       message.warning("Choose an image volume before starting the project.");
       return;
@@ -2406,7 +2438,8 @@ function FilesManager() {
     const profile = suggestion?.profile || {};
     const volumeSets = getProjectVolumeSetsFromSuggestion(suggestion);
     const feedbackTurns = pendingProjectSetup.feedbackTurns || [];
-    const semanticFeedbackTurns = pendingProjectSetup.semanticFeedbackTurns || [];
+    const semanticFeedbackTurns =
+      pendingProjectSetup.semanticFeedbackTurns || [];
     const projectDescriptionText = String(projectDescription || "").trim();
     const existingMetadata = workflowContext.workflow?.metadata || {};
     const projectContextMetadata = buildProjectContextMetadata(
@@ -2437,9 +2470,8 @@ function FilesManager() {
           ? {
               ...current,
               setupStep: "semantic",
-              lastSemanticResponse: describeProjectContextAssessment(
-                contextAssessment,
-              ),
+              lastSemanticResponse:
+                describeProjectContextAssessment(contextAssessment),
             }
           : current,
       );
@@ -2701,8 +2733,7 @@ function FilesManager() {
   const renderEditableProjectContextFields = (options = {}) => {
     const {
       title = "Editable project context",
-      description =
-        "These are the concrete assumptions the agent absorbed. Edit or clear each one before starting.",
+      description = "These are the concrete assumptions the agent absorbed. Edit or clear each one before starting.",
       includeNotes = true,
       marginBottom = 12,
     } = options;
@@ -2923,7 +2954,8 @@ function FilesManager() {
     if (!pendingProjectSetup) return null;
     const draft = pendingProjectSetup.projectContextDraft || {};
     const volumeSplit =
-      draft.volume_split || getProjectVolumeSplitFromSuggestion(pendingProjectSetup.suggestion);
+      draft.volume_split ||
+      getProjectVolumeSplitFromSuggestion(pendingProjectSetup.suggestion);
     const factRows = [
       {
         key: "imaging_modality",
@@ -2971,8 +3003,8 @@ function FilesManager() {
           Shared project facts
         </div>
         <div style={{ color: "#6b7280", fontSize: 12, marginBottom: 10 }}>
-          These are the facts the agent will use to interpret this project. Edit or
-          confirm them in the controls below.
+          These are the facts the agent will use to interpret this project. Edit
+          or confirm them in the controls below.
         </div>
         <div
           style={{
@@ -3001,9 +3033,7 @@ function FilesManager() {
               >
                 {fact.label}
               </div>
-              <div style={{ color: "#111827", fontSize: 13 }}>
-                {fact.value}
-              </div>
+              <div style={{ color: "#111827", fontSize: 13 }}>{fact.value}</div>
             </div>
           ))}
         </div>
@@ -3227,7 +3257,9 @@ function FilesManager() {
       context: projectContext,
       roles: pendingProjectSetup.roles,
       suggestion: pendingProjectSetup.suggestion,
-      volumeSets: getProjectVolumeSetsFromSuggestion(pendingProjectSetup.suggestion),
+      volumeSets: getProjectVolumeSetsFromSuggestion(
+        pendingProjectSetup.suggestion,
+      ),
     });
     return (
       <div
@@ -3435,7 +3467,7 @@ function FilesManager() {
       );
       const hasReviewableContext = Boolean(
         String(pendingProjectSetup.projectDescription || "").trim() &&
-          !pendingProjectSetup.lastSemanticResponse,
+        !pendingProjectSetup.lastSemanticResponse,
       );
       const hasCompleteDraft =
         editableProjectContextMissingFields(
@@ -3719,7 +3751,10 @@ function FilesManager() {
   const handleMountProjectDirectory = async () => {
     try {
       if (!canOpenLocalFile()) {
-        await mountProjectPath(DEFAULT_REMOTE_PROJECT_PATH, "remote_default_mount");
+        await mountProjectPath(
+          DEFAULT_REMOTE_PROJECT_PATH,
+          "remote_default_mount",
+        );
         return;
       }
       const selectedDirectory = await openLocalFile({
@@ -3745,7 +3780,8 @@ function FilesManager() {
         : null;
     const suggestion =
       explicitSuggestion ||
-      projectSuggestions.find((item) => item.recommended) || projectSuggestions[0];
+      projectSuggestions.find((item) => item.recommended) ||
+      projectSuggestions[0];
     if (!suggestion) {
       message.info("No suggested local project is available.");
       return;
@@ -3779,7 +3815,8 @@ function FilesManager() {
         {
           ...suggestion,
           already_mounted: true,
-          mounted_root_id: res?.data?.mounted_root_id || suggestion.mounted_root_id,
+          mounted_root_id:
+            res?.data?.mounted_root_id || suggestion.mounted_root_id,
           profile: res?.data?.profile || suggestion.profile || {},
         },
         "suggested_mount",
@@ -3864,10 +3901,7 @@ function FilesManager() {
     };
 
     run();
-  }, [
-    consumeRuntimeAction,
-    pendingRuntimeAction,
-  ]);
+  }, [consumeRuntimeAction, pendingRuntimeAction]);
 
   useEffect(() => {
     const workflowMetadata = workflowContext.workflow?.metadata || {};
@@ -3875,7 +3909,8 @@ function FilesManager() {
     const shouldCollectProjectContext =
       workflowMetadata.needs_project_context || !hasProjectContext;
     const suggestedProject =
-      projectSuggestions.find((item) => item.recommended) || projectSuggestions[0];
+      projectSuggestions.find((item) => item.recommended) ||
+      projectSuggestions[0];
     if (
       autoProjectSetupOpenedRef.current ||
       pendingProjectSetup ||
@@ -4281,12 +4316,12 @@ function FilesManager() {
             currentFiles.length === 0 &&
             currentFolder !== "root" &&
             !newItemType && (
-            <div
-              style={{ width: "100%", marginTop: 64, pointerEvents: "none" }}
-            >
-              <Empty description="Empty Folder" />
-            </div>
-          )}
+              <div
+                style={{ width: "100%", marginTop: 64, pointerEvents: "none" }}
+              >
+                <Empty description="Empty Folder" />
+              </div>
+            )}
           {currentFolders.map((f) => renderItem(f, "folder"))}
           {renderNewFolderPlaceholder()}
           {currentFiles.map((f) => renderItem(f, "file"))}

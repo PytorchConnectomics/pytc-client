@@ -170,7 +170,8 @@ describe("project suggestion utilities", () => {
       getProjectContextDefaultsFromSuggestion({
         id: "yixiao-tapereader-xri-case-study",
         name: "yixiao_tapereader_xri_case_study",
-        directory_path: "/home/weidf/demo_data/yixiao_tapereader_xri_case_study",
+        directory_path:
+          "/home/weidf/demo_data/yixiao_tapereader_xri_case_study",
         description: "Yixiao TapeReader XRI fibre segmentation case study.",
         profile: {
           counts: { image: 10, label: 8, config: 3 },
@@ -219,7 +220,9 @@ describe("project suggestion utilities", () => {
   });
 
   it("does not invent generic defaults from profiled folders", () => {
-    expect(getProjectContextDefaultsFromSuggestion(batchSuggestion)).toEqual({});
+    expect(getProjectContextDefaultsFromSuggestion(batchSuggestion)).toEqual(
+      {},
+    );
     expect(
       getProjectContextDefaultsFromSuggestion({
         name: "prepilot_cremi_official",
@@ -290,18 +293,14 @@ describe("project suggestion utilities", () => {
   });
 
   it("reports missing project context fields deterministically", () => {
-    expect(
-      evaluateProjectContextCompleteness("EM!", {}),
-    ).toEqual(
+    expect(evaluateProjectContextCompleteness("EM!", {})).toEqual(
       expect.objectContaining({
         context: expect.objectContaining({
           imaging_modality: "EM",
         }),
       }),
     );
-    expect(
-      evaluateProjectContextCompleteness("EM mitochondria", {}),
-    ).toEqual(
+    expect(evaluateProjectContextCompleteness("EM mitochondria", {})).toEqual(
       expect.objectContaining({
         complete: false,
         missing: ["imaging resolution"],

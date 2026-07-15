@@ -1,4 +1,10 @@
-import React, { useCallback, useContext, useState, useEffect, useRef } from "react";
+import React, {
+  useCallback,
+  useContext,
+  useState,
+  useEffect,
+  useRef,
+} from "react";
 import { Button, Space, Tag, Typography, message } from "antd";
 import {
   getTrainingLogs,
@@ -12,7 +18,10 @@ import StageHeader from "../components/workflow/StageHeader";
 import { AppContext } from "../contexts/GlobalContext";
 import { useWorkflow } from "../contexts/WorkflowContext";
 import { revealInFinder } from "../electronApi";
-import { getPathValue, launchTrainingFromContext } from "../runtime/modelLaunch";
+import {
+  getPathValue,
+  launchTrainingFromContext,
+} from "../runtime/modelLaunch";
 
 const { Text } = Typography;
 
@@ -48,7 +57,8 @@ function ModelTraining() {
   const setTrainingLogPath = training.setLogPath;
   const setInferenceConfig = context?.setInferenceConfig;
   const setInferenceCheckpointPath = context?.inferenceState?.setCheckpointPath;
-  const setInferenceConfigOriginPath = context?.inferenceState?.setConfigOriginPath;
+  const setInferenceConfigOriginPath =
+    context?.inferenceState?.setConfigOriginPath;
   const setInferenceSelectedYamlPreset =
     context?.inferenceState?.setSelectedYamlPreset;
   const setInferenceUploadedYamlFile =
@@ -114,7 +124,9 @@ function ModelTraining() {
   useEffect(() => {
     const metadata = trainingRuntime?.metadata || {};
     const phase = trainingRuntime?.phase || "idle";
-    if (!["starting", "running", "finished", "failed", "stopped"].includes(phase)) {
+    if (
+      !["starting", "running", "finished", "failed", "stopped"].includes(phase)
+    ) {
       return;
     }
     applyTrainingRunPaths({ metadata });
@@ -178,7 +190,10 @@ function ModelTraining() {
             const nextWorkflow = await updateWorkflow(patch);
             nextStage = nextWorkflow?.stage || "evaluation";
           } catch (error) {
-            console.error("Error updating workflow after training success:", error);
+            console.error(
+              "Error updating workflow after training success:",
+              error,
+            );
             nextStage = "evaluation";
           }
         } else {
@@ -216,7 +231,9 @@ function ModelTraining() {
         );
       } else if (status.exitCode !== null) {
         console.error("Training failed.", status);
-        setTrainingStatus(`Training finished with exit code: ${status.exitCode}`);
+        setTrainingStatus(
+          `Training finished with exit code: ${status.exitCode}`,
+        );
       } else if (status.phase === "failed" && status.lastError) {
         console.error("Training failed.", status);
         setTrainingStatus(`Training failed: ${status.lastError}`);
@@ -246,21 +263,24 @@ function ModelTraining() {
     workflowStage,
   ]);
 
-  const recordTrainingPollingFailure = useCallback(async (error) => {
-    if (!terminalLoggedRef.current && appendWorkflowEvent) {
-      terminalLoggedRef.current = true;
-      await appendWorkflowEvent({
-        actor: "system",
-        event_type: "training.failed",
-        stage: workflowStage,
-        summary: "Training status polling failed.",
-        payload: {
-          error: error.message || "unknown error",
-          outputPath: getPathValue(training.outputPath),
-        },
-      });
-    }
-  }, [appendWorkflowEvent, training.outputPath, workflowStage]);
+  const recordTrainingPollingFailure = useCallback(
+    async (error) => {
+      if (!terminalLoggedRef.current && appendWorkflowEvent) {
+        terminalLoggedRef.current = true;
+        await appendWorkflowEvent({
+          actor: "system",
+          event_type: "training.failed",
+          stage: workflowStage,
+          summary: "Training status polling failed.",
+          payload: {
+            error: error.message || "unknown error",
+            outputPath: getPathValue(training.outputPath),
+          },
+        });
+      }
+    },
+    [appendWorkflowEvent, training.outputPath, workflowStage],
+  );
 
   useEffect(() => {
     refreshTrainingLogs();
@@ -294,57 +314,60 @@ function ModelTraining() {
     };
   }, [isTraining, recordTrainingPollingFailure, refreshTrainingRuntime]);
 
-  const startTrainingRun = useCallback(async (runtimeAction = null) => {
-    if (isTraining) {
-      setTrainingStatus("Training is already running.");
-      return;
-    }
-    try {
-      setIsTraining(true);
-      setTrainingStatus(
-        "Starting training... Please wait, this may take a while.",
-      );
-      terminalLoggedRef.current = false;
-
-      const res = await launchTrainingFromContext(
-        context,
-        workflowId,
-        runtimeAction?.overrides || {},
-      );
-      console.log(res);
-      await refreshTrainingLogs();
-
-      setTrainingStatus(
-        "Training started successfully. Monitoring progress...",
-      );
-    } catch (e) {
-      console.error("Training start error:", e);
-      if (runtimeAction && appendWorkflowEvent) {
-        await appendWorkflowEvent({
-          actor: "system",
-          event_type: "assistant.command_failed",
-          stage: workflowStage,
-          summary: "Assistant could not start training.",
-          payload: {
-            error: e.message || "unknown error",
-            runtime_action: runtimeAction.kind,
-          },
-        });
+  const startTrainingRun = useCallback(
+    async (runtimeAction = null) => {
+      if (isTraining) {
+        setTrainingStatus("Training is already running.");
+        return;
       }
-      await refreshTrainingLogs();
-      setTrainingStatus(
-        `Training error: ${e.message || "Please check console for details."}`,
-      );
-      setIsTraining(false);
-    }
-  }, [
-    appendWorkflowEvent,
-    context,
-    isTraining,
-    refreshTrainingLogs,
-    workflowId,
-    workflowStage,
-  ]);
+      try {
+        setIsTraining(true);
+        setTrainingStatus(
+          "Starting training... Please wait, this may take a while.",
+        );
+        terminalLoggedRef.current = false;
+
+        const res = await launchTrainingFromContext(
+          context,
+          workflowId,
+          runtimeAction?.overrides || {},
+        );
+        console.log(res);
+        await refreshTrainingLogs();
+
+        setTrainingStatus(
+          "Training started successfully. Monitoring progress...",
+        );
+      } catch (e) {
+        console.error("Training start error:", e);
+        if (runtimeAction && appendWorkflowEvent) {
+          await appendWorkflowEvent({
+            actor: "system",
+            event_type: "assistant.command_failed",
+            stage: workflowStage,
+            summary: "Assistant could not start training.",
+            payload: {
+              error: e.message || "unknown error",
+              runtime_action: runtimeAction.kind,
+            },
+          });
+        }
+        await refreshTrainingLogs();
+        setTrainingStatus(
+          `Training error: ${e.message || "Please check console for details."}`,
+        );
+        setIsTraining(false);
+      }
+    },
+    [
+      appendWorkflowEvent,
+      context,
+      isTraining,
+      refreshTrainingLogs,
+      workflowId,
+      workflowStage,
+    ],
+  );
 
   useEffect(() => {
     if (pendingRuntimeAction?.kind !== "start_training") return;
@@ -418,7 +441,10 @@ function ModelTraining() {
       const url = response?.url || response?.tensorboard_url || response;
       if (url && typeof url === "string") {
         context?.setTensorBoardURL?.(url);
-        if (typeof window !== "undefined" && typeof window.open === "function") {
+        if (
+          typeof window !== "undefined" &&
+          typeof window.open === "function"
+        ) {
           window.open(url, "_blank", "noopener,noreferrer");
         }
         message.success("TensorBoard opened for this training run.");
@@ -508,7 +534,11 @@ function ModelTraining() {
                 </Text>
               )}
               <Space wrap size={8}>
-                <Button size="small" type="primary" onClick={handleOpenInference}>
+                <Button
+                  size="small"
+                  type="primary"
+                  onClick={handleOpenInference}
+                >
                   Open Run Model
                 </Button>
                 <Button size="small" onClick={handleOpenTensorboard}>

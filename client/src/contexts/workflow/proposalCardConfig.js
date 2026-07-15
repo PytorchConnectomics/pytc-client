@@ -125,13 +125,20 @@ const trainingSubsetFields = (subset = {}) => {
     );
   }
   if (subset.manifest_path) {
-    fields.push(field("training_subset_manifest", "Manifest", compactPath(subset.manifest_path)));
+    fields.push(
+      field(
+        "training_subset_manifest",
+        "Manifest",
+        compactPath(subset.manifest_path),
+      ),
+    );
   }
   return fields;
 };
 
 export const getProposalCardContent = (proposal = {}) => {
-  const type = proposal.type || proposal.proposal_type || proposal.action || "proposal";
+  const type =
+    proposal.type || proposal.proposal_type || proposal.action || "proposal";
 
   if (type === "prioritize_failure_hotspots") {
     return {
@@ -175,9 +182,11 @@ export const getProposalCardContent = (proposal = {}) => {
         "written_path",
         "training_output_path",
       ]).map((item) =>
-        ["corrected_mask_path", "written_path", "training_output_path"].includes(
-          item.key,
-        )
+        [
+          "corrected_mask_path",
+          "written_path",
+          "training_output_path",
+        ].includes(item.key)
           ? {
               ...item,
               rawValue: proposal[item.key],
@@ -220,7 +229,9 @@ export const getProposalCardContent = (proposal = {}) => {
         field(
           "parameters",
           "Parameters",
-          proposal.autopick_parameters ? "safe defaults" : proposal.parameter_mode,
+          proposal.autopick_parameters
+            ? "safe defaults"
+            : proposal.parameter_mode,
           { editable: false },
         ),
       ].filter((item) => item.value !== "—"),
@@ -247,7 +258,9 @@ export const getProposalCardContent = (proposal = {}) => {
   }
 
   const fallbackFields = Object.entries(proposal)
-    .filter(([key]) => !["type", "proposal_type", "rationale", "why"].includes(key))
+    .filter(
+      ([key]) => !["type", "proposal_type", "rationale", "why"].includes(key),
+    )
     .slice(0, 4)
     .map(([key, value]) => ({
       key,

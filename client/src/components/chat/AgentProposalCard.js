@@ -4,7 +4,10 @@ import { Button, Input, Space, Tag, Typography } from "antd";
 
 import { getProposalCardContent } from "../../contexts/workflow/proposalCardConfig";
 import { getApprovalMeta } from "../../design/workflowDesignSystem";
-import AgentBadge, { getAgentBorderStyles, getAgentVisual } from "./AgentVisuals";
+import AgentBadge, {
+  getAgentBorderStyles,
+  getAgentVisual,
+} from "./AgentVisuals";
 
 const { Text } = Typography;
 
@@ -36,7 +39,9 @@ const collectArtifacts = (artifacts = []) =>
               : artifact.uri !== undefined
                 ? "uri"
                 : null;
-      const kind = asText(artifact.kind || artifact.artifact_type || artifact.type);
+      const kind = asText(
+        artifact.kind || artifact.artifact_type || artifact.type,
+      );
       const identifier = asText(
         artifact.path ||
           artifact.label ||
@@ -46,7 +51,9 @@ const collectArtifacts = (artifacts = []) =>
           artifact.id,
       );
       const prefix = kind || fallbackKind || "artifact";
-      return identifier ? `${prefix}: ${identifier}` : `${prefix} (#${index + 1})`;
+      return identifier
+        ? `${prefix}: ${identifier}`
+        : `${prefix} (#${index + 1})`;
     })
     .filter(Boolean);
 
@@ -64,7 +71,8 @@ const collectTracedFacts = (trace = []) =>
     });
 
 const collectPolicyLines = (proposal = {}, actionCard = {}) => {
-  const policy = asObject(proposal.policy_decision) || asObject(actionCard.policy_decision);
+  const policy =
+    asObject(proposal.policy_decision) || asObject(actionCard.policy_decision);
   const lines = [];
 
   const decision = asText(
@@ -93,13 +101,16 @@ const collectPolicyLines = (proposal = {}, actionCard = {}) => {
     lines.push(requiresApproval ? "Approval required" : "No approval required");
   }
 
-  const blockers = [...toList(policy?.blocking_reasons), ...toList(actionCard.blocking_reasons)].filter(
-    Boolean,
-  );
+  const blockers = [
+    ...toList(policy?.blocking_reasons),
+    ...toList(actionCard.blocking_reasons),
+  ].filter(Boolean);
   if (blockers.length) {
     lines.push(
       `Blockers: ${blockers
-        .map((blocker) => blocker?.reason || blocker?.message || String(blocker))
+        .map(
+          (blocker) => blocker?.reason || blocker?.message || String(blocker),
+        )
         .join(", ")}`,
     );
   }
@@ -169,7 +180,9 @@ const collectProjectMemoryLines = (proposal = {}, actionCard = {}) => {
   }
 
   return Object.entries(updates)
-    .filter(([, value]) => value !== undefined && value !== null && value !== "")
+    .filter(
+      ([, value]) => value !== undefined && value !== null && value !== "",
+    )
     .map(([key, value]) => {
       if (typeof value === "object") {
         return `${key}: ${asText(JSON.stringify(value))}`;
@@ -216,7 +229,10 @@ function AgentProposalCard({
     [proposal?.action_card],
   );
   const specialist = useMemo(
-    () => asObject(proposal?.specialist_agent) || asObject(actionCard?.specialist_agent) || {},
+    () =>
+      asObject(proposal?.specialist_agent) ||
+      asObject(actionCard?.specialist_agent) ||
+      {},
     [actionCard?.specialist_agent, proposal?.specialist_agent],
   );
   const agentVisual = getAgentVisual({
@@ -227,7 +243,10 @@ function AgentProposalCard({
     agent_border_style: proposal?.agent_border_style,
   });
 
-  const traceItems = useMemo(() => (Array.isArray(trace) ? trace : []), [trace]);
+  const traceItems = useMemo(
+    () => (Array.isArray(trace) ? trace : []),
+    [trace],
+  );
   const fields = useMemo(() => content.fields || [], [content.fields]);
   const editableFields = useMemo(
     () => fields.filter((field) => field.editable),
@@ -273,8 +292,12 @@ function AgentProposalCard({
     const policyLines = collectPolicyLines(proposal, actionCard);
     const statusLines = collectStatusLines(proposal);
     const artifactLines = [
-      ...collectArtifacts(actionCard.input_artifacts).map((item) => `Input · ${item}`),
-      ...collectArtifacts(actionCard.output_artifacts).map((item) => `Output · ${item}`),
+      ...collectArtifacts(actionCard.input_artifacts).map(
+        (item) => `Input · ${item}`,
+      ),
+      ...collectArtifacts(actionCard.output_artifacts).map(
+        (item) => `Output · ${item}`,
+      ),
     ];
     const projectMemoryLines = collectProjectMemoryLines(proposal, actionCard);
 
@@ -357,7 +380,10 @@ function AgentProposalCard({
           <span className="workflow-proposal-card__agent-badge">
             <AgentBadge agent={agentVisual} />
           </span>
-          <Tag className="workflow-proposal-card__type-tag" style={{ margin: 0 }}>
+          <Tag
+            className="workflow-proposal-card__type-tag"
+            style={{ margin: 0 }}
+          >
             {content.type}
           </Tag>
           <Tag
@@ -393,7 +419,9 @@ function AgentProposalCard({
                     <Input.TextArea
                       autoSize={{ minRows: 1, maxRows: 3 }}
                       value={draft[field.key] ?? ""}
-                      onChange={(event) => setFieldValue(field.key, event.target.value)}
+                      onChange={(event) =>
+                        setFieldValue(field.key, event.target.value)
+                      }
                       style={{ fontSize: 11 }}
                       aria-label={`Edit ${field.label}`}
                     />
@@ -414,7 +442,9 @@ function AgentProposalCard({
                     className={
                       field.editable
                         ? `workflow-proposal-card__field-value${
-                            isPending ? " workflow-proposal-card__field-value--editable" : ""
+                            isPending
+                              ? " workflow-proposal-card__field-value--editable"
+                              : ""
                           }`
                         : "workflow-proposal-card__field-value"
                     }
@@ -436,7 +466,9 @@ function AgentProposalCard({
                           }
                         : undefined
                     }
-                    aria-label={field.editable ? `Edit ${field.label}` : undefined}
+                    aria-label={
+                      field.editable ? `Edit ${field.label}` : undefined
+                    }
                   >
                     {field.value}
                   </Text>

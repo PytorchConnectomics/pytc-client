@@ -55,25 +55,25 @@ Project root:
 
 Expected initial state:
 
-| Category | Expected Value |
-| --- | --- |
-| Project | Yixiao TapeReader XRI Case Study |
-| Modality | X-ray / XRI volumetric microscopy |
-| Target | CytoTape fibres |
-| Voxel size | 40 x 16.3 x 16.3 nm in z,y,x |
-| Total tracked volumes | 10 |
-| Fully good / ground truth | 6 |
-| Needs proofreading | 2 |
-| No segmentation | 2 |
-| Training policy | Train only on confirmed ground-truth masks |
+| Category                  | Expected Value                             |
+| ------------------------- | ------------------------------------------ |
+| Project                   | Yixiao TapeReader XRI Case Study           |
+| Modality                  | X-ray / XRI volumetric microscopy          |
+| Target                    | CytoTape fibres                            |
+| Voxel size                | 40 x 16.3 x 16.3 nm in z,y,x               |
+| Total tracked volumes     | 10                                         |
+| Fully good / ground truth | 6                                          |
+| Needs proofreading        | 2                                          |
+| No segmentation           | 2                                          |
+| Training policy           | Train only on confirmed ground-truth masks |
 
 Volume split:
 
-| State | Volumes |
-| --- | --- |
-| Ground truth | `1`, `2`, `3`, `4_1`, `4_2`, `4_3` |
-| Needs proofreading | `5_1`, `5_2` |
-| Image only | `6_1`, `6_2` |
+| State              | Volumes                            |
+| ------------------ | ---------------------------------- |
+| Ground truth       | `1`, `2`, `3`, `4_1`, `4_2`, `4_3` |
+| Needs proofreading | `5_1`, `5_2`                       |
+| Image only         | `6_1`, `6_2`                       |
 
 ## Taxonomy Of Study Tasks
 
@@ -436,17 +436,17 @@ Paper construct:
 
 ## Suggested One-Hour Schedule
 
-| Time | Segment | Activity |
-| --- | --- | --- |
-| 0-5 min | Intro | Explain that this is a workflow-coordination prototype, not a model-accuracy benchmark. |
-| 5-12 min | Project setup | Open/mount Yixiao project and review inferred context. |
-| 12-20 min | Progress state | Inspect 10-volume status split and discuss training eligibility. |
-| 20-30 min | Visualization | Open one ground-truth pair and one draft/proofreading target. |
-| 30-38 min | Proofreading status | Discuss or simulate promoting a draft mask. |
-| 38-48 min | Training proposal | Ask the agent to stage training from trusted ground truth; review/edit proposal. |
-| 48-53 min | Inference planning | Ask what happens to image-only targets after training. |
-| 53-57 min | Evidence export | Export or inspect session provenance. |
-| 57-60 min | Reflection | Ask final study questions. |
+| Time      | Segment             | Activity                                                                                |
+| --------- | ------------------- | --------------------------------------------------------------------------------------- |
+| 0-5 min   | Intro               | Explain that this is a workflow-coordination prototype, not a model-accuracy benchmark. |
+| 5-12 min  | Project setup       | Open/mount Yixiao project and review inferred context.                                  |
+| 12-20 min | Progress state      | Inspect 10-volume status split and discuss training eligibility.                        |
+| 20-30 min | Visualization       | Open one ground-truth pair and one draft/proofreading target.                           |
+| 30-38 min | Proofreading status | Discuss or simulate promoting a draft mask.                                             |
+| 38-48 min | Training proposal   | Ask the agent to stage training from trusted ground truth; review/edit proposal.        |
+| 48-53 min | Inference planning  | Ask what happens to image-only targets after training.                                  |
+| 53-57 min | Evidence export     | Export or inspect session provenance.                                                   |
+| 57-60 min | Reflection          | Ask final study questions.                                                              |
 
 ## Facilitator Checklist
 

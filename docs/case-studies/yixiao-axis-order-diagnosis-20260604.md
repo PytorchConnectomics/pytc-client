@@ -21,12 +21,14 @@ Using `tifffile.imread` directly on raw/mask files:
 All sampled pairs have raw/label shape equality and match manifest `shape_zyx` for each volume, including the leading dimension being `49` or `40`.
 
 ### Axis plausibility checks
+
 For each pair, I computed simple slice-alignment metrics between raw and mask under permutations where axis `axis` is considered the Neuroglancer “front” axis:
 
 - Axis 0 (as-is, z-first): produces low slice count (`49` or `40`) and mask bbox spans such as `(2,35)`, `(0,40)`, etc., matching the known physical depth.
 - Axis 1/2 (swapped candidates): forces `500` slices and full-length span across all near-all slices.
 
 Examples:
+
 - `1`: axis0 correlation (raw mean/mask mean) `0.853`, axis1 `0.390`, axis2 `0.252`; nonzero-slice occupancy axis0 `34/49`, axis1 `490/500`, axis2 `482/500`.
 - `4_1`: axis0 correlation `0.796`, axis1 `0.864`, axis2 `0.849`; however axis0 has expected 40 slices total while axis1/2 have 500.
 - `4_2`: axis0 correlation `0.731`, axis1 `0.733`, axis2 `0.781`; again expected depth is preserved only when first axis remains 40.
@@ -34,6 +36,7 @@ Examples:
 Because the TIFF tensors already have one short depth-like axis (`40`/`49`) and one long axis pair (`500`/`500`), swapping to any 500-first interpretation would imply a physically implausible 500-slice z stack and would invert expected scale mapping.
 
 ## Neuroglancer construction review
+
 In `server_api/main.py`:
 
 - `/neuroglancer` and `/neuroglancer/proofread` both derive scales with `_coerce_neuroglancer_scales(scales)` which validates required `z, y, x` order.

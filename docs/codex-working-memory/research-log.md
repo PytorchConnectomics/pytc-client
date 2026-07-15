@@ -137,6 +137,7 @@ Reframed manuscript Sections 3 and 4 so the assistant is modeled as an agentic w
 ### Research Rationale
 
 Paper title and contribution claims require an explicit mapping from expert workflow pain points to agent-mediated capabilities. The revised structure now makes that mapping inspectable:
+
 - Section 3 now includes `G6` (agent leverage under human control), `R9` (configurable autonomy envelope), and `T7` (draft bounded multi-step delegation).
 - Section 4 now describes implemented and draft agent modes (`M1`/`M2`/`M3`) and ties concrete features to `G/R/T`.
 
@@ -187,6 +188,7 @@ Used a targeted corpus pass over nine recent TOCHI papers to refactor manuscript
 ### Research Rationale
 
 The strongest recurring pattern was explicit traceability: empirical observations are translated into goals/requirements/tasks, then mapped to design features and evaluated against explicit questions. We mirrored that pattern by adding:
+
 - formative questions (`FQ1`, `FQ2`) in Section 3,
 - a `G -> R -> T` traceability table,
 - a structured evaluation protocol (`EQ1`--`EQ3`, measures, analysis plan).
@@ -194,6 +196,7 @@ The strongest recurring pattern was explicit traceability: empirical observation
 ### User-Control Implication
 
 The revised writing keeps control boundaries explicit while avoiding status labels in paper text:
+
 - human approval remains central for mutating agent actions,
 - agent orchestration remains bounded by guardrails,
 - provenance is treated as a first-class evaluation target.
@@ -207,6 +210,7 @@ The revised writing keeps control boundaries explicit while avoiding status labe
 ### Internal Implementation Distinction (Not In Manuscript Text)
 
 Implemented evidence-backed features:
+
 - workflow session/event model and APIs,
 - event-linked inference/proofreading flows,
 - approval/rejection action gating,
@@ -214,6 +218,7 @@ Implemented evidence-backed features:
 - LLM configuration hardening and backend diagnostics.
 
 Ideation/planned feature set:
+
 - failure hotspot prioritization,
 - correction impact preview,
 - bounded project-level autonomous run manager,
@@ -238,6 +243,7 @@ Recent TOCHI articles in the reviewed corpus consistently combine: (1) explicit 
 ### User-Control Implication
 
 The expanded text continues to center user authority:
+
 - agent guidance is grounded in workflow evidence,
 - mutating actions remain approval-gated,
 - bounded autonomy is framed around checkpoints and interruption rights.
@@ -268,6 +274,7 @@ Removed manuscript wording that implied interviews had already been completed; r
 ### Research Rationale
 
 Claim calibration is critical for TOCHI review. Since interviews and user studies are not yet run, the paper should present:
+
 - a rigorous study design and requirement framework,
 - a concrete implemented prototype,
 - clearly planned empirical phases.
@@ -305,6 +312,7 @@ The codex draft branches were generated against mixed assumptions (notably `serv
 ### User-Control Implication
 
 User control remains explicit:
+
 - mutating workflow operations still require approve/reject decisions,
 - proposal cards increase transparency of agent intent and parameters,
 - timeline filters make auditability easier during debugging and study instrumentation.
@@ -735,6 +743,7 @@ pair has replaced folder-level fields, so it can keep continuity across later
 queries.
 
 Test evidence:
+
 - `python -m py_compile server_api/main.py server_api/workflows/router.py server_api/workflows/volume_pairs.py`
 - `/opt/homebrew/bin/uv run pytest tests/test_neuroglancer_volume_normalization.py -q`: 11 passed.
 - `/opt/homebrew/bin/uv run pytest tests/test_workflow_routes.py -q`: 27 passed.
@@ -760,6 +769,7 @@ Also hardened chat rendering against embedded JSON tool-call leaks such as
 "Here is the revised function call..." followed by a JSON object.
 
 Test evidence:
+
 - `python -m py_compile server_api/main.py server_api/workflows/router.py server_api/workflows/volume_pairs.py`
 - `/opt/homebrew/bin/uv run pytest tests/test_workflow_routes.py -q`: 29 passed.
 - `CI=true npm test -- --runInBand src/components/Chatbot.test.js src/contexts/WorkflowContext.test.js`: 20 passed.

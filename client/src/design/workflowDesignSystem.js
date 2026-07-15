@@ -79,12 +79,14 @@ export const ARTIFACT_META = {
 };
 
 export function getStageMeta(stage) {
-  return STAGE_META[stage] || {
-    label: stage || "No Workflow",
-    tone: "neutral",
-    color: "default",
-    description: "No active workflow stage.",
-  };
+  return (
+    STAGE_META[stage] || {
+      label: stage || "No Workflow",
+      tone: "neutral",
+      color: "default",
+      description: "No active workflow stage.",
+    }
+  );
 }
 
 export function getSeverityMeta(severity) {
@@ -96,8 +98,10 @@ export function getApprovalMeta(status) {
 }
 
 export function getArtifactMeta(type) {
-  return ARTIFACT_META[type] || {
-    label: type || "Artifact",
-    color: "default",
-  };
+  return (
+    ARTIFACT_META[type] || {
+      label: type || "Artifact",
+      color: "default",
+    }
+  );
 }

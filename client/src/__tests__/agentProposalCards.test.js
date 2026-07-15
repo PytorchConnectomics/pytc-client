@@ -67,7 +67,11 @@ describe("AgentProposalCard", () => {
   it("renders fallback proposal content", () => {
     render(
       <AgentProposalCard
-        proposal={{ type: "custom_type", rationale: "Keep behavior stable", foo: "bar" }}
+        proposal={{
+          type: "custom_type",
+          rationale: "Keep behavior stable",
+          foo: "bar",
+        }}
       />,
     );
 

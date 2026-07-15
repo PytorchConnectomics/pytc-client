@@ -3,10 +3,15 @@ import { fireEvent, render, screen } from "@testing-library/react";
 
 import UnifiedFileInput from "./UnifiedFileInput";
 
-jest.mock("./FilePickerModal", () => (props) =>
-  props.visible ? (
-    <div data-testid="file-picker-modal" data-selection-type={props.selectionType} />
-  ) : null,
+jest.mock(
+  "./FilePickerModal",
+  () => (props) =>
+    props.visible ? (
+      <div
+        data-testid="file-picker-modal"
+        data-selection-type={props.selectionType}
+      />
+    ) : null,
 );
 
 beforeAll(() => {

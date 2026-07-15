@@ -200,15 +200,25 @@ function InlineHelpChat({
     if (!open) return;
     const onMove = (event) => {
       if (resizeState.current.resizing) {
-        const viewportMaxWidth = Math.max(340, window.innerWidth - panelPos.left - 8);
-        const viewportMaxHeight = Math.max(280, window.innerHeight - panelPos.top - 8);
+        const viewportMaxWidth = Math.max(
+          340,
+          window.innerWidth - panelPos.left - 8,
+        );
+        const viewportMaxHeight = Math.max(
+          280,
+          window.innerHeight - panelPos.top - 8,
+        );
         const nextWidth = clamp(
-          resizeState.current.width + event.clientX - resizeState.current.startX,
+          resizeState.current.width +
+            event.clientX -
+            resizeState.current.startX,
           340,
           viewportMaxWidth,
         );
         const nextHeight = clamp(
-          resizeState.current.height + event.clientY - resizeState.current.startY,
+          resizeState.current.height +
+            event.clientY -
+            resizeState.current.startY,
           280,
           viewportMaxHeight,
         );

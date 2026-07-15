@@ -45,7 +45,7 @@ assistant a real biomedical segmentation workflow orchestrator.
    - Claude Code separates read-only tools from risky tools and routes each
      through a permission layer.
    - PyTC equivalent: show whether an agent action is `view only`, `opens
-     editor`, `runs job`, `writes record`, or `exports`; never hide the approval
+editor`, `runs job`, `writes record`, or `exports`; never hide the approval
      boundary.
 
 3. Slash commands are compact workflow entrypoints

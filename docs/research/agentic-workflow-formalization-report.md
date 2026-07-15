@@ -75,18 +75,18 @@ Frontend:
 
 ## 3. Literature-Backed Design Principles
 
-| Principle | Evidence | App Implication | Priority |
-|---|---|---|---|
-| Use mixed initiative, not hidden autonomy | Horvitz identifies common agent failures: poor goal guesses, poor timing, weak user guidance, and weak recovery; effective systems combine direct manipulation and automated services. [Horvitz 1999](https://www.microsoft.com/en-us/research/wp-content/uploads/2016/11/chi99horvitz.pdf) | The assistant proposes bounded actions and asks for approval when cost or mutation matters. Users can edit facts and reject proposals. | High |
-| Show capabilities, uncertainty, and recovery | Amershi et al. organize Human-AI Interaction Guidelines around initial expectations, interaction, errors, and long-term adaptation. [Amershi et al. 2019](https://www.microsoft.com/en-us/research/publication/guidelines-for-human-ai-interaction/) | Each answer should include one concrete next move, uncertainty when facts are inferred, and correction controls for wrong project facts. | High |
-| Keep humans inside the learning loop | Interactive ML research argues end-users shape systems through iterative interaction, not just one-time labeling. [Amershi et al. 2014](https://ojs.aaai.org/aimagazine/index.php/aimagazine/article/view/2513/0) | Proofreading, promotion to ground truth, retraining, and evaluation should be explicit loop stages with visible evidence. | High |
-| Ask concrete questions instead of blank prompts | Mixed-initiative and HAI guidelines both favor timely, bounded clarification over vague handoff. | First-run intake should display detected facts and ask short editable questions: modality, target, label type, voxel size, which masks are trusted. | High |
-| Reproducible workflows need durable provenance | W3C PROV models entities, activities, agents, and derivation. [PROV-DM](https://www.w3.org/TR/prov-dm/); CWLProv distinguishes prospective and retrospective provenance. [CWLProv review](https://academic.oup.com/gigascience/article/doi/10.1093/gigascience/giz095/5611001) | Use an append-only evidence ledger for observations, proposals, approvals, executions, artifacts, metrics, and status transitions. | High |
-| Bioimage data needs metadata, not just files | REMBI recommends metadata sufficient for reuse of biological images. [REMBI](https://www.nature.com/articles/s41592-021-01166-8); OME-Zarr stores scalable image arrays with multiscale metadata. [OME-Zarr paper](https://pmc.ncbi.nlm.nih.gov/articles/PMC9980008/) and [spec](https://ngff.openmicroscopy.org/0.5/index.html) | Project memory should store modality, voxel size, axes, dtype, shape, channel/label semantics, and metadata source/confidence. | High |
-| Biologists adopt guided workflow tools | ilastik emphasizes interactive labeling and immediate feedback for non-ML experts. [ilastik](https://www.ilastik.org/); CellProfiler emphasizes modular reproducible pipelines designed for biologists. [CellProfiler 3.0](https://pmc.ncbi.nlm.nih.gov/articles/PMC6029841/) | The assistant should feel like guided workflow software, not a command-line agent in a chat drawer. | High |
-| Proofreading is stateful and versioned | CAVE supports reproducible analysis while proofreading changes segmentation state. [CAVE](https://pmc.ncbi.nlm.nih.gov/articles/PMC12074985/); WEBKNOSSOS supports merge/split and voxel relabeling workflows. [WEBKNOSSOS](https://docs.webknossos.org/webknossos/proofreading/index.html); VAST targets large-volume annotation and segmentation editing. [VAST](https://pmc.ncbi.nlm.nih.gov/articles/PMC6198149/) | Proofread masks should become versioned correction artifacts with edited regions, source masks, and promotion decisions. | High |
-| Agentic coding patterns transfer only as control patterns | Codex and Claude Code-style tools inspect project context, plan, call typed tools, require approvals, and preserve traces. [Codex help](https://help.openai.com/en/articles/11096431), [Claude Code subagents](https://code.claude.com/docs/en/sub-agents), [GitHub Copilot coding agent](https://github.blog/developer-skills/github/less-todo-more-done-the-difference-between-coding-agent-and-agent-mode-in-github-copilot/) | Transfer inspect-plan-act, typed tools, approval gates, traces, and resumability. Do not transfer arbitrary shell execution or code-diff metaphors as the main user surface. | Medium |
-| Experiment tracking needs lineage and versioning | MLflow model registry tracks model lineage and stage transitions. [MLflow](https://mlflow.org/docs/2.4.1/model-registry.html); DVC emphasizes data, code, params, metrics, and artifacts for reproducibility. [DVC](https://dvc.org/doc/use-cases/experiment-tracking) | Training/inference/evaluation records should capture configs, inputs, outputs, checkpoints, metrics, code/library versions when available, and data membership. | Medium |
+| Principle                                                 | Evidence                                                                                                                                                                                                                                                                                                                                                                                                                         | App Implication                                                                                                                                                              | Priority |
+| --------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------- |
+| Use mixed initiative, not hidden autonomy                 | Horvitz identifies common agent failures: poor goal guesses, poor timing, weak user guidance, and weak recovery; effective systems combine direct manipulation and automated services. [Horvitz 1999](https://www.microsoft.com/en-us/research/wp-content/uploads/2016/11/chi99horvitz.pdf)                                                                                                                                      | The assistant proposes bounded actions and asks for approval when cost or mutation matters. Users can edit facts and reject proposals.                                       | High     |
+| Show capabilities, uncertainty, and recovery              | Amershi et al. organize Human-AI Interaction Guidelines around initial expectations, interaction, errors, and long-term adaptation. [Amershi et al. 2019](https://www.microsoft.com/en-us/research/publication/guidelines-for-human-ai-interaction/)                                                                                                                                                                             | Each answer should include one concrete next move, uncertainty when facts are inferred, and correction controls for wrong project facts.                                     | High     |
+| Keep humans inside the learning loop                      | Interactive ML research argues end-users shape systems through iterative interaction, not just one-time labeling. [Amershi et al. 2014](https://ojs.aaai.org/aimagazine/index.php/aimagazine/article/view/2513/0)                                                                                                                                                                                                                | Proofreading, promotion to ground truth, retraining, and evaluation should be explicit loop stages with visible evidence.                                                    | High     |
+| Ask concrete questions instead of blank prompts           | Mixed-initiative and HAI guidelines both favor timely, bounded clarification over vague handoff.                                                                                                                                                                                                                                                                                                                                 | First-run intake should display detected facts and ask short editable questions: modality, target, label type, voxel size, which masks are trusted.                          | High     |
+| Reproducible workflows need durable provenance            | W3C PROV models entities, activities, agents, and derivation. [PROV-DM](https://www.w3.org/TR/prov-dm/); CWLProv distinguishes prospective and retrospective provenance. [CWLProv review](https://academic.oup.com/gigascience/article/doi/10.1093/gigascience/giz095/5611001)                                                                                                                                                   | Use an append-only evidence ledger for observations, proposals, approvals, executions, artifacts, metrics, and status transitions.                                           | High     |
+| Bioimage data needs metadata, not just files              | REMBI recommends metadata sufficient for reuse of biological images. [REMBI](https://www.nature.com/articles/s41592-021-01166-8); OME-Zarr stores scalable image arrays with multiscale metadata. [OME-Zarr paper](https://pmc.ncbi.nlm.nih.gov/articles/PMC9980008/) and [spec](https://ngff.openmicroscopy.org/0.5/index.html)                                                                                                 | Project memory should store modality, voxel size, axes, dtype, shape, channel/label semantics, and metadata source/confidence.                                               | High     |
+| Biologists adopt guided workflow tools                    | ilastik emphasizes interactive labeling and immediate feedback for non-ML experts. [ilastik](https://www.ilastik.org/); CellProfiler emphasizes modular reproducible pipelines designed for biologists. [CellProfiler 3.0](https://pmc.ncbi.nlm.nih.gov/articles/PMC6029841/)                                                                                                                                                    | The assistant should feel like guided workflow software, not a command-line agent in a chat drawer.                                                                          | High     |
+| Proofreading is stateful and versioned                    | CAVE supports reproducible analysis while proofreading changes segmentation state. [CAVE](https://pmc.ncbi.nlm.nih.gov/articles/PMC12074985/); WEBKNOSSOS supports merge/split and voxel relabeling workflows. [WEBKNOSSOS](https://docs.webknossos.org/webknossos/proofreading/index.html); VAST targets large-volume annotation and segmentation editing. [VAST](https://pmc.ncbi.nlm.nih.gov/articles/PMC6198149/)            | Proofread masks should become versioned correction artifacts with edited regions, source masks, and promotion decisions.                                                     | High     |
+| Agentic coding patterns transfer only as control patterns | Codex and Claude Code-style tools inspect project context, plan, call typed tools, require approvals, and preserve traces. [Codex help](https://help.openai.com/en/articles/11096431), [Claude Code subagents](https://code.claude.com/docs/en/sub-agents), [GitHub Copilot coding agent](https://github.blog/developer-skills/github/less-todo-more-done-the-difference-between-coding-agent-and-agent-mode-in-github-copilot/) | Transfer inspect-plan-act, typed tools, approval gates, traces, and resumability. Do not transfer arbitrary shell execution or code-diff metaphors as the main user surface. | Medium   |
+| Experiment tracking needs lineage and versioning          | MLflow model registry tracks model lineage and stage transitions. [MLflow](https://mlflow.org/docs/2.4.1/model-registry.html); DVC emphasizes data, code, params, metrics, and artifacts for reproducibility. [DVC](https://dvc.org/doc/use-cases/experiment-tracking)                                                                                                                                                           | Training/inference/evaluation records should capture configs, inputs, outputs, checkpoints, metrics, code/library versions when available, and data membership.              | Medium   |
 
 ## 4. Proposed Agent Architecture
 
@@ -178,8 +178,16 @@ flowchart TD
   "task_preset": {
     "id": "xri_tapereader_fibre",
     "expected_inputs": ["raw_volume", "instance_mask", "pytc_config"],
-    "expected_outputs": ["prediction_mask", "correction_set", "trained_checkpoint"],
-    "evaluation_metrics": ["instance_count_delta", "mask_iou", "object_precision_recall"],
+    "expected_outputs": [
+      "prediction_mask",
+      "correction_set",
+      "trained_checkpoint"
+    ],
+    "evaluation_metrics": [
+      "instance_count_delta",
+      "mask_iou",
+      "object_precision_recall"
+    ],
     "safe_defaults_profile": "app_compatible_sanity"
   },
   "volumes": [
@@ -196,8 +204,8 @@ flowchart TD
       "eligible_for_training": false,
       "eligible_for_inference": false,
       "shape_zyx": [40, 500, 500],
-      "dtype": {"image": "uint16", "label": "int64"},
-      "label_stats": {"instance_label_count": 134},
+      "dtype": { "image": "uint16", "label": "int64" },
+      "label_stats": { "instance_label_count": 134 },
       "regions": [
         {
           "region_id": "bbox:z0-39_y0-499_x0-499",
@@ -252,7 +260,7 @@ flowchart TD
       "baseline_run_id": 12,
       "candidate_run_id": 15,
       "reference_artifact_id": 40,
-      "metrics": {"mask_iou": 0.81},
+      "metrics": { "mask_iou": 0.81 },
       "report_path": "outputs/evaluation/report.json"
     }
   ],
@@ -275,10 +283,17 @@ flowchart TD
     }
   ],
   "freshness": {
-    "project_tree": {"state": "fresh", "observed_at": "...", "invalidated_by": null},
-    "volume_states": {"state": "fresh", "observed_at": "..."},
-    "runtime": {"state": "stale", "reason": "training job completed"},
-    "assistant_context": {"built_at": "...", "source_event_high_watermark": 501}
+    "project_tree": {
+      "state": "fresh",
+      "observed_at": "...",
+      "invalidated_by": null
+    },
+    "volume_states": { "state": "fresh", "observed_at": "..." },
+    "runtime": { "state": "stale", "reason": "training job completed" },
+    "assistant_context": {
+      "built_at": "...",
+      "source_event_high_watermark": 501
+    }
   }
 }
 ```
@@ -287,32 +302,32 @@ flowchart TD
 
 Use the following canonical states. Keep legacy labels as aliases during migration:
 
-| Canonical state | Meaning | Legacy alias |
-|---|---|---|
-| `image_only` | Image exists; no usable label/prediction registered. | `missing_segmentation` |
-| `draft_segmentation` | Segmentation exists but trust status is unknown or imported from a model. | none |
-| `needs_proofreading` | Draft or prediction is explicitly queued for human review. | `needs_proofreading` |
-| `proofread_ground_truth` | Human-confirmed training/evaluation reference. | `ground_truth` |
-| `training_candidate` | Selected for a training run but not necessarily all project ground truth. | none |
-| `queued_for_inference` | Selected target for inference. | none |
-| `prediction_ready` | Inference output exists and can be viewed/proofread/evaluated. | none |
-| `ignored` | Intentionally excluded. | `ignored` |
+| Canonical state          | Meaning                                                                   | Legacy alias           |
+| ------------------------ | ------------------------------------------------------------------------- | ---------------------- |
+| `image_only`             | Image exists; no usable label/prediction registered.                      | `missing_segmentation` |
+| `draft_segmentation`     | Segmentation exists but trust status is unknown or imported from a model. | none                   |
+| `needs_proofreading`     | Draft or prediction is explicitly queued for human review.                | `needs_proofreading`   |
+| `proofread_ground_truth` | Human-confirmed training/evaluation reference.                            | `ground_truth`         |
+| `training_candidate`     | Selected for a training run but not necessarily all project ground truth. | none                   |
+| `queued_for_inference`   | Selected target for inference.                                            | none                   |
+| `prediction_ready`       | Inference output exists and can be viewed/proofread/evaluated.            | none                   |
+| `ignored`                | Intentionally excluded.                                                   | `ignored`              |
 
 ### Transition policy
 
-| From | To | Actor | Evidence required | Approval |
-|---|---|---|---|---|
-| unknown | `image_only` | inspector | readable image artifact, no matching mask/prediction | no |
-| unknown | `draft_segmentation` | inspector | image plus mask/prediction, source not confirmed | no |
-| unknown | `proofread_ground_truth` | manifest/importer/user | manifest status, path marker, or user confirmation | user confirmation recommended |
-| `draft_segmentation` | `needs_proofreading` | agent/user | draft mask path and image path | no if just queueing; yes if writing status |
-| `needs_proofreading` | `proofread_ground_truth` | user | saved correction set or explicit "mark fully good" | yes |
-| `image_only` | `queued_for_inference` | user/agent | selected image, checkpoint/config readiness | yes |
-| `queued_for_inference` | `prediction_ready` | executor | completed inference run and output artifact | no, system postcondition |
-| `prediction_ready` | `needs_proofreading` | agent/user | prediction artifact exists | no if queueing; yes if writing status |
-| `proofread_ground_truth` | `training_candidate` | agent/user | selected training set, config, training policy | yes |
-| any | `ignored` | user | explicit user exclusion reason | yes |
-| `ignored` | previous state | user | undo event or selected new status | yes |
+| From                     | To                       | Actor                  | Evidence required                                    | Approval                                   |
+| ------------------------ | ------------------------ | ---------------------- | ---------------------------------------------------- | ------------------------------------------ |
+| unknown                  | `image_only`             | inspector              | readable image artifact, no matching mask/prediction | no                                         |
+| unknown                  | `draft_segmentation`     | inspector              | image plus mask/prediction, source not confirmed     | no                                         |
+| unknown                  | `proofread_ground_truth` | manifest/importer/user | manifest status, path marker, or user confirmation   | user confirmation recommended              |
+| `draft_segmentation`     | `needs_proofreading`     | agent/user             | draft mask path and image path                       | no if just queueing; yes if writing status |
+| `needs_proofreading`     | `proofread_ground_truth` | user                   | saved correction set or explicit "mark fully good"   | yes                                        |
+| `image_only`             | `queued_for_inference`   | user/agent             | selected image, checkpoint/config readiness          | yes                                        |
+| `queued_for_inference`   | `prediction_ready`       | executor               | completed inference run and output artifact          | no, system postcondition                   |
+| `prediction_ready`       | `needs_proofreading`     | agent/user             | prediction artifact exists                           | no if queueing; yes if writing status      |
+| `proofread_ground_truth` | `training_candidate`     | agent/user             | selected training set, config, training policy       | yes                                        |
+| any                      | `ignored`                | user                   | explicit user exclusion reason                       | yes                                        |
+| `ignored`                | previous state           | user                   | undo event or selected new status                    | yes                                        |
 
 Partial proofreading should be represented as region-level state, not by pretending the whole volume is fully good. Add `volume_regions` or metadata entries with `bbox_zyx`, `valid_mask_path`, `proofreading_status`, `reviewer`, `source_event_id`, and `promoted_at`. Training eligibility for partially proofread volumes requires a valid mask or an explicit region list.
 
@@ -326,35 +341,44 @@ All cards should use one envelope:
   "action_type": "start_training",
   "plain_language_summary": "Train on 6 confirmed XRI fibre masks.",
   "affected_volume_ids": ["1", "2", "3", "4_1", "4_2", "4_3"],
-  "inputs": [{"role": "config", "path": "configs/TapeReader-Fiber-BCS-AppCompat-Sanity.yaml"}],
-  "outputs": [{"role": "checkpoint", "planned_path": "outputs/training/..."}],
+  "inputs": [
+    {
+      "role": "config",
+      "path": "configs/TapeReader-Fiber-BCS-AppCompat-Sanity.yaml"
+    }
+  ],
+  "outputs": [{ "role": "checkpoint", "planned_path": "outputs/training/..." }],
   "risk_level": "runs_job",
   "requires_approval": true,
   "estimated_duration": "unknown",
   "cost_notes": ["uses GPU if available", "writes training outputs"],
-  "preconditions": [{"id": "training_set", "status": "passed"}],
-  "evidence_basis": [{"event_id": 501, "label": "manifest volume split"}],
-  "review_details": {"config_diff": null, "selected_volume_count": 6},
-  "on_approve": {"executor": "workflow.start_training"},
-  "on_reject": {"write_event": "agent.proposal_rejected"},
-  "postconditions": ["model_run row", "checkpoint artifact", "training completed/failed event"]
+  "preconditions": [{ "id": "training_set", "status": "passed" }],
+  "evidence_basis": [{ "event_id": 501, "label": "manifest volume split" }],
+  "review_details": { "config_diff": null, "selected_volume_count": 6 },
+  "on_approve": { "executor": "workflow.start_training" },
+  "on_reject": { "write_event": "agent.proposal_rejected" },
+  "postconditions": [
+    "model_run row",
+    "checkpoint artifact",
+    "training completed/failed event"
+  ]
 }
 ```
 
 Required card types:
 
-| Type | Required fields | Approval behavior |
-|---|---|---|
-| `visualize_data` | image path, optional label/prediction path, voxel scale, source volume | no approval unless it changes saved project state |
-| `choose_change_data` | proposed image/label/config paths, source evidence, fields to change | approval if it writes workflow memory; no approval for form prefill |
-| `open_progress` | summary counts, stale/fresh marker | no approval |
-| `start_training` | training volumes, excluded volumes, config, labels/corrections, output/log paths, expected checkpoint | approval required |
-| `start_inference` | target volumes, checkpoint, config, output registration plan | approval required |
-| `queue_proofreading` | volumes, masks/predictions, priority/evidence | approval if status is written; no approval for opening view |
-| `mark_volume_status` | old/new state, volume ids, reason, reversibility | approval required |
-| `export_corrected_masks` | source session, output path, selected volumes/regions | approval required |
-| `evaluate_compare_results` | baseline, candidate, reference, metrics, report path | approval required if it writes metrics/artifacts |
-| `export_evidence_bundle` | included tables/artifacts, copy limit, output path | approval required |
+| Type                       | Required fields                                                                                       | Approval behavior                                                   |
+| -------------------------- | ----------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------- |
+| `visualize_data`           | image path, optional label/prediction path, voxel scale, source volume                                | no approval unless it changes saved project state                   |
+| `choose_change_data`       | proposed image/label/config paths, source evidence, fields to change                                  | approval if it writes workflow memory; no approval for form prefill |
+| `open_progress`            | summary counts, stale/fresh marker                                                                    | no approval                                                         |
+| `start_training`           | training volumes, excluded volumes, config, labels/corrections, output/log paths, expected checkpoint | approval required                                                   |
+| `start_inference`          | target volumes, checkpoint, config, output registration plan                                          | approval required                                                   |
+| `queue_proofreading`       | volumes, masks/predictions, priority/evidence                                                         | approval if status is written; no approval for opening view         |
+| `mark_volume_status`       | old/new state, volume ids, reason, reversibility                                                      | approval required                                                   |
+| `export_corrected_masks`   | source session, output path, selected volumes/regions                                                 | approval required                                                   |
+| `evaluate_compare_results` | baseline, candidate, reference, metrics, report path                                                  | approval required if it writes metrics/artifacts                    |
+| `export_evidence_bundle`   | included tables/artifacts, copy limit, output path                                                    | approval required                                                   |
 
 Cards should show a short summary and compact affected-volume list. Long paths, full volume arrays, config snippets, and logs belong behind "Review details." Every approval/rejection/execution must write a workflow event.
 
@@ -377,13 +401,13 @@ Example first-run questions:
 
 Workflow-family prompts:
 
-| Family | Ask |
-|---|---|
-| mitochondria semantic segmentation | target class, binary/semantic label convention, voxel size, trusted labels, expected metric such as Dice/IoU |
-| mitochondria instance segmentation | instance id semantics, touching-object handling, AP/object metrics, proofread versus draft masks |
-| XRI fibre / TapeReader | paper-faithful config versus app-compatible config, instance mask semantics, preprocessing/tiled CLAHE status, inference targets |
-| affinity-heavy neuron segmentation | affinity target axes, watershed/agglomeration outputs, valid masks/partial labels, split/merge proofreading policy |
-| synapse/cleft segmentation | cleft versus pre/post labels, class imbalance strategy, evaluation reference, region-level review |
+| Family                             | Ask                                                                                                                              |
+| ---------------------------------- | -------------------------------------------------------------------------------------------------------------------------------- |
+| mitochondria semantic segmentation | target class, binary/semantic label convention, voxel size, trusted labels, expected metric such as Dice/IoU                     |
+| mitochondria instance segmentation | instance id semantics, touching-object handling, AP/object metrics, proofread versus draft masks                                 |
+| XRI fibre / TapeReader             | paper-faithful config versus app-compatible config, instance mask semantics, preprocessing/tiled CLAHE status, inference targets |
+| affinity-heavy neuron segmentation | affinity target axes, watershed/agglomeration outputs, valid masks/partial labels, split/merge proofreading policy               |
+| synapse/cleft segmentation         | cleft versus pre/post labels, class imbalance strategy, evaluation reference, region-level review                                |
 
 Voice input should map to the same bounded questions and cards. Corrections should be stored as `user_confirmations`, not just chat text.
 
@@ -535,33 +559,33 @@ Claims to avoid without stronger evidence:
 
 ### Immediate fixes
 
-| Item | User value | Backend | Frontend | Verification | Paper relevance |
-|---|---|---|---|---|---|
-| Add `ProjectMemory` read endpoint | assistant answers from one state | compose workflow, events, volume states, artifacts, runs, observations, freshness | show memory/debug panel and trace source | unit tests with MitoEM2/TapeReader manifests | core architecture |
-| Migrate volume states to canonical labels | avoids training on drafts | add aliases/migration from `ground_truth`/`missing_segmentation` | update Progress labels and filters | fixture tests for 2/2/2 and 6/2/2 splits | case-study correctness |
-| One action proposal envelope | simpler approval model | add `workflow_action_proposals` or typed event payload schema | render one card component by type | tests for approve/reject/execution event chain | HAI/provenance claim |
-| Freshness policy | fewer stale answers | add invalidation markers for scan, progress, runtime, proofreading | show stale badge and refresh action | tests for job complete/edit save/app resume | credibility |
-| Guided intake from detected facts | less blank-page anxiety | expose detected facts and confirmation writes | first-run checklist/editor | Cypress/manual demo script | user study task |
+| Item                                      | User value                       | Backend                                                                           | Frontend                                 | Verification                                   | Paper relevance        |
+| ----------------------------------------- | -------------------------------- | --------------------------------------------------------------------------------- | ---------------------------------------- | ---------------------------------------------- | ---------------------- |
+| Add `ProjectMemory` read endpoint         | assistant answers from one state | compose workflow, events, volume states, artifacts, runs, observations, freshness | show memory/debug panel and trace source | unit tests with MitoEM2/TapeReader manifests   | core architecture      |
+| Migrate volume states to canonical labels | avoids training on drafts        | add aliases/migration from `ground_truth`/`missing_segmentation`                  | update Progress labels and filters       | fixture tests for 2/2/2 and 6/2/2 splits       | case-study correctness |
+| One action proposal envelope              | simpler approval model           | add `workflow_action_proposals` or typed event payload schema                     | render one card component by type        | tests for approve/reject/execution event chain | HAI/provenance claim   |
+| Freshness policy                          | fewer stale answers              | add invalidation markers for scan, progress, runtime, proofreading                | show stale badge and refresh action      | tests for job complete/edit save/app resume    | credibility            |
+| Guided intake from detected facts         | less blank-page anxiety          | expose detected facts and confirmation writes                                     | first-run checklist/editor               | Cypress/manual demo script                     | user study task        |
 
 ### Paper-demo requirements
 
-| Item | User value | Backend | Frontend | Verification | Paper relevance |
-|---|---|---|---|---|---|
-| Training set from volume states | correct data selection | action preflight selects `proofread_ground_truth` only | card shows included/excluded volumes | fixture tests | central demo |
-| Inference queue from volume states | clear targets | action preflight selects `image_only` or selected targets | Run Model shows target volume list | fixture tests | progress workflow |
-| Proofreading promotion | trustworthy labels | correction-set to status transition with approval | Proofread/Progress "promote" action | event/artifact test | HITL loop |
-| Evidence bundle completeness check | reconstructable workflows | post-export validator | export result card | bundle schema test | paper artifact |
-| TapeReader preset | domain-specific behavior | preset metadata and config distinction | intake card and training/inference cards | fixture test | second case |
+| Item                               | User value                | Backend                                                   | Frontend                                 | Verification        | Paper relevance   |
+| ---------------------------------- | ------------------------- | --------------------------------------------------------- | ---------------------------------------- | ------------------- | ----------------- |
+| Training set from volume states    | correct data selection    | action preflight selects `proofread_ground_truth` only    | card shows included/excluded volumes     | fixture tests       | central demo      |
+| Inference queue from volume states | clear targets             | action preflight selects `image_only` or selected targets | Run Model shows target volume list       | fixture tests       | progress workflow |
+| Proofreading promotion             | trustworthy labels        | correction-set to status transition with approval         | Proofread/Progress "promote" action      | event/artifact test | HITL loop         |
+| Evidence bundle completeness check | reconstructable workflows | post-export validator                                     | export result card                       | bundle schema test  | paper artifact    |
+| TapeReader preset                  | domain-specific behavior  | preset metadata and config distinction                    | intake card and training/inference cards | fixture test        | second case       |
 
 ### Production-quality requirements
 
-| Item | User value | Backend | Frontend | Verification | Paper relevance |
-|---|---|---|---|---|---|
-| Durable job runner for train/infer | reliable long jobs | command leases, status polling, retries, cancellation | status near Train/Run tabs | integration tests | robustness |
-| Artifact checksums and dimension probes | reproducibility | checksum/shape/dtype jobs | details disclosure | sample HDF5/TIFF/Zarr tests | provenance |
-| Region-level proofreading | partial-label correctness | `WorkflowVolumeRegionState` or equivalent | region queue UI | proofread fixture | CREMI case |
-| Config/run manifest writer | reproducible ML | save exact config, data membership, environment hints | review details | golden manifest tests | scientific rigor |
-| Role-specific permission modes | safer autonomy | policy table in backend | card labels and settings | approval tests | mixed initiative |
+| Item                                    | User value                | Backend                                               | Frontend                   | Verification                | Paper relevance  |
+| --------------------------------------- | ------------------------- | ----------------------------------------------------- | -------------------------- | --------------------------- | ---------------- |
+| Durable job runner for train/infer      | reliable long jobs        | command leases, status polling, retries, cancellation | status near Train/Run tabs | integration tests           | robustness       |
+| Artifact checksums and dimension probes | reproducibility           | checksum/shape/dtype jobs                             | details disclosure         | sample HDF5/TIFF/Zarr tests | provenance       |
+| Region-level proofreading               | partial-label correctness | `WorkflowVolumeRegionState` or equivalent             | region queue UI            | proofread fixture           | CREMI case       |
+| Config/run manifest writer              | reproducible ML           | save exact config, data membership, environment hints | review details             | golden manifest tests       | scientific rigor |
+| Role-specific permission modes          | safer autonomy            | policy table in backend                               | card labels and settings   | approval tests              | mixed initiative |
 
 ### Future/research extensions
 

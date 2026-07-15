@@ -88,12 +88,12 @@ Proposed canonical states:
 
 Do not switch the whole UI in one risky pass. Add aliases first:
 
-| Legacy | Canonical Alias |
-|---|---|
-| `ground_truth` | `proofread_ground_truth` |
-| `missing_segmentation` | `image_only` |
-| `needs_proofreading` | `needs_proofreading` |
-| `ignored` | `ignored` |
+| Legacy                 | Canonical Alias          |
+| ---------------------- | ------------------------ |
+| `ground_truth`         | `proofread_ground_truth` |
+| `missing_segmentation` | `image_only`             |
+| `needs_proofreading`   | `needs_proofreading`     |
+| `ignored`              | `ignored`                |
 
 Immediate implementation target:
 

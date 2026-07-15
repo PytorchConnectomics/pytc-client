@@ -54,7 +54,10 @@ export const summarizeConfigObject = (configObj, modeHint = null) => {
 
   const datasetImageName = getNestedValue(configObj, ["DATASET", "IMAGE_NAME"]);
   const datasetLabelName = getNestedValue(configObj, ["DATASET", "LABEL_NAME"]);
-  const inferenceImageName = getNestedValue(configObj, ["INFERENCE", "IMAGE_NAME"]);
+  const inferenceImageName = getNestedValue(configObj, [
+    "INFERENCE",
+    "IMAGE_NAME",
+  ]);
 
   return {
     modeHint,
@@ -63,7 +66,9 @@ export const summarizeConfigObject = (configObj, modeHint = null) => {
     dataset: {
       imageName: pathBasename(datasetImageName),
       labelName: pathBasename(datasetLabelName),
-      outputPath: trimPath(getNestedValue(configObj, ["DATASET", "OUTPUT_PATH"])),
+      outputPath: trimPath(
+        getNestedValue(configObj, ["DATASET", "OUTPUT_PATH"]),
+      ),
       doChunkTitle: getNestedValue(configObj, ["DATASET", "DO_CHUNK_TITLE"]),
       validRatio: getNestedValue(configObj, ["DATASET", "VALID_RATIO"]),
       rejectSamplingProbability: getNestedValue(configObj, [
@@ -71,14 +76,19 @@ export const summarizeConfigObject = (configObj, modeHint = null) => {
         "REJECT_SAMPLING",
         "P",
       ]),
-      isAbsolutePath: getNestedValue(configObj, ["DATASET", "IS_ABSOLUTE_PATH"]),
+      isAbsolutePath: getNestedValue(configObj, [
+        "DATASET",
+        "IS_ABSOLUTE_PATH",
+      ]),
       usesDirectVolumePaths:
         looksLikeDirectVolume(datasetImageName) ||
         looksLikeDirectVolume(datasetLabelName),
     },
     inference: {
       imageName: pathBasename(inferenceImageName),
-      outputPath: trimPath(getNestedValue(configObj, ["INFERENCE", "OUTPUT_PATH"])),
+      outputPath: trimPath(
+        getNestedValue(configObj, ["INFERENCE", "OUTPUT_PATH"]),
+      ),
       augNum: getNestedValue(configObj, ["INFERENCE", "AUG_NUM"]),
       samplesPerBatch: getNestedValue(configObj, [
         "INFERENCE",
@@ -88,10 +98,7 @@ export const summarizeConfigObject = (configObj, modeHint = null) => {
     solver: {
       baseLr: getNestedValue(configObj, ["SOLVER", "BASE_LR"]),
       batchSize: getNestedValue(configObj, ["SOLVER", "SAMPLES_PER_BATCH"]),
-      totalIterations: getNestedValue(configObj, [
-        "SOLVER",
-        "ITERATION_TOTAL",
-      ]),
+      totalIterations: getNestedValue(configObj, ["SOLVER", "ITERATION_TOTAL"]),
     },
     system: {
       numGpus: getNestedValue(configObj, ["SYSTEM", "NUM_GPUS"]),

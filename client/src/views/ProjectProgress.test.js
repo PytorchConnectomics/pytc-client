@@ -121,7 +121,9 @@ describe("ProjectProgress", () => {
     render(<ProjectProgress />);
 
     await waitFor(() => {
-      expect(mockWorkflowContext.refreshProjectProgress).toHaveBeenCalledTimes(1);
+      expect(mockWorkflowContext.refreshProjectProgress).toHaveBeenCalledTimes(
+        1,
+      );
     });
     const refreshButton = screen.getByRole("button", { name: /Refresh/ });
     await waitFor(() => {
@@ -130,7 +132,9 @@ describe("ProjectProgress", () => {
     fireEvent.click(refreshButton);
 
     await waitFor(() => {
-      expect(mockWorkflowContext.refreshProjectProgress).toHaveBeenCalledTimes(2);
+      expect(mockWorkflowContext.refreshProjectProgress).toHaveBeenCalledTimes(
+        2,
+      );
     });
   });
 });

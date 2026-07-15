@@ -128,7 +128,9 @@ describe("Chatbot workflow routing", () => {
       charCode: 13,
     });
 
-    expect(await screen.findByText("I found the current project state.")).toBeTruthy();
+    expect(
+      await screen.findByText("I found the current project state."),
+    ).toBeTruthy();
     first.unmount();
 
     const secondQueryAgent = jest.fn().mockResolvedValue({
@@ -142,7 +144,9 @@ describe("Chatbot workflow routing", () => {
     renderChatbot({ queryAgent: secondQueryAgent });
 
     expect(await screen.findByText("what are we looking at?")).toBeTruthy();
-    expect(await screen.findByText("I found the current project state.")).toBeTruthy();
+    expect(
+      await screen.findByText("I found the current project state."),
+    ).toBeTruthy();
 
     fireEvent.change(screen.getByPlaceholderText("Message"), {
       target: { value: "again" },
@@ -193,7 +197,9 @@ describe("Chatbot workflow routing", () => {
       );
     });
     expect(queryChatBot).not.toHaveBeenCalled();
-    expect(await screen.findByText("Do this: view the current volume pair.")).toBeTruthy();
+    expect(
+      await screen.findByText("Do this: view the current volume pair."),
+    ).toBeTruthy();
     expect(screen.getAllByText("View data").length).toBeGreaterThan(0);
   });
 
@@ -238,7 +244,9 @@ describe("Chatbot workflow routing", () => {
       );
     });
     expect(queryChatBot).not.toHaveBeenCalled();
-    expect(await screen.findByText("Do this: view image with seg.")).toBeTruthy();
+    expect(
+      await screen.findByText("Do this: view image with seg."),
+    ).toBeTruthy();
     expect(screen.getAllByText("View data").length).toBeGreaterThan(0);
     expect(screen.getByRole("button", { name: "Run in app" })).toBeTruthy();
   });
@@ -328,7 +336,9 @@ describe("Chatbot workflow routing", () => {
       );
     });
     expect(queryChatBot).not.toHaveBeenCalled();
-    expect(await screen.findByText("Do this: view the mounted data.")).toBeTruthy();
+    expect(
+      await screen.findByText("Do this: view the mounted data."),
+    ).toBeTruthy();
     expect(screen.getAllByText("View data").length).toBeGreaterThan(0);
     expect(screen.getByRole("button", { name: "Run in app" })).toBeTruthy();
   });
@@ -368,7 +378,9 @@ describe("Chatbot workflow routing", () => {
       );
     });
     expect(queryChatBot).not.toHaveBeenCalled();
-    expect(await screen.findByText("Do this: inspect workflow status.")).toBeTruthy();
+    expect(
+      await screen.findByText("Do this: inspect workflow status."),
+    ).toBeTruthy();
     expect(screen.getAllByText("Show status").length).toBeGreaterThan(0);
   });
 
@@ -396,7 +408,9 @@ describe("Chatbot workflow routing", () => {
     });
     expect(workflow.queryAgent).not.toHaveBeenCalled();
     expect(
-      await screen.findByText("Binary cross entropy is a loss for binary labels."),
+      await screen.findByText(
+        "Binary cross entropy is a loss for binary labels.",
+      ),
     ).toBeTruthy();
   });
 
@@ -461,9 +475,13 @@ describe("Chatbot workflow routing", () => {
     });
     expect(queryChatBot).not.toHaveBeenCalled();
     expect(
-      await screen.findByText("Do this: reload the viewer with 1,1,1 nm voxel scales."),
+      await screen.findByText(
+        "Do this: reload the viewer with 1,1,1 nm voxel scales.",
+      ),
     ).toBeTruthy();
-    expect((await screen.findAllByText("Reload viewer")).length).toBeGreaterThan(0);
+    expect(
+      (await screen.findAllByText("Reload viewer")).length,
+    ).toBeGreaterThan(0);
   });
 
   it("routes greetings to the workflow agent so internal LLM prompts cannot leak", async () => {
@@ -570,7 +588,9 @@ describe("Chatbot workflow routing", () => {
     expect(
       await screen.findByText("Do this: add a checkpoint or mask/label."),
     ).toBeTruthy();
-    expect((await screen.findAllByText("Choose data")).length).toBeGreaterThan(0);
+    expect((await screen.findAllByText("Choose data")).length).toBeGreaterThan(
+      0,
+    );
   });
 
   it("keeps workflow follow-up questions with the orchestrator after a workflow answer", async () => {
@@ -635,7 +655,9 @@ describe("Chatbot workflow routing", () => {
     });
     expect(queryChatBot).not.toHaveBeenCalled();
     expect(
-      await screen.findByText("Do this: open the current image and mask pair first."),
+      await screen.findByText(
+        "Do this: open the current image and mask pair first.",
+      ),
     ).toBeTruthy();
     expect(screen.getAllByText("Show data").length).toBeGreaterThan(0);
   });
@@ -672,7 +694,9 @@ describe("Chatbot workflow routing", () => {
     });
 
     expect(
-      await screen.findByText("Do this: show status before starting another action."),
+      await screen.findByText(
+        "Do this: show status before starting another action.",
+      ),
     ).toBeTruthy();
 
     fireEvent.change(screen.getByPlaceholderText("Message"), {
@@ -689,7 +713,9 @@ describe("Chatbot workflow routing", () => {
     });
     expect(queryChatBot).not.toHaveBeenCalled();
     expect(
-      await screen.findByText("I mean the workflow evidence and readiness status."),
+      await screen.findByText(
+        "I mean the workflow evidence and readiness status.",
+      ),
     ).toBeTruthy();
   });
 
@@ -811,8 +837,12 @@ describe("Chatbot workflow routing", () => {
     );
     renderChatbot();
 
-    expect(await screen.findByText("Do this: proofread this data.")).toBeTruthy();
-    expect(screen.getAllByText("Proofread this data").length).toBeGreaterThan(0);
+    expect(
+      await screen.findByText("Do this: proofread this data."),
+    ).toBeTruthy();
+    expect(screen.getAllByText("Proofread this data").length).toBeGreaterThan(
+      0,
+    );
     expect(screen.getByRole("button", { name: "Run in app" })).toBeTruthy();
   });
 
@@ -1333,7 +1363,8 @@ describe("Chatbot workflow routing", () => {
         messages: [
           {
             role: "assistant",
-            content: "I staged that run. Review the run card before launching it.",
+            content:
+              "I staged that run. Review the run card before launching it.",
             source: "workflow_orchestrator",
             workflow_id: 999,
             actions: [

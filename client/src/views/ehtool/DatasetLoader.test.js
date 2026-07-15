@@ -62,7 +62,9 @@ describe("DatasetLoader", () => {
     expect(screen.getByText("train + train")).toBeTruthy();
     expect(screen.queryByText("mito25-paper-loop-smoke")).toBeNull();
 
-    fireEvent.click(screen.getByRole("button", { name: "Start with current data" }));
+    fireEvent.click(
+      screen.getByRole("button", { name: "Start with current data" }),
+    );
 
     expect(onLoad).toHaveBeenCalledWith(
       "/projects/prepilot/data/image/train",
@@ -90,7 +92,9 @@ describe("DatasetLoader", () => {
 
     expect(screen.getByText("raw.h5 + corrected.tif")).toBeTruthy();
 
-    fireEvent.click(screen.getByRole("button", { name: "Start with current data" }));
+    fireEvent.click(
+      screen.getByRole("button", { name: "Start with current data" }),
+    );
 
     expect(onLoad).toHaveBeenCalledWith(
       "/projects/mito/data/image/raw.h5",
@@ -116,7 +120,9 @@ describe("DatasetLoader", () => {
 
     expect(screen.getByText("raw.h5 + prediction.h5")).toBeTruthy();
 
-    fireEvent.click(screen.getByRole("button", { name: "Start with current data" }));
+    fireEvent.click(
+      screen.getByRole("button", { name: "Start with current data" }),
+    );
 
     expect(onLoad).toHaveBeenCalledWith(
       "/projects/mito/data/image/raw.h5",

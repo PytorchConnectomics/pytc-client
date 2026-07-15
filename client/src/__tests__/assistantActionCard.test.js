@@ -32,7 +32,9 @@ describe("AssistantActionCard", () => {
     render(<AssistantActionCard action={action} onRun={onRun} />);
 
     expect(screen.getByText("Open Training")).toBeTruthy();
-    expect(screen.getByText("Jump to training with staged labels.")).toBeTruthy();
+    expect(
+      screen.getByText("Jump to training with staged labels."),
+    ).toBeTruthy();
 
     fireEvent.click(screen.getByRole("button", { name: "Run in app" }));
     expect(onRun).toHaveBeenCalledWith(action);

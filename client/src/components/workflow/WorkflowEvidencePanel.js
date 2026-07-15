@@ -12,19 +12,25 @@ const METRIC_ROWS = [
   { key: "dice", label: "Dice", direction: "higher" },
   { key: "iou", label: "IoU", direction: "higher" },
   { key: "voxel_accuracy", label: "Voxel accuracy", direction: "higher" },
-  { key: "adapted_rand_error", label: "Adapted Rand error", direction: "lower" },
+  {
+    key: "adapted_rand_error",
+    label: "Adapted Rand error",
+    direction: "lower",
+  },
   { key: "vi_total", label: "VI total", direction: "lower" },
 ];
 
 const EMPTY_ARRAY = [];
 
 function latestByCreatedAt(items = []) {
-  return [...items].sort((left, right) => {
-    const leftTime = new Date(left.created_at || 0).getTime();
-    const rightTime = new Date(right.created_at || 0).getTime();
-    if (leftTime !== rightTime) return rightTime - leftTime;
-    return (right.id || 0) - (left.id || 0);
-  })[0] || null;
+  return (
+    [...items].sort((left, right) => {
+      const leftTime = new Date(left.created_at || 0).getTime();
+      const rightTime = new Date(right.created_at || 0).getTime();
+      if (leftTime !== rightTime) return rightTime - leftTime;
+      return (right.id || 0) - (left.id || 0);
+    })[0] || null
+  );
 }
 
 function normalizeText(value) {
@@ -68,7 +74,9 @@ function formatPath(path) {
 
 function formatShortPath(path) {
   if (!path) return "Not selected";
-  const parts = String(path).split(/[\\/]+/).filter(Boolean);
+  const parts = String(path)
+    .split(/[\\/]+/)
+    .filter(Boolean);
   if (parts.length <= 2) return parts.join("/");
   return parts.slice(-2).join("/");
 }
@@ -84,7 +92,9 @@ function statusForPath(artifacts, path) {
 
 function compactObject(value) {
   return Object.fromEntries(
-    Object.entries(value).filter(([, entry]) => entry !== undefined && entry !== null && entry !== ""),
+    Object.entries(value).filter(
+      ([, entry]) => entry !== undefined && entry !== null && entry !== "",
+    ),
   );
 }
 
@@ -183,7 +193,8 @@ function getEvaluationOptions(workflow, latestEvaluation, evaluationInputs) {
     ...(latestEvaluation?.metadata || {}),
   };
   return compactObject({
-    baseline_dataset: evaluationInputs.baselineDataset || metadata.baseline_dataset,
+    baseline_dataset:
+      evaluationInputs.baselineDataset || metadata.baseline_dataset,
     candidate_dataset:
       evaluationInputs.candidateDataset || metadata.candidate_dataset,
     ground_truth_dataset:
@@ -226,17 +237,18 @@ function getPipelineSteps({
 }) {
   const hasSourceVolume = Boolean(
     workflow?.dataset_path ||
-      workflow?.image_path ||
-      artifacts.some((artifact) =>
-        ["dataset", "image_volume"].includes(artifact.artifact_type),
-      ),
+    workflow?.image_path ||
+    artifacts.some((artifact) =>
+      ["dataset", "image_volume"].includes(artifact.artifact_type),
+    ),
   );
   const completedTrainingRuns = modelRuns.filter(
     (run) => run.run_type === "training" && run.status === "completed",
   );
   const hasCandidatePrediction = Boolean(
     evidence.candidateRun ||
-      (evidence.candidatePath && evidence.candidatePath !== evidence.baselinePath),
+    (evidence.candidatePath &&
+      evidence.candidatePath !== evidence.baselinePath),
   );
 
   const hasBundleExport = events.some(
@@ -256,7 +268,9 @@ function getPipelineSteps({
       key: "baseline",
       label: "First result",
       complete: Boolean(evidence.baselinePath),
-      detail: evidence.baselineRun ? `run #${evidence.baselineRun.id}` : "run model",
+      detail: evidence.baselineRun
+        ? `run #${evidence.baselineRun.id}`
+        : "run model",
     },
     {
       key: "proofreading",
@@ -278,7 +292,9 @@ function getPipelineSteps({
       key: "candidate",
       label: "New result",
       complete: hasCandidatePrediction,
-      detail: evidence.candidateRun ? `run #${evidence.candidateRun.id}` : "run model again",
+      detail: evidence.candidateRun
+        ? `run #${evidence.candidateRun.id}`
+        : "run model again",
     },
     {
       key: "evaluation",
@@ -377,7 +393,10 @@ function EvidencePathCard({ title, path, status, detail }) {
         {formatPath(path)}
       </div>
       {detail && (
-        <Text type="secondary" style={{ display: "block", marginTop: 6, fontSize: 11 }}>
+        <Text
+          type="secondary"
+          style={{ display: "block", marginTop: 6, fontSize: 11 }}
+        >
           {detail}
         </Text>
       )}
@@ -450,14 +469,19 @@ function MetricGrid({ evaluation }) {
     <div
       style={{
         display: "grid",
-        gridTemplateColumns: "minmax(120px, 1.2fr) repeat(3, minmax(72px, 0.8fr)) minmax(86px, 0.8fr)",
+        gridTemplateColumns:
+          "minmax(120px, 1.2fr) repeat(3, minmax(72px, 0.8fr)) minmax(86px, 0.8fr)",
         gap: 8,
         alignItems: "center",
         overflowX: "auto",
       }}
     >
       {["Metric", "Previous", "New", "Change", "Goal"].map((label) => (
-        <Text key={label} type="secondary" style={{ fontSize: 11, fontWeight: 700 }}>
+        <Text
+          key={label}
+          type="secondary"
+          style={{ fontSize: 11, fontWeight: 700 }}
+        >
           {label}
         </Text>
       ))}
@@ -472,11 +496,19 @@ function MetricGrid({ evaluation }) {
         return (
           <React.Fragment key={row.key}>
             <Text style={{ fontSize: 12 }}>{row.label}</Text>
-            <Text style={{ fontSize: 12 }}>{formatMetric(baseline[row.key])}</Text>
-            <Text style={{ fontSize: 12 }}>{formatMetric(candidate[row.key])}</Text>
-            <Text style={{ fontSize: 12 }}>{formatMetric(deltaValue, { signed: true })}</Text>
+            <Text style={{ fontSize: 12 }}>
+              {formatMetric(baseline[row.key])}
+            </Text>
+            <Text style={{ fontSize: 12 }}>
+              {formatMetric(candidate[row.key])}
+            </Text>
+            <Text style={{ fontSize: 12 }}>
+              {formatMetric(deltaValue, { signed: true })}
+            </Text>
             <Tag
-              color={improved === null ? "default" : improved ? "green" : "orange"}
+              color={
+                improved === null ? "default" : improved ? "green" : "orange"
+              }
               style={{ width: "fit-content", margin: 0 }}
             >
               {row.direction === "higher" ? "higher better" : "lower better"}
@@ -602,7 +634,9 @@ function WorkflowEvidencePanel({ compact = false }) {
     try {
       const bundle = await exportWorkflowBundle(workflow.id);
       const artifactPaths = bundle?.artifact_paths || [];
-      const missingCount = artifactPaths.filter((entry) => !entry.exists).length;
+      const missingCount = artifactPaths.filter(
+        (entry) => !entry.exists,
+      ).length;
       setBundleNotice(
         `Report exported: ${bundle?.artifacts?.length || 0} files, ${bundle?.model_runs?.length || 0} runs, ${bundle?.evaluation_results?.length || 0} comparisons, ${missingCount} missing paths.`,
       );
@@ -631,7 +665,10 @@ function WorkflowEvidencePanel({ compact = false }) {
             <Tag color={statusTag.color} style={{ margin: 0 }}>
               {statusTag.label}
             </Tag>
-            <Tag color={completeEvidenceCount === 4 ? "green" : "gold"} style={{ margin: 0 }}>
+            <Tag
+              color={completeEvidenceCount === 4 ? "green" : "gold"}
+              style={{ margin: 0 }}
+            >
               {completeEvidenceCount}/4 ready
             </Tag>
           </Space>
@@ -900,20 +937,33 @@ function WorkflowEvidencePanel({ compact = false }) {
               </Tag>
             )}
             {summary.voxel_accuracy_delta !== undefined && (
-              <Tag color={summary.voxel_accuracy_delta >= 0 ? "green" : "orange"}>
-                Accuracy {formatMetric(summary.voxel_accuracy_delta, { signed: true })}
+              <Tag
+                color={summary.voxel_accuracy_delta >= 0 ? "green" : "orange"}
+              >
+                Accuracy{" "}
+                {formatMetric(summary.voxel_accuracy_delta, { signed: true })}
               </Tag>
             )}
           </Space>
           <MetricGrid evaluation={evidence.latestEvaluation} />
           {!canComputeEvaluation && (
-            <Text type="secondary" style={{ display: "block", marginTop: 8, fontSize: 12 }}>
+            <Text
+              type="secondary"
+              style={{ display: "block", marginTop: 8, fontSize: 12 }}
+            >
               Need {missingEvaluationInputs.join(", ")} before metrics can be
               computed.
             </Text>
           )}
           {computeNotice && (
-            <Text style={{ display: "block", marginTop: 8, fontSize: 12, color: "#2f7d32" }}>
+            <Text
+              style={{
+                display: "block",
+                marginTop: 8,
+                fontSize: 12,
+                color: "#2f7d32",
+              }}
+            >
               {computeNotice}
             </Text>
           )}
@@ -930,7 +980,14 @@ function WorkflowEvidencePanel({ compact = false }) {
             </Text>
           )}
           {computeError && (
-            <Text style={{ display: "block", marginTop: 8, fontSize: 12, color: "#b13a2f" }}>
+            <Text
+              style={{
+                display: "block",
+                marginTop: 8,
+                fontSize: 12,
+                color: "#b13a2f",
+              }}
+            >
               {computeError}
             </Text>
           )}

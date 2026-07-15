@@ -45,7 +45,9 @@ const METRIC_TONE_COLORS = {
 
 function shortPath(path) {
   if (!path) return "Not found";
-  const parts = String(path).split(/[\\/]+/).filter(Boolean);
+  const parts = String(path)
+    .split(/[\\/]+/)
+    .filter(Boolean);
   if (parts.length <= 3) return parts.join("/");
   return parts.slice(-3).join("/");
 }
@@ -223,7 +225,8 @@ function ProjectProgress() {
             Workflow Overview
           </Title>
           <Text type="secondary">
-            Shared workflow map for the user, agent, volume statuses, blockers, and next actions.
+            Shared workflow map for the user, agent, volume statuses, blockers,
+            and next actions.
           </Text>
         </Space>
         <Button
@@ -237,13 +240,18 @@ function ProjectProgress() {
 
       <Card size="small" style={{ marginBottom: 16 }}>
         <Space direction="vertical" size={12} style={{ width: "100%" }}>
-          <Space align="center" style={{ width: "100%", justifyContent: "space-between" }}>
+          <Space
+            align="center"
+            style={{ width: "100%", justifyContent: "space-between" }}
+          >
             <Space direction="vertical" size={2}>
               <Text strong>
-                Current phase: {workflowOverview?.phase_label || workflow?.stage || "Setup"}
+                Current phase:{" "}
+                {workflowOverview?.phase_label || workflow?.stage || "Setup"}
               </Text>
               <Text type="secondary">
-                {workflowOverview?.phase_reason || "The workflow is waiting for project state."}
+                {workflowOverview?.phase_reason ||
+                  "The workflow is waiting for project state."}
               </Text>
             </Space>
             <Text type="secondary">
@@ -336,18 +344,20 @@ function ProjectProgress() {
 
       <Card size="small" style={{ marginBottom: 16 }}>
         <Space direction="vertical" size={8} style={{ width: "100%" }}>
-          <Space align="center" style={{ width: "100%", justifyContent: "space-between" }}>
+          <Space
+            align="center"
+            style={{ width: "100%", justifyContent: "space-between" }}
+          >
             <Text strong>Completion</Text>
-            <Text type="secondary">
-              {summary.remaining ?? 0} remaining
-            </Text>
+            <Text type="secondary">{summary.remaining ?? 0} remaining</Text>
           </Space>
           <Progress
             percent={summary.completion_pct || 0}
             success={{ percent: summary.completion_pct || 0 }}
           />
           <Text type="secondary">
-            Segmentation coverage: {summary.segmentation_coverage_pct || 0}% have some mask or segmentation.
+            Segmentation coverage: {summary.segmentation_coverage_pct || 0}%
+            have some mask or segmentation.
           </Text>
         </Space>
       </Card>
@@ -397,7 +407,10 @@ function ProjectProgress() {
                       <Text strong>{action.label}</Text>
                       <Text type="secondary">{action.detail}</Text>
                     </Space>
-                    <Button size="small" onClick={() => handleOverviewAction(action)}>
+                    <Button
+                      size="small"
+                      onClick={() => handleOverviewAction(action)}
+                    >
                       Open
                     </Button>
                   </div>
@@ -415,10 +428,7 @@ function ProjectProgress() {
           value={filter}
           style={{ width: 220 }}
           onChange={setFilter}
-          options={[
-            { value: "all", label: "All volumes" },
-            ...STATUS_OPTIONS,
-          ]}
+          options={[{ value: "all", label: "All volumes" }, ...STATUS_OPTIONS]}
         />
         {STATUS_OPTIONS.map((option) => (
           <Tag

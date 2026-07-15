@@ -98,8 +98,8 @@ describe("proofreadingPaths", () => {
 
   it("keeps display names stable", () => {
     expect(basename("/tmp/project/data/")).toBe("data");
-    expect(getProofreadingProjectName({ metadata: { projectName: "Mouse EM" } })).toBe(
-      "Mouse EM",
-    );
+    expect(
+      getProofreadingProjectName({ metadata: { projectName: "Mouse EM" } }),
+    ).toBe("Mouse EM");
   });
 });

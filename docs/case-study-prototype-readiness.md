@@ -38,15 +38,15 @@ manager.
 
 ## Case Studies
 
-| ID | Purpose | Participant Task | Required Prototype Gate |
-| --- | --- | --- | --- |
-| CS1 | Workflow continuity | Load data, create viewer, run or inspect inference, proofread, inspect timeline | Workflow context, data artifacts, baseline inference |
-| CS2 | Agent-guided triage | Ask where to inspect, review hotspot ranking, correct a selected region | Persisted hotspots, workflow-grounded agent response |
-| CS3 | Correction-to-retraining loop | Export corrections, preview impact, approve retraining, produce checkpoint | `CorrectionSet`, training `ModelRun`, `ModelVersion` |
-| CS4 | Before/after evidence | Compare baseline and post-retraining inference | Two inference runs plus `EvaluationResult` |
-| CS5 | Approval-gated control | Review, approve, reject, and inspect agent proposals | Proposal events, approval/rejection events |
-| CS6 | Failure recovery | Recover from failed training, bad config, or interrupted run | Terminal failure events, interrupted/resumed agent plan, visible next action |
-| CS7 | Study export | Export state, artifacts, metrics, events, screenshots, and task timing | Evidence bundle with typed records |
+| ID  | Purpose                       | Participant Task                                                                | Required Prototype Gate                                                      |
+| --- | ----------------------------- | ------------------------------------------------------------------------------- | ---------------------------------------------------------------------------- |
+| CS1 | Workflow continuity           | Load data, create viewer, run or inspect inference, proofread, inspect timeline | Workflow context, data artifacts, baseline inference                         |
+| CS2 | Agent-guided triage           | Ask where to inspect, review hotspot ranking, correct a selected region         | Persisted hotspots, workflow-grounded agent response                         |
+| CS3 | Correction-to-retraining loop | Export corrections, preview impact, approve retraining, produce checkpoint      | `CorrectionSet`, training `ModelRun`, `ModelVersion`                         |
+| CS4 | Before/after evidence         | Compare baseline and post-retraining inference                                  | Two inference runs plus `EvaluationResult`                                   |
+| CS5 | Approval-gated control        | Review, approve, reject, and inspect agent proposals                            | Proposal events, approval/rejection events                                   |
+| CS6 | Failure recovery              | Recover from failed training, bad config, or interrupted run                    | Terminal failure events, interrupted/resumed agent plan, visible next action |
+| CS7 | Study export                  | Export state, artifacts, metrics, events, screenshots, and task timing          | Evidence bundle with typed records                                           |
 
 ## Instrumentation Checklist
 
@@ -72,7 +72,7 @@ manager.
 - Agent proposals always display title, proposal type, approval state, rationale,
   artifact references, and approve/reject controls.
 - Repeated functions keep consistent labels: `Approve`, `Reject`, `Refresh
-  Insights`, `Start Training`, `Run Model`, `Open Proofreading`.
+Insights`, `Start Training`, `Run Model`, `Open Proofreading`.
 - Status colors are semantic, not decorative: amber for review/staging, green for
   completed/model-ready, red for failure/high risk, blue/teal for inspection.
 - Keyboard focus and accessible names must remain consistent across repeated

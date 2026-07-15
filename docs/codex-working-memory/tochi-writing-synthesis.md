@@ -1,6 +1,7 @@
 # TOCHI Writing Synthesis (2026-04-13)
 
 Corpus reviewed from local PDFs:
+
 - `3769675.pdf`
 - `3771924.pdf`
 - `3770583.pdf`
@@ -43,6 +44,7 @@ File: `/Users/adamg/seg.bio/_toCHI__Human_Agent_collaboration_for_biomed_image_s
 ## Internal Implementation Reality (Not For Manuscript Text)
 
 Implemented in project codebase (current evidence in tests/logs):
+
 - Workflow state/event backbone and APIs.
 - Proofreading/inference/workflow event integration.
 - Approval-gated proposal flow.
@@ -50,6 +52,7 @@ Implemented in project codebase (current evidence in tests/logs):
 - LLM configuration hardening + backend observability improvements.
 
 Design ideation / planned extensions:
+
 - Failure hotspot prioritization.
 - Correction impact preview.
 - Project-level autonomous run manager.

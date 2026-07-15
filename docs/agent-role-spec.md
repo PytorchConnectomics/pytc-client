@@ -62,7 +62,7 @@ Implemented UI commitments:
   results" instead of "open artifact", "candidate output", or "retraining
   handoff" in biologist-facing controls.
 - The primary action should mutate local app state when safe. `Proofread this
-  data` now carries a `start_proofreading` runtime action with image/mask/review
+data` now carries a `start_proofreading` runtime action with image/mask/review
   overrides so the proofreading workbench can load the current pair directly.
 - Status panels should summarize readiness with domain labels: previous result,
   new result, your saved edits, and reference mask. Full paths and dataset-key
@@ -250,7 +250,7 @@ Implemented UI commitments:
 - Treat chat as a control surface over typed workflow tools. The agent should
   return app actions with risk metadata rather than long explanatory prose.
 - Every action should be classifiable as `view only`, `sets form`, `opens
-  editor`, `runs job`, `writes record`, or `exports`. Long-running or
+editor`, `runs job`, `writes record`, or `exports`. Long-running or
   artifact-changing actions require an explicit user click and workflow-event
   logging.
 - Support deterministic slash-style workflow commands for power users:

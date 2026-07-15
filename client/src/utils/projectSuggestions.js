@@ -49,7 +49,9 @@ const parseVoxelSizeNmFromText = (text) => {
   const threeAxisMatch = source.match(threeAxisPattern);
   if (threeAxisMatch) {
     const multiplier = scaleUnitMultiplier(threeAxisMatch[4] || source);
-    return threeAxisMatch.slice(1, 4).map((value) => Number(value) * multiplier);
+    return threeAxisMatch
+      .slice(1, 4)
+      .map((value) => Number(value) * multiplier);
   }
 
   const unitQualifiedTriple =
@@ -57,14 +59,18 @@ const parseVoxelSizeNmFromText = (text) => {
   const unitQualifiedMatch = source.match(unitQualifiedTriple);
   if (unitQualifiedMatch) {
     const multiplier = scaleUnitMultiplier(unitQualifiedMatch[4]);
-    return unitQualifiedMatch.slice(1, 4).map((value) => Number(value) * multiplier);
+    return unitQualifiedMatch
+      .slice(1, 4)
+      .map((value) => Number(value) * multiplier);
   }
 
   const isotropicPattern =
     /(?:isotropic|cubic|same\s+voxel|same\s+scale)[^\d]{0,60}(\d+(?:\.\d+)?)(?:\s*(nm|nanometers?|um|\u00b5m|microns?))?/i;
   const isotropicMatch = source.match(isotropicPattern);
   if (isotropicMatch) {
-    const value = Number(isotropicMatch[1]) * scaleUnitMultiplier(isotropicMatch[2] || source);
+    const value =
+      Number(isotropicMatch[1]) *
+      scaleUnitMultiplier(isotropicMatch[2] || source);
     return [value, value, value];
   }
 
@@ -72,7 +78,9 @@ const parseVoxelSizeNmFromText = (text) => {
 };
 
 const formatScaleNumber = (value) =>
-  Number.isInteger(Number(value)) ? String(Number(value)) : `${Number(value).toFixed(4)}`.replace(/0+$/, "").replace(/\.$/, "");
+  Number.isInteger(Number(value))
+    ? String(Number(value))
+    : `${Number(value).toFixed(4)}`.replace(/0+$/, "").replace(/\.$/, "");
 
 export const formatVoxelSizeNm = (value) => {
   const voxelSize = normalizeVoxelSizeNm(value);
@@ -98,7 +106,8 @@ export const getProjectContextDefaultsFromSuggestion = (suggestion) => {
     ...(suggestion?.context_hints || {}),
   };
   const counts = profile.counts || {};
-  const auditFacts = getProjectAuditFromSuggestion(suggestion)?.context_facts || [];
+  const auditFacts =
+    getProjectAuditFromSuggestion(suggestion)?.context_facts || [];
   const defaults = {};
 
   [
@@ -127,8 +136,7 @@ export const getProjectContextDefaultsFromSuggestion = (suggestion) => {
   const auditVoxelSize = normalizeVoxelSizeNm(auditVoxelSizeFact?.value);
   if (auditVoxelSize) {
     defaults.voxel_size_nm = auditVoxelSize;
-    defaults.voxel_size_source =
-      auditVoxelSizeFact.source || "volume_metadata";
+    defaults.voxel_size_source = auditVoxelSizeFact.source || "volume_metadata";
   }
 
   const modalityText = String(defaults.imaging_modality || "").toLowerCase();
@@ -159,14 +167,17 @@ export const getProjectContextDefaultsFromSuggestion = (suggestion) => {
   }
   const hasDomainContext = Boolean(
     defaults.imaging_modality ||
-      defaults.target_structure ||
-      defaults.task_family ||
-      contentHints.task_goal,
+    defaults.target_structure ||
+    defaults.task_family ||
+    contentHints.task_goal,
   );
   if (hasDomainContext && !defaults.mask_status) {
     if ((counts.image || 0) > 0 && (counts.label || 0) === 0) {
       defaults.mask_status = "image-only; no masks found";
-    } else if ((counts.image || 0) > (counts.label || 0) && (counts.label || 0) > 0) {
+    } else if (
+      (counts.image || 0) > (counts.label || 0) &&
+      (counts.label || 0) > 0
+    ) {
       defaults.mask_status = "mixed: some masks, some image-only volumes";
     } else if ((counts.label || 0) > 0) {
       defaults.mask_status = "masks found; confirm ground truth vs draft";
@@ -179,7 +190,11 @@ export const getProjectContextDefaultsFromSuggestion = (suggestion) => {
   ) {
     defaults.image_only_strategy = "run inference on image-only volumes later";
   }
-  if (hasDomainContext && !defaults.training_policy && (counts.label || 0) > 0) {
+  if (
+    hasDomainContext &&
+    !defaults.training_policy &&
+    (counts.label || 0) > 0
+  ) {
     defaults.training_policy = "train only on confirmed ground-truth masks";
   }
 
@@ -258,15 +273,25 @@ export const inferProjectContextFromDescription = (description) => {
     context.task_goal = "proofreading";
   } else if (/(segment|segmentation|infer|inference|predict)/.test(lower)) {
     context.task_goal = "segmentation";
-  } else if (/(retrain|fine.?tune|\btrain(?:ing)?\b(?!\s*\/\s*val))/.test(lower)) {
+  } else if (
+    /(retrain|fine.?tune|\btrain(?:ing)?\b(?!\s*\/\s*val))/.test(lower)
+  ) {
     context.task_goal = "training";
   } else if (/(compare|metric|evaluate|evaluation|before.*after)/.test(lower)) {
     context.task_goal = "comparison";
   }
 
-  if (/(train|val|valid|test)\s*(\/|and|,|\+)\s*(val|valid|test|train)/.test(lower)) {
+  if (
+    /(train|val|valid|test)\s*(\/|and|,|\+)\s*(val|valid|test|train)/.test(
+      lower,
+    )
+  ) {
     context.data_unit = "train/validation/test folders";
-  } else if (/(folder|directory|batch|multiple|several|many|set of|collection)/.test(lower)) {
+  } else if (
+    /(folder|directory|batch|multiple|several|many|set of|collection)/.test(
+      lower,
+    )
+  ) {
     context.data_unit = "folder of volumes";
   } else if (/(one|single)\s+(volume|image|stack|file)/.test(lower)) {
     context.data_unit = "single volume";
@@ -280,9 +305,15 @@ export const inferProjectContextFromDescription = (description) => {
     context.label_status = "no labels";
   } else if (/(rough|weak|partial|imperfect).*(label|mask|seg)/.test(lower)) {
     context.label_status = "rough labels";
-  } else if (/(expert|manual|ground truth|ground-truth|gt).*(label|mask|seg)/.test(lower)) {
+  } else if (
+    /(expert|manual|ground truth|ground-truth|gt).*(label|mask|seg)/.test(lower)
+  ) {
     context.label_status = "expert labels";
-  } else if (/(prediction|predictions|model output|baseline).*(mask|seg|available|exist)/.test(lower)) {
+  } else if (
+    /(prediction|predictions|model output|baseline).*(mask|seg|available|exist)/.test(
+      lower,
+    )
+  ) {
     context.label_status = "predictions available";
   }
 
@@ -299,7 +330,8 @@ const PROJECT_CONTEXT_REQUIRED_FIELDS = [
   {
     key: "imaging_modality",
     label: "imaging modality",
-    question: "What imaging modality is this from, such as EM, fluorescence, or micro-CT?",
+    question:
+      "What imaging modality is this from, such as EM, fluorescence, or micro-CT?",
   },
   {
     key: "target_structure",
@@ -309,7 +341,8 @@ const PROJECT_CONTEXT_REQUIRED_FIELDS = [
   {
     key: "voxel_size_nm",
     label: "imaging resolution",
-    question: "What is the voxel size or imaging resolution in z, y, x nanometers?",
+    question:
+      "What is the voxel size or imaging resolution in z, y, x nanometers?",
   },
 ];
 
@@ -358,7 +391,9 @@ export const describeProjectContextAssessment = (assessment) => {
   if (assessment.complete) {
     return "I have enough project context to continue.";
   }
-  return assessment.next_question || "Tell me one more detail about this dataset.";
+  return (
+    assessment.next_question || "Tell me one more detail about this dataset."
+  );
 };
 
 const preferDirectoryDefault = (profile, role) => {
@@ -390,15 +425,22 @@ export const getProjectRoleDefaultsFromSuggestion = (suggestion) => {
   const rootPath = suggestion?.directory_path;
   const imageRelative =
     preferDirectoryDefault(profile, "image") ||
-    primaryPaths.image || paired.image || examples.image?.[0] || examples.volume?.[0];
+    primaryPaths.image ||
+    paired.image ||
+    examples.image?.[0] ||
+    examples.volume?.[0];
   const labelRelative =
     preferDirectoryDefault(profile, "label") ||
-    primaryPaths.label || primaryPaths.mask || paired.label || examples.label?.[0];
+    primaryPaths.label ||
+    primaryPaths.mask ||
+    paired.label ||
+    examples.label?.[0];
   const predictionRelative =
     preferDirectoryDefault(profile, "prediction") ||
     primaryPaths.prediction ||
     examples.prediction?.[0];
-  const checkpointRelative = primaryPaths.checkpoint || examples.checkpoint?.[0];
+  const checkpointRelative =
+    primaryPaths.checkpoint || examples.checkpoint?.[0];
   const configRelative = primaryPaths.config || examples.config?.[0];
 
   return {
@@ -420,10 +462,12 @@ export const buildWorkflowPatchFromConfirmedProjectRoles = ({
     dataset_path: rootPath || null,
     image_path: normalizeProjectRolePath(rootPath, roles.image) || null,
     label_path: normalizeProjectRolePath(rootPath, labelOrMask) || null,
-    mask_path: normalizeProjectRolePath(rootPath, roles.mask || labelOrMask) || null,
+    mask_path:
+      normalizeProjectRolePath(rootPath, roles.mask || labelOrMask) || null,
     inference_output_path:
       normalizeProjectRolePath(rootPath, roles.prediction) || null,
-    checkpoint_path: normalizeProjectRolePath(rootPath, roles.checkpoint) || null,
+    checkpoint_path:
+      normalizeProjectRolePath(rootPath, roles.checkpoint) || null,
     config_path: normalizeProjectRolePath(rootPath, roles.config) || null,
   };
   if (metadata && typeof metadata === "object") {
@@ -473,7 +517,8 @@ export const summarizeProjectSuggestionForWorkflow = (
       counts: profile.counts || {},
       missing_roles: profile.missing_roles || [],
       paired_example: pairedExample,
-      role_directories: profile.role_directories || profile.schema?.role_directories || {},
+      role_directories:
+        profile.role_directories || profile.schema?.role_directories || {},
       volume_sets: getProjectVolumeSetsFromSuggestion(suggestion),
     },
     inferred_paths: buildWorkflowPatchFromProjectSuggestion(suggestion),
@@ -535,11 +580,16 @@ export const scoreProjectSuggestionForGoal = (suggestion, goal) => {
     counts.prediction > 0 &&
     counts.checkpoint > 0;
 
-  if (/(proofread|review|correct|fix|mask|label)/.test(goalText) && hasImageLabel) {
+  if (
+    /(proofread|review|correct|fix|mask|label)/.test(goalText) &&
+    hasImageLabel
+  ) {
     score += 3;
     reasons.push("image/mask pair");
   }
-  if (/(segment|segmentation|predict|prediction|infer|inference)/.test(goalText)) {
+  if (
+    /(segment|segmentation|predict|prediction|infer|inference)/.test(goalText)
+  ) {
     if (counts.prediction > 0) {
       score += 3;
       reasons.push("prediction artifacts");
@@ -552,7 +602,11 @@ export const scoreProjectSuggestionForGoal = (suggestion, goal) => {
     score += 7;
     reasons.push("mitochondria");
   }
-  if (/(train|retrain|compare|metric|baseline|candidate|closed|loop)/.test(goalText)) {
+  if (
+    /(train|retrain|compare|metric|baseline|candidate|closed|loop)/.test(
+      goalText,
+    )
+  ) {
     if (hasLoopArtifacts) {
       score += 6;
       reasons.push("loop artifacts");

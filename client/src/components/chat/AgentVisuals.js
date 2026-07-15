@@ -76,10 +76,10 @@ export function getAgentVisual(agent = {}) {
     label: explicitLabel || DEFAULT_AGENT_VISUAL.label,
     shortLabel: shortLabel || explicitLabel || DEFAULT_AGENT_VISUAL.shortLabel,
     color: normalizeAgentColor(agent.agent_color || agent.color),
-    iconKey:
-      normalizeAgentIconKey(agent.agent_icon_key || agent.icon_key),
-    borderStyle:
-      normalizeBorderStyle(agent.agent_border_style || agent.border_style),
+    iconKey: normalizeAgentIconKey(agent.agent_icon_key || agent.icon_key),
+    borderStyle: normalizeBorderStyle(
+      agent.agent_border_style || agent.border_style,
+    ),
   };
 }
 

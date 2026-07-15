@@ -1,4 +1,5 @@
-const isLocalHost = (hostname) => /^(localhost|127\.0\.0\.1)$/.test(hostname || "");
+const isLocalHost = (hostname) =>
+  /^(localhost|127\.0\.0\.1)$/.test(hostname || "");
 
 const removeTrailingSlash = (value) => value.replace(/\/+$/, "");
 
@@ -25,7 +26,10 @@ const envFlagEnabled = (name, defaultValue = true) => {
   return !["0", "false", "off", "no"].includes(String(rawValue).toLowerCase());
 };
 
-const CAPTURE_CONSOLE_LOGS = envFlagEnabled("REACT_APP_CAPTURE_CONSOLE_LOGS", true);
+const CAPTURE_CONSOLE_LOGS = envFlagEnabled(
+  "REACT_APP_CAPTURE_CONSOLE_LOGS",
+  true,
+);
 const CAPTURE_BROWSER_NETWORK = envFlagEnabled(
   "REACT_APP_CAPTURE_BROWSER_NETWORK",
   true,
@@ -205,8 +209,7 @@ export const logClientEvent = (
     source,
     sessionId: CLIENT_SESSION_ID,
     url:
-      url ||
-      (typeof window !== "undefined" ? window.location.href : undefined),
+      url || (typeof window !== "undefined" ? window.location.href : undefined),
   });
 };
 
@@ -455,12 +458,18 @@ const installNavigationLogging = () => {
   originalReplaceState = window.history.replaceState;
   window.history.pushState = function pushState(state, title, url) {
     const result = originalPushState.apply(this, arguments);
-    logNavigation("history_push_state", { targetUrl: normalizeUrl(url), state });
+    logNavigation("history_push_state", {
+      targetUrl: normalizeUrl(url),
+      state,
+    });
     return result;
   };
   window.history.replaceState = function replaceState(state, title, url) {
     const result = originalReplaceState.apply(this, arguments);
-    logNavigation("history_replace_state", { targetUrl: normalizeUrl(url), state });
+    logNavigation("history_replace_state", {
+      targetUrl: normalizeUrl(url),
+      state,
+    });
     return result;
   };
   window.addEventListener("popstate", (event) =>
@@ -527,7 +536,9 @@ export const installClientLogging = () => {
   }
   installed = true;
   originalFetch =
-    typeof window.fetch === "function" ? window.fetch.bind(window) : originalFetch;
+    typeof window.fetch === "function"
+      ? window.fetch.bind(window)
+      : originalFetch;
 
   if (CAPTURE_CONSOLE_LOGS) {
     installConsoleLogging();

@@ -40,16 +40,16 @@ all of the following are evidenced by app-executed artifacts:
 For a live one-hour session, the protocol is `GO` only if every row is green.
 `NO-GO` means the facilitator must pause and reset claim language.
 
-| Gate | Explicit Pass Condition | Evidence Check |
-| --- | --- | --- |
-| Baseline project state | Baseline is exactly 10 volumes, `6/2/2` split, correct roots/config, project identified as Yixiao/XRI/CytoTape. | `--prepare-live`; project profile and progress assertions |
-| Agent context | Assistant summary uses mounted workflow context, not stale dataset names or defaults. | `--prepare-live`; project context assertions; agent recommendation |
-| Approval-gated training proposal | Training request creates a reviewable proposal, not auto-launch. | `--prepare-live`; recommendation/`agent-proposal` logs |
-| Proofread promotion | Draft volume can be promoted and reflected in progress state. | `--exercise-promotion`; volume-status transition assertions |
-| Closed-loop rehearsal | Rehearsal path can pair `6_1` / `6_2` predictions with withheld targets without in-project leakage. | `--closed-loop-rehearsal` |
-| Real training/inference/evaluation artifacts | Terminal training/inference completion + checkpoint/version + evaluation entries exist. | model runs, model versions, evaluation results, bundle export |
-| Export bundle | Evidence bundle returns with schema, artifact manifests, and copy-policy summary (including size-safe defaults). | `/api/workflows/{id}/export-bundle` |
-| Live demo health | API/worker/Neuroglancer/worker routing/app log health checks are clean enough for launch, with temporary-load transients treated as WARN, not FAIL. | `inspect_demo_instance.py --json` |
+| Gate                                         | Explicit Pass Condition                                                                                                                             | Evidence Check                                                     |
+| -------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------ |
+| Baseline project state                       | Baseline is exactly 10 volumes, `6/2/2` split, correct roots/config, project identified as Yixiao/XRI/CytoTape.                                     | `--prepare-live`; project profile and progress assertions          |
+| Agent context                                | Assistant summary uses mounted workflow context, not stale dataset names or defaults.                                                               | `--prepare-live`; project context assertions; agent recommendation |
+| Approval-gated training proposal             | Training request creates a reviewable proposal, not auto-launch.                                                                                    | `--prepare-live`; recommendation/`agent-proposal` logs             |
+| Proofread promotion                          | Draft volume can be promoted and reflected in progress state.                                                                                       | `--exercise-promotion`; volume-status transition assertions        |
+| Closed-loop rehearsal                        | Rehearsal path can pair `6_1` / `6_2` predictions with withheld targets without in-project leakage.                                                 | `--closed-loop-rehearsal`                                          |
+| Real training/inference/evaluation artifacts | Terminal training/inference completion + checkpoint/version + evaluation entries exist.                                                             | model runs, model versions, evaluation results, bundle export      |
+| Export bundle                                | Evidence bundle returns with schema, artifact manifests, and copy-policy summary (including size-safe defaults).                                    | `/api/workflows/{id}/export-bundle`                                |
+| Live demo health                             | API/worker/Neuroglancer/worker routing/app log health checks are clean enough for launch, with temporary-load transients treated as WARN, not FAIL. | `inspect_demo_instance.py --json`                                  |
 
 ### Acceptance interpretation
 
@@ -62,13 +62,13 @@ For a live one-hour session, the protocol is `GO` only if every row is green.
 
 ## Case-Study Evidence Mapping
 
-| Claim | Can claim today | Requires closed-loop evidence |
-| --- | --- | --- |
-| "workflow coordination" | yes | no |
-| "approval-gated training proposal" | yes | no |
-| "proofread promotion affects training readiness" | partial (status transition only) | full browser proofread edit/save/replay loop |
-| "model converges/improves on TapeReader targets" | no | training + inference + evaluation artifacts |
-| "closed-loop quality is measured on withheld labels" | no | rehearsal + real infer/eval records tied to model versions |
+| Claim                                                | Can claim today                  | Requires closed-loop evidence                              |
+| ---------------------------------------------------- | -------------------------------- | ---------------------------------------------------------- |
+| "workflow coordination"                              | yes                              | no                                                         |
+| "approval-gated training proposal"                   | yes                              | no                                                         |
+| "proofread promotion affects training readiness"     | partial (status transition only) | full browser proofread edit/save/replay loop               |
+| "model converges/improves on TapeReader targets"     | no                               | training + inference + evaluation artifacts                |
+| "closed-loop quality is measured on withheld labels" | no                               | rehearsal + real infer/eval records tied to model versions |
 
 ## Ready/Not-Ready Task Taxonomy
 
@@ -96,14 +96,14 @@ For a live one-hour session, the protocol is `GO` only if every row is green.
 
 This is the current subagent split for the second finish-line pass.
 
-| Workstream | Owner | Scope | Success Condition |
-| --- | --- | --- | --- |
-| Closed-loop execution | Worker A | Operator-safe train/infer/evaluate runbook/helper, explicit holdout truth, short-run override scaffolding | A facilitator can see the exact commands or app steps required for a real short run, and the helper refuses accidental use of mounted labels for `6_1`/`6_2`. |
-| Browser QA | Worker B | Browser-level smoke or documented automation gap | We can validate the user-visible path, including refresh/reopen and proposal readability, with a repeatable command or documented manual fallback. |
-| Agent proposal UX | Worker C | Editable proposal-card fields, terminal state clarity, specialist agent visual labels | Users can adjust agent-filled values before approval and agent role labels/icons do not clip. |
-| Memory/provenance | Worker D | Export completeness, artifact links, external holdout evidence | Evidence bundles contain the records needed to support workflow claims without relying on hidden chat state. |
-| Deployment survivability | Worker E | Demo2 API restart/start/stop helper and health validation | The live demo can be restarted without brittle shell behavior or accidentally affecting other deployments. |
-| Study readiness | Worker F | Go/no-go checklist and paper claim acceptance criteria | The team has a crisp matrix for what is demo-ready, what is caveated, and what remains before a stronger paper result. |
+| Workstream               | Owner    | Scope                                                                                                     | Success Condition                                                                                                                                             |
+| ------------------------ | -------- | --------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Closed-loop execution    | Worker A | Operator-safe train/infer/evaluate runbook/helper, explicit holdout truth, short-run override scaffolding | A facilitator can see the exact commands or app steps required for a real short run, and the helper refuses accidental use of mounted labels for `6_1`/`6_2`. |
+| Browser QA               | Worker B | Browser-level smoke or documented automation gap                                                          | We can validate the user-visible path, including refresh/reopen and proposal readability, with a repeatable command or documented manual fallback.            |
+| Agent proposal UX        | Worker C | Editable proposal-card fields, terminal state clarity, specialist agent visual labels                     | Users can adjust agent-filled values before approval and agent role labels/icons do not clip.                                                                 |
+| Memory/provenance        | Worker D | Export completeness, artifact links, external holdout evidence                                            | Evidence bundles contain the records needed to support workflow claims without relying on hidden chat state.                                                  |
+| Deployment survivability | Worker E | Demo2 API restart/start/stop helper and health validation                                                 | The live demo can be restarted without brittle shell behavior or accidentally affecting other deployments.                                                    |
+| Study readiness          | Worker F | Go/no-go checklist and paper claim acceptance criteria                                                    | The team has a crisp matrix for what is demo-ready, what is caveated, and what remains before a stronger paper result.                                        |
 
 ## Current Hard Gaps
 

@@ -3,7 +3,10 @@ import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 
 import WorkflowEvidencePanel from "./WorkflowEvidencePanel";
 import { WorkflowContext } from "../../contexts/WorkflowContext";
-import { computeWorkflowEvaluationResult, exportWorkflowBundle } from "../../api";
+import {
+  computeWorkflowEvaluationResult,
+  exportWorkflowBundle,
+} from "../../api";
 
 jest.mock("../../api", () => ({
   computeWorkflowEvaluationResult: jest.fn(),
@@ -188,7 +191,9 @@ describe("WorkflowEvidencePanel", () => {
     expect(screen.getByText("IoU +0.2")).toBeTruthy();
     expect(screen.getByText("Accuracy +0.1")).toBeTruthy();
     expect(screen.getByText("Before/after evaluation computed.")).toBeTruthy();
-    expect(screen.getByText("Report: /tmp/evaluation-report.json")).toBeTruthy();
+    expect(
+      screen.getByText("Report: /tmp/evaluation-report.json"),
+    ).toBeTruthy();
     expect(screen.getByText("Loop progress")).toBeTruthy();
     expect(screen.getByText("ready")).toBeTruthy();
   });
@@ -297,9 +302,7 @@ describe("WorkflowEvidencePanel", () => {
 
     expect(screen.getByText("Compare results").disabled).toBe(true);
     expect(
-      screen.getByText(
-        /Need previous result, new result, reference mask/,
-      ),
+      screen.getByText(/Need previous result, new result, reference mask/),
     ).toBeTruthy();
   });
 

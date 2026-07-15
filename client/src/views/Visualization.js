@@ -5,7 +5,15 @@ import React, {
   useRef,
   useState,
 } from "react";
-import { Button, Tabs, Input, Space, Typography, message, notification } from "antd";
+import {
+  Button,
+  Tabs,
+  Input,
+  Space,
+  Typography,
+  message,
+  notification,
+} from "antd";
 import {
   ArrowRightOutlined,
   InboxOutlined,
@@ -47,7 +55,8 @@ const getViewerTitle = (imageValue, labelValue) => {
   };
 
   return (
-    getImageName(imageValue) + (labelValue ? " & " + getImageName(labelValue) : "")
+    getImageName(imageValue) +
+    (labelValue ? " & " + getImageName(labelValue) : "")
   );
 };
 
@@ -187,219 +196,221 @@ function Visualization(props) {
     return false;
   }, []);
 
-  const loadViewer = useCallback(async (
-    imageValue,
-    labelValue,
-    scalesValue,
-    options = {},
-  ) => {
-    const imagePath = getPath(imageValue);
-    const labelPath = getPath(labelValue);
+  const loadViewer = useCallback(
+    async (imageValue, labelValue, scalesValue, options = {}) => {
+      const imagePath = getPath(imageValue);
+      const labelPath = getPath(labelValue);
 
-    if (!imagePath) {
-      message.error("Please select an image");
-      return;
-    }
-
-    setIsLoading(true);
-    try {
-      const imageSelectionOk = await validateManagedUploadSelection(
-        imageValue,
-        "image",
-      );
-      if (!imageSelectionOk) {
-        return;
-      }
-      const labelSelectionOk = await validateManagedUploadSelection(
-        labelValue,
-        "label",
-      );
-      if (!labelSelectionOk) {
+      if (!imagePath) {
+        message.error("Please select an image");
         return;
       }
 
-      const scalesArray = parseScalesInput(scalesValue);
-      if (!scalesArray) {
-        message.error("Enter voxel scales as z,y,x nanometers before opening the viewer.");
-        return;
-      }
-      const viewerId =
-        imagePath + (labelPath || "") + JSON.stringify(scalesArray);
+      setIsLoading(true);
+      try {
+        const imageSelectionOk = await validateManagedUploadSelection(
+          imageValue,
+          "image",
+        );
+        if (!imageSelectionOk) {
+          return;
+        }
+        const labelSelectionOk = await validateManagedUploadSelection(
+          labelValue,
+          "label",
+        );
+        if (!labelSelectionOk) {
+          return;
+        }
 
-      let updatedViewers = viewers;
-      const exists = viewers.find((viewer) => viewer.key === viewerId);
+        const scalesArray = parseScalesInput(scalesValue);
+        if (!scalesArray) {
+          message.error(
+            "Enter voxel scales as z,y,x nanometers before opening the viewer.",
+          );
+          return;
+        }
+        const viewerId =
+          imagePath + (labelPath || "") + JSON.stringify(scalesArray);
 
-      if (exists) {
-        updatedViewers = viewers.filter((viewer) => viewer.key !== viewerId);
-      }
+        let updatedViewers = viewers;
+        const exists = viewers.find((viewer) => viewer.key === viewerId);
 
-      const viewerResult = await getNeuroglancerViewer(
-        imagePath,
-        labelPath,
-        scalesArray,
-        workflowContext?.workflow?.id,
-      );
-      const viewerUrl =
-        typeof viewerResult === "string"
-          ? viewerResult
-          : viewerResult?.url || viewerResult?.neuroglancer_url || "";
+        if (exists) {
+          updatedViewers = viewers.filter((viewer) => viewer.key !== viewerId);
+        }
 
-      if (!viewerUrl) {
-        throw new Error("Viewer did not return a Neuroglancer URL.");
-      }
-      logClientEvent("visualization_viewer_url_received", {
-        level: "INFO",
-        message: "Received Neuroglancer viewer URL",
-        source: "visualization",
-        data: {
-          viewerUrl,
+        const viewerResult = await getNeuroglancerViewer(
           imagePath,
           labelPath,
-          scales: scalesArray,
-          workflowId: workflowContext?.workflow?.id || null,
-          requestedImagePath: viewerResult?.requested_image_path || imagePath,
-          requestedLabelPath: viewerResult?.requested_label_path || labelPath,
-          resolvedImagePath: viewerResult?.image_path || null,
-          resolvedLabelPath: viewerResult?.label_path || null,
-        },
-      });
-      if (isMixedContentUrl(viewerUrl)) {
-        logClientEvent("visualization_viewer_mixed_content_blocked", {
-          level: "ERROR",
-          message: "Blocked insecure Neuroglancer viewer URL on HTTPS page",
+          scalesArray,
+          workflowContext?.workflow?.id,
+        );
+        const viewerUrl =
+          typeof viewerResult === "string"
+            ? viewerResult
+            : viewerResult?.url || viewerResult?.neuroglancer_url || "";
+
+        if (!viewerUrl) {
+          throw new Error("Viewer did not return a Neuroglancer URL.");
+        }
+        logClientEvent("visualization_viewer_url_received", {
+          level: "INFO",
+          message: "Received Neuroglancer viewer URL",
           source: "visualization",
           data: {
             viewerUrl,
-            pageUrl: window.location.href,
             imagePath,
             labelPath,
             scales: scalesArray,
             workflowId: workflowContext?.workflow?.id || null,
+            requestedImagePath: viewerResult?.requested_image_path || imagePath,
+            requestedLabelPath: viewerResult?.requested_label_path || labelPath,
+            resolvedImagePath: viewerResult?.image_path || null,
+            resolvedLabelPath: viewerResult?.label_path || null,
           },
         });
-        throw new Error(
-          "Viewer URL is insecure for this HTTPS page. The server must expose Neuroglancer through HTTPS.",
-        );
-      }
-
-      const resolvedImagePath = viewerResult?.image_path;
-      const resolvedLabelPath = viewerResult?.label_path;
-      const pairQuestion = viewerResult?.pair_question;
-      if (resolvedImagePath && resolvedImagePath !== imagePath) {
-        setCurrentImage(resolvedImagePath);
-        appContext?.setCurrentImage?.(resolvedImagePath);
-      }
-      if (resolvedLabelPath && resolvedLabelPath !== labelPath) {
-        setCurrentLabel(resolvedLabelPath);
-        appContext?.setCurrentLabel?.(resolvedLabelPath);
-      }
-      if (pairQuestion) {
-        const pairCount = viewerResult?.pair_discovery?.pair_count || 0;
-        const notificationKey = `volume-pairs-${viewerId}`;
-        notification.info({
-          key: notificationKey,
-          message: `Found ${pairCount} image/segmentation pairs`,
-          description:
-            "I opened the first pair. You can use the progress tracker to review which volumes are proofread, draft, or missing masks.",
-          duration: 12,
-          btn: (
-            <Space size={8}>
-              <Button
-                size="small"
-                type="primary"
-                onClick={() => {
-                  notification.close(notificationKey);
-                  workflowContext?.runClientEffects?.({
-                    navigate_to: "project-progress",
-                    refresh_project_progress: true,
-                  });
-                }}
-              >
-                Open Progress
-              </Button>
-              <Button
-                size="small"
-                onClick={() => {
-                  notification.close(notificationKey);
-                  workflowContext?.runClientEffects?.({ navigate_to: "files" });
-                }}
-              >
-                Show Files
-              </Button>
-            </Space>
-          ),
-        });
-      }
-
-      const newViewers = [
-        ...updatedViewers,
-        {
-          key: viewerId,
-          title: getViewerTitle(
-            resolvedImagePath || imageValue,
-            resolvedLabelPath || labelValue,
-          ),
-          viewer: viewerUrl,
-        },
-      ];
-
-      setViewers(newViewers);
-      setActiveKey(viewerId);
-      logClientEvent("visualization_viewer_mounted", {
-        level: "INFO",
-        message: "Mounted Neuroglancer iframe",
-        source: "visualization",
-        data: {
-          viewerId,
-          viewerUrl,
-          title: getViewerTitle(
-            resolvedImagePath || imageValue,
-            resolvedLabelPath || labelValue,
-          ),
-          imagePath: resolvedImagePath || imagePath,
-          labelPath: resolvedLabelPath || labelPath,
-          scales: scalesArray,
-          workflowId: workflowContext?.workflow?.id || null,
-        },
-      });
-      if (options.refreshAfterMount) {
-        const timerId = window.setTimeout(() => {
-          setViewers((currentViewers) =>
-            currentViewers.map((viewer) =>
-              viewer.key === viewerId
-                ? { ...viewer, viewer: appendRefreshParam(viewer.viewer) }
-                : viewer,
-            ),
+        if (isMixedContentUrl(viewerUrl)) {
+          logClientEvent("visualization_viewer_mixed_content_blocked", {
+            level: "ERROR",
+            message: "Blocked insecure Neuroglancer viewer URL on HTTPS page",
+            source: "visualization",
+            data: {
+              viewerUrl,
+              pageUrl: window.location.href,
+              imagePath,
+              labelPath,
+              scales: scalesArray,
+              workflowId: workflowContext?.workflow?.id || null,
+            },
+          });
+          throw new Error(
+            "Viewer URL is insecure for this HTTPS page. The server must expose Neuroglancer through HTTPS.",
           );
-        }, options.refreshAfterMount);
-        viewerRefreshTimersRef.current.push(timerId);
+        }
+
+        const resolvedImagePath = viewerResult?.image_path;
+        const resolvedLabelPath = viewerResult?.label_path;
+        const pairQuestion = viewerResult?.pair_question;
+        if (resolvedImagePath && resolvedImagePath !== imagePath) {
+          setCurrentImage(resolvedImagePath);
+          appContext?.setCurrentImage?.(resolvedImagePath);
+        }
+        if (resolvedLabelPath && resolvedLabelPath !== labelPath) {
+          setCurrentLabel(resolvedLabelPath);
+          appContext?.setCurrentLabel?.(resolvedLabelPath);
+        }
+        if (pairQuestion) {
+          const pairCount = viewerResult?.pair_discovery?.pair_count || 0;
+          const notificationKey = `volume-pairs-${viewerId}`;
+          notification.info({
+            key: notificationKey,
+            message: `Found ${pairCount} image/segmentation pairs`,
+            description:
+              "I opened the first pair. You can use the progress tracker to review which volumes are proofread, draft, or missing masks.",
+            duration: 12,
+            btn: (
+              <Space size={8}>
+                <Button
+                  size="small"
+                  type="primary"
+                  onClick={() => {
+                    notification.close(notificationKey);
+                    workflowContext?.runClientEffects?.({
+                      navigate_to: "project-progress",
+                      refresh_project_progress: true,
+                    });
+                  }}
+                >
+                  Open Progress
+                </Button>
+                <Button
+                  size="small"
+                  onClick={() => {
+                    notification.close(notificationKey);
+                    workflowContext?.runClientEffects?.({
+                      navigate_to: "files",
+                    });
+                  }}
+                >
+                  Show Files
+                </Button>
+              </Space>
+            ),
+          });
+        }
+
+        const newViewers = [
+          ...updatedViewers,
+          {
+            key: viewerId,
+            title: getViewerTitle(
+              resolvedImagePath || imageValue,
+              resolvedLabelPath || labelValue,
+            ),
+            viewer: viewerUrl,
+          },
+        ];
+
+        setViewers(newViewers);
+        setActiveKey(viewerId);
+        logClientEvent("visualization_viewer_mounted", {
+          level: "INFO",
+          message: "Mounted Neuroglancer iframe",
+          source: "visualization",
+          data: {
+            viewerId,
+            viewerUrl,
+            title: getViewerTitle(
+              resolvedImagePath || imageValue,
+              resolvedLabelPath || labelValue,
+            ),
+            imagePath: resolvedImagePath || imagePath,
+            labelPath: resolvedLabelPath || labelPath,
+            scales: scalesArray,
+            workflowId: workflowContext?.workflow?.id || null,
+          },
+        });
+        if (options.refreshAfterMount) {
+          const timerId = window.setTimeout(() => {
+            setViewers((currentViewers) =>
+              currentViewers.map((viewer) =>
+                viewer.key === viewerId
+                  ? { ...viewer, viewer: appendRefreshParam(viewer.viewer) }
+                  : viewer,
+              ),
+            );
+          }, options.refreshAfterMount);
+          viewerRefreshTimersRef.current.push(timerId);
+        }
+      } catch (error) {
+        console.error("Failed to load Neuroglancer viewer", error);
+        logClientEvent("visualization_viewer_load_failed", {
+          level: "ERROR",
+          message: error?.message || "Failed to load Neuroglancer viewer",
+          source: "visualization",
+          data: {
+            imagePath,
+            labelPath,
+            scalesValue,
+            workflowId: workflowContext?.workflow?.id || null,
+            error,
+          },
+        });
+        message.error(error?.message || "Failed to load viewer");
+      } finally {
+        setIsLoading(false);
       }
-    } catch (error) {
-      console.error("Failed to load Neuroglancer viewer", error);
-      logClientEvent("visualization_viewer_load_failed", {
-        level: "ERROR",
-        message: error?.message || "Failed to load Neuroglancer viewer",
-        source: "visualization",
-        data: {
-          imagePath,
-          labelPath,
-          scalesValue,
-          workflowId: workflowContext?.workflow?.id || null,
-          error,
-        },
-      });
-      message.error(error?.message || "Failed to load viewer");
-    } finally {
-      setIsLoading(false);
-    }
-  }, [
-    appContext,
-    parseScalesInput,
-    setViewers,
-    validateManagedUploadSelection,
-    viewers,
-    workflowContext,
-  ]);
+    },
+    [
+      appContext,
+      parseScalesInput,
+      setViewers,
+      validateManagedUploadSelection,
+      viewers,
+      workflowContext,
+    ],
+  );
 
   const fetchNeuroglancerViewer = async () => {
     await loadViewer(currentImage, currentLabel, scales);

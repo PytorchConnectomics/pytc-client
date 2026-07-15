@@ -83,7 +83,10 @@ jest.mock("../api", () => ({
   }),
 }));
 
-function createAppContextValue({ trainingConfig = "", inferenceConfig = "" } = {}) {
+function createAppContextValue({
+  trainingConfig = "",
+  inferenceConfig = "",
+} = {}) {
   return {
     trainingConfig,
     setTrainingConfig: jest.fn(),
@@ -141,9 +144,7 @@ SYSTEM:
 `;
 
     render(
-      <AppContext.Provider
-        value={createAppContextValue({ trainingConfig })}
-      >
+      <AppContext.Provider value={createAppContextValue({ trainingConfig })}>
         <YamlContext.Provider value={yamlContextValue}>
           <YamlFileUploader type="training" />
         </YamlContext.Provider>
@@ -170,9 +171,7 @@ INFERENCE:
 `;
 
     render(
-      <AppContext.Provider
-        value={createAppContextValue({ inferenceConfig })}
-      >
+      <AppContext.Provider value={createAppContextValue({ inferenceConfig })}>
         <YamlFileEditor type="inference" />
       </AppContext.Provider>,
     );
@@ -180,9 +179,7 @@ INFERENCE:
     expect(
       await screen.findByText("help:Batch size:INFERENCE.SAMPLES_PER_BATCH"),
     ).toBeTruthy();
-    expect(
-      screen.getByText("help:Blending:INFERENCE.BLENDING"),
-    ).toBeTruthy();
+    expect(screen.getByText("help:Blending:INFERENCE.BLENDING")).toBeTruthy();
     expect(screen.getByText("help:Eval mode:INFERENCE.DO_EVAL")).toBeTruthy();
   });
 });

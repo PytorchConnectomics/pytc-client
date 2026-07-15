@@ -45,7 +45,8 @@ function summarizeRuntime(runtime, text) {
     return {
       type: "info",
       label: phase === "starting" ? "Starting" : "Running",
-      message: "The run is active. You do not need to read the log unless it fails.",
+      message:
+        "The run is active. You do not need to read the log unless it fails.",
     };
   }
 
@@ -92,7 +93,10 @@ function RuntimeLogPanel({ title, runtime, onRefresh }) {
   const [showLog, setShowLog] = useState(false);
   const previousPhaseRef = useRef(phase);
   const hasObservedRuntimeRef = useRef(false);
-  const summary = useMemo(() => summarizeRuntime(runtime, text), [runtime, text]);
+  const summary = useMemo(
+    () => summarizeRuntime(runtime, text),
+    [runtime, text],
+  );
 
   useEffect(() => {
     if (!hasObservedRuntimeRef.current) {
@@ -227,7 +231,7 @@ function RuntimeLogPanel({ title, runtime, onRefresh }) {
                   background: "#fff",
                   border: "1px solid #f0f0f0",
                   fontFamily:
-                    'ui-monospace, SFMono-Regular, SF Mono, Menlo, Consolas, monospace',
+                    "ui-monospace, SFMono-Regular, SF Mono, Menlo, Consolas, monospace",
                   fontSize: 12,
                   color: "#262626",
                   wordBreak: "break-word",
@@ -255,7 +259,7 @@ function RuntimeLogPanel({ title, runtime, onRefresh }) {
               whiteSpace: "pre-wrap",
               wordBreak: "break-word",
               fontFamily:
-                'ui-monospace, SFMono-Regular, SF Mono, Menlo, Consolas, monospace',
+                "ui-monospace, SFMono-Regular, SF Mono, Menlo, Consolas, monospace",
             }}
           >
             {text || "No runtime logs captured yet."}

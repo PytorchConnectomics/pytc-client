@@ -188,10 +188,11 @@ Answer these in concrete, implementation-oriented terms.
    - Avoiding hidden arbitrary shell execution.
 
 10. How should the system be evaluated for a paper?
-   - What claims are defensible?
-   - What study tasks should participants perform?
-   - What metrics or qualitative evidence would show that the agent improves coordination?
-   - What claims should be avoided unless there is stronger evidence?
+
+- What claims are defensible?
+- What study tasks should participants perform?
+- What metrics or qualitative evidence would show that the agent improves coordination?
+- What claims should be avoided unless there is stronger evidence?
 
 ## Code Areas To Inspect
 
@@ -383,9 +384,9 @@ For each principle:
 
 Example format:
 
-| Principle | Evidence | App Implication | Priority |
-|---|---|---|---|
-| Ask concrete questions instead of blank prompts | ... | Guided project intake wizard | High |
+| Principle                                       | Evidence | App Implication              | Priority |
+| ----------------------------------------------- | -------- | ---------------------------- | -------- |
+| Ask concrete questions instead of blank prompts | ...      | Guided project intake wizard | High     |
 
 ### 4. Proposed Agent Architecture
 

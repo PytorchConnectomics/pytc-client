@@ -9,10 +9,7 @@ import {
   Tag,
   message,
 } from "antd";
-import {
-  SendOutlined,
-  CloseOutlined,
-} from "@ant-design/icons";
+import { SendOutlined, CloseOutlined } from "@ant-design/icons";
 import { getWorkflowAgentConversation, queryChatBot } from "../api";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
@@ -152,7 +149,11 @@ const runnableAttachmentCount = (message = {}) =>
   (Array.isArray(message.proposals) ? message.proposals.length : 0);
 
 const agentIdentityKey = (agent = {}) =>
-  agent.agent_type || agent.type || agent.label || agent.agent_label || "project_manager";
+  agent.agent_type ||
+  agent.type ||
+  agent.label ||
+  agent.agent_label ||
+  "project_manager";
 
 const messageAgents = (message = {}) => {
   const agents = [];
@@ -172,7 +173,9 @@ const messageAgents = (message = {}) => {
   (message.proposals || []).forEach((proposal) => {
     const payload = proposal.payload || proposal;
     addAgent(payload.specialist_agent || payload.action_card?.specialist_agent);
-    addAgent(payload.orchestrator_agent || payload.action_card?.orchestrator_agent);
+    addAgent(
+      payload.orchestrator_agent || payload.action_card?.orchestrator_agent,
+    );
   });
 
   return agents;
@@ -272,7 +275,11 @@ const PROMPT_LEAK_MARKERS = [
 const parseToolCallJson = (text) => {
   try {
     const parsed = JSON.parse(text);
-    if (!parsed || typeof parsed !== "object" || typeof parsed.name !== "string") {
+    if (
+      !parsed ||
+      typeof parsed !== "object" ||
+      typeof parsed.name !== "string"
+    ) {
       return null;
     }
     return parsed;
@@ -296,13 +303,13 @@ const normalizeAssistantContent = (content) => {
   if (!toolCall) return String(content || "");
   if (toolCall.name === "visualize_volume_pair") {
     return (
-      "I should not have shown that internal command.\n"
-      + "Do this: use the workflow action card to choose a volume pair, then open it in Visualize."
+      "I should not have shown that internal command.\n" +
+      "Do this: use the workflow action card to choose a volume pair, then open it in Visualize."
     );
   }
   return (
-    "I should not have shown that internal command.\n"
-    + "Tell me what you want to do in plain language and I will offer a safe app action."
+    "I should not have shown that internal command.\n" +
+    "Tell me what you want to do in plain language and I will offer a safe app action."
   );
 };
 
@@ -310,7 +317,9 @@ const sanitizeLoadedMessage = (message, currentWorkflowId = null) => {
   if (message.role !== "assistant") return message;
   const content = String(message.content || "");
   const normalizedContent = normalizeAssistantContent(content);
-  const messageWorkflowId = Number(message.workflow_id || message.workflowId || 0);
+  const messageWorkflowId = Number(
+    message.workflow_id || message.workflowId || 0,
+  );
   const activeWorkflowId = Number(currentWorkflowId || 0);
   if (
     messageWorkflowId &&
@@ -441,7 +450,11 @@ const reconcileProposal = (localProposal, hydratedProposal) => {
 const reconcileProposalStatuses = (messages = [], hydratedMessages = []) => {
   const hydrated = byProposalId(hydratedMessages);
   return messages.map((message) => {
-    if (!message || !Array.isArray(message.proposals) || !message.proposals.length) {
+    if (
+      !message ||
+      !Array.isArray(message.proposals) ||
+      !message.proposals.length
+    ) {
       return message;
     }
     return {
@@ -475,7 +488,9 @@ function Chatbot({
   const [activeConvoId, setActiveConvoId] = useState(
     initialChatStateRef.current.activeConvoId,
   );
-  const [messages, setMessages] = useState(initialChatStateRef.current.messages);
+  const [messages, setMessages] = useState(
+    initialChatStateRef.current.messages,
+  );
   const [inputValue, setInputValue] = useState("");
   const [isSending, setIsSending] = useState(false);
 
@@ -500,24 +515,27 @@ function Chatbot({
     });
   }, []);
 
-  const updateLocalProposalStatus = useCallback((proposalId, approvalStatus) => {
-    if (!proposalId) return;
-    setMessages((prev) =>
-      prev.map((entry) => {
-        if (!Array.isArray(entry.proposals) || entry.proposals.length === 0) {
-          return entry;
-        }
-        return {
-          ...entry,
-          proposals: entry.proposals.map((proposal) =>
-            proposal.id === proposalId
-              ? { ...proposal, approval_status: approvalStatus }
-              : proposal,
-          ),
-        };
-      }),
-    );
-  }, []);
+  const updateLocalProposalStatus = useCallback(
+    (proposalId, approvalStatus) => {
+      if (!proposalId) return;
+      setMessages((prev) =>
+        prev.map((entry) => {
+          if (!Array.isArray(entry.proposals) || entry.proposals.length === 0) {
+            return entry;
+          }
+          return {
+            ...entry,
+            proposals: entry.proposals.map((proposal) =>
+              proposal.id === proposalId
+                ? { ...proposal, approval_status: approvalStatus }
+                : proposal,
+            ),
+          };
+        }),
+      );
+    },
+    [],
+  );
 
   const buildTrainingRunProposal = useCallback((item) => {
     const effects = item?.client_effects || {};
@@ -690,8 +708,12 @@ function Chatbot({
             workflowConversationMessageToChatMessage(message, workflow.id),
           );
         if (!serverMessages.length) return;
-        setActiveConvoId((current) =>
-          current || conversation.conversation_id || conversation.conversationId || null,
+        setActiveConvoId(
+          (current) =>
+            current ||
+            conversation.conversation_id ||
+            conversation.conversationId ||
+            null,
         );
         setMessages((previousMessages) => {
           const hasLocalUserMessages = previousMessages.some(
@@ -927,10 +949,7 @@ function Chatbot({
     });
     try {
       const runtimeKind = item?.client_effects?.runtime_action?.kind;
-      if (
-        item?.requires_approval &&
-        workflowContext?.proposeAgentAction
-      ) {
+      if (item?.requires_approval && workflowContext?.proposeAgentAction) {
         const trainingFormReady =
           runtimeKind === "start_training"
             ? await populateTrainingReviewForm(item, itemId)
@@ -1022,12 +1041,16 @@ function Chatbot({
 
       try {
         if (isStaleWorkflowProposal) {
-          const nextProposal = await recreateProposalForCurrentWorkflow(proposal);
+          const nextProposal =
+            await recreateProposalForCurrentWorkflow(proposal);
           approvalId = nextProposal.id;
           recreated = true;
         }
         if (approvalOverrides) {
-          await workflowContext.approveAgentAction(approvalId, approvalOverrides);
+          await workflowContext.approveAgentAction(
+            approvalId,
+            approvalOverrides,
+          );
         } else {
           await workflowContext.approveAgentAction(approvalId);
         }
@@ -1038,7 +1061,8 @@ function Chatbot({
       } catch (error) {
         if (!recreated && isProposalNotFoundError(error)) {
           try {
-            const nextProposal = await recreateProposalForCurrentWorkflow(proposal);
+            const nextProposal =
+              await recreateProposalForCurrentWorkflow(proposal);
             if (approvalOverrides) {
               await workflowContext.approveAgentAction(
                 nextProposal.id,
@@ -1049,20 +1073,25 @@ function Chatbot({
             }
             updateLocalProposalStatus(nextProposal.id, "approved");
             updateLocalProposalStatus(proposal.id, "superseded");
-            message.info("That run card was stale, so I recreated it and approved the fresh one.");
+            message.info(
+              "That run card was stale, so I recreated it and approved the fresh one.",
+            );
             return;
           } catch (retryError) {
             logClientEvent("assistant_proposal_recreate_failed", {
               level: "ERROR",
               source: "chatbot",
-              message: retryError.message || "Failed to recreate stale proposal.",
+              message:
+                retryError.message || "Failed to recreate stale proposal.",
               data: {
                 workflowId: activeWorkflowId || null,
                 proposalId: proposal.id,
                 proposalWorkflowId: proposalWorkflowId || null,
               },
             });
-            message.error(retryError.message || "Could not approve that proposal.");
+            message.error(
+              retryError.message || "Could not approve that proposal.",
+            );
             return;
           }
         }
@@ -1284,9 +1313,7 @@ function Chatbot({
                     }}
                   >
                     {isUser ? (
-                      <Text style={{ color: "white" }}>
-                        {message.content}
-                      </Text>
+                      <Text style={{ color: "white" }}>{message.content}</Text>
                     ) : (
                       <Space
                         direction="vertical"
@@ -1364,9 +1391,17 @@ function Chatbot({
                                 payload?.action_card ||
                                 proposal?.action_card ||
                                 {};
-                              const actionTrace =
-                                toList(params?.trace || payload?.trace || proposal?.trace || actionCard?.trace);
-                              const proposalTrace = toList(proposal.trace || payload?.trace || params?.trace);
+                              const actionTrace = toList(
+                                params?.trace ||
+                                  payload?.trace ||
+                                  proposal?.trace ||
+                                  actionCard?.trace,
+                              );
+                              const proposalTrace = toList(
+                                proposal.trace ||
+                                  payload?.trace ||
+                                  params?.trace,
+                              );
                               const specialistAgent =
                                 params?.specialist_agent ||
                                 payload?.specialist_agent ||

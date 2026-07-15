@@ -40,26 +40,26 @@ The final system implied by the paper should satisfy this contract:
 
 The paper can safely claim the following only if the corresponding gates pass.
 
-| Claim | Required System Evidence | Paper Risk If Missing |
-| --- | --- | --- |
-| The system maintains project-level workflow context. | Canonical project memory, rescan/update behavior, per-volume state, evidence log. | The assistant looks like a chat panel with stale guesses. |
-| The system coordinates fragmented segmentation stages. | End-to-end loop across visualization, inference, proofreading, training, evaluation. | The paper overclaims beyond a prototype GUI. |
-| The assistant supports mixed-initiative handoffs. | Action cards with inspect/propose/approve/execute/update lifecycle. | The agent looks passive or unsafe. |
-| Users remain in control of expensive or mutating actions. | Approval gates, rejection, interruption, audit trail. | The system is not defensible for scientific workflows. |
-| The interface reduces setup ambiguity for biologists. | Guided onboarding with detected facts and concrete questions. | The first-run UX contradicts the HCI argument. |
-| The workflow creates reusable evidence. | Bundle export with events, artifacts, configs, metrics, screenshots/links. | Case-study results become anecdotal and hard to verify. |
-| The loop supports iterative model improvement. | Before/after inference and metrics from real app-generated artifacts. | The paper must avoid accuracy or improvement claims. |
+| Claim                                                     | Required System Evidence                                                             | Paper Risk If Missing                                     |
+| --------------------------------------------------------- | ------------------------------------------------------------------------------------ | --------------------------------------------------------- |
+| The system maintains project-level workflow context.      | Canonical project memory, rescan/update behavior, per-volume state, evidence log.    | The assistant looks like a chat panel with stale guesses. |
+| The system coordinates fragmented segmentation stages.    | End-to-end loop across visualization, inference, proofreading, training, evaluation. | The paper overclaims beyond a prototype GUI.              |
+| The assistant supports mixed-initiative handoffs.         | Action cards with inspect/propose/approve/execute/update lifecycle.                  | The agent looks passive or unsafe.                        |
+| Users remain in control of expensive or mutating actions. | Approval gates, rejection, interruption, audit trail.                                | The system is not defensible for scientific workflows.    |
+| The interface reduces setup ambiguity for biologists.     | Guided onboarding with detected facts and concrete questions.                        | The first-run UX contradicts the HCI argument.            |
+| The workflow creates reusable evidence.                   | Bundle export with events, artifacts, configs, metrics, screenshots/links.           | Case-study results become anecdotal and hard to verify.   |
+| The loop supports iterative model improvement.            | Before/after inference and metrics from real app-generated artifacts.                | The paper must avoid accuracy or improvement claims.      |
 
 ## Case-Study Readiness Taxonomy
 
 For the Yixiao workflow, the paper-ready surface is split by artifact maturity.
 
-| Claim Surface | Required Artifact Set | Pass Condition |
-| --- | --- | --- |
-| Workflow coordination claim | project context snapshot, volume-state counts, and bounded proposal/action traces | Proposal + training drill demonstrates context-aware gating with `6/2/2` baseline |
-| Review-control claim | explicit proposal approvals and audit trails (`agent.proposal_*` and `agent.plan_*`) | No mutating action appears without recorded approval step |
-| Closed-loop claim | training completion record, checkpoint/version, inference record, evaluation result, export bundle | At least one run is reproducible from `WorkflowExport` metadata with model/evaluation links |
-| Paper evidence claim | export bundle with manifest-only policy and copied artifact summary | `export-bundle` call returns schema, paths, and copy policy metadata |
+| Claim Surface               | Required Artifact Set                                                                              | Pass Condition                                                                              |
+| --------------------------- | -------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------- |
+| Workflow coordination claim | project context snapshot, volume-state counts, and bounded proposal/action traces                  | Proposal + training drill demonstrates context-aware gating with `6/2/2` baseline           |
+| Review-control claim        | explicit proposal approvals and audit trails (`agent.proposal_*` and `agent.plan_*`)               | No mutating action appears without recorded approval step                                   |
+| Closed-loop claim           | training completion record, checkpoint/version, inference record, evaluation result, export bundle | At least one run is reproducible from `WorkflowExport` metadata with model/evaluation links |
+| Paper evidence claim        | export bundle with manifest-only policy and copied artifact summary                                | `export-bundle` call returns schema, paths, and copy policy metadata                        |
 
 This mapping is intentionally strict:
 
@@ -970,14 +970,14 @@ Paper value:
 
 ## Claim-To-Workstream Matrix
 
-| Paper Claim | Workstreams Required |
-| --- | --- |
-| The system maintains project context over time. | 1, 2, 3, 5, 10 |
-| The system supports biologist-friendly onboarding. | 2, 5, 12 |
-| The system enables visible volume-level workflow tracking. | 1, 3, 8, 10 |
-| The agent proposes bounded, approval-gated workflow actions. | 4, 5, 11 |
-| The system supports closed-loop segmentation. | 6, 7, 8, 9 |
-| The system produces reproducible evidence for case studies. | 10, 11, 12 |
+| Paper Claim                                                             | Workstreams Required                     |
+| ----------------------------------------------------------------------- | ---------------------------------------- |
+| The system maintains project context over time.                         | 1, 2, 3, 5, 10                           |
+| The system supports biologist-friendly onboarding.                      | 2, 5, 12                                 |
+| The system enables visible volume-level workflow tracking.              | 1, 3, 8, 10                              |
+| The agent proposes bounded, approval-gated workflow actions.            | 4, 5, 11                                 |
+| The system supports closed-loop segmentation.                           | 6, 7, 8, 9                               |
+| The system produces reproducible evidence for case studies.             | 10, 11, 12                               |
 | The design is suitable for iterative biomedical segmentation workflows. | All workstreams plus case-study evidence |
 
 ## Final Readiness Checklist

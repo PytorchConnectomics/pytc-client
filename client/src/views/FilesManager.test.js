@@ -23,27 +23,26 @@ jest.mock("../electronApi", () => ({
 }));
 
 jest.mock("../components/FileTreeSidebar", () => () => null);
-jest.mock("../components/FilePickerModal", () => ({
-  visible,
-  onSelect,
-  title,
-}) =>
-  visible ? (
-    <div>
-      <div>{title}</div>
-      <button
-        type="button"
-        onClick={() =>
-          onSelect({
-            name: "override-prediction.tif",
-            physical_path: "/tmp/override/override-prediction.tif",
-          })
-        }
-      >
-        Choose mocked file
-      </button>
-    </div>
-  ) : null,
+jest.mock(
+  "../components/FilePickerModal",
+  () =>
+    ({ visible, onSelect, title }) =>
+      visible ? (
+        <div>
+          <div>{title}</div>
+          <button
+            type="button"
+            onClick={() =>
+              onSelect({
+                name: "override-prediction.tif",
+                physical_path: "/tmp/override/override-prediction.tif",
+              })
+            }
+          >
+            Choose mocked file
+          </button>
+        </div>
+      ) : null,
 );
 
 jest.mock("../logging/appEventLog", () => ({
@@ -92,7 +91,9 @@ jest.mock("antd", () => {
     </button>
   );
   const Dropdown = ({ children }) => <div>{children}</div>;
-  const Input = React.forwardRef((props, ref) => <input ref={ref} {...props} />);
+  const Input = React.forwardRef((props, ref) => (
+    <input ref={ref} {...props} />
+  ));
   Input.TextArea = React.forwardRef((props, ref) => (
     <textarea ref={ref} {...props} />
   ));
@@ -274,7 +275,8 @@ const yixiaoLikeSmokeSuggestion = {
       ...completeSmokeSuggestion.profile.context_hints,
       task_family: "XRI fibre instance segmentation",
       training_policy: "train only on confirmed ground-truth masks",
-      mask_status: "mixed: 6 ground-truth masks, 2 draft masks, 2 image-only targets",
+      mask_status:
+        "mixed: 6 ground-truth masks, 2 draft masks, 2 image-only targets",
     },
     schema: {
       ...completeSmokeSuggestion.profile.schema,
@@ -285,7 +287,8 @@ const yixiaoLikeSmokeSuggestion = {
           : {}),
         task_family: "XRI fibre instance segmentation",
         training_policy: "train only on confirmed ground-truth masks",
-        mask_status: "mixed: 6 ground-truth masks, 2 draft masks, 2 image-only targets",
+        mask_status:
+          "mixed: 6 ground-truth masks, 2 draft masks, 2 image-only targets",
       },
       manifest: {
         initial_progress_summary: {
@@ -486,7 +489,9 @@ describe("FilesManager", () => {
 
     renderFilesManager();
 
-    expect(await screen.findByText("Start a segmentation project")).toBeTruthy();
+    expect(
+      await screen.findByText("Start a segmentation project"),
+    ).toBeTruthy();
     await clickSuggestedProject();
 
     await waitFor(() => {
@@ -508,22 +513,20 @@ describe("FilesManager", () => {
       expect(screen.getAllByText("Start project").length).toBeGreaterThan(1);
     });
     expect(
-      screen.getByDisplayValue(
-        "data/image/mito25_smoke_im.h5",
-      ),
+      screen.getByDisplayValue("data/image/mito25_smoke_im.h5"),
     ).toBeTruthy();
     expect(mockWorkflowContext.updateWorkflow).not.toHaveBeenCalled();
 
     await reviewAndStartProject();
     expect(await screen.findByText("Project brief")).toBeTruthy();
     expect(
-      screen.getByText(
-        "EM mitochondria project at 30 x 6 x 6 nm.",
-      ),
+      screen.getByText("EM mitochondria project at 30 x 6 x 6 nm."),
     ).toBeTruthy();
     expect(screen.getByText("Editable project context")).toBeTruthy();
     expect(screen.getByText("What I checked automatically")).toBeTruthy();
-    expect(screen.getByText(/I inspected 2 volumes and 1 image\/mask pair/i)).toBeTruthy();
+    expect(
+      screen.getByText(/I inspected 2 volumes and 1 image\/mask pair/i),
+    ).toBeTruthy();
     expect(screen.getByText(/Image and mask shapes match/i)).toBeTruthy();
     expect(screen.queryByText(/^Priority$/)).toBeNull();
     expect(screen.queryByText(/^Goal$/)).toBeNull();
@@ -534,7 +537,8 @@ describe("FilesManager", () => {
     await waitFor(() => {
       expect(mockWorkflowContext.updateWorkflow).toHaveBeenCalledWith({
         dataset_path: "/tmp/mito25_paper_loop_smoke",
-        image_path: "/tmp/mito25_paper_loop_smoke/data/image/mito25_smoke_im.h5",
+        image_path:
+          "/tmp/mito25_paper_loop_smoke/data/image/mito25_smoke_im.h5",
         label_path: "/tmp/mito25_paper_loop_smoke/data/seg/mito25_smoke_seg.h5",
         mask_path: "/tmp/mito25_paper_loop_smoke/data/seg/mito25_smoke_seg.h5",
         inference_output_path:
@@ -571,8 +575,7 @@ describe("FilesManager", () => {
             voxel_size_nm: [30, 6, 6],
           }),
           project_brief: expect.objectContaining({
-            summary:
-              "EM mitochondria project at 30 x 6 x 6 nm.",
+            summary: "EM mitochondria project at 30 x 6 x 6 nm.",
             fields: expect.arrayContaining([
               expect.objectContaining({
                 label: "Target structure",
@@ -613,8 +616,7 @@ describe("FilesManager", () => {
             target_structure: "mitochondria",
           }),
           project_brief: expect.objectContaining({
-            summary:
-              "EM mitochondria project at 30 x 6 x 6 nm.",
+            summary: "EM mitochondria project at 30 x 6 x 6 nm.",
           }),
           project_audit: expect.objectContaining({
             schema_version: "pytc-project-audit/v1",
@@ -658,14 +660,16 @@ describe("FilesManager", () => {
 
     await clickSuggestedProject();
     await screen.findByText("Shared project facts");
-    expect(screen.getAllByText("Shared project facts").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("Shared project facts").length).toBeGreaterThan(
+      0,
+    );
     expect(screen.getAllByText("Modality").length).toBeGreaterThan(0);
     expect(screen.getAllByText("Target").length).toBeGreaterThan(0);
     expect(screen.getAllByText("Voxel size").length).toBeGreaterThan(0);
     expect(screen.getAllByText("Volume split").length).toBeGreaterThan(0);
-    expect(screen.getAllByText("XRI fibre instance segmentation").length).toBeGreaterThan(
-      0,
-    );
+    expect(
+      screen.getAllByText("XRI fibre instance segmentation").length,
+    ).toBeGreaterThan(0);
     expect(
       screen.getAllByText("train only on confirmed ground-truth masks").length,
     ).toBeGreaterThan(0);
@@ -685,8 +689,7 @@ describe("FilesManager", () => {
             project_context: expect.objectContaining({
               task_family: "XRI fibre instance segmentation",
               training_policy: "train only on confirmed ground-truth masks",
-              volume_split:
-                "6 ground-truth / 2 draft masks / 2 image-only",
+              volume_split: "6 ground-truth / 2 draft masks / 2 image-only",
             }),
           }),
         }),
@@ -772,7 +775,9 @@ describe("FilesManager", () => {
     });
 
     expect(
-      screen.getByText("serial block-face EM synapses project at 4 x 4 x 40 nm."),
+      screen.getByText(
+        "serial block-face EM synapses project at 4 x 4 x 40 nm.",
+      ),
     ).toBeTruthy();
 
     await reviewAndStartProject();
@@ -793,7 +798,8 @@ describe("FilesManager", () => {
       );
     });
     const projectContext =
-      mockWorkflowContext.updateWorkflow.mock.calls[0][0].metadata.project_context;
+      mockWorkflowContext.updateWorkflow.mock.calls[0][0].metadata
+        .project_context;
     expect(projectContext).not.toHaveProperty("task_goal");
     expect(projectContext).not.toHaveProperty("data_unit");
     expect(projectContext).not.toHaveProperty("optimization_priority");
@@ -811,29 +817,29 @@ describe("FilesManager", () => {
     await clickSuggestedProject();
     await continueWithDefaults();
 
+    fireEvent.change(screen.getByDisplayValue("predictions/baseline.tif"), {
+      target: { value: "" },
+    });
     fireEvent.change(
-      screen.getByDisplayValue(
-        "predictions/baseline.tif",
-      ),
-      { target: { value: "" } },
-    );
-    fireEvent.change(
-      screen.getByDisplayValue(
-        "checkpoints/checkpoint_00200.pth.tar",
-      ),
+      screen.getByDisplayValue("checkpoints/checkpoint_00200.pth.tar"),
       { target: { value: "/tmp/custom/checkpoint.pth.tar" } },
     );
     await reviewAndStartProject();
 
     await waitFor(() => {
-      expect(mockWorkflowContext.updateWorkflow).toHaveBeenCalledWith(expect.objectContaining({
-        dataset_path: "/tmp/mito25_paper_loop_smoke",
-        image_path: "/tmp/mito25_paper_loop_smoke/data/image/mito25_smoke_im.h5",
-        label_path: "/tmp/mito25_paper_loop_smoke/data/seg/mito25_smoke_seg.h5",
-        mask_path: "/tmp/mito25_paper_loop_smoke/data/seg/mito25_smoke_seg.h5",
-        checkpoint_path: "/tmp/custom/checkpoint.pth.tar",
-        config_path: "/tmp/mito25_paper_loop_smoke/configs/MitoEM.yaml",
-      }));
+      expect(mockWorkflowContext.updateWorkflow).toHaveBeenCalledWith(
+        expect.objectContaining({
+          dataset_path: "/tmp/mito25_paper_loop_smoke",
+          image_path:
+            "/tmp/mito25_paper_loop_smoke/data/image/mito25_smoke_im.h5",
+          label_path:
+            "/tmp/mito25_paper_loop_smoke/data/seg/mito25_smoke_seg.h5",
+          mask_path:
+            "/tmp/mito25_paper_loop_smoke/data/seg/mito25_smoke_seg.h5",
+          checkpoint_path: "/tmp/custom/checkpoint.pth.tar",
+          config_path: "/tmp/mito25_paper_loop_smoke/configs/MitoEM.yaml",
+        }),
+      );
     });
     expect(
       mockWorkflowContext.updateWorkflow.mock.calls[0][0].inference_output_path,
@@ -890,25 +896,23 @@ describe("FilesManager", () => {
     await continueWithProjectContext(
       "Mouse micro-CT nuclei dataset with train/val folders at 8 x 8 x 8 nm. Segment nuclei and prioritize accuracy.",
     );
-    expect(
-      screen.getByDisplayValue("data/source/Image/train"),
-    ).toBeTruthy();
-    expect(
-      screen.getByDisplayValue("data/source/Label/train"),
-    ).toBeTruthy();
+    expect(screen.getByDisplayValue("data/source/Image/train")).toBeTruthy();
+    expect(screen.getByDisplayValue("data/source/Label/train")).toBeTruthy();
     expect(screen.getByText(/4 matched pairs/)).toBeTruthy();
 
     await reviewAndStartProject();
 
     await waitFor(() => {
-      expect(mockWorkflowContext.updateWorkflow).toHaveBeenCalledWith(expect.objectContaining({
-        dataset_path: "/tmp/nucmm_project",
-        image_path: "/tmp/nucmm_project/data/source/Image/train",
-        label_path: "/tmp/nucmm_project/data/source/Label/train",
-        mask_path: "/tmp/nucmm_project/data/source/Label/train",
-        checkpoint_path: "/tmp/nucmm_project/checkpoints/model.pth.tar",
-        config_path: "/tmp/nucmm_project/configs/preset.yaml",
-      }));
+      expect(mockWorkflowContext.updateWorkflow).toHaveBeenCalledWith(
+        expect.objectContaining({
+          dataset_path: "/tmp/nucmm_project",
+          image_path: "/tmp/nucmm_project/data/source/Image/train",
+          label_path: "/tmp/nucmm_project/data/source/Label/train",
+          mask_path: "/tmp/nucmm_project/data/source/Label/train",
+          checkpoint_path: "/tmp/nucmm_project/checkpoints/model.pth.tar",
+          config_path: "/tmp/nucmm_project/configs/preset.yaml",
+        }),
+      );
     });
     expect(mockWorkflowContext.appendEvent).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -989,10 +993,12 @@ describe("FilesManager", () => {
     await reviewAndStartProject();
 
     await waitFor(() => {
-      expect(mockWorkflowContext.updateWorkflow).toHaveBeenCalledWith(expect.objectContaining({
-        dataset_path: "/tmp/image_only_project",
-        image_path: "/tmp/image_only_project/volume/raw_image.tif",
-      }));
+      expect(mockWorkflowContext.updateWorkflow).toHaveBeenCalledWith(
+        expect.objectContaining({
+          dataset_path: "/tmp/image_only_project",
+          image_path: "/tmp/image_only_project/volume/raw_image.tif",
+        }),
+      );
     });
   });
 
@@ -1019,9 +1025,7 @@ describe("FilesManager", () => {
 
     fireEvent.click(await screen.findByText("Mount Project"));
     await screen.findByText("Confirm project basics");
-    expect(
-      screen.getByPlaceholderText(/Optional:/i),
-    ).toBeTruthy();
+    expect(screen.getByPlaceholderText(/Optional:/i)).toBeTruthy();
     fireEvent.click(screen.getByText("Cancel"));
 
     expect(mockWorkflowContext.updateWorkflow).not.toHaveBeenCalled();

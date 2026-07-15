@@ -132,8 +132,7 @@ const ProofreadingEditor = forwardRef(
     const minimapComposedRef = useRef(null);
     const activeOverlayDirtyRef = useRef(true);
     const minimapSourceDirtyRef = useRef(true);
-    const activeBrushSize =
-      tool === "erase" ? eraseBrushSize : paintBrushSize;
+    const activeBrushSize = tool === "erase" ? eraseBrushSize : paintBrushSize;
     const setBrushSize =
       tool === "erase" ? setEraseBrushSize : setPaintBrushSize;
     const normalizeBrushSize = (value) => {
@@ -912,7 +911,10 @@ const ProofreadingEditor = forwardRef(
         if (maskData.data[i] > 0) positiveCount += 1;
       }
       const targetPoints = 5200;
-      const stride = Math.max(1, Math.ceil(Math.sqrt(positiveCount / targetPoints)));
+      const stride = Math.max(
+        1,
+        Math.ceil(Math.sqrt(positiveCount / targetPoints)),
+      );
       for (let y = 0; y < maskData.height; y += stride) {
         for (let x = 0; x < maskData.width; x += stride) {
           const idx = (y * maskData.width + x) * 4;
@@ -1281,315 +1283,328 @@ const ProofreadingEditor = forwardRef(
       >
         {/* Left Panel - Tools */}
         {!hideToolPanel && (
-        <Card
-          title={
-            <div
-              style={{
-                display: "flex",
-                alignItems: "center",
-                justifyContent: toolPanelCollapsed ? "center" : "space-between",
-                gap: 8,
-              }}
-            >
-              {!toolPanelCollapsed && <span>Tools</span>}
-              <Tooltip
-                title={toolPanelCollapsed ? "Expand tools" : "Collapse tools"}
+          <Card
+            title={
+              <div
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: toolPanelCollapsed
+                    ? "center"
+                    : "space-between",
+                  gap: 8,
+                }}
               >
-                <Button
-                  type="text"
-                  size="small"
-                  icon={
-                    toolPanelCollapsed ? <RightOutlined /> : <LeftOutlined />
-                  }
-                  onClick={() => setToolPanelCollapsed((prev) => !prev)}
-                  aria-label={
-                    toolPanelCollapsed ? "Expand tools" : "Collapse tools"
-                  }
-                  style={{
-                    width: 28,
-                    height: 28,
-                    display: "inline-flex",
-                    alignItems: "center",
-                    justifyContent: "center",
-                  }}
-                />
-              </Tooltip>
-            </div>
-          }
-          style={{
-            width: toolPanelCollapsed ? collapsedToolWidth : expandedToolWidth,
-            minWidth: toolPanelCollapsed
-              ? collapsedToolWidth
-              : expandedToolWidth,
-            height: "100%",
-            transition: "width 0.2s ease",
-            borderRadius: minimalChrome ? 0 : undefined,
-            borderTop: minimalChrome ? 0 : undefined,
-            borderBottom: minimalChrome ? 0 : undefined,
-            borderLeft: minimalChrome ? 0 : undefined,
-          }}
-          headStyle={{
-            padding: toolPanelCollapsed ? "0 8px" : "0 12px",
-          }}
-          bodyStyle={{
-            height: "calc(100% - 40px)",
-            overflowY: "auto",
-            padding: toolPanelCollapsed ? "10px 8px" : "12px",
-          }}
-          size="small"
-        >
-          {toolPanelCollapsed ? (
-            <Space
-              direction="vertical"
-              size="small"
-              style={{ width: "100%", alignItems: "center" }}
-            >
-              <Tooltip title="Paint (P)">
-                <Button
-                  type={tool === "paint" ? "primary" : "default"}
-                  icon={<EditOutlined />}
-                  onClick={() => setTool("paint")}
-                  disabled={!canEdit}
-                />
-              </Tooltip>
-              <Tooltip title="Erase (E)">
-                <Button
-                  type={tool === "erase" ? "primary" : "default"}
-                  icon={<ClearOutlined />}
-                  onClick={() => setTool("erase")}
-                  disabled={!canEdit}
-                />
-              </Tooltip>
-              <Tooltip title="Hand (H)">
-                <Button
-                  type={tool === "hand" ? "primary" : "default"}
-                  icon={<DragOutlined />}
-                  onClick={() => setTool("hand")}
-                />
-              </Tooltip>
-              <Tooltip title={showMask ? "Hide mask" : "Show mask"}>
-                <Button
-                  icon={showMask ? <EyeInvisibleOutlined /> : <EyeOutlined />}
-                  onClick={() => setShowMask(!showMask)}
-                />
-              </Tooltip>
-              <Tooltip title="Save mask (Ctrl+S)">
-                <Button
-                  type={hasUnsavedEdits ? "primary" : "default"}
-                  icon={<SaveOutlined />}
-                  onClick={handleSave}
-                  disabled={!canEdit}
-                />
-              </Tooltip>
-              <Tooltip title="Zoom in">
-                <Button
-                  icon={<ZoomInOutlined />}
-                  onClick={() => setZoom((prev) => Math.min(10.0, prev + 0.1))}
-                />
-              </Tooltip>
-              <Tooltip title="Zoom out">
-                <Button
-                  icon={<ZoomOutOutlined />}
-                  onClick={() => {
-                    const nextZoom = Math.max(1, zoom - 0.1);
-                    setZoom(nextZoom);
-                    setOffset((prev) => clampOffsetToViewport(prev, nextZoom));
-                  }}
-                />
-              </Tooltip>
-            </Space>
-          ) : (
-            <Collapse
-              bordered={false}
-              size="small"
-              activeKey={toolPanelSections}
-              onChange={(keys) =>
-                setToolPanelSections(Array.isArray(keys) ? keys : [keys])
-              }
-              items={[
-                {
-                  key: "minimap",
-                  label: "Minimap",
-                  children: (
-                    <div
-                      style={{
-                        background: "#eee",
-                        border: "1px solid #d9d9d9",
-                        position: "relative",
-                        width: "100%",
-                        aspectRatio: "4 / 3",
-                        margin: "0 auto",
-                        borderRadius: "4px",
-                        overflow: "hidden",
-                        cursor: "crosshair",
-                        display: canvasDimensions.width > 0 ? "block" : "none",
-                      }}
-                      onClick={handleMinimapClick}
-                    >
-                      <canvas
-                        ref={minimapRef}
-                        width={240}
-                        height={180}
-                        style={{
-                          width: "100%",
-                          height: "100%",
-                          display: "block",
-                        }}
-                      />
+                {!toolPanelCollapsed && <span>Tools</span>}
+                <Tooltip
+                  title={toolPanelCollapsed ? "Expand tools" : "Collapse tools"}
+                >
+                  <Button
+                    type="text"
+                    size="small"
+                    icon={
+                      toolPanelCollapsed ? <RightOutlined /> : <LeftOutlined />
+                    }
+                    onClick={() => setToolPanelCollapsed((prev) => !prev)}
+                    aria-label={
+                      toolPanelCollapsed ? "Expand tools" : "Collapse tools"
+                    }
+                    style={{
+                      width: 28,
+                      height: 28,
+                      display: "inline-flex",
+                      alignItems: "center",
+                      justifyContent: "center",
+                    }}
+                  />
+                </Tooltip>
+              </div>
+            }
+            style={{
+              width: toolPanelCollapsed
+                ? collapsedToolWidth
+                : expandedToolWidth,
+              minWidth: toolPanelCollapsed
+                ? collapsedToolWidth
+                : expandedToolWidth,
+              height: "100%",
+              transition: "width 0.2s ease",
+              borderRadius: minimalChrome ? 0 : undefined,
+              borderTop: minimalChrome ? 0 : undefined,
+              borderBottom: minimalChrome ? 0 : undefined,
+              borderLeft: minimalChrome ? 0 : undefined,
+            }}
+            headStyle={{
+              padding: toolPanelCollapsed ? "0 8px" : "0 12px",
+            }}
+            bodyStyle={{
+              height: "calc(100% - 40px)",
+              overflowY: "auto",
+              padding: toolPanelCollapsed ? "10px 8px" : "12px",
+            }}
+            size="small"
+          >
+            {toolPanelCollapsed ? (
+              <Space
+                direction="vertical"
+                size="small"
+                style={{ width: "100%", alignItems: "center" }}
+              >
+                <Tooltip title="Paint (P)">
+                  <Button
+                    type={tool === "paint" ? "primary" : "default"}
+                    icon={<EditOutlined />}
+                    onClick={() => setTool("paint")}
+                    disabled={!canEdit}
+                  />
+                </Tooltip>
+                <Tooltip title="Erase (E)">
+                  <Button
+                    type={tool === "erase" ? "primary" : "default"}
+                    icon={<ClearOutlined />}
+                    onClick={() => setTool("erase")}
+                    disabled={!canEdit}
+                  />
+                </Tooltip>
+                <Tooltip title="Hand (H)">
+                  <Button
+                    type={tool === "hand" ? "primary" : "default"}
+                    icon={<DragOutlined />}
+                    onClick={() => setTool("hand")}
+                  />
+                </Tooltip>
+                <Tooltip title={showMask ? "Hide mask" : "Show mask"}>
+                  <Button
+                    icon={showMask ? <EyeInvisibleOutlined /> : <EyeOutlined />}
+                    onClick={() => setShowMask(!showMask)}
+                  />
+                </Tooltip>
+                <Tooltip title="Save mask (Ctrl+S)">
+                  <Button
+                    type={hasUnsavedEdits ? "primary" : "default"}
+                    icon={<SaveOutlined />}
+                    onClick={handleSave}
+                    disabled={!canEdit}
+                  />
+                </Tooltip>
+                <Tooltip title="Zoom in">
+                  <Button
+                    icon={<ZoomInOutlined />}
+                    onClick={() =>
+                      setZoom((prev) => Math.min(10.0, prev + 0.1))
+                    }
+                  />
+                </Tooltip>
+                <Tooltip title="Zoom out">
+                  <Button
+                    icon={<ZoomOutOutlined />}
+                    onClick={() => {
+                      const nextZoom = Math.max(1, zoom - 0.1);
+                      setZoom(nextZoom);
+                      setOffset((prev) =>
+                        clampOffsetToViewport(prev, nextZoom),
+                      );
+                    }}
+                  />
+                </Tooltip>
+              </Space>
+            ) : (
+              <Collapse
+                bordered={false}
+                size="small"
+                activeKey={toolPanelSections}
+                onChange={(keys) =>
+                  setToolPanelSections(Array.isArray(keys) ? keys : [keys])
+                }
+                items={[
+                  {
+                    key: "minimap",
+                    label: "Minimap",
+                    children: (
                       <div
                         style={{
-                          position: "absolute",
-                          bottom: "4px",
-                          left: "4px",
-                          background: "rgba(0,0,0,0.5)",
-                          color: "white",
-                          fontSize: "10px",
-                          padding: "0 4px",
-                          borderRadius: "3px",
-                          pointerEvents: "none",
-                          opacity: 0.7,
+                          background: "#eee",
+                          border: "1px solid #d9d9d9",
+                          position: "relative",
+                          width: "100%",
+                          aspectRatio: "4 / 3",
+                          margin: "0 auto",
+                          borderRadius: "4px",
+                          overflow: "hidden",
+                          cursor: "crosshair",
+                          display:
+                            canvasDimensions.width > 0 ? "block" : "none",
                         }}
+                        onClick={handleMinimapClick}
                       >
-                        Minimap (click to jump)
+                        <canvas
+                          ref={minimapRef}
+                          width={240}
+                          height={180}
+                          style={{
+                            width: "100%",
+                            height: "100%",
+                            display: "block",
+                          }}
+                        />
+                        <div
+                          style={{
+                            position: "absolute",
+                            bottom: "4px",
+                            left: "4px",
+                            background: "rgba(0,0,0,0.5)",
+                            color: "white",
+                            fontSize: "10px",
+                            padding: "0 4px",
+                            borderRadius: "3px",
+                            pointerEvents: "none",
+                            opacity: 0.7,
+                          }}
+                        >
+                          Minimap (click to jump)
+                        </div>
                       </div>
-                    </div>
-                  ),
-                },
-                {
-                  key: "editing",
-                  label: "Editing",
-                  children: (
-                    <Space direction="vertical" style={{ width: "100%" }}>
-                      <Space>
-                        <Tooltip title="Paint (P)">
-                          <Button
-                            type={tool === "paint" ? "primary" : "default"}
-                            icon={<EditOutlined />}
-                            onClick={() => setTool("paint")}
-                            disabled={!canEdit}
-                          />
-                        </Tooltip>
-                        <Tooltip title="Erase (E)">
-                          <Button
-                            type={tool === "erase" ? "primary" : "default"}
-                            icon={<ClearOutlined />}
-                            onClick={() => setTool("erase")}
-                            disabled={!canEdit}
-                          />
-                        </Tooltip>
-                        <Tooltip title="Hand (H)">
-                          <Button
-                            type={tool === "hand" ? "primary" : "default"}
-                            icon={<DragOutlined />}
-                            onClick={() => setTool("hand")}
-                          />
-                        </Tooltip>
+                    ),
+                  },
+                  {
+                    key: "editing",
+                    label: "Editing",
+                    children: (
+                      <Space direction="vertical" style={{ width: "100%" }}>
+                        <Space>
+                          <Tooltip title="Paint (P)">
+                            <Button
+                              type={tool === "paint" ? "primary" : "default"}
+                              icon={<EditOutlined />}
+                              onClick={() => setTool("paint")}
+                              disabled={!canEdit}
+                            />
+                          </Tooltip>
+                          <Tooltip title="Erase (E)">
+                            <Button
+                              type={tool === "erase" ? "primary" : "default"}
+                              icon={<ClearOutlined />}
+                              onClick={() => setTool("erase")}
+                              disabled={!canEdit}
+                            />
+                          </Tooltip>
+                          <Tooltip title="Hand (H)">
+                            <Button
+                              type={tool === "hand" ? "primary" : "default"}
+                              icon={<DragOutlined />}
+                              onClick={() => setTool("hand")}
+                            />
+                          </Tooltip>
+                        </Space>
+                        {(tool === "paint" || tool === "erase") && (
+                          <>
+                            <Text style={{ fontSize: 12, fontWeight: 500 }}>
+                              {tool === "erase" ? "Erase" : "Paint"} size
+                            </Text>
+                            <Slider
+                              min={1}
+                              max={64}
+                              value={activeBrushSize}
+                              onChange={setBrushSize}
+                            />
+                            <InputNumber
+                              min={1}
+                              max={64}
+                              value={activeBrushSize}
+                              onChange={setBrushSize}
+                              style={{ width: "100%" }}
+                            />
+                          </>
+                        )}
                       </Space>
-                      {(tool === "paint" || tool === "erase") && (
-                        <>
-                          <Text style={{ fontSize: 12, fontWeight: 500 }}>
-                            {tool === "erase" ? "Erase" : "Paint"} size
-                          </Text>
-                          <Slider
-                            min={1}
-                            max={64}
-                            value={activeBrushSize}
-                            onChange={setBrushSize}
-                          />
-                          <InputNumber
-                            min={1}
-                            max={64}
-                            value={activeBrushSize}
-                            onChange={setBrushSize}
-                            style={{ width: "100%" }}
-                          />
-                        </>
-                      )}
-                    </Space>
-                  ),
-                },
-                {
-                  key: "history",
-                  label: "History & visibility",
-                  children: (
-                    <Space direction="vertical" style={{ width: "100%" }}>
-                      <Space>
-                        <Tooltip title="Undo (Ctrl+Z)">
-                          <Button
-                            icon={<UndoOutlined />}
-                            onClick={handleUndo}
-                            disabled={!canEdit || undoStack.length === 0}
-                          >
-                            Undo
-                          </Button>
-                        </Tooltip>
-                        <Tooltip title="Redo (Ctrl+Shift+Z)">
-                          <Button
-                            icon={<RedoOutlined />}
-                            onClick={handleRedo}
-                            disabled={!canEdit || redoStack.length === 0}
-                          >
-                            Redo
-                          </Button>
-                        </Tooltip>
+                    ),
+                  },
+                  {
+                    key: "history",
+                    label: "History & visibility",
+                    children: (
+                      <Space direction="vertical" style={{ width: "100%" }}>
+                        <Space>
+                          <Tooltip title="Undo (Ctrl+Z)">
+                            <Button
+                              icon={<UndoOutlined />}
+                              onClick={handleUndo}
+                              disabled={!canEdit || undoStack.length === 0}
+                            >
+                              Undo
+                            </Button>
+                          </Tooltip>
+                          <Tooltip title="Redo (Ctrl+Shift+Z)">
+                            <Button
+                              icon={<RedoOutlined />}
+                              onClick={handleRedo}
+                              disabled={!canEdit || redoStack.length === 0}
+                            >
+                              Redo
+                            </Button>
+                          </Tooltip>
+                        </Space>
+                        <Button
+                          icon={
+                            showMask ? (
+                              <EyeInvisibleOutlined />
+                            ) : (
+                              <EyeOutlined />
+                            )
+                          }
+                          onClick={() => setShowMask(!showMask)}
+                          block
+                        >
+                          {showMask ? "Hide Mask" : "Show Mask"}
+                        </Button>
+                        <Button
+                          type={hasUnsavedEdits ? "primary" : "default"}
+                          icon={<SaveOutlined />}
+                          onClick={handleSave}
+                          disabled={!canEdit}
+                          block
+                        >
+                          Save mask
+                        </Button>
                       </Space>
-                      <Button
-                        icon={
-                          showMask ? <EyeInvisibleOutlined /> : <EyeOutlined />
-                        }
-                        onClick={() => setShowMask(!showMask)}
-                        block
-                      >
-                        {showMask ? "Hide Mask" : "Show Mask"}
-                      </Button>
-                      <Button
-                        type={hasUnsavedEdits ? "primary" : "default"}
-                        icon={<SaveOutlined />}
-                        onClick={handleSave}
-                        disabled={!canEdit}
-                        block
-                      >
-                        Save mask
-                      </Button>
-                    </Space>
-                  ),
-                },
-                {
-                  key: "zoom",
-                  label: `Zoom (${Math.round(zoom * 100)}%)`,
-                  children: (
-                    <Space>
-                      <Button
-                        icon={<ZoomOutOutlined />}
-                        onClick={() => {
-                          const nextZoom = Math.max(1, zoom - 0.1);
-                          setZoom(nextZoom);
-                          setOffset((prev) =>
-                            clampOffsetToViewport(prev, nextZoom),
-                          );
-                        }}
-                      />
-                      <Button
-                        onClick={() => {
-                          setZoom(1.0);
-                          setOffset({ x: 0, y: 0 });
-                        }}
-                      >
-                        Reset
-                      </Button>
-                      <Button
-                        icon={<ZoomInOutlined />}
-                        onClick={() =>
-                          setZoom((prev) => Math.min(10.0, prev + 0.1))
-                        }
-                      />
-                    </Space>
-                  ),
-                },
-              ]}
-            />
-          )}
-        </Card>
+                    ),
+                  },
+                  {
+                    key: "zoom",
+                    label: `Zoom (${Math.round(zoom * 100)}%)`,
+                    children: (
+                      <Space>
+                        <Button
+                          icon={<ZoomOutOutlined />}
+                          onClick={() => {
+                            const nextZoom = Math.max(1, zoom - 0.1);
+                            setZoom(nextZoom);
+                            setOffset((prev) =>
+                              clampOffsetToViewport(prev, nextZoom),
+                            );
+                          }}
+                        />
+                        <Button
+                          onClick={() => {
+                            setZoom(1.0);
+                            setOffset({ x: 0, y: 0 });
+                          }}
+                        >
+                          Reset
+                        </Button>
+                        <Button
+                          icon={<ZoomInOutlined />}
+                          onClick={() =>
+                            setZoom((prev) => Math.min(10.0, prev + 0.1))
+                          }
+                        />
+                      </Space>
+                    ),
+                  },
+                ]}
+              />
+            )}
+          </Card>
         )}
 
         {/* Center - Canvas */}

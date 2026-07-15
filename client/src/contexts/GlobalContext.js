@@ -102,25 +102,13 @@ export const ContextWrapper = (props) => {
   const [inferenceConfigOriginPath, setInferenceConfigOriginPath] =
     usePersistedState("inferenceConfigOriginPath", "");
   const [trainingUploadedYamlFile, setTrainingUploadedYamlFile] =
-    usePersistedState(
-      "trainingUploadedYamlFile",
-      "",
-    );
+    usePersistedState("trainingUploadedYamlFile", "");
   const [inferenceUploadedYamlFile, setInferenceUploadedYamlFile] =
-    usePersistedState(
-      "inferenceUploadedYamlFile",
-      "",
-    );
+    usePersistedState("inferenceUploadedYamlFile", "");
   const [trainingSelectedYamlPreset, setTrainingSelectedYamlPreset] =
-    usePersistedState(
-      "trainingSelectedYamlPreset",
-      "",
-    );
+    usePersistedState("trainingSelectedYamlPreset", "");
   const [inferenceSelectedYamlPreset, setInferenceSelectedYamlPreset] =
-    usePersistedState(
-      "inferenceSelectedYamlPreset",
-      "",
-    );
+    usePersistedState("inferenceSelectedYamlPreset", "");
   const [imageFileList, setImageFileList] = usePersistedState(
     "imageFileList",
     [],
@@ -142,10 +130,7 @@ export const ContextWrapper = (props) => {
     null,
   );
   const [inferenceCheckpointPath, setInferenceCheckpointPath] =
-    usePersistedState(
-      "inferenceCheckpointPath",
-      null,
-    );
+    usePersistedState("inferenceCheckpointPath", null);
   const [currentImage, setCurrentImage] = usePersistedState(
     "currentImage",
     null,
@@ -195,11 +180,19 @@ export const ContextWrapper = (props) => {
       setTrainingConfig(FILE_STATE_DEFAULTS.trainingConfig);
       setInferenceConfig(FILE_STATE_DEFAULTS.inferenceConfig);
       setTrainingConfigOriginPath(FILE_STATE_DEFAULTS.trainingConfigOriginPath);
-      setInferenceConfigOriginPath(FILE_STATE_DEFAULTS.inferenceConfigOriginPath);
+      setInferenceConfigOriginPath(
+        FILE_STATE_DEFAULTS.inferenceConfigOriginPath,
+      );
       setTrainingUploadedYamlFile(FILE_STATE_DEFAULTS.trainingUploadedYamlFile);
-      setInferenceUploadedYamlFile(FILE_STATE_DEFAULTS.inferenceUploadedYamlFile);
-      setTrainingSelectedYamlPreset(FILE_STATE_DEFAULTS.trainingSelectedYamlPreset);
-      setInferenceSelectedYamlPreset(FILE_STATE_DEFAULTS.inferenceSelectedYamlPreset);
+      setInferenceUploadedYamlFile(
+        FILE_STATE_DEFAULTS.inferenceUploadedYamlFile,
+      );
+      setTrainingSelectedYamlPreset(
+        FILE_STATE_DEFAULTS.trainingSelectedYamlPreset,
+      );
+      setInferenceSelectedYamlPreset(
+        FILE_STATE_DEFAULTS.inferenceSelectedYamlPreset,
+      );
       setTrainingOutputPath(FILE_STATE_DEFAULTS.trainingOutputPath);
       setInferenceOutputPath(FILE_STATE_DEFAULTS.inferenceOutputPath);
       setTrainingLogPath(FILE_STATE_DEFAULTS.trainingLogPath);

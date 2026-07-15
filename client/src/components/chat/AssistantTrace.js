@@ -1,7 +1,10 @@
 import React, { useState } from "react";
 import { Button, Typography } from "antd";
 import { DownOutlined, RightOutlined } from "@ant-design/icons";
-import AgentBadge, { getAgentBorderStyles, getAgentVisual } from "./AgentVisuals";
+import AgentBadge, {
+  getAgentBorderStyles,
+  getAgentVisual,
+} from "./AgentVisuals";
 
 const { Text } = Typography;
 
@@ -82,7 +85,11 @@ function AssistantTrace({ trace = [] }) {
                     key={`${item.label || "trace"}-${section.key}-${index}`}
                     className="assistant-trace__item"
                     style={{
-                      ...getAgentBorderStyles(item.agent_border_style, item.agent_color, 3),
+                      ...getAgentBorderStyles(
+                        item.agent_border_style,
+                        item.agent_color,
+                        3,
+                      ),
                     }}
                   >
                     <div
@@ -94,14 +101,19 @@ function AssistantTrace({ trace = [] }) {
                     >
                       <AgentBadge agent={getAgentVisual(item)} compact />
                       <Text type="secondary" style={{ fontSize: 11 }}>
-                        {CATEGORY_LABELS[getCategory(item)] || getCategory(item) || "Step"}
+                        {CATEGORY_LABELS[getCategory(item)] ||
+                          getCategory(item) ||
+                          "Step"}
                       </Text>
                       <Text style={{ color: "#374151", fontSize: 11 }}>
                         {item.label || "Operational step"}
                       </Text>
                     </div>
                     {item.detail && (
-                      <Text type="secondary" style={{ display: "block", fontSize: 11 }}>
+                      <Text
+                        type="secondary"
+                        style={{ display: "block", fontSize: 11 }}
+                      >
                         {item.detail}
                       </Text>
                     )}

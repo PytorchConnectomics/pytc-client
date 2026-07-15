@@ -47,7 +47,8 @@ const PENDING_RUNTIME_ACTION_KEY = "pytc.workflow.pendingRuntimeAction.v1";
 const PENDING_RUNTIME_ACTION_TTL_MS = 6 * 60 * 60 * 1000;
 const PERSISTABLE_RUNTIME_KINDS = new Set(["monitor_training"]);
 
-const isPersistableRuntimeAction = (kind) => PERSISTABLE_RUNTIME_KINDS.has(kind);
+const isPersistableRuntimeAction = (kind) =>
+  PERSISTABLE_RUNTIME_KINDS.has(kind);
 
 const readPersistedRuntimeAction = (workflowId = null) => {
   if (typeof window === "undefined" || !window.sessionStorage) return null;
@@ -114,18 +115,12 @@ const buildRuntimeOverridesFromEffects = (
   } = {},
 ) => ({
   inputLabelPath:
-    effects.set_training_label_path ||
-    effects.set_inference_label_path ||
-    "",
+    effects.set_training_label_path || effects.set_inference_label_path || "",
   inputImagePath:
-    effects.set_training_image_path ||
-    effects.set_inference_image_path ||
-    "",
+    effects.set_training_image_path || effects.set_inference_image_path || "",
   logPath: effects.set_training_log_path || "",
   outputPath:
-    effects.set_training_output_path ||
-    effects.set_inference_output_path ||
-    "",
+    effects.set_training_output_path || effects.set_inference_output_path || "",
   trainingConfig: resolvedTrainingConfig || undefined,
   configOriginPath: resolvedTrainingConfigOrigin || undefined,
   autoParameters: Boolean(effects.runtime_action?.autopick_parameters),
@@ -322,7 +317,10 @@ export function WorkflowProvider({ children }) {
   const updateProjectProgressVolume = useCallback(
     async (body) => {
       if (!workflow?.id) return null;
-      const progress = await updateWorkflowProjectProgressVolume(workflow.id, body);
+      const progress = await updateWorkflowProjectProgressVolume(
+        workflow.id,
+        body,
+      );
       setProjectProgress(progress || null);
       await refreshWorkflowOverview({ refresh: false });
       return progress || null;
@@ -738,7 +736,10 @@ export function WorkflowProvider({ children }) {
         });
         message.success(mountResult?.message || "Project mounted.");
         if (effects.mount_project.workflow_patch && workflow?.id) {
-          await updateWorkflowApi(workflow.id, effects.mount_project.workflow_patch);
+          await updateWorkflowApi(
+            workflow.id,
+            effects.mount_project.workflow_patch,
+          );
         }
         await refreshWorkflow();
       }
@@ -866,16 +867,19 @@ export function WorkflowProvider({ children }) {
     ],
   );
 
-  const consumeRuntimeAction = useCallback((actionId = null) => {
-    setPendingRuntimeAction((current) => {
-      if (!current) return null;
-      if (!actionId || current.id === actionId) {
-        clearPersistedRuntimeAction();
-        return null;
-      }
-      return current;
-    });
-  }, [clearPersistedRuntimeAction]);
+  const consumeRuntimeAction = useCallback(
+    (actionId = null) => {
+      setPendingRuntimeAction((current) => {
+        if (!current) return null;
+        if (!actionId || current.id === actionId) {
+          clearPersistedRuntimeAction();
+          return null;
+        }
+        return current;
+      });
+    },
+    [clearPersistedRuntimeAction],
+  );
 
   const executeAssistantItem = useCallback(
     async (item) => {
@@ -906,20 +910,25 @@ export function WorkflowProvider({ children }) {
   const approveAgentAction = useCallback(
     async (eventId, overrides = {}) => {
       if (!workflow?.id) return null;
-      const result = await approveAgentActionApi(workflow.id, eventId, overrides);
+      const result = await approveAgentActionApi(
+        workflow.id,
+        eventId,
+        overrides,
+      );
       if (result?.workflow) {
         setWorkflow(result.workflow);
       }
-      const durableCommand = result?.commands?.find?.(
-        (command) => Number.isFinite(Number(command?.id)),
+      const durableCommand = result?.commands?.find?.((command) =>
+        Number.isFinite(Number(command?.id)),
       );
       if (durableCommand) {
         const approvedEffects = result?.client_effects || {};
         await runClientEffects(clientEffectsWithoutRuntime(approvedEffects));
-        const commandResult = await runWorkflowCommand(workflow.id, durableCommand.id);
-        if (
-          (approvedEffects?.runtime_action || {}).kind === "start_training"
-        ) {
+        const commandResult = await runWorkflowCommand(
+          workflow.id,
+          durableCommand.id,
+        );
+        if ((approvedEffects?.runtime_action || {}).kind === "start_training") {
           registerPendingRuntimeAction(
             {
               id: `monitor_training:${Date.now()}`,

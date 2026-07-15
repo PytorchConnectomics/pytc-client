@@ -216,7 +216,8 @@ function Views() {
 
   const navigateTo = useCallback((key) => {
     if (!key) return;
-    const targetKey = key === "monitoring" || key === "model-training" ? "training" : key;
+    const targetKey =
+      key === "monitoring" || key === "model-training" ? "training" : key;
     setCurrent(targetKey);
     setVisitedTabs((prev) => new Set(prev).add(targetKey));
   }, []);
@@ -264,7 +265,12 @@ function Views() {
       refreshProjectProgress?.();
     }
     consumeClientEffects?.();
-  }, [lastClientEffects, consumeClientEffects, refreshProjectProgress, navigateTo]);
+  }, [
+    lastClientEffects,
+    consumeClientEffects,
+    refreshProjectProgress,
+    navigateTo,
+  ]);
 
   useEffect(() => {
     logClientEvent("view_changed", {
@@ -278,7 +284,9 @@ function Views() {
   useEffect(() => {
     logClientEvent(isChatOpen ? "chat_opened" : "chat_closed", {
       level: "INFO",
-      message: isChatOpen ? "Assistant drawer opened" : "Assistant drawer closed",
+      message: isChatOpen
+        ? "Assistant drawer opened"
+        : "Assistant drawer closed",
       source: "views",
       data: { width: chatWidth },
     });

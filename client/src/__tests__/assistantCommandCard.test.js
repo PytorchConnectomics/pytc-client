@@ -23,7 +23,8 @@ describe("AssistantCommandCard", () => {
       id: "prime-training",
       title: "Prime the training screen",
       description: "Move the UI into training setup mode.",
-      command: 'app open training\napp training labels set "/tmp/corrected.tif"',
+      command:
+        'app open training\napp training labels set "/tmp/corrected.tif"',
       run_label: "Execute",
       client_effects: {
         navigate_to: "training",

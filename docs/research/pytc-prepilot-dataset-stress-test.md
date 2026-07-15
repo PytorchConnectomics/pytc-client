@@ -22,16 +22,16 @@ The important constraint is that most public PyTC datasets provide data and conf
 
 Run the ladder in order. Stop when the prototype fails; log the failure as product evidence rather than forcing the demo through.
 
-| Tier | Dataset | Why this tier matters | Data source | Existing local config(s) | Expected stress point |
-| --- | --- | --- | --- | --- | --- |
-| 0 | Local Mito25 / Mito25 smoke | Fastest app-level closed-loop rehearsal using the app's current demo path | Existing local data under `/Users/adamg/seg.bio/testing_data/mito25` when mounted | `configs/MitoEM/Mito25-Local-Smoke-BC.yaml`, `configs/MitoEM/Mito25-Local-BC.yaml` | End-to-end app state, project setup, proofreading save/export, short training/inference job handling |
-| 1 | MitoEM toy crop | Real PyTC/Hugging Face data, small enough to iterate | [pytc/MitoEM](https://huggingface.co/datasets/pytc/MitoEM/tree/main), especially `mitoem_R_train_4um_im.h5` and `mitoem_R_train_4um_seg.h5` | Adapt `configs/MitoEM/Mito25-Local-BC.yaml` for direct HDF5 crop, or `MitoEM-R-Base.yaml` + `MitoEM-R-BC.yaml` for full tiled data | HDF5 role inference, small real mitochondria proofreading, model-run artifact lineage |
-| 2 | Lucchi / Lucchi++ | Small classic mitochondria semantic segmentation benchmark with public labels | PyTC docs link `lucchi.zip`; also [pytc/tutorial](https://huggingface.co/datasets/pytc/tutorial/tree/main) has `lucchi++.zip`; background at [Connectomics Lucchi++](https://sites.google.com/view/connectomics) | `configs/Lucchi-Mitochondria.yaml` | TIFF stack handling, semantic rather than instance masks, local evaluation with IoU/F1-style metrics |
-| 3 | CREMI synaptic clefts | Multi-volume HDF5 benchmark and synapse task; tests non-mito biology | [CREMI data page](https://cremi.org/data/) cropped A/B/C volumes or [pytc/tutorial](https://huggingface.co/datasets/pytc/tutorial/tree/main) `cremi.zip` | `configs/CREMI/CREMI-Base.yaml` + `configs/CREMI/CREMI-Foreground-UNet.yaml` | Multiple image/label pairs, `@`-separated config paths, HDF5 internal dataset keys, synapse-specific metrics |
-| 4 | SNEMI3D neurons | Classic dense neurite segmentation with affinity output and postprocessing | PyTC docs `snemi.zip`; challenge context at [SNEMI3D](https://snemi3d.grand-challenge.org/) | `configs/SNEMI/SNEMI-Base.yaml` + `configs/SNEMI/SNEMI-Affinity-UNet.yaml` | Affinity maps are not directly editable instance masks; requires waterz/zwatershed postprocessing before proofreading |
-| 5 | NucMM | Non-mito, non-synapse nuclei; tests modality generality and project agnosticism | [NucMM project page](https://pytorchconnectomics.github.io/datasets/proj/nucmm/) and [pytc/NucMM](https://huggingface.co/datasets/pytc/NucMM/tree/main) | `configs/NucMM/NucMM-Mouse-Base.yaml` + `NucMM-Mouse-UNet-BC.yaml`; `NucMM-Zebrafish-Base.yaml` + `NucMM-Zebrafish-UNet-BC.yaml` | Large-volume nuclei, EM vs micro-CT modality mismatch, non-mito proofreading language |
-| Stretch | JWR15 synapse polarity | Tests arbitrary-volume synapse inference and semantic synapse masks | PyTC synapse docs mention `jwr15_synapse.zip` | `configs/JWR15/synapse/JWR15-Synapse-Base.yaml` + `JWR15-Synapse-BCE.yaml` | Pretrained-checkpoint availability, arbitrary-volume inference, non-instance semantic masks |
-| Stretch | MitoEM2.0 | Current PyTC dataset ecosystem and larger modern mitochondrial scope | [pytc/MitoEM2.0](https://huggingface.co/datasets/pytc/MitoEM2.0/tree/main) | No matching local legacy config yet; evaluate separately | 17GB scale, new dataset organization, likely requires schema/config adaptation |
+| Tier    | Dataset                     | Why this tier matters                                                           | Data source                                                                                                                                                                                                      | Existing local config(s)                                                                                                           | Expected stress point                                                                                                 |
+| ------- | --------------------------- | ------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------- |
+| 0       | Local Mito25 / Mito25 smoke | Fastest app-level closed-loop rehearsal using the app's current demo path       | Existing local data under `/Users/adamg/seg.bio/testing_data/mito25` when mounted                                                                                                                                | `configs/MitoEM/Mito25-Local-Smoke-BC.yaml`, `configs/MitoEM/Mito25-Local-BC.yaml`                                                 | End-to-end app state, project setup, proofreading save/export, short training/inference job handling                  |
+| 1       | MitoEM toy crop             | Real PyTC/Hugging Face data, small enough to iterate                            | [pytc/MitoEM](https://huggingface.co/datasets/pytc/MitoEM/tree/main), especially `mitoem_R_train_4um_im.h5` and `mitoem_R_train_4um_seg.h5`                                                                      | Adapt `configs/MitoEM/Mito25-Local-BC.yaml` for direct HDF5 crop, or `MitoEM-R-Base.yaml` + `MitoEM-R-BC.yaml` for full tiled data | HDF5 role inference, small real mitochondria proofreading, model-run artifact lineage                                 |
+| 2       | Lucchi / Lucchi++           | Small classic mitochondria semantic segmentation benchmark with public labels   | PyTC docs link `lucchi.zip`; also [pytc/tutorial](https://huggingface.co/datasets/pytc/tutorial/tree/main) has `lucchi++.zip`; background at [Connectomics Lucchi++](https://sites.google.com/view/connectomics) | `configs/Lucchi-Mitochondria.yaml`                                                                                                 | TIFF stack handling, semantic rather than instance masks, local evaluation with IoU/F1-style metrics                  |
+| 3       | CREMI synaptic clefts       | Multi-volume HDF5 benchmark and synapse task; tests non-mito biology            | [CREMI data page](https://cremi.org/data/) cropped A/B/C volumes or [pytc/tutorial](https://huggingface.co/datasets/pytc/tutorial/tree/main) `cremi.zip`                                                         | `configs/CREMI/CREMI-Base.yaml` + `configs/CREMI/CREMI-Foreground-UNet.yaml`                                                       | Multiple image/label pairs, `@`-separated config paths, HDF5 internal dataset keys, synapse-specific metrics          |
+| 4       | SNEMI3D neurons             | Classic dense neurite segmentation with affinity output and postprocessing      | PyTC docs `snemi.zip`; challenge context at [SNEMI3D](https://snemi3d.grand-challenge.org/)                                                                                                                      | `configs/SNEMI/SNEMI-Base.yaml` + `configs/SNEMI/SNEMI-Affinity-UNet.yaml`                                                         | Affinity maps are not directly editable instance masks; requires waterz/zwatershed postprocessing before proofreading |
+| 5       | NucMM                       | Non-mito, non-synapse nuclei; tests modality generality and project agnosticism | [NucMM project page](https://pytorchconnectomics.github.io/datasets/proj/nucmm/) and [pytc/NucMM](https://huggingface.co/datasets/pytc/NucMM/tree/main)                                                          | `configs/NucMM/NucMM-Mouse-Base.yaml` + `NucMM-Mouse-UNet-BC.yaml`; `NucMM-Zebrafish-Base.yaml` + `NucMM-Zebrafish-UNet-BC.yaml`   | Large-volume nuclei, EM vs micro-CT modality mismatch, non-mito proofreading language                                 |
+| Stretch | JWR15 synapse polarity      | Tests arbitrary-volume synapse inference and semantic synapse masks             | PyTC synapse docs mention `jwr15_synapse.zip`                                                                                                                                                                    | `configs/JWR15/synapse/JWR15-Synapse-Base.yaml` + `JWR15-Synapse-BCE.yaml`                                                         | Pretrained-checkpoint availability, arbitrary-volume inference, non-instance semantic masks                           |
+| Stretch | MitoEM2.0                   | Current PyTC dataset ecosystem and larger modern mitochondrial scope            | [pytc/MitoEM2.0](https://huggingface.co/datasets/pytc/MitoEM2.0/tree/main)                                                                                                                                       | No matching local legacy config yet; evaluate separately                                                                           | 17GB scale, new dataset organization, likely requires schema/config adaptation                                        |
 
 ## Project Folder Schema For The Prepilot
 
@@ -176,19 +176,19 @@ Expected findings:
 
 Use a table in `notes/prepilot-log.md` for each dataset:
 
-| Check | Result | Evidence path | Notes |
-| --- | --- | --- | --- |
-| Project roles inferred correctly | pass/fail | screenshot/log/event id | Was any role wrong or silently defaulted? |
-| Config selected correctly | pass/fail | config path | Did app suggest the right PyTC config family? |
-| Agent next-step answer useful | pass/fail | chat id | Did it produce action, question, or irrelevant docs? |
-| Agent action approval works | pass/fail | event id | Did action mutate app only after approval? |
-| Runtime starts | pass/fail | run id | Training/inference job record exists? |
-| Runtime summary readable | pass/fail | screenshot | Was raw log hidden unless requested? |
-| Proofreading loads quickly | pass/fail | timing | Slice change target: under 1-2s on small crop. |
-| Mask save persists | pass/fail | artifact path | Reopen and verify edit remains. |
-| Export works | pass/fail | export path | Corrected mask usable by training. |
-| Candidate metrics computed | pass/fail | report path | Baseline/candidate/reference all resolved. |
-| Evidence bundle exported | pass/fail | bundle path | Includes events, configs, artifacts, metrics. |
+| Check                            | Result    | Evidence path           | Notes                                                |
+| -------------------------------- | --------- | ----------------------- | ---------------------------------------------------- |
+| Project roles inferred correctly | pass/fail | screenshot/log/event id | Was any role wrong or silently defaulted?            |
+| Config selected correctly        | pass/fail | config path             | Did app suggest the right PyTC config family?        |
+| Agent next-step answer useful    | pass/fail | chat id                 | Did it produce action, question, or irrelevant docs? |
+| Agent action approval works      | pass/fail | event id                | Did action mutate app only after approval?           |
+| Runtime starts                   | pass/fail | run id                  | Training/inference job record exists?                |
+| Runtime summary readable         | pass/fail | screenshot              | Was raw log hidden unless requested?                 |
+| Proofreading loads quickly       | pass/fail | timing                  | Slice change target: under 1-2s on small crop.       |
+| Mask save persists               | pass/fail | artifact path           | Reopen and verify edit remains.                      |
+| Export works                     | pass/fail | export path             | Corrected mask usable by training.                   |
+| Candidate metrics computed       | pass/fail | report path             | Baseline/candidate/reference all resolved.           |
+| Evidence bundle exported         | pass/fail | bundle path             | Includes events, configs, artifacts, metrics.        |
 
 ## Failure Modes This Prepilot Is Designed To Expose
 
@@ -217,14 +217,14 @@ If those pass, the app is ready for a controlled prepilot with another person. I
 
 On 2026-04-28, `scripts/ingest_prepilot_datasets.py` staged practical prepilot fixtures under `/Users/adamg/seg.bio/testing_projects`.
 
-| Project | Status | Contents |
-| --- | --- | --- |
-| `prepilot_mito25_smoke` | ready | Symlinked local Mito25 smoke HDF5 image/seg pairs plus `Mito25-Local-Smoke-BC.yaml`. |
-| `prepilot_mitoem_toy` | ready | Downloaded public MitoEM-R 4um HDF5 image/seg crop from Hugging Face and wrote `MitoEM-Toy-BC-Smoke.yaml`. |
-| `prepilot_lucchi_pp` | ready | Downloaded/extracted `lucchi++.zip`; staged `train_im.h5`, `train_mito.h5`, `test_im.h5`, and `test_mito.h5` with patched Lucchi config. |
-| `prepilot_snemi3d_local` | ready | Symlinked existing local SNEMI train/test TIFFs and labels with patched SNEMI base config plus affinity UNet config. |
+| Project                   | Status              | Contents                                                                                                                                                                                                                                                         |
+| ------------------------- | ------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `prepilot_mito25_smoke`   | ready               | Symlinked local Mito25 smoke HDF5 image/seg pairs plus `Mito25-Local-Smoke-BC.yaml`.                                                                                                                                                                             |
+| `prepilot_mitoem_toy`     | ready               | Downloaded public MitoEM-R 4um HDF5 image/seg crop from Hugging Face and wrote `MitoEM-Toy-BC-Smoke.yaml`.                                                                                                                                                       |
+| `prepilot_lucchi_pp`      | ready               | Downloaded/extracted `lucchi++.zip`; staged `train_im.h5`, `train_mito.h5`, `test_im.h5`, and `test_mito.h5` with patched Lucchi config.                                                                                                                         |
+| `prepilot_snemi3d_local`  | ready               | Symlinked existing local SNEMI train/test TIFFs and labels with patched SNEMI base config plus affinity UNet config.                                                                                                                                             |
 | `prepilot_cremi_official` | needs preprocessing | Downloaded official CREMI A/B/C HDF5 containers; manifest records raw and cleft-label HDF5 keys. Legacy PyTC configs expect preprocessed `corrected/im_*.h5` and `corrected/syn_*.h5`, so this fixture intentionally exposes the HDF5-key/config-adaptation gap. |
-| `prepilot_nucmm_mouse` | ready | Downloaded/extracted public NucMM-Mouse archive; staged train image/seg HDF5 crops and copied NucMM Mouse configs. |
+| `prepilot_nucmm_mouse`    | ready               | Downloaded/extracted public NucMM-Mouse archive; staged train image/seg HDF5 crops and copied NucMM Mouse configs.                                                                                                                                               |
 
 Each project includes:
 

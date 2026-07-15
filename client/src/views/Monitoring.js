@@ -1,5 +1,14 @@
 import React, { useCallback, useEffect, useMemo, useState } from "react";
-import { Alert, Button, Card, Space, Spin, Tag, Typography, message } from "antd";
+import {
+  Alert,
+  Button,
+  Card,
+  Space,
+  Spin,
+  Tag,
+  Typography,
+  message,
+} from "antd";
 import { getTensorboardStatus, startTensorboard } from "../api";
 import WorkflowEvidencePanel from "../components/workflow/WorkflowEvidencePanel";
 
@@ -170,7 +179,9 @@ function Monitoring() {
                     <div style={{ wordBreak: "break-word", color: "#595959" }}>
                       {source.path}
                     </div>
-                    <div style={{ color: source.exists ? "#389e0d" : "#d46b08" }}>
+                    <div
+                      style={{ color: source.exists ? "#389e0d" : "#d46b08" }}
+                    >
                       {source.exists ? "Directory ready" : "Directory missing"}
                     </div>
                   </div>
@@ -178,7 +189,8 @@ function Monitoring() {
               </Space>
             ) : (
               <Typography.Text type="secondary">
-                No training or inference output directories have been registered yet.
+                No training or inference output directories have been registered
+                yet.
               </Typography.Text>
             )}
           </Card>
@@ -215,7 +227,9 @@ function Monitoring() {
           <Alert
             type={hasSources ? "warning" : "info"}
             showIcon
-            message={hasSources ? "TensorBoard is stopped." : "No log directory yet."}
+            message={
+              hasSources ? "TensorBoard is stopped." : "No log directory yet."
+            }
           />
         )}
       </Card>

@@ -148,7 +148,8 @@ Assume the app could be restructured around:
    - Records observations, user confirmations, proposals, approvals/rejections, executions, artifacts, volume transitions, job statuses, metrics, and exported evidence.
 
 10. **Invalidation/reinspection loop**
-   - Refreshes memory when files change, statuses change, jobs start/complete/fail, proofread edits are saved, app resumes, or a user asks a freshness-sensitive question.
+
+- Refreshes memory when files change, statuses change, jobs start/complete/fail, proofread edits are saved, app resumes, or a user asks a freshness-sensitive question.
 
 Please assess this architecture against HCI/agent/workflow/provenance literature.
 
@@ -487,14 +488,14 @@ State the recommended conceptual model, architecture, and strongest paper framin
 Create a structured map of the literature/systems reviewed:
 
 | Area | Key sources | Core lesson | Relevance to seg.bio |
-|---|---|---|---|
+| ---- | ----------- | ----------- | -------------------- |
 
 ### 3. Design Principles
 
 Use a table:
 
 | Principle | Evidence | Design implication | Priority |
-|---|---|---|---|
+| --------- | -------- | ------------------ | -------- |
 
 Principles should be specific enough to implement.
 

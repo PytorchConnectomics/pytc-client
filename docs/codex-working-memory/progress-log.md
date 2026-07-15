@@ -1009,11 +1009,13 @@ Local working log for Codex sessions on `pytc-client`.
 - Added the Yixiao project to backend project suggestions so it can be mounted from the app.
 
 ### 2026-05-24 - Yixiao TapeReader XRI Case Study Verification
+
 - Hardened `/home/weidf/demo_data/yixiao_tapereader_xri_case_study/reset_to_initial.sh` to use the demo app venv when regenerating CLAHE training inputs, so reset does not depend on ambient `python` packages.
 - Verified fixture counts after reset: 10 raw volumes, 8 visible segmentation masks, 12 PyTC training files, and 10 withheld masks in `/home/weidf/demo_data/yixiao_tapereader_xri_case_study_holdout_masks`.
 - Verified manifest split remains 6 ground-truth volumes, 2 draft/needs-proofreading volumes, and 2 image-only/missing-segmentation volumes.
 - Verified both TapeReader YAML configs parse and load through the local PyTC config loader. The app-compatible sanity target builds local PyTC training targets on a crop; the original barcode-branch target intentionally fails under bundled current PyTC with `Target option a is not valid`, preserving the known compatibility boundary.
 - Restarted the live `pytc-demo@pytc-client-demo2.service` process via systemd auto-restart and confirmed `https://demo.seg.bio/api/files/project-suggestions` now includes `yixiao-tapereader-xri-case-study`.
+
 ## 2026-05-24 - Guided Project Context Intake Pass
 
 - Reworked mounted-project setup toward inspect-first guided confirmation:

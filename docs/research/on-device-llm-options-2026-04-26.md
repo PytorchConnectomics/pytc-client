@@ -12,13 +12,13 @@ reasoning beyond the old `llama3.2:1b` default.
 
 ## Models To Evaluate Next
 
-| Model | Why It Matters | Tradeoff | Status |
-| --- | --- | --- | --- |
-| `qwen3:4b` | Ollama lists it at 2.5GB with a 256K context window; useful candidate for fast local workflow chat. | Needs local pull and behavioral testing. | Evaluate |
-| `qwen3:8b` | Larger Qwen3 local text model, 5.2GB and 40K context. | More memory/latency than 4B. | Evaluate |
-| `gemma3:4b` | Ollama lists Gemma 3 as multimodal with 128K context; 4B is 3.3GB. | Multimodal support is not yet integrated into PyTC Client. | Evaluate |
-| `phi4-mini` | Ollama describes it as memory/compute constrained and latency-bound, with 128K context. | Requires Ollama 0.5.13+ and should be tested for UI-agent instruction following. | Evaluate |
-| llama.cpp / GGUF | Strong fallback runtime path; official repo supports Metal for Apple Silicon. | More integration work than Ollama. | Future runtime option |
+| Model            | Why It Matters                                                                                      | Tradeoff                                                                         | Status                |
+| ---------------- | --------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------- | --------------------- |
+| `qwen3:4b`       | Ollama lists it at 2.5GB with a 256K context window; useful candidate for fast local workflow chat. | Needs local pull and behavioral testing.                                         | Evaluate              |
+| `qwen3:8b`       | Larger Qwen3 local text model, 5.2GB and 40K context.                                               | More memory/latency than 4B.                                                     | Evaluate              |
+| `gemma3:4b`      | Ollama lists Gemma 3 as multimodal with 128K context; 4B is 3.3GB.                                  | Multimodal support is not yet integrated into PyTC Client.                       | Evaluate              |
+| `phi4-mini`      | Ollama describes it as memory/compute constrained and latency-bound, with 128K context.             | Requires Ollama 0.5.13+ and should be tested for UI-agent instruction following. | Evaluate              |
+| llama.cpp / GGUF | Strong fallback runtime path; official repo supports Metal for Apple Silicon.                       | More integration work than Ollama.                                               | Future runtime option |
 
 ## Product Takeaway
 

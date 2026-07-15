@@ -30,10 +30,7 @@ import InstanceNavigator from "./InstanceNavigator";
 import ProofreadingEditor from "./ProofreadingEditor";
 import Instance3DPreview from "./Instance3DPreview";
 import SliceScheduler from "./SliceScheduler";
-import {
-  apiClient,
-  getInstanceMeshPreview,
-} from "../../api";
+import { apiClient, getInstanceMeshPreview } from "../../api";
 import { AppContext } from "../../contexts/GlobalContext";
 import { useWorkflow } from "../../contexts/WorkflowContext";
 import { logClientEvent } from "../../logging/appEventLog";
@@ -96,7 +93,8 @@ const ORTHO_PANES = [
   { axis: "zx", label: "XZ" },
 ];
 
-const formatAxisLabel = (axis) => AXIS_LABELS[axis] || String(axis).toUpperCase();
+const formatAxisLabel = (axis) =>
+  AXIS_LABELS[axis] || String(axis).toUpperCase();
 
 function OrthoviewPane({
   axis,
@@ -1398,14 +1396,8 @@ function DetectionWorkflow({
           : overlayActiveAlpha;
       let overlayVisibilityChanged = false;
 
-      if (
-        shouldRestore &&
-        nextInstanceMode !== "none"
-      ) {
-        if (
-          nextOverlayAllAlpha <= 0.001 &&
-          nextOverlayActiveAlpha <= 0.001
-        ) {
+      if (shouldRestore && nextInstanceMode !== "none") {
+        if (nextOverlayAllAlpha <= 0.001 && nextOverlayActiveAlpha <= 0.001) {
           nextOverlayAllAlpha = DEFAULT_OVERLAY_ALL_ALPHA;
           nextOverlayActiveAlpha = DEFAULT_OVERLAY_ACTIVE_ALPHA;
           overlayVisibilityChanged = true;
@@ -2101,7 +2093,9 @@ function DetectionWorkflow({
       ? Number(cachedPlane.zIndex)
       : Math.max(
           0,
-          Math.round(Number(getAxisIndexForInstance(activeInstance, axisValue)) || 0),
+          Math.round(
+            Number(getAxisIndexForInstance(activeInstance, axisValue)) || 0,
+          ),
         );
     if (cachedTotal) {
       setAxisTotal(cachedTotal);
@@ -2156,12 +2150,14 @@ function DetectionWorkflow({
     }
   };
 
-  const handleSaveMaskForAxis = async (axis, zIndex, planeState, maskBase64) => {
+  const handleSaveMaskForAxis = async (
+    axis,
+    zIndex,
+    planeState,
+    maskBase64,
+  ) => {
     if (!sessionId || !activeInstanceId) return;
-    const targetIndex = clampSliceIndex(
-      zIndex,
-      axisTotal || totalLayers,
-    );
+    const targetIndex = clampSliceIndex(zIndex, axisTotal || totalLayers);
     const rawMaskMatchesCurrentSlice =
       planeState?.axis === axis &&
       planeState?.zIndex === targetIndex &&
@@ -2368,7 +2364,9 @@ function DetectionWorkflow({
       axesToLoad.map(async (pane) => {
         const zIndex = Math.max(
           0,
-          Math.round(Number(getAxisIndexForInstance(activeInstance, pane.axis)) || 0),
+          Math.round(
+            Number(getAxisIndexForInstance(activeInstance, pane.axis)) || 0,
+          ),
         );
         const payload = await fetchInstanceBundle({
           sessionId,
@@ -2496,15 +2494,15 @@ function DetectionWorkflow({
     >
       {progressPanel}
       <Divider style={{ margin: "4px 0" }} />
-        <InstanceNavigator
-          instances={instances}
-          activeInstanceId={activeInstanceId}
-          onSelect={selectInstance}
-          filterText={filterText}
-          onFilterText={setFilterText}
-          showClassification={false}
-        />
-      </Card>
+      <InstanceNavigator
+        instances={instances}
+        activeInstanceId={activeInstanceId}
+        onSelect={selectInstance}
+        filterText={filterText}
+        onFilterText={setFilterText}
+        showClassification={false}
+      />
+    </Card>
   );
 
   const activeInstanceCoordinates = activeInstance
@@ -2630,10 +2628,7 @@ function DetectionWorkflow({
       (axis === viewAxis ? currentAxisTotal : 0) ||
       currentAxisTotal ||
       totalLayers;
-    const nextIndex = clampSliceIndex(
-      currentIndex + delta,
-      totalForPlane,
-    );
+    const nextIndex = clampSliceIndex(currentIndex + delta, totalForPlane);
     if (nextIndex === currentIndex) return nextIndex;
     if (axis === viewAxis) {
       if (options.previewOnly) {
@@ -2875,8 +2870,7 @@ function DetectionWorkflow({
                 windowWidth < 1180
                   ? "minmax(0, 1fr)"
                   : "minmax(0, 1fr) minmax(0, 1fr)",
-              gridAutoRows:
-                windowWidth < 1180 ? "360px" : "minmax(260px, 1fr)",
+              gridAutoRows: windowWidth < 1180 ? "360px" : "minmax(260px, 1fr)",
               height:
                 windowWidth < 1180
                   ? "auto"

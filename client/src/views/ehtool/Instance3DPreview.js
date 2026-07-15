@@ -245,7 +245,11 @@ function Instance3DPreview({
     renderer.domElement.style.width = "100%";
     renderer.domElement.style.height = "100%";
     renderer.domElement.style.display = "block";
-    renderer.setSize(container.clientWidth || 360, container.clientHeight || 480, false);
+    renderer.setSize(
+      container.clientWidth || 360,
+      container.clientHeight || 480,
+      false,
+    );
     container.appendChild(renderer.domElement);
 
     const controls = new OrbitControls(camera, renderer.domElement);
@@ -273,7 +277,10 @@ function Instance3DPreview({
     const resize = () => {
       const rect = container.getBoundingClientRect();
       const width = Math.max(container.clientWidth || rect.width || 360, 240);
-      const height = Math.max(container.clientHeight || rect.height || 480, 320);
+      const height = Math.max(
+        container.clientHeight || rect.height || 480,
+        320,
+      );
       if (width === lastWidth && height === lastHeight) return;
       lastWidth = width;
       lastHeight = height;
@@ -349,10 +356,7 @@ function Instance3DPreview({
       const camera = cameraRef.current;
       const controls = controlsRef.current;
       const fov = THREE.MathUtils.degToRad(camera.fov);
-      const fitDistance = Math.max(
-        radius * 2.8,
-        radius / Math.sin(fov / 2),
-      );
+      const fitDistance = Math.max(radius * 2.8, radius / Math.sin(fov / 2));
       controls.target.copy(sphere.center);
       controls.minDistance = Math.max(radius * 0.35, 0.1);
       controls.maxDistance = Math.max(radius * 8, fitDistance * 3);
@@ -457,7 +461,9 @@ function Instance3DPreview({
             ) : loading ? (
               <Spin />
             ) : (
-              <Text style={{ color: "#e5e7eb" }}>Extracting surface mesh...</Text>
+              <Text style={{ color: "#e5e7eb" }}>
+                Extracting surface mesh...
+              </Text>
             )}
           </div>
         )}

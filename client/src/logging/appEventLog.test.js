@@ -26,8 +26,9 @@ describe("appEventLog canonicalization", () => {
   });
 
   it("posts logging events to /app/log-event when base URL already has /api", async () => {
-    const { appEventLog, fetchMock } =
-      loadAppEventLogModule("https://demo.example/api");
+    const { appEventLog, fetchMock } = loadAppEventLogModule(
+      "https://demo.example/api",
+    );
 
     appEventLog.logClientEvent("api_test_event", {
       message: "from test",
