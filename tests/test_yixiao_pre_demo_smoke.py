@@ -5,7 +5,9 @@ import pytest
 from scripts import run_yixiao_case_study_smoke as smoke
 
 
-def _fake_pre_demo_args(tmp_path, *, skip_readiness_check=False, skip_export_check=False):
+def _fake_pre_demo_args(
+    tmp_path, *, skip_readiness_check=False, skip_export_check=False
+):
     return Namespace(
         base_url="http://127.0.0.1:4342",
         project_root=str(tmp_path),
@@ -133,12 +135,16 @@ def test_pre_demo_gate_fails_when_export_payload_is_incomplete(monkeypatch, tmp_
     report = smoke._build_pre_demo_gate_report(args)
 
     assert not report["passed"]
-    export_step = next(step for step in report["steps"] if step["name"] == "export_sanity")
+    export_step = next(
+        step for step in report["steps"] if step["name"] == "export_sanity"
+    )
     assert not export_step["passed"]
     assert "export payload missing required fields" in report["caveats"]
 
 
-def test_pre_demo_gate_records_readiness_and_export_check_failures_as_caveats(monkeypatch, tmp_path):
+def test_pre_demo_gate_records_readiness_and_export_check_failures_as_caveats(
+    monkeypatch, tmp_path
+):
     _setup_fake_run(monkeypatch)
 
     def fake_request_json(self, method, path, payload=None, timeout=30):
@@ -150,15 +156,21 @@ def test_pre_demo_gate_records_readiness_and_export_check_failures_as_caveats(mo
     report = smoke._build_pre_demo_gate_report(args)
 
     assert not report["passed"]
-    readiness_step = next(step for step in report["steps"] if step["name"] == "readiness_check")
-    export_step = next(step for step in report["steps"] if step["name"] == "export_sanity")
+    readiness_step = next(
+        step for step in report["steps"] if step["name"] == "readiness_check"
+    )
+    export_step = next(
+        step for step in report["steps"] if step["name"] == "export_sanity"
+    )
     assert not readiness_step["passed"]
     assert not export_step["passed"]
     assert any("readiness check failed" in caveat for caveat in report["caveats"])
     assert any("export sanity check failed" in caveat for caveat in report["caveats"])
 
 
-def test_closed_loop_rehearsal_uses_explicit_external_holdout_masks(monkeypatch, tmp_path):
+def test_closed_loop_rehearsal_uses_explicit_external_holdout_masks(
+    monkeypatch, tmp_path
+):
     project_root = tmp_path / "project"
     holdout_root = tmp_path / "holdout"
     project_root.mkdir()
@@ -294,7 +306,9 @@ def test_withheld_ground_truth_must_live_outside_project(monkeypatch, tmp_path):
     def fake_rehearsal_target(*args, **kwargs):
         return {}
 
-    monkeypatch.setattr(smoke, "_run_closed_loop_rehearsal_target", fake_rehearsal_target)
+    monkeypatch.setattr(
+        smoke, "_run_closed_loop_rehearsal_target", fake_rehearsal_target
+    )
 
     report = smoke._build_closed_loop_rehearsal_report(
         Namespace(

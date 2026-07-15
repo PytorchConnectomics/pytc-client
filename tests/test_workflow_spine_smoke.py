@@ -122,7 +122,7 @@ class WorkflowSpineSmokeTests(unittest.TestCase):
         training_effects = launch_query_payload["actions"][0]["client_effects"]
         self.assertEqual(
             training_effects["set_training_config_preset"],
-            "configs/MitoEM/Mito-CaseStudy-BC.yaml",
+            "configs/MitoEM/Mito25-Local-BC.yaml",
         )
         self.assertEqual(
             training_effects["set_training_image_path"],

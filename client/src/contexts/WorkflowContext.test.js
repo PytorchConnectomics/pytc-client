@@ -125,8 +125,7 @@ function Probe() {
         onClick={() =>
           workflowContext.runClientEffects({
             navigate_to: "inference",
-            set_inference_config_preset:
-              "configs/MitoEM/Mito-CaseStudy-BC.yaml",
+            set_inference_config_preset: "configs/MitoEM/Mito25-Local-BC.yaml",
             set_inference_image_path: "/tmp/image.h5",
             set_inference_label_path: "/tmp/mask.h5",
             set_inference_checkpoint_path: "/tmp/checkpoint.pth.tar",
@@ -211,8 +210,7 @@ function Probe() {
         onClick={() =>
           workflowContext.runClientEffects({
             navigate_to: "training",
-            set_training_config_preset:
-              "configs/MitoEM/Mito-CaseStudy-BC.yaml",
+            set_training_config_preset: "configs/MitoEM/Mito25-Local-BC.yaml",
             set_training_image_path: "/tmp/image.h5",
             set_training_label_path: "/tmp/corrected.tif",
             set_training_output_path: "/tmp/output",
@@ -375,7 +373,7 @@ describe("WorkflowProvider", () => {
     stopModelInference.mockResolvedValue();
     stopModelTraining.mockResolvedValue();
     getConfigPresetContent.mockResolvedValue({
-      path: "configs/MitoEM/Mito-CaseStudy-BC.yaml",
+      path: "configs/MitoEM/Mito25-Local-BC.yaml",
       content: "DATASET: {}\nSOLVER: {}\n",
     });
     listWorkflowArtifacts.mockResolvedValue([
@@ -397,7 +395,10 @@ describe("WorkflowProvider", () => {
       workflow: { ...baseWorkflow, dataset_path: "/tmp/boot-project" },
       events: [{ id: 1, event_type: "workflow.created" }],
     });
-    renderProvider({ resetFileState, trainingState: { setInputLabel: jest.fn() } });
+    renderProvider({
+      resetFileState,
+      trainingState: { setInputLabel: jest.fn() },
+    });
 
     expect(await screen.findByText("setup")).toBeTruthy();
     expect(screen.getByText("workflow.created")).toBeTruthy();
@@ -590,7 +591,10 @@ describe("WorkflowProvider", () => {
 
     renderProvider({
       resetFileState,
-      inferenceState: { setOutputPath: jest.fn(), setCheckpointPath: jest.fn() },
+      inferenceState: {
+        setOutputPath: jest.fn(),
+        setCheckpointPath: jest.fn(),
+      },
     });
     await screen.findByText("setup");
 
@@ -672,7 +676,7 @@ describe("WorkflowProvider", () => {
 
     await waitFor(() => {
       expect(getConfigPresetContent).toHaveBeenCalledWith(
-        "configs/MitoEM/Mito-CaseStudy-BC.yaml",
+        "configs/MitoEM/Mito25-Local-BC.yaml",
       );
       expect(setTrainingConfig).toHaveBeenCalledWith(
         "DATASET: {}\nSOLVER: {}\n",
@@ -757,7 +761,7 @@ describe("WorkflowProvider", () => {
           commandId: 22,
           commandResult: { submitted: true },
           clientEffects: {
-            set_training_config_preset: "configs/MitoEM/Mito-CaseStudy-BC.yaml",
+            set_training_config_preset: "configs/MitoEM/Mito25-Local-BC.yaml",
             set_training_image_path: "/persist/image.tif",
             set_training_label_path: "/persist/label.tif",
             set_training_output_path: "/persist/out",

@@ -19,13 +19,14 @@ from typing import Any
 
 import requests
 
-
 DEMO_API_ROOT = Path(__file__).resolve().parent.parent
 DEMO2_API_PORT = 4342
 DEMO2_WORKER_URL = "localhost:4243"
 DEMO2_NEUROGLANCER_PORT = 4244
 DEMO2_NEUROGLANCER_PUBLIC_BASE = "https://demo.seg.bio/neuroglancer"
-DEMO2_ALLOWED_ORIGINS = "https://demo.seg.bio,http://localhost:3000,http://127.0.0.1:3000,null"
+DEMO2_ALLOWED_ORIGINS = (
+    "https://demo.seg.bio,http://localhost:3000,http://127.0.0.1:3000,null"
+)
 
 
 @dataclass(frozen=True)
@@ -61,7 +62,10 @@ def _is_descendant_path(candidate: str | None, root: Path) -> bool:
         return False
     try:
         candidate_path = Path(candidate).resolve()
-        return candidate_path == root or candidate_path.is_relative_to(root)
+        resolved_root = root.resolve()
+        return candidate_path == resolved_root or candidate_path.is_relative_to(
+            resolved_root
+        )
     except Exception:
         return False
 
@@ -188,7 +192,9 @@ def _runtime_snapshot_message(env: dict[str, str], *, api_port: int) -> str:
     )
 
 
-def _wait_for_health(url: str, timeout: int = 30) -> tuple[bool, str | dict[str, Any] | None]:
+def _wait_for_health(
+    url: str, timeout: int = 30
+) -> tuple[bool, str | dict[str, Any] | None]:
     deadline = time.time() + timeout
     last_error = None
     while time.time() < deadline:
@@ -276,7 +282,9 @@ def start_demo_api(
     processes = discover_demo_api_processes(api_port=api_port, root=root)
     if processes:
         if force:
-            print(f"Found {len(processes)} existing process(es) on demo2 port {api_port}; stopping first")
+            print(
+                f"Found {len(processes)} existing process(es) on demo2 port {api_port}; stopping first"
+            )
             stop_rc = stop_demo_api(api_port=api_port, root=root)
             if stop_rc != 0:
                 return stop_rc
@@ -310,7 +318,9 @@ def start_demo_api(
     print(f"Started demo2 API pid {process.pid}; logs: {log_file}")
     print(_runtime_snapshot_message(env, api_port=api_port))
 
-    healthy, detail = _wait_for_health(f"http://127.0.0.1:{api_port}/health", timeout=health_timeout)
+    healthy, detail = _wait_for_health(
+        f"http://127.0.0.1:{api_port}/health", timeout=health_timeout
+    )
     if healthy:
         print(f"Health check passed: https://127.0.0.1:{api_port}/health -> {detail}")
         return 0

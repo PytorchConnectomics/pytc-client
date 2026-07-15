@@ -59,7 +59,9 @@ class WorkflowRouteTests(unittest.TestCase):
 
     def test_semantic_workflow_intents_have_one_source_of_truth(self):
         prompt_intents = set(workflows_router_module.SEMANTIC_WORKFLOW_INTENT_ORDER)
-        self.assertEqual(prompt_intents, workflows_router_module.SEMANTIC_WORKFLOW_INTENTS)
+        self.assertEqual(
+            prompt_intents, workflows_router_module.SEMANTIC_WORKFLOW_INTENTS
+        )
         self.assertIn("style_feedback", prompt_intents)
         self.assertIn("project_files", prompt_intents)
         self.assertIn("project_progress", prompt_intents)
@@ -136,15 +138,15 @@ class WorkflowRouteTests(unittest.TestCase):
         second_patch = self.client.patch(
             f"/api/workflows/{workflow_id}",
             json={
-                "metadata": {
-                    "project_context": {"optimization_priority": "accuracy"}
-                },
+                "metadata": {"project_context": {"optimization_priority": "accuracy"}},
             },
         )
         self.assertEqual(second_patch.status_code, 200)
         metadata = second_patch.json()["metadata"]
         self.assertEqual(metadata["project_context"]["imaging_modality"], "EM")
-        self.assertEqual(metadata["project_context"]["target_structure"], "mitochondria")
+        self.assertEqual(
+            metadata["project_context"]["target_structure"], "mitochondria"
+        )
         self.assertEqual(
             metadata["project_context"]["optimization_priority"],
             "accuracy",
@@ -851,9 +853,7 @@ class WorkflowRouteTests(unittest.TestCase):
         self.assertEqual(abbreviated_response.status_code, 200)
         abbreviated_payload = abbreviated_response.json()
         self.assertEqual(abbreviated_payload["intent"], "view_data")
-        self.assertEqual(
-            abbreviated_payload["actions"][0]["id"], "open-visualization"
-        )
+        self.assertEqual(abbreviated_payload["actions"][0]["id"], "open-visualization")
 
     def test_agent_visualize_request_discovers_directory_pairs_and_asks_for_more(self):
         workflow, _ = self._current_workflow()
@@ -1056,9 +1056,7 @@ class WorkflowRouteTests(unittest.TestCase):
         self.assertEqual(query_response.status_code, 200)
         conversation_id = query_response.json()["conversation_id"]
 
-        response = self.client.get(
-            f"/api/workflows/{workflow_id}/agent/conversation"
-        )
+        response = self.client.get(f"/api/workflows/{workflow_id}/agent/conversation")
 
         self.assertEqual(response.status_code, 200)
         payload = response.json()
@@ -1072,7 +1070,10 @@ class WorkflowRouteTests(unittest.TestCase):
         )
         self.assertIn("trace", payload["messages"][1])
         self.assertTrue(
-            all("category" in item and "data" in item for item in payload["messages"][1]["trace"])
+            all(
+                "category" in item and "data" in item
+                for item in payload["messages"][1]["trace"]
+            )
         )
 
     def test_project_progress_counts_ground_truth_unproofread_and_missing_volumes(self):
@@ -1099,9 +1100,7 @@ class WorkflowRouteTests(unittest.TestCase):
             },
         )
 
-        response = self.client.get(
-            f"/api/workflows/{workflow_id}/project-progress"
-        )
+        response = self.client.get(f"/api/workflows/{workflow_id}/project-progress")
 
         self.assertEqual(response.status_code, 200)
         payload = response.json()
@@ -1141,7 +1140,9 @@ class WorkflowRouteTests(unittest.TestCase):
         updated = update_response.json()
         self.assertEqual(updated["summary"]["ground_truth"], 2)
         updated_rows = {row["name"]: row for row in updated["volumes"]}
-        self.assertEqual(updated_rows["vol_b_im.h5"]["status_source"], "manual_override")
+        self.assertEqual(
+            updated_rows["vol_b_im.h5"]["status_source"], "manual_override"
+        )
         self.assertEqual(
             updated_rows["vol_b_im.h5"]["annotation_state"],
             "proofread_ground_truth",
@@ -1155,9 +1156,7 @@ class WorkflowRouteTests(unittest.TestCase):
         self.assertEqual(states["summary"]["total"], 3)
         self.assertEqual(states["summary"]["ground_truth"], 2)
         self.assertEqual(states["summary"]["training_ready"], 2)
-        state_by_volume_id = {
-            state["volume_id"]: state for state in states["volumes"]
-        }
+        state_by_volume_id = {state["volume_id"]: state for state in states["volumes"]}
         self.assertEqual(
             state_by_volume_id[rows["vol_b_im.h5"]["id"]]["status_source"],
             "manual_override",
@@ -1328,7 +1327,9 @@ class WorkflowRouteTests(unittest.TestCase):
         )
         self.assertIn("tracked image volume", payload["response"])
         self.assertEqual(payload["trace_schema_version"], "agent_trace/v1")
-        self.assertTrue(any(item["category"] == "proposed" for item in payload["trace"]))
+        self.assertTrue(
+            any(item["category"] == "proposed" for item in payload["trace"])
+        )
         self.assertTrue(
             any(item["agent_type"] == "project_manager" for item in payload["trace"])
         )
@@ -1826,7 +1827,9 @@ class WorkflowRouteTests(unittest.TestCase):
         self.assertEqual(payload["actions"], [])
         self.assertEqual(payload["commands"], [])
 
-    def test_agent_answers_current_workflow_context_instead_of_repeating_next_step(self):
+    def test_agent_answers_current_workflow_context_instead_of_repeating_next_step(
+        self,
+    ):
         workflow, _ = self._current_workflow()
         workflow_id = workflow["id"]
         self.client.patch(
@@ -1890,8 +1893,14 @@ class WorkflowRouteTests(unittest.TestCase):
             payload["freshness"]["missing"],
             ["imaging_modality", "target_structure"],
         )
-        self.assertEqual(payload["blocking_reasons"][0]["code"], "project_context.missing_imaging_modality")
-        self.assertEqual(payload["blocking_reasons"][1]["code"], "project_context.missing_target_structure")
+        self.assertEqual(
+            payload["blocking_reasons"][0]["code"],
+            "project_context.missing_imaging_modality",
+        )
+        self.assertEqual(
+            payload["blocking_reasons"][1]["code"],
+            "project_context.missing_target_structure",
+        )
         self.assertEqual(payload["actions"], [])
         self.assertEqual(payload["commands"], [])
 
@@ -1951,9 +1960,7 @@ class WorkflowRouteTests(unittest.TestCase):
 
         response = self.client.post(
             f"/api/workflows/{workflow_id}/agent/query",
-            json={
-                "query": "run inference on EM mitochondria; prioritize accuracy"
-            },
+            json={"query": "run inference on EM mitochondria; prioritize accuracy"},
         )
         self.assertEqual(response.status_code, 200)
         payload = response.json()
@@ -2008,14 +2015,16 @@ class WorkflowRouteTests(unittest.TestCase):
         )
         self.assertEqual(
             effects["set_training_config_preset"],
-            "configs/MitoEM/Mito-CaseStudy-BC.yaml",
+            "configs/MitoEM/Mito25-Local-BC.yaml",
         )
         self.assertTrue(effects["runtime_action"]["autopick_parameters"])
         self.assertEqual(
             effects["runtime_action"]["parameter_mode"],
             "agent_default",
         )
-        self.assertEqual(payload["actions"][0]["policy_decision"]["decision"], "allowed")
+        self.assertEqual(
+            payload["actions"][0]["policy_decision"]["decision"], "allowed"
+        )
         self.assertTrue(payload["actions"][0]["policy_decision"]["requires_approval"])
         self.assertEqual(payload["actions"][0]["freshness"]["scope"], "training")
         self.assertEqual(payload["actions"][0]["freshness"]["state"], "ready")
@@ -2038,7 +2047,7 @@ class WorkflowRouteTests(unittest.TestCase):
                 "autopick_parameters": True,
                 "parameter_mode": "agent_default",
             },
-            "set_training_config_preset": "configs/MitoEM/Mito-CaseStudy-BC.yaml",
+            "set_training_config_preset": "configs/MitoEM/Mito25-Local-BC.yaml",
             "set_training_image_path": "/projects/mito25/data/image/mito25_im.h5",
             "set_training_label_path": "/projects/mito25/data/seg/corrected.tif",
             "set_training_output_path": "/projects/mito25/outputs/training",
@@ -2070,7 +2079,9 @@ class WorkflowRouteTests(unittest.TestCase):
         self.assertEqual(approval.status_code, 200)
         payload = approval.json()
         self.assertEqual(payload["workflow"]["stage"], "retraining_staged")
-        self.assertEqual(payload["client_effects"]["runtime_action"]["kind"], "start_training")
+        self.assertEqual(
+            payload["client_effects"]["runtime_action"]["kind"], "start_training"
+        )
         self.assertEqual(len(payload["commands"]), 1)
         self.assertEqual(payload["commands"][0]["command_type"], "start_training")
         self.assertEqual(payload["commands"][0]["status"], "queued")
@@ -2083,7 +2094,7 @@ class WorkflowRouteTests(unittest.TestCase):
         )
         self.assertEqual(
             payload["client_effects"]["set_training_config_preset"],
-            "configs/MitoEM/Mito-CaseStudy-BC.yaml",
+            "configs/MitoEM/Mito25-Local-BC.yaml",
         )
         self.assertEqual(
             payload["client_effects"]["set_training_output_path"],
@@ -2226,7 +2237,9 @@ class WorkflowRouteTests(unittest.TestCase):
             "/projects/sample/data/labels/train",
         )
         self.assertEqual(effects["runtime_action"]["kind"], "start_training")
-        self.assertEqual(payload["actions"][0]["policy_decision"]["decision"], "allowed")
+        self.assertEqual(
+            payload["actions"][0]["policy_decision"]["decision"], "allowed"
+        )
         self.assertTrue(payload["actions"][0]["policy_decision"]["requires_approval"])
         self.assertEqual(payload["actions"][0]["freshness"]["scope"], "training")
         self.assertEqual(payload["actions"][0]["freshness"]["state"], "ready")
@@ -2383,7 +2396,9 @@ class WorkflowRouteTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         payload = response.json()
         self.assertEqual(payload["intent"], "start_training")
-        self.assertIn("confirmed labels or saved proofreading edits", payload["response"].lower())
+        self.assertIn(
+            "confirmed labels or saved proofreading edits", payload["response"].lower()
+        )
         self.assertEqual(payload["policy_decision"]["decision"], "blocked")
         self.assertFalse(payload["policy_decision"]["requires_approval"])
         self.assertEqual(
@@ -2405,7 +2420,9 @@ class WorkflowRouteTests(unittest.TestCase):
         self.assertEqual(payload["intent"], "start_training")
         self.assertEqual(payload["policy_decision"]["decision"], "allowed")
         self.assertTrue(payload["policy_decision"]["requires_approval"])
-        self.assertEqual(payload["actions"][0]["policy_decision"]["decision"], "allowed")
+        self.assertEqual(
+            payload["actions"][0]["policy_decision"]["decision"], "allowed"
+        )
         self.assertTrue(payload["actions"][0]["policy_decision"]["requires_approval"])
         self.assertEqual(payload["actions"][0]["id"], "start-training")
         self.assertEqual(
@@ -2544,9 +2561,7 @@ class WorkflowRouteTests(unittest.TestCase):
         import server_api.main as server_api_main
 
         original_error = server_api_main._chatbot_error
-        server_api_main._chatbot_error = RuntimeError(
-            'model "missing-model" not found'
-        )
+        server_api_main._chatbot_error = RuntimeError('model "missing-model" not found')
         try:
             with patch("server_api.main._ensure_chatbot", return_value=False):
                 response = self.client.post(
@@ -2761,9 +2776,7 @@ class WorkflowRouteTests(unittest.TestCase):
             payload["actions"][0]["policy_decision"]["decision"],
             "blocked",
         )
-        self.assertFalse(
-            payload["actions"][0]["policy_decision"]["requires_approval"]
-        )
+        self.assertFalse(payload["actions"][0]["policy_decision"]["requires_approval"])
         self.assertEqual(
             payload["blocking_reasons"][0]["code"],
             "evaluation.missing_reference_mask",
@@ -2778,8 +2791,12 @@ class WorkflowRouteTests(unittest.TestCase):
         self.assertEqual(export_payload["actions"][0]["id"], "export-workflow-bundle")
         self.assertEqual(export_payload["actions"][0]["risk_level"], "exports_evidence")
         self.assertTrue(export_payload["actions"][0]["requires_approval"])
-        self.assertEqual(export_payload["actions"][0]["policy_decision"]["decision"], "allowed")
-        self.assertTrue(export_payload["actions"][0]["policy_decision"]["requires_approval"])
+        self.assertEqual(
+            export_payload["actions"][0]["policy_decision"]["decision"], "allowed"
+        )
+        self.assertTrue(
+            export_payload["actions"][0]["policy_decision"]["requires_approval"]
+        )
         self.assertEqual(
             export_payload["actions"][0]["client_effects"]["workflow_action"]["kind"],
             "export_bundle",

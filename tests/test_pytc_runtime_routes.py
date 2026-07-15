@@ -81,7 +81,10 @@ class NeuroglancerShaderBehaviorTests(unittest.TestCase):
             "#uicontrol float contrast slider(min=-3, max=3, step=0.01)",
             UM_NEUROGLANCER_RAW_IMAGE_SHADER,
         )
-        self.assertIn("emitGrayscale((normalized() + brightness) * exp(contrast));", UM_NEUROGLANCER_RAW_IMAGE_SHADER)
+        self.assertIn(
+            "emitGrayscale((normalized() + brightness) * exp(contrast));",
+            UM_NEUROGLANCER_RAW_IMAGE_SHADER,
+        )
         self.assertTrue(_has_single_neuroglancer_main(UM_NEUROGLANCER_RAW_IMAGE_SHADER))
 
     def test_mask_red_shader_shape_and_controls(self):
@@ -124,6 +127,8 @@ class NeuroglancerShaderBehaviorTests(unittest.TestCase):
         )
         self.assertIsInstance(source, DummyLocalVolume)
         self.assertEqual(source.shader, UM_NEUROGLANCER_MASK_RED_SHADER)
+
+
 class ServerPytcRouteTests(unittest.TestCase):
     def setUp(self):
         self.client = TestClient(server_pytc_app)
@@ -178,9 +183,7 @@ class ServerPytcRouteTests(unittest.TestCase):
 
     def test_training_logs_route_returns_worker_payload(self):
         payload = {"phase": "running", "text": "hello", "lines": ["hello"]}
-        with patch(
-            "server_pytc.main.get_training_process_logs", return_value=payload
-        ):
+        with patch("server_pytc.main.get_training_process_logs", return_value=payload):
             response = self.client.get("/training_logs")
 
         self.assertEqual(response.status_code, 200)
@@ -217,9 +220,7 @@ class ServerApiProxyTests(unittest.TestCase):
         request_mock.assert_called_once()
 
     def test_start_tensorboard_proxy_propagates_worker_client_error(self):
-        worker_payload = {
-            "detail": "No TensorBoard log directory is registered yet."
-        }
+        worker_payload = {"detail": "No TensorBoard log directory is registered yet."}
         with patch(
             "server_api.main.requests.request",
             return_value=FakeResponse(400, payload=worker_payload),
@@ -271,7 +272,7 @@ class ServerApiProxyTests(unittest.TestCase):
                 )
 
         self.assertEqual(response.status_code, 200)
-        self.assertEqual(response.json()["path"], str(config_path))
+        self.assertEqual(response.json()["path"], str(config_path.resolve()))
         self.assertEqual(response.json()["content"], "DATASET: {}\n")
 
     def test_start_model_training_proxy_returns_504_on_timeout(self):
@@ -288,10 +289,13 @@ class ServerApiProxyTests(unittest.TestCase):
         self.assertEqual(response.json()["detail"]["error"], "Timeout")
 
     def test_worker_proxy_logs_connection_failures(self):
-        with patch(
-            "server_api.main.requests.request",
-            side_effect=requests.exceptions.ConnectionError("connection refused"),
-        ), patch("server_api.main.append_app_event") as log_event:
+        with (
+            patch(
+                "server_api.main.requests.request",
+                side_effect=requests.exceptions.ConnectionError("connection refused"),
+            ),
+            patch("server_api.main.append_app_event") as log_event,
+        ):
             response = self.client.get("/training_status")
 
         self.assertEqual(response.status_code, 503)
@@ -488,7 +492,7 @@ class WorkflowInferenceRuntimeSyncTests(unittest.TestCase):
                 "autopick_parameters": True,
                 "parameter_mode": "agent_default",
             },
-            "set_training_config_preset": "configs/MitoEM/Mito-CaseStudy-BC.yaml",
+            "set_training_config_preset": "configs/MitoEM/Mito25-Local-BC.yaml",
             "set_training_image_path": str(image_path),
             "set_training_label_path": str(label_path),
             "set_training_output_path": str(output_path),
@@ -541,8 +545,12 @@ class WorkflowInferenceRuntimeSyncTests(unittest.TestCase):
             f"workflow-command-{command['id']}",
         )
         self.assertIn("DATASET", captured["json_body"]["trainingConfig"])
-        self.assertEqual(captured["json_body"]["inputImagePath"], str(image_path))
-        self.assertEqual(captured["json_body"]["inputLabelPath"], str(label_path))
+        self.assertEqual(
+            captured["json_body"]["inputImagePath"], str(image_path.resolve())
+        )
+        self.assertEqual(
+            captured["json_body"]["inputLabelPath"], str(label_path.resolve())
+        )
 
         commands_response = self.client.get(f"/api/workflows/{workflow_id}/commands")
         self.assertEqual(commands_response.status_code, 200)
@@ -613,7 +621,9 @@ class ModelServiceTests(unittest.TestCase):
             try:
                 model_service._reset_runtime_state("training", phase="starting")
                 model_service._update_runtime_state("training", pid=12345)
-                model_service._append_runtime_event("training", "Config origin: foo.yaml")
+                model_service._append_runtime_event(
+                    "training", "Config origin: foo.yaml"
+                )
                 model_service._append_runtime_log(
                     "training",
                     "UnicodeDecodeError: invalid start byte",
@@ -642,19 +652,15 @@ class ModelServiceTests(unittest.TestCase):
             self.assertEqual(records[1]["stream"], "stdout")
 
     def test_detect_chunk_tile_mismatch_for_direct_h5_volume(self):
-        diagnostic = model_service._detect_chunk_tile_mismatch(
-            """
+        diagnostic = model_service._detect_chunk_tile_mismatch("""
 DATASET:
   DO_CHUNK_TITLE: 1
   IMAGE_NAME: /tmp/train-volume.h5
   LABEL_NAME: /tmp/train-label.h5
-"""
-        )
+""")
 
         self.assertIsNotNone(diagnostic)
-        self.assertEqual(
-            diagnostic["code"], "tile_dataset_direct_volume_mismatch"
-        )
+        self.assertEqual(diagnostic["code"], "tile_dataset_direct_volume_mismatch")
         self.assertIn("TileDataset", diagnostic["message"])
         self.assertEqual(diagnostic["image_name"], "/tmp/train-volume.h5")
 
@@ -745,9 +751,15 @@ DATASET:
             )
             rewritten = model_service._load_yaml_config(rewritten_text)
 
-            self.assertEqual(rewritten["DATASET"]["IMAGE_NAME"], str(image_path))
-            self.assertEqual(rewritten["INFERENCE"]["IMAGE_NAME"], str(image_path))
-            self.assertEqual(rewritten["INFERENCE"]["OUTPUT_PATH"], str(output_path))
+            self.assertEqual(
+                rewritten["DATASET"]["IMAGE_NAME"], str(image_path.resolve())
+            )
+            self.assertEqual(
+                rewritten["INFERENCE"]["IMAGE_NAME"], str(image_path.resolve())
+            )
+            self.assertEqual(
+                rewritten["INFERENCE"]["OUTPUT_PATH"], str(output_path.resolve())
+            )
             self.assertEqual(rewritten["DATASET"]["INPUT_PATH"], "")
             self.assertEqual(rewritten["INFERENCE"]["INPUT_PATH"], "")
             self.assertGreaterEqual(len(changes), 4)

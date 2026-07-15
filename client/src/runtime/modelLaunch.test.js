@@ -59,7 +59,7 @@ SYSTEM: {}
         inputLabelPath: "/tmp/corrected.tif",
         outputPath: "/tmp/agent-training",
         logPath: "/tmp/agent-training",
-        configOriginPath: "configs/MitoEM/Mito-CaseStudy-BC.yaml",
+        configOriginPath: "configs/MitoEM/Mito25-Local-BC.yaml",
         autoParameters: true,
       },
     );
@@ -80,7 +80,7 @@ SYSTEM: {}
     expect(parsed.INFERENCE.STRIDE).toEqual([32, 32, 32]);
     expect(request.autoParameters).toBe(true);
     expect(request.configOriginPath).toBe(
-      "configs/MitoEM/Mito-CaseStudy-BC.yaml",
+      "configs/MitoEM/Mito25-Local-BC.yaml",
     );
   });
 

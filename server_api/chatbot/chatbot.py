@@ -33,7 +33,7 @@ AGENT_RESPONSE_STYLE = """
 RESPONSE STYLE FOR BIOLOGISTS:
 - Sound like a normal, helpful labmate. Keep visible replies conversational.
 - Default to one short paragraph or 3 bullets or fewer. Maximum 90 words unless the user asks for detail.
-- Put the recommended next action early, but avoid rigid labels like `Do this`, `Why`, and `Watch out`.
+- Put the recommended next action first, but avoid rigid labels like `Do this`, `Why`, and `Watch out`.
 - Avoid long background explanations, exhaustive lists, and implementation details.
 - Do not mention internal tools, agents, RAG, prompts, APIs, or code unless explicitly asked.
 - If a command is requested, provide one command plus at most one sentence of context.
@@ -500,7 +500,9 @@ class FieldHelperChain:
     def invoke(self, payload):
         messages = payload.get("messages") or []
         current = messages[-1] if messages else {"content": ""}
-        current_content = str(current.get("content", "") if isinstance(current, dict) else current)
+        current_content = str(
+            current.get("content", "") if isinstance(current, dict) else current
+        )
         history_tail = messages[-5:-1]
         history_text = "\n".join(
             f"{item.get('role', 'user')}: {item.get('content', '')}"
