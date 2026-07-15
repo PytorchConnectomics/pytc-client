@@ -22,6 +22,11 @@ scripts\bootstrap.ps1     # Windows
 
 Re-run the relevant bootstrap script when you need to update dependencies.
 
+The bootstrap scripts fetch the legacy-compatible PyTorch Connectomics runtime
+from `pytc-client-legacy-runtime` and verify commit
+`04c2a35e78a1a7ca1138f83a98fc3ef27097abd4` before installation. The generated
+`pytorch_connectomics/` checkout is intentionally not tracked by this repository.
+
 ## Run the app
 
 ```
