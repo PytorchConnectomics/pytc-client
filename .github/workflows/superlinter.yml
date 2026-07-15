@@ -3,6 +3,7 @@ name: Super-Linter
 
 permissions:
   contents: read
+  statuses: write
 
 "on":
   push:
@@ -29,6 +30,7 @@ jobs:
           DEFAULT_BRANCH: main
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           VALIDATE_ALL_CODEBASE: false
+          ENABLE_GITHUB_PULL_REQUEST_SUMMARY_COMMENT: false
           VALIDATE_CSS_PRETTIER: true
           VALIDATE_HTML_PRETTIER: true
           VALIDATE_JAVASCRIPT_PRETTIER: true
