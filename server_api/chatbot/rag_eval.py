@@ -333,7 +333,11 @@ QUESTIONS = [
     ),
     # Real-user inference questions
     ("How do I make my inference predictions smoother?", "PyTC-Inference.md", "medium"),
-    ("Can I increase the batch size for faster inference?", "PyTC-Inference.md", "medium"),
+    (
+        "Can I increase the batch size for faster inference?",
+        "PyTC-Inference.md",
+        "medium",
+    ),
     ("What output format does inference produce?", "PyTC-Inference.md", "medium"),
     (
         "I'm seeing tile boundary artifacts in my predictions, how do I fix that?",
@@ -415,7 +419,11 @@ QUESTIONS = [
     ),
     # ── PyTC-Configs.md ────────────────────────────────────────────────
     ("What bundled configs does PyTC have?", "PyTC-Configs.md", "easy"),
-    ("Which config should I use for mitochondria segmentation?", "PyTC-Configs.md", "easy"),
+    (
+        "Which config should I use for mitochondria segmentation?",
+        "PyTC-Configs.md",
+        "easy",
+    ),
     ("What config is used for CREMI synapse detection?", "PyTC-Configs.md", "medium"),
     ("Which config uses the Swin UNETR architecture?", "PyTC-Configs.md", "medium"),
     (
@@ -431,7 +439,11 @@ QUESTIONS = [
     # ── PyTC-Evaluation.md ─────────────────────────────────────────────
     ("How do I evaluate segmentation results in PyTC?", "PyTC-Evaluation.md", "easy"),
     ("What is adapted Rand error?", "PyTC-Evaluation.md", "easy"),
-    ("What evaluation metric should I use for instance segmentation?", "PyTC-Evaluation.md", "medium"),
+    (
+        "What evaluation metric should I use for instance segmentation?",
+        "PyTC-Evaluation.md",
+        "medium",
+    ),
     ("How do I compute IoU for binary segmentation?", "PyTC-Evaluation.md", "medium"),
     (
         "What is variation of information in segmentation evaluation?",
@@ -445,7 +457,11 @@ QUESTIONS = [
     ),
     # Real-user evaluation questions
     ("How do I know if my model is good?", "PyTC-Evaluation.md", "medium"),
-    ("What metric should I report for the SNEMI3D challenge?", "PyTC-Evaluation.md", "hard"),
+    (
+        "What metric should I report for the SNEMI3D challenge?",
+        "PyTC-Evaluation.md",
+        "hard",
+    ),
     (
         "How do I compare my prediction against ground truth?",
         "PyTC-Evaluation.md",

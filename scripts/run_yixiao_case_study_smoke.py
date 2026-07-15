@@ -21,14 +21,15 @@ from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional
 from urllib.parse import urlsplit
 
-
 DEFAULT_BASE_URL = "http://127.0.0.1:4342"
 DEFAULT_PROJECT_ROOT = Path("/home/weidf/demo_data/yixiao_tapereader_xri_case_study")
 DEFAULT_HOLDOUT_ROOT = Path(
     "/home/weidf/demo_data/yixiao_tapereader_xri_case_study_holdout_masks"
 )
 DEFAULT_REPORT_PATH = Path("/tmp/yixiao-case-study-smoke-report.json")
-DEFAULT_PRE_DEMO_GATE_REPORT_PATH = Path("/tmp/yixiao-case-study-pre-demo-gate-report.json")
+DEFAULT_PRE_DEMO_GATE_REPORT_PATH = Path(
+    "/tmp/yixiao-case-study-pre-demo-gate-report.json"
+)
 DEFAULT_CLOSED_LOOP_REHEARSAL_REPORT_PATH = Path(
     "/tmp/yixiao-closed-loop-rehearsal-report.json"
 )
@@ -102,8 +103,12 @@ class SmokeHarness:
             return status, json.loads(raw)
         except json.JSONDecodeError as exc:
             if status >= 400:
-                raise SmokeFailure(f"{method} {path} returned {status}: {raw[:300]}") from exc
-            raise SmokeFailure(f"{method} {path} returned non-JSON: {raw[:300]}") from exc
+                raise SmokeFailure(
+                    f"{method} {path} returned {status}: {raw[:300]}"
+                ) from exc
+            raise SmokeFailure(
+                f"{method} {path} returned non-JSON: {raw[:300]}"
+            ) from exc
 
     def request_json(
         self,
@@ -181,7 +186,9 @@ def _first_volume_with_status(manifest: Dict[str, Any], status: str) -> Dict[str
     raise SmokeFailure(f"Manifest does not contain a {status!r} volume.")
 
 
-def _workflow_patch_payload(project_root: Path, manifest: Dict[str, Any]) -> Dict[str, Any]:
+def _workflow_patch_payload(
+    project_root: Path, manifest: Dict[str, Any]
+) -> Dict[str, Any]:
     first = _first_volume_with_label(manifest)
     active_paths = manifest.get("active_paths") or {}
     voxel = (manifest.get("voxel_size") or {}).get("zyx_nm") or [40, 16.3, 16.3]
@@ -191,8 +198,7 @@ def _workflow_patch_payload(project_root: Path, manifest: Dict[str, Any]) -> Dic
         "imaging_modality": manifest.get("imaging_modality")
         or "X-ray / XRI volumetric microscopy",
         "target_structure": manifest.get("target_structure") or "CytoTape fibres",
-        "task_family": manifest.get("task_family")
-        or "fibre instance segmentation",
+        "task_family": manifest.get("task_family") or "fibre instance segmentation",
         "optimization_priority": "case-study workflow fidelity",
         "mask_status": "6 confirmed ground-truth volumes, 2 draft masks for proofreading, 2 image-only inference targets",
         "image_only_strategy": "run inference on 6_1 and 6_2 after training/checkpoint selection",
@@ -222,7 +228,11 @@ def _workflow_patch_payload(project_root: Path, manifest: Dict[str, Any]) -> Dic
 
 
 def _find_yixiao_suggestion(suggestions: Any) -> Optional[Dict[str, Any]]:
-    items = suggestions if isinstance(suggestions, list) else suggestions.get("suggestions", [])
+    items = (
+        suggestions
+        if isinstance(suggestions, list)
+        else suggestions.get("suggestions", [])
+    )
     for item in items:
         if item.get("id") == SUGGESTION_ID:
             return item
@@ -266,8 +276,12 @@ def _assert_profile(harness: SmokeHarness, suggestion: Dict[str, Any]) -> None:
     volume_sets = schema.get("volume_sets") or profile.get("volume_sets") or []
     audit = schema.get("audit") or profile.get("audit") or {}
     audit_summary = audit.get("summary") or {}
-    harness.check("profile image root", primary.get("image_root") == "data/raw", primary)
-    harness.check("profile label root", primary.get("label_root") == "data/seg", primary)
+    harness.check(
+        "profile image root", primary.get("image_root") == "data/raw", primary
+    )
+    harness.check(
+        "profile label root", primary.get("label_root") == "data/seg", primary
+    )
     harness.check(
         "profile config",
         primary.get("config") == "configs/TapeReader-Fiber-BCS-AppCompat-Sanity.yaml",
@@ -277,13 +291,25 @@ def _assert_profile(harness: SmokeHarness, suggestion: Dict[str, Any]) -> None:
         (item for item in volume_sets if item.get("id") == "manifest-active-set"),
         None,
     )
-    harness.check("profile manifest volume set exists", manifest_set is not None, volume_sets)
+    harness.check(
+        "profile manifest volume set exists", manifest_set is not None, volume_sets
+    )
     if manifest_set:
-        harness.check("profile image count", manifest_set.get("image_count") == 10, manifest_set)
-        harness.check("profile label count", manifest_set.get("label_count") == 8, manifest_set)
-        harness.check("profile pair count", manifest_set.get("pair_count") == 8, manifest_set)
-    harness.check("profile audit errors", audit_summary.get("errors") == 0, audit_summary)
-    harness.check("profile audit warnings", audit_summary.get("warnings") == 0, audit_summary)
+        harness.check(
+            "profile image count", manifest_set.get("image_count") == 10, manifest_set
+        )
+        harness.check(
+            "profile label count", manifest_set.get("label_count") == 8, manifest_set
+        )
+        harness.check(
+            "profile pair count", manifest_set.get("pair_count") == 8, manifest_set
+        )
+    harness.check(
+        "profile audit errors", audit_summary.get("errors") == 0, audit_summary
+    )
+    harness.check(
+        "profile audit warnings", audit_summary.get("warnings") == 0, audit_summary
+    )
     harness.check(
         "profile audit pair checks",
         audit_summary.get("pair_checks") == 8,
@@ -296,9 +322,13 @@ def _assert_profile(harness: SmokeHarness, suggestion: Dict[str, Any]) -> None:
     )
 
 
-def _assert_agent_project_response(harness: SmokeHarness, response: Dict[str, Any]) -> None:
+def _assert_agent_project_response(
+    harness: SmokeHarness, response: Dict[str, Any]
+) -> None:
     text = response.get("response") or ""
-    harness.check("agent project intent", response.get("intent") == "project_context", response)
+    harness.check(
+        "agent project intent", response.get("intent") == "project_context", response
+    )
     for needle in ("Yixiao", "XRI", "CytoTape", "10 volume", "6 fully good"):
         harness.check(f"agent project mentions {needle}", needle in text, text)
 
@@ -311,13 +341,21 @@ def _assert_agent_training_response(
     expected_review_count: int = 2,
     expected_target_count: int = 2,
 ) -> None:
-    harness.check("agent training intent", response.get("intent") == "start_training", response)
+    harness.check(
+        "agent training intent", response.get("intent") == "start_training", response
+    )
     actions = response.get("actions") or []
-    action = next((item for item in actions if item.get("id") == "start-training"), None)
+    action = next(
+        (item for item in actions if item.get("id") == "start-training"), None
+    )
     harness.check("agent training action exists", action is not None, actions)
     if not action:
         return
-    harness.check("agent training requires approval", action.get("requires_approval") is True, action)
+    harness.check(
+        "agent training requires approval",
+        action.get("requires_approval") is True,
+        action,
+    )
     harness.check("agent training risk", action.get("risk_level") == "runs_job", action)
     effects = action.get("client_effects") or {}
     subset = effects.get("training_volume_subset") or {}
@@ -336,9 +374,15 @@ def _assert_agent_training_response(
         subset.get("target_volume_count") == expected_target_count,
         subset,
     )
-    for key in ("set_training_image_path", "set_training_label_path", "set_training_output_path"):
+    for key in (
+        "set_training_image_path",
+        "set_training_label_path",
+        "set_training_output_path",
+    ):
         path = effects.get(key)
-        harness.check(f"training effect {key}", bool(path) and Path(path).exists(), path)
+        harness.check(
+            f"training effect {key}", bool(path) and Path(path).exists(), path
+        )
     manifest_path = subset.get("manifest_path")
     harness.check(
         "training subset manifest exists",
@@ -562,8 +606,12 @@ def _run_export_bundle_check(
         "duration_seconds": time.time() - start,
         "bundle_directory": bundle_directory,
         "bundle_manifest_path": bundle_manifest,
-        "bundle_manifest_exists": bool(bundle_manifest and Path(bundle_manifest).exists()),
-        "bundle_directory_exists": bool(bundle_directory and Path(bundle_directory).exists()),
+        "bundle_manifest_exists": bool(
+            bundle_manifest and Path(bundle_manifest).exists()
+        ),
+        "bundle_directory_exists": bool(
+            bundle_directory and Path(bundle_directory).exists()
+        ),
         "artifact_counts": {
             "events": len(payload.get("events") or []),
             "artifacts": len(payload.get("artifacts") or []),
@@ -581,8 +629,7 @@ def _run_export_bundle_check(
 def _default_post_deploy_report_paths() -> Dict[str, Path]:
     stamp = time.strftime("%Y%m%d-%H%M%S")
     markdown_path = (
-        DEFAULT_POST_DEPLOY_REPORT_ROOT
-        / f"yixiao-postdeploy-smoke-report-{stamp}.md"
+        DEFAULT_POST_DEPLOY_REPORT_ROOT / f"yixiao-postdeploy-smoke-report-{stamp}.md"
     )
     return {
         "markdown_path": markdown_path,
@@ -705,7 +752,9 @@ def _compare_progress(
         return ["progress summary missing"]
     for key, value in expected.items():
         if observed.get(key) != value:
-            issues.append(f"summary[{key}] expected {value!r}, got {observed.get(key)!r}")
+            issues.append(
+                f"summary[{key}] expected {value!r}, got {observed.get(key)!r}"
+            )
     return issues
 
 
@@ -731,10 +780,14 @@ def _build_post_deploy_report(args: argparse.Namespace) -> Dict[str, Any]:
     endpoint_checks: List[Dict[str, Any]] = []
     report["public_endpoints"] = endpoint_checks
 
-    current = _probe_endpoint(harness, name="workflow_current", method="GET", path="/api/workflows/current")
+    current = _probe_endpoint(
+        harness, name="workflow_current", method="GET", path="/api/workflows/current"
+    )
     endpoint_checks.append(current)
     workflow_payload = current.get("payload") or {}
-    current_workflow = workflow_payload.get("workflow") if isinstance(workflow_payload, dict) else None
+    current_workflow = (
+        workflow_payload.get("workflow") if isinstance(workflow_payload, dict) else None
+    )
     if not isinstance(current_workflow, dict):
         checks.append(
             {
@@ -754,7 +807,13 @@ def _build_post_deploy_report(args: argparse.Namespace) -> Dict[str, Any]:
     if args.workflow_id is not None:
         workflow_id = args.workflow_id
     if workflow_id is None:
-        checks.append({"name": "workflow_id_resolved", "passed": False, "error": "workflow_id unavailable"})
+        checks.append(
+            {
+                "name": "workflow_id_resolved",
+                "passed": False,
+                "error": "workflow_id unavailable",
+            }
+        )
         report["passed"] = False
         return {**report, "checks": checks, "duration_seconds": time.time() - start}
     workflow_id = int(workflow_id)
@@ -788,12 +847,22 @@ def _build_post_deploy_report(args: argparse.Namespace) -> Dict[str, Any]:
         summary = project_progress.get("payload", {}).get("summary")
         issue_lines = _compare_progress(summary, expected=_expected_progress_summary())
         if issue_lines:
-            checks.append({"name": "progress_counts", "passed": False, "issues": issue_lines})
+            checks.append(
+                {"name": "progress_counts", "passed": False, "issues": issue_lines}
+            )
             caveats.append("Progress counts are not the expected 6/2/2 split.")
         else:
-            checks.append({"name": "progress_counts", "passed": True, "summary": summary})
+            checks.append(
+                {"name": "progress_counts", "passed": True, "summary": summary}
+            )
     else:
-        checks.append({"name": "progress_counts", "passed": False, "error": project_progress.get("error")})
+        checks.append(
+            {
+                "name": "progress_counts",
+                "passed": False,
+                "error": project_progress.get("error"),
+            }
+        )
 
     memory = _probe_endpoint(
         harness,
@@ -812,7 +881,13 @@ def _build_post_deploy_report(args: argparse.Namespace) -> Dict[str, Any]:
             }
         )
     else:
-        checks.append({"name": "memory_schema_version", "passed": False, "error": memory.get("error")})
+        checks.append(
+            {
+                "name": "memory_schema_version",
+                "passed": False,
+                "error": memory.get("error"),
+            }
+        )
 
     overview = _probe_endpoint(
         harness,
@@ -864,11 +939,15 @@ def _build_post_deploy_report(args: argparse.Namespace) -> Dict[str, Any]:
             if suggestion.get("already_mounted") is not True:
                 caveats.append("Yixiao suggestion exists but is not currently mounted.")
         else:
-            suggestion_error = "Yixiao suggestion not found in files/project-suggestions"
+            suggestion_error = (
+                "Yixiao suggestion not found in files/project-suggestions"
+            )
     else:
         suggestion_error = suggestion_error or "Could not load project-suggestions"
     if suggestion_error:
-        checks.append({"name": "yixiao_suggestion", "passed": False, "error": suggestion_error})
+        checks.append(
+            {"name": "yixiao_suggestion", "passed": False, "error": suggestion_error}
+        )
 
     visualization_payload = None
     if summary and summary.get("total") == 10:
@@ -909,7 +988,10 @@ def _build_post_deploy_report(args: argparse.Namespace) -> Dict[str, Any]:
         visualization_steps.append(public_viewer)
     report["visualization"] = visualization_steps
     for candidate in visualization_steps:
-        if candidate.get("name") == "neuroglancer_public_viewer" and candidate.get("status_code") == 200:
+        if (
+            candidate.get("name") == "neuroglancer_public_viewer"
+            and candidate.get("status_code") == 200
+        ):
             break
     else:
         caveats.append(
@@ -926,27 +1008,76 @@ def _build_post_deploy_report(args: argparse.Namespace) -> Dict[str, Any]:
     agent_checks: List[Dict[str, Any]] = []
     for query in agent_queries:
         agent_checks.append(
-            _query_agent_action(harness, workflow_id=workflow_id, query=query, timeout=args.agent_timeout)
+            _query_agent_action(
+                harness,
+                workflow_id=workflow_id,
+                query=query,
+                timeout=args.agent_timeout,
+            )
         )
     report["agent_queries"] = agent_checks
-    training_query = next((row for row in agent_checks if row.get("query") == agent_queries[1]), {})
-    if training_query.get("passed") and any(action.get("id") == "start-training" for action in training_query.get("actions", [])):
-        checks.append({"name": "training_action_proposal", "passed": True, "action_ids": [a.get("id") for a in training_query.get("actions", [])]})
-    else:
-        checks.append({"name": "training_action_proposal", "passed": False, "error": "start-training action not returned for training prompt"})
-        caveats.append("Training action proposal is not currently returning expected `start-training` behavior.")
-    proofread_query = next((row for row in agent_checks if row.get("query") == agent_queries[2]), {})
-    if proofread_query.get("passed") and any(
-        action.get("id") == "start-proofreading" for action in proofread_query.get("actions", [])
+    training_query = next(
+        (row for row in agent_checks if row.get("query") == agent_queries[1]), {}
+    )
+    if training_query.get("passed") and any(
+        action.get("id") == "start-training"
+        for action in training_query.get("actions", [])
     ):
-        checks.append({"name": "proofread_action_proposal", "passed": True, "action_ids": [a.get("id") for a in proofread_query.get("actions", [])]})
+        checks.append(
+            {
+                "name": "training_action_proposal",
+                "passed": True,
+                "action_ids": [a.get("id") for a in training_query.get("actions", [])],
+            }
+        )
     else:
-        checks.append({"name": "proofread_action_proposal", "passed": False, "error": "start-proofreading action not returned"})
-        caveats.append("Proofread action proposal is weak or not returning expected identifier.")
-    inference_query = next((row for row in agent_checks if row.get("query") == agent_queries[3]), {})
+        checks.append(
+            {
+                "name": "training_action_proposal",
+                "passed": False,
+                "error": "start-training action not returned for training prompt",
+            }
+        )
+        caveats.append(
+            "Training action proposal is not currently returning expected `start-training` behavior."
+        )
+    proofread_query = next(
+        (row for row in agent_checks if row.get("query") == agent_queries[2]), {}
+    )
+    if proofread_query.get("passed") and any(
+        action.get("id") == "start-proofreading"
+        for action in proofread_query.get("actions", [])
+    ):
+        checks.append(
+            {
+                "name": "proofread_action_proposal",
+                "passed": True,
+                "action_ids": [a.get("id") for a in proofread_query.get("actions", [])],
+            }
+        )
+    else:
+        checks.append(
+            {
+                "name": "proofread_action_proposal",
+                "passed": False,
+                "error": "start-proofreading action not returned",
+            }
+        )
+        caveats.append(
+            "Proofread action proposal is weak or not returning expected identifier."
+        )
+    inference_query = next(
+        (row for row in agent_checks if row.get("query") == agent_queries[3]), {}
+    )
     if inference_query.get("passed") and (
-        any(action.get("id") == "open-inference" for action in inference_query.get("actions", []))
-        or any(action.get("id") == "start-inference" for action in inference_query.get("actions", []))
+        any(
+            action.get("id") == "open-inference"
+            for action in inference_query.get("actions", [])
+        )
+        or any(
+            action.get("id") == "start-inference"
+            for action in inference_query.get("actions", [])
+        )
     ):
         checks.append(
             {
@@ -963,7 +1094,9 @@ def _build_post_deploy_report(args: argparse.Namespace) -> Dict[str, Any]:
                 "error": "Inference proposal action not returned",
             }
         )
-        caveats.append("Inference proposal may need checkpoint/agent sequencing before action can be launched.")
+        caveats.append(
+            "Inference proposal may need checkpoint/agent sequencing before action can be launched."
+        )
 
     report["checks"] = checks
     report["caveats"] = caveats
@@ -1054,8 +1187,13 @@ def _write_post_deploy_report_markdown(report: Dict[str, Any], path: Path) -> No
         )
         if row.get("actions"):
             lines.append(
-                "  - " + ", ".join(
-                    [f"{action.get('id')} (approval={action.get('requires_approval')})" for action in row.get("actions") if isinstance(action, dict)]
+                "  - "
+                + ", ".join(
+                    [
+                        f"{action.get('id')} (approval={action.get('requires_approval')})"
+                        for action in row.get("actions")
+                        if isinstance(action, dict)
+                    ]
                 )
             )
         if row.get("error"):
@@ -1328,7 +1466,9 @@ def _build_pre_demo_gate_report(args: argparse.Namespace) -> Dict[str, Any]:
 
     if not args.skip_readiness_check:
         if not restore_workflow_id:
-            caveats.append("readiness check could not run because restore step did not return a workflow id")
+            caveats.append(
+                "readiness check could not run because restore step did not return a workflow id"
+            )
             passed = False
         else:
             readiness_step = next(
@@ -1351,16 +1491,22 @@ def _build_pre_demo_gate_report(args: argparse.Namespace) -> Dict[str, Any]:
 
     if not args.skip_export_check:
         if not restore_workflow_id:
-            caveats.append("export sanity check could not run because restore step did not return a workflow id")
+            caveats.append(
+                "export sanity check could not run because restore step did not return a workflow id"
+            )
             passed = False
         else:
-            export_step = next((s for s in steps if s.get("name") == "export_sanity"), None)
+            export_step = next(
+                (s for s in steps if s.get("name") == "export_sanity"), None
+            )
             if export_step is None:
                 caveats.append("export sanity check was requested but not executed")
                 passed = False
             elif export_step.get("error"):
                 passed = False
-                caveats.append(f"export sanity check failed: {export_step.get('error')}")
+                caveats.append(
+                    f"export sanity check failed: {export_step.get('error')}"
+                )
             elif export_step.get("payload_missing_keys"):
                 passed = False
                 caveats.append("export payload missing required fields")
@@ -1424,10 +1570,16 @@ def _exercise_proofreading_promotion(
         timeout=30,
     )
     items = (memory.get("volume_states") or {}).get("items") or []
-    promoted = next((item for item in items if item.get("volume_id") == volume_id), None)
+    promoted = next(
+        (item for item in items if item.get("volume_id") == volume_id), None
+    )
     harness.check("promoted volume appears in memory", promoted is not None, items)
     if promoted:
-        harness.check("promoted volume legacy status", promoted.get("status") == "ground_truth", promoted)
+        harness.check(
+            "promoted volume legacy status",
+            promoted.get("status") == "ground_truth",
+            promoted,
+        )
         harness.check(
             "promoted volume canonical status",
             promoted.get("canonical_status") == "proofread_ground_truth",
@@ -1439,7 +1591,9 @@ def _exercise_proofreading_promotion(
         training_answer = harness.request_json(
             "POST",
             f"/api/workflows/{workflow_id}/agent/query",
-            payload={"query": "train on the fully good masks to segment the image-only volumes"},
+            payload={
+                "query": "train on the fully good masks to segment the image-only volumes"
+            },
             timeout=agent_timeout,
         )
         _assert_agent_training_response(
@@ -1478,7 +1632,9 @@ def run(args: argparse.Namespace) -> Dict[str, Any]:
     harness.check("manifest volume count", len(volumes) == 10, len(volumes))
     harness.check("manifest GT count", counts.get("ground_truth") == 6, counts)
     harness.check("manifest draft count", counts.get("needs_proofreading") == 2, counts)
-    harness.check("manifest image-only count", counts.get("missing_segmentation") == 2, counts)
+    harness.check(
+        "manifest image-only count", counts.get("missing_segmentation") == 2, counts
+    )
 
     if args.reset_fixture:
         reset_script = project_root / "reset_to_initial.sh"
@@ -1490,7 +1646,9 @@ def run(args: argparse.Namespace) -> Dict[str, Any]:
 
     if args.reset_workspace:
         reset = harness.request_json("DELETE", "/files/workspace", timeout=30)
-        harness.check("workspace reset", reset.get("message") == "Workspace reset", reset)
+        harness.check(
+            "workspace reset", reset.get("message") == "Workspace reset", reset
+        )
 
     if args.mount_project:
         mount = harness.request_json(
@@ -1508,7 +1666,11 @@ def run(args: argparse.Namespace) -> Dict[str, Any]:
     suggestion = _find_yixiao_suggestion(suggestions)
     harness.check("Yixiao suggestion exists", suggestion is not None, suggestions)
     assert suggestion is not None
-    harness.check("Yixiao suggestion mounted", suggestion.get("already_mounted") is True, suggestion)
+    harness.check(
+        "Yixiao suggestion mounted",
+        suggestion.get("already_mounted") is True,
+        suggestion,
+    )
     _assert_profile(harness, suggestion)
 
     workflow_id = args.workflow_id
@@ -1533,7 +1695,9 @@ def run(args: argparse.Namespace) -> Dict[str, Any]:
         timeout=30,
     )
     harness.check("workflow title", workflow.get("title") == PROJECT_TITLE, workflow)
-    harness.check("workflow dataset", workflow.get("dataset_path") == str(project_root), workflow)
+    harness.check(
+        "workflow dataset", workflow.get("dataset_path") == str(project_root), workflow
+    )
     harness.check("workflow stage", workflow.get("stage") == "visualization", workflow)
 
     progress = harness.request_json(
@@ -1541,13 +1705,25 @@ def run(args: argparse.Namespace) -> Dict[str, Any]:
     )
     _assert_progress_counts(harness, progress, expected_counts)
 
-    memory = harness.request_json("GET", f"/api/workflows/{workflow_id}/memory", timeout=30)
+    memory = harness.request_json(
+        "GET", f"/api/workflows/{workflow_id}/memory", timeout=30
+    )
     facts = memory.get("project_facts") or {}
     context = facts.get("project_context") or {}
     summary = (memory.get("volume_states") or {}).get("summary") or {}
-    harness.check("memory schema", memory.get("schema_version") == "pytc-project-memory/v1", memory)
-    harness.check("memory task preset", (facts.get("task_family_preset") or {}).get("id") == "tapereader_xri_fiber", facts)
-    harness.check("memory modality", "XRI" in str(context.get("imaging_modality")), context)
+    harness.check(
+        "memory schema",
+        memory.get("schema_version") == "pytc-project-memory/v1",
+        memory,
+    )
+    harness.check(
+        "memory task preset",
+        (facts.get("task_family_preset") or {}).get("id") == "tapereader_xri_fiber",
+        facts,
+    )
+    harness.check(
+        "memory modality", "XRI" in str(context.get("imaging_modality")), context
+    )
     harness.check("memory tracked volumes", summary.get("tracked_total") == 10, summary)
 
     first = _first_volume_with_label(manifest)
@@ -1557,16 +1733,27 @@ def run(args: argparse.Namespace) -> Dict[str, Any]:
         payload={
             "image": _rel_to_abs(project_root, first.get("image")),
             "label": _rel_to_abs(project_root, first.get("segmentation")),
-            "scales": (manifest.get("voxel_size") or {}).get("zyx_nm") or [40, 16.3, 16.3],
+            "scales": (manifest.get("voxel_size") or {}).get("zyx_nm")
+            or [40, 16.3, 16.3],
             "workflow_id": workflow_id,
         },
         timeout=120,
     )
     harness.check("viewer url", "/neuroglancer/v/" in str(viewer.get("url")), viewer)
     pair_discovery = viewer.get("pair_discovery") or {}
-    harness.check("viewer pair count", pair_discovery.get("pair_count") == 1, pair_discovery)
-    harness.check("viewer unpaired images", pair_discovery.get("unpaired_images") == [], pair_discovery)
-    harness.check("viewer unpaired labels", pair_discovery.get("unpaired_labels") == [], pair_discovery)
+    harness.check(
+        "viewer pair count", pair_discovery.get("pair_count") == 1, pair_discovery
+    )
+    harness.check(
+        "viewer unpaired images",
+        pair_discovery.get("unpaired_images") == [],
+        pair_discovery,
+    )
+    harness.check(
+        "viewer unpaired labels",
+        pair_discovery.get("unpaired_labels") == [],
+        pair_discovery,
+    )
 
     if not args.skip_agent:
         project_answer = harness.request_json(
@@ -1580,7 +1767,9 @@ def run(args: argparse.Namespace) -> Dict[str, Any]:
         training_answer = harness.request_json(
             "POST",
             f"/api/workflows/{workflow_id}/agent/query",
-            payload={"query": "train on the fully good masks to segment the image-only volumes"},
+            payload={
+                "query": "train on the fully good masks to segment the image-only volumes"
+            },
             timeout=args.agent_timeout,
         )
         _assert_agent_training_response(harness, training_answer)
@@ -1723,7 +1912,7 @@ def main() -> int:
         elif args.pre_demo_gate:
             report = _build_pre_demo_gate_report(args)
         else:
-        # pragma: no cover - main path used by CLI integration tests.
+            # pragma: no cover - main path used by CLI integration tests.
             report = run(args)
     except Exception as exc:
         report = {
@@ -1732,12 +1921,16 @@ def main() -> int:
             "base_url": args.base_url,
             "project_root": args.project_root,
         }
-        Path(args.report).write_text(json.dumps(report, indent=2, sort_keys=True), encoding="utf-8")
+        Path(args.report).write_text(
+            json.dumps(report, indent=2, sort_keys=True), encoding="utf-8"
+        )
         print(f"Yixiao case-study smoke failed: {exc}", file=sys.stderr)
         print(f"Report: {args.report}", file=sys.stderr)
         return 1
 
-    Path(args.report).write_text(json.dumps(report, indent=2, sort_keys=True), encoding="utf-8")
+    Path(args.report).write_text(
+        json.dumps(report, indent=2, sort_keys=True), encoding="utf-8"
+    )
     if args.post_deploy and post_deploy_markdown_path:
         _write_post_deploy_report_markdown(report, post_deploy_markdown_path)
     if args.closed_loop_rehearsal:

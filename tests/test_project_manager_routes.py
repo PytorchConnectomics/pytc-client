@@ -53,7 +53,9 @@ class ProjectManagerRouteTests(unittest.TestCase):
 
         self.assertEqual(response.status_code, 200)
         payload = response.json()
-        self.assertEqual(pathlib.Path(payload["metadata_path"]), metadata_path.resolve())
+        self.assertEqual(
+            pathlib.Path(payload["metadata_path"]), metadata_path.resolve()
+        )
         self.assertEqual(pathlib.Path(payload["data_root"]), data_root.resolve())
         self.assertTrue(payload["using_metadata_override"])
         self.assertTrue(payload["using_data_root_override"])

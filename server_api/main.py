@@ -314,7 +314,9 @@ def _with_neuroglancer_image_shader(
         try:
             layer_source.shader = shader
         except Exception:
-            logger.debug("Unable to attach Neuroglancer image shader directly.", exc_info=True)
+            logger.debug(
+                "Unable to attach Neuroglancer image shader directly.", exc_info=True
+            )
         return layer_source
 
     try:
@@ -322,7 +324,9 @@ def _with_neuroglancer_image_shader(
         if "shader" in image_init_signature.parameters:
             return image_layer(source=layer_source, shader=shader)
     except Exception:
-        logger.debug("Unable to probe Neuroglancer ImageLayer __init__ signature.", exc_info=True)
+        logger.debug(
+            "Unable to probe Neuroglancer ImageLayer __init__ signature.", exc_info=True
+        )
 
     try:
         return image_layer(source=layer_source, shader=shader)
@@ -330,7 +334,10 @@ def _with_neuroglancer_image_shader(
         try:
             layer_source.shader = shader
         except Exception:
-            logger.debug("Unable to apply Neuroglancer image shader to layer source.", exc_info=True)
+            logger.debug(
+                "Unable to apply Neuroglancer image shader to layer source.",
+                exc_info=True,
+            )
     return layer_source
 
 
@@ -370,7 +377,9 @@ def _build_neuroglancer_layer(
     if volume_type == "segmentation":
         if segmentation_kwargs is None:
             return neuroglancer_module.SegmentationLayer(source=source)
-        return neuroglancer_module.SegmentationLayer(source=source, **segmentation_kwargs)
+        return neuroglancer_module.SegmentationLayer(
+            source=source, **segmentation_kwargs
+        )
     shader = image_shader or _resolve_raw_image_shader()
     return _with_neuroglancer_image_shader(neuroglancer_module, source, shader)
 
@@ -600,10 +609,9 @@ def _runtime_body_with_workflow_fallbacks(
             metadata.get("imageDataPath"),
             metadata.get("inputImagePath"),
         )
-        checkpoint = (
-            (next_body.get("arguments") or {}).get("checkpoint")
-            or next_body.get("checkpointPath")
-        )
+        checkpoint = (next_body.get("arguments") or {}).get(
+            "checkpoint"
+        ) or next_body.get("checkpointPath")
         checkpoint = _first_existing_runtime_path(
             "Checkpoint",
             checkpoint,
@@ -656,7 +664,9 @@ def _build_training_body_from_command(
                 status_code=400,
                 detail="Training command is missing a config preset or config text.",
             )
-        config_origin_path, training_config = _read_pytc_config_content(config_origin_path)
+        config_origin_path, training_config = _read_pytc_config_content(
+            config_origin_path
+        )
 
     output_path = _first_string(
         command_input.get("outputPath"),
@@ -1396,8 +1406,12 @@ def _derive_two_channel_prediction_preview(array):
 
     if np.issubdtype(semantic.dtype, np.floating):
         if not np.all(np.isfinite(semantic)):
-            raise ValueError("2-channel prediction foreground contains NaN or infinity.")
-        foreground_threshold = 0.5 if float(np.nanmax(semantic, initial=0.0)) <= 1.0 else 127.5
+            raise ValueError(
+                "2-channel prediction foreground contains NaN or infinity."
+            )
+        foreground_threshold = (
+            0.5 if float(np.nanmax(semantic, initial=0.0)) <= 1.0 else 127.5
+        )
         foreground = semantic > foreground_threshold
     else:
         foreground = semantic > 0
@@ -1405,7 +1419,9 @@ def _derive_two_channel_prediction_preview(array):
     if np.issubdtype(boundary.dtype, np.floating):
         if not np.all(np.isfinite(boundary)):
             raise ValueError("2-channel prediction boundary contains NaN or infinity.")
-        boundary_threshold = 0.5 if float(np.nanmax(boundary, initial=0.0)) <= 1.0 else 127.5
+        boundary_threshold = (
+            0.5 if float(np.nanmax(boundary, initial=0.0)) <= 1.0 else 127.5
+        )
         boundary_mask = boundary > boundary_threshold
     else:
         boundary_mask = boundary > 0
@@ -1715,13 +1731,17 @@ async def neuroglancer(
             )
 
         try:
-            resolved_image_path, image_resolution_note = _resolve_neuroglancer_image_path(
-                original_image_path,
-                original_label_path,
+            resolved_image_path, image_resolution_note = (
+                _resolve_neuroglancer_image_path(
+                    original_image_path,
+                    original_label_path,
+                )
             )
-            resolved_label_path, label_resolution_note = _resolve_neuroglancer_label_path(
-                original_label_path,
-                resolved_image_path,
+            resolved_label_path, label_resolution_note = (
+                _resolve_neuroglancer_label_path(
+                    original_label_path,
+                    resolved_image_path,
+                )
             )
         except ValueError as exc:
             append_app_event(
@@ -1742,9 +1762,9 @@ async def neuroglancer(
                 image_path=str(original_image_path),
                 label_path=str(original_label_path) if original_label_path else None,
                 resolved_image_path=str(resolved_image_path),
-                resolved_label_path=str(resolved_label_path)
-                if resolved_label_path
-                else None,
+                resolved_label_path=(
+                    str(resolved_label_path) if resolved_label_path else None
+                ),
                 image_resolution_note=image_resolution_note,
                 label_resolution_note=label_resolution_note,
             )
@@ -1841,7 +1861,9 @@ async def neuroglancer(
             image_path=str(resolved_image_path),
             label_path=str(resolved_label_path) if resolved_label_path else None,
             image_shape=list(getattr(im, "shape", []) or []),
-            label_shape=list(getattr(gt, "shape", []) or []) if gt is not None else None,
+            label_shape=(
+                list(getattr(gt, "shape", []) or []) if gt is not None else None
+            ),
             scales=scales,
             workflow_id=workflow_id,
             viewer_token=viewer_token,
@@ -1853,20 +1875,22 @@ async def neuroglancer(
             "image_path": str(resolved_image_path),
             "label_path": str(resolved_label_path) if resolved_label_path else None,
             "requested_image_path": str(original_image_path),
-            "requested_label_path": str(original_label_path)
-            if original_label_path
-            else None,
+            "requested_label_path": (
+                str(original_label_path) if original_label_path else None
+            ),
             "image_resolution_note": image_resolution_note,
             "label_resolution_note": label_resolution_note,
             "scales": scales,
             "pair_discovery": pair_discovery,
             "pair_question": (
-                "I found "
-                f"{pair_discovery['pair_count']} clear image/segmentation pairs. "
-                "I opened the first one. Are there other folders or pairs I should include?"
-            )
-            if pair_discovery["pair_count"] > 1
-            else None,
+                (
+                    "I found "
+                    f"{pair_discovery['pair_count']} clear image/segmentation pairs. "
+                    "I opened the first one. Are there other folders or pairs I should include?"
+                )
+                if pair_discovery["pair_count"] > 1
+                else None
+            ),
         }
         if workflow_id:
             workflow = get_user_workflow_or_404(
@@ -1898,7 +1922,9 @@ async def neuroglancer(
                 {
                     "stage": "visualization",
                     "image_path": str(resolved_image_path),
-                    "label_path": str(resolved_label_path) if resolved_label_path else None,
+                    "label_path": (
+                        str(resolved_label_path) if resolved_label_path else None
+                    ),
                     "neuroglancer_url": public_url,
                     "metadata": metadata,
                 },
@@ -1913,11 +1939,13 @@ async def neuroglancer(
                 summary="Created Neuroglancer viewer.",
                 payload={
                     "image_path": str(resolved_image_path),
-                    "label_path": str(resolved_label_path) if resolved_label_path else None,
+                    "label_path": (
+                        str(resolved_label_path) if resolved_label_path else None
+                    ),
                     "requested_image_path": str(original_image_path),
-                    "requested_label_path": str(original_label_path)
-                    if original_label_path
-                    else None,
+                    "requested_label_path": (
+                        str(original_label_path) if original_label_path else None
+                    ),
                     "image_resolution_note": image_resolution_note,
                     "label_resolution_note": label_resolution_note,
                     "pair_discovery": pair_discovery,
@@ -1968,16 +1996,17 @@ async def neuroglancer_proofread(
             .first()
         )
         if not session_context:
-            raise HTTPException(status_code=404, detail="Proofreading session not found.")
+            raise HTTPException(
+                status_code=404, detail="Proofreading session not found."
+            )
         image = image or session_context.dataset_path
         label = label or session_context.mask_path
         workflow_id = workflow_id or session_context.workflow_id
         try:
             data_manager = get_data_manager(int(session_id), db)
             persistence_context = data_manager.get_persistence_status()
-            if (
-                persistence_context.get("artifact_exists")
-                and persistence_context.get("artifact_path")
+            if persistence_context.get("artifact_exists") and persistence_context.get(
+                "artifact_path"
             ):
                 label = persistence_context["artifact_path"]
         except Exception:
@@ -2069,7 +2098,9 @@ async def neuroglancer_proofread(
         volume_type="image",
         voxel_offset=[0, 0, 0],
     )
-    segmentation_source = make_local_volume(gt, "segmentation") if gt is not None else None
+    segmentation_source = (
+        make_local_volume(gt, "segmentation") if gt is not None else None
+    )
     initial_voxel = _coerce_initial_voxel(
         payload.initial_voxel or payload.initialVoxel,
         tuple(getattr(im, "shape", ()) or ()),
@@ -2117,9 +2148,9 @@ async def neuroglancer_proofread(
                     "session_id": session_id,
                     "active_instance_id": active_instance_id,
                     "image_path": str(resolved_image_path),
-                    "label_path": str(resolved_label_path)
-                    if resolved_label_path
-                    else None,
+                    "label_path": (
+                        str(resolved_label_path) if resolved_label_path else None
+                    ),
                 },
             )
             with viewer.config_state.txn() as config:
@@ -2259,7 +2290,9 @@ async def neuroglancer_proofread(
         "image_path": str(resolved_image_path),
         "label_path": str(resolved_label_path) if resolved_label_path else None,
         "requested_image_path": str(original_image_path),
-        "requested_label_path": str(original_label_path) if original_label_path else None,
+        "requested_label_path": (
+            str(original_label_path) if original_label_path else None
+        ),
         "image_resolution_note": image_resolution_note,
         "label_resolution_note": label_resolution_note,
         "scales": scales,

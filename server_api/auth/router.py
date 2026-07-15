@@ -421,10 +421,7 @@ def _metadata_voxel_size_nm(attrs: dict) -> Optional[List[float]]:
     )
     normalized = {str(key).lower(): value for key, value in (attrs or {}).items()}
     ordered_keys = [
-        key
-        for preferred in preferred_keys
-        for key in normalized
-        if preferred in key
+        key for preferred in preferred_keys for key in normalized if preferred in key
     ]
     for key in ordered_keys:
         values = _numeric_values_from_metadata(normalized[key])
@@ -437,7 +434,9 @@ def _metadata_voxel_size_nm(attrs: dict) -> Optional[List[float]]:
     return None
 
 
-def _downsample_array_for_stats(array: Any, *, max_values: int = PROJECT_AUDIT_MAX_SAMPLE_VALUES):
+def _downsample_array_for_stats(
+    array: Any, *, max_values: int = PROJECT_AUDIT_MAX_SAMPLE_VALUES
+):
     if np is None:
         return None
     try:
@@ -512,7 +511,9 @@ def _sample_array_stats(array: Any) -> Optional[dict]:
                 "nonzero_fraction": float(np.count_nonzero(finite) / finite.size),
             }
         )
-        if np.issubdtype(sample.dtype, np.integer) or np.issubdtype(sample.dtype, np.bool_):
+        if np.issubdtype(sample.dtype, np.integer) or np.issubdtype(
+            sample.dtype, np.bool_
+        ):
             unique_values = np.unique(sample)
             stats["unique_count_sample"] = int(unique_values.size)
             stats["unique_values_preview"] = [
@@ -521,7 +522,9 @@ def _sample_array_stats(array: Any) -> Optional[dict]:
     return stats
 
 
-def _audit_findings_for_stats(relative_path: str, role: str, stats: Optional[dict]) -> List[dict]:
+def _audit_findings_for_stats(
+    relative_path: str, role: str, stats: Optional[dict]
+) -> List[dict]:
     if not stats:
         return []
     findings = []
@@ -620,10 +623,14 @@ def _audit_hdf5_volume(
             selected_record = None
             for record in dataset_records:
                 record_path = str(record.get("path", "")).lower()
-                if preferred_tokens and any(token in record_path for token in preferred_tokens):
+                if preferred_tokens and any(
+                    token in record_path for token in preferred_tokens
+                ):
                     selected_record = record
                     break
-            selected_record = selected_record or (dataset_records[0] if dataset_records else None)
+            selected_record = selected_record or (
+                dataset_records[0] if dataset_records else None
+            )
             stats = None
             voxel_size_nm = _metadata_voxel_size_nm(root_attrs)
             if selected_record:
@@ -633,7 +640,9 @@ def _audit_hdf5_volume(
                     selected_record.get("attrs") or {}
                 )
                 if stats:
-                    findings.extend(_audit_findings_for_stats(relative_path, role, stats))
+                    findings.extend(
+                        _audit_findings_for_stats(relative_path, role, stats)
+                    )
     except Exception as exc:
         return {
             "path": relative_path,
@@ -686,7 +695,12 @@ def _audit_tiff_volume(
             "error": "tifffile_missing",
         }
     result = {"path": relative_path, "role": role, **metadata}
-    if collect_stats and metadata.get("readable") and tifffile is not None and np is not None:
+    if (
+        collect_stats
+        and metadata.get("readable")
+        and tifffile is not None
+        and np is not None
+    ):
         try:
             sample = tifffile.memmap(path)
             stats = _sample_array_stats(sample)
@@ -844,7 +858,9 @@ def _build_project_audit(
             findings.append(
                 {
                     "level": "info" if shape_match else "warning",
-                    "code": "pair_shape_match" if shape_match else "pair_shape_mismatch",
+                    "code": (
+                        "pair_shape_match" if shape_match else "pair_shape_mismatch"
+                    ),
                     "message": (
                         "Image and mask shapes match."
                         if shape_match
@@ -869,7 +885,9 @@ def _build_project_audit(
             "audited_volumes": len(volumes),
             "readable_volumes": sum(1 for volume in volumes if volume.get("readable")),
             "pair_checks": len(pair_checks),
-            "shape_match_count": sum(1 for pair in pair_checks if pair.get("shape_match")),
+            "shape_match_count": sum(
+                1 for pair in pair_checks if pair.get("shape_match")
+            ),
             "shape_mismatch_count": sum(
                 1
                 for pair in pair_checks
@@ -920,7 +938,9 @@ def _context_terms_for_text(text: str) -> List[str]:
     ]
 
 
-def _collect_project_content_signals(directory_path: str, roles: dict, extension_counts: dict):
+def _collect_project_content_signals(
+    directory_path: str, roles: dict, extension_counts: dict
+):
     text_candidates = []
     seen_text_candidates = set()
     volume_candidates = []
@@ -939,7 +959,9 @@ def _collect_project_content_signals(directory_path: str, roles: dict, extension
 
     for current_dir, dirnames, filenames in os.walk(directory_path):
         dirnames[:] = [
-            dirname for dirname in sorted(dirnames) if not _is_ignored_system_file(dirname)
+            dirname
+            for dirname in sorted(dirnames)
+            if not _is_ignored_system_file(dirname)
         ]
         for filename in sorted(filenames):
             if _is_ignored_system_file(filename):
@@ -1008,7 +1030,10 @@ def _collect_project_content_signals(directory_path: str, roles: dict, extension
         elif extension in {".tif", ".tiff", ".ome.tif", ".ome.tiff"}:
             metadata = _inspect_tiff_container(absolute_path)
         elif extension in {".zarr", ".n5"}:
-            metadata = {"format": extension.lstrip("."), "readable": os.path.isdir(absolute_path)}
+            metadata = {
+                "format": extension.lstrip("."),
+                "readable": os.path.isdir(absolute_path),
+            }
         if metadata:
             dataset_text = " ".join(
                 dataset.get("path", "")
@@ -1062,7 +1087,9 @@ def _parse_voxel_size_nm_hint(text: str) -> Optional[List[float]]:
     if three_axis_match:
         unit_text = (three_axis_match.group(4) or source).lower()
         multiplier = 1000.0 if re.search(r"\u00b5m|um|microns?", unit_text) else 1.0
-        return [float(three_axis_match.group(index)) * multiplier for index in (1, 2, 3)]
+        return [
+            float(three_axis_match.group(index)) * multiplier for index in (1, 2, 3)
+        ]
 
     unit_qualified_match = re.search(
         r"(?:at|@)?\s*(\d+(?:\.\d+)?)\s*(?:x|by|,|;|/|-)\s*"
@@ -1074,7 +1101,9 @@ def _parse_voxel_size_nm_hint(text: str) -> Optional[List[float]]:
     if unit_qualified_match:
         unit_text = unit_qualified_match.group(4).lower()
         multiplier = 1000.0 if re.search(r"\u00b5m|um|microns?", unit_text) else 1.0
-        return [float(unit_qualified_match.group(index)) * multiplier for index in (1, 2, 3)]
+        return [
+            float(unit_qualified_match.group(index)) * multiplier for index in (1, 2, 3)
+        ]
 
     isotropic_match = re.search(
         r"(?:isotropic|cubic|same\s+voxel|same\s+scale)[^\d]{0,60}"
@@ -1167,7 +1196,9 @@ def _infer_project_context_hints(content_text: str) -> dict:
     return hints
 
 
-def _project_role_directories(role_paths: List[str], *, max_directories: int = 6) -> List[dict]:
+def _project_role_directories(
+    role_paths: List[str], *, max_directories: int = 6
+) -> List[dict]:
     grouped = {}
     for role_path in role_paths:
         directory = os.path.dirname(role_path) or "."
@@ -1182,7 +1213,9 @@ def _project_role_directories(role_paths: List[str], *, max_directories: int = 6
     )[:max_directories]
 
 
-def _project_primary_root(role_directories: dict, role: str, counts: dict) -> Optional[str]:
+def _project_primary_root(
+    role_directories: dict, role: str, counts: dict
+) -> Optional[str]:
     directories = role_directories.get(role) or []
     if not directories:
         return None
@@ -1219,9 +1252,7 @@ def _prepend_preferred_role_directory(
         "source": "project_manifest",
     }
     remaining = [
-        item
-        for item in (role_directories.get(role) or [])
-        if item.get("path") != root
+        item for item in (role_directories.get(role) or []) if item.get("path") != root
     ]
     role_directories[role] = [preferred, *remaining][:max_directories]
 
@@ -1369,7 +1400,9 @@ def _build_project_workable_schema(
         roles, "volume"
     )
     primary_label = (
-        paired_examples[0]["label"] if paired_examples else _first_project_path(roles, "label")
+        paired_examples[0]["label"]
+        if paired_examples
+        else _first_project_path(roles, "label")
     )
     primary_prediction = _first_project_path(roles, "prediction")
     primary_config = _first_project_path(roles, "config")
@@ -1382,16 +1415,16 @@ def _build_project_workable_schema(
     # an otherwise valid image/checkpoint or image/label workflow.
     has_inference_inputs = bool(primary_image and primary_checkpoint)
     has_training_inputs = bool(primary_image and primary_label)
-    has_evaluation_inputs = bool(
-        primary_label and counts.get("prediction", 0) >= 2
-    )
+    has_evaluation_inputs = bool(primary_label and counts.get("prediction", 0) >= 2)
 
     if not has_image:
         mode = "not_workable"
         summary = "No image volume detected yet."
     elif has_evaluation_inputs and has_training_inputs and primary_checkpoint:
         mode = "closed_loop_ready"
-        summary = "Ready for visualization, proofreading, training, and before/after checks."
+        summary = (
+            "Ready for visualization, proofreading, training, and before/after checks."
+        )
     elif has_image_label:
         mode = "image_mask_pair"
         summary = "Ready to start from an image and mask/label pair."
@@ -1499,7 +1532,9 @@ def _infer_project_volume_sets(roles: dict, role_directories: dict) -> List[dict
             label_path
         )
 
-    image_directories = role_directories.get("image") or role_directories.get("volume") or []
+    image_directories = (
+        role_directories.get("image") or role_directories.get("volume") or []
+    )
     for image_directory in image_directories:
         directory = image_directory["path"]
         images_in_directory = [
@@ -1538,9 +1573,9 @@ def _infer_project_volume_sets(roles: dict, role_directories: dict) -> List[dict
                     "image_root": directory,
                     "label_root": label_root,
                     "image_count": image_directory["count"],
-                    "label_count": best_label_directory["count"]
-                    if best_label_directory
-                    else 0,
+                    "label_count": (
+                        best_label_directory["count"] if best_label_directory else 0
+                    ),
                     "pair_count": len(best_pairs),
                     "examples": best_pairs[:3],
                 }
@@ -1594,12 +1629,18 @@ def _apply_manifest_profile_to_roles(roles: dict, manifest_profile: dict) -> Non
     label_paths = manifest_profile.get("label_paths") or []
     active_paths = manifest_profile.get("active_paths") or {}
     if image_paths:
-        roles["image"] = _unique_project_paths([*image_paths, *(roles.get("image") or [])])
+        roles["image"] = _unique_project_paths(
+            [*image_paths, *(roles.get("image") or [])]
+        )
     if label_paths:
-        roles["label"] = _unique_project_paths([*label_paths, *(roles.get("label") or [])])
+        roles["label"] = _unique_project_paths(
+            [*label_paths, *(roles.get("label") or [])]
+        )
     active_config = active_paths.get("config")
     if active_config:
-        roles["config"] = _unique_project_paths([active_config, *(roles.get("config") or [])])
+        roles["config"] = _unique_project_paths(
+            [active_config, *(roles.get("config") or [])]
+        )
 
 
 def _scan_project_profile(directory_path: str, *, audit_detail: str = "full") -> dict:
@@ -1726,9 +1767,11 @@ def _scan_project_profile(directory_path: str, *, audit_detail: str = "full") ->
         schema["manifest"] = {
             "title": manifest.get("title") if isinstance(manifest, dict) else None,
             "active_paths": manifest_profile.get("active_paths") or {},
-            "initial_progress_summary": manifest.get("initial_progress_summary")
-            if isinstance(manifest, dict)
-            else None,
+            "initial_progress_summary": (
+                manifest.get("initial_progress_summary")
+                if isinstance(manifest, dict)
+                else None
+            ),
         }
 
     required_roles = {
@@ -1738,9 +1781,7 @@ def _scan_project_profile(directory_path: str, *, audit_detail: str = "full") ->
         "checkpoint": counts["checkpoint"] > 0,
         "prediction": counts["prediction"] >= 2,
     }
-    missing_roles = [
-        role for role, present in required_roles.items() if not present
-    ]
+    missing_roles = [role for role, present in required_roles.items() if not present]
 
     return {
         "scanned_files": min(scanned_files, PROJECT_PROFILE_MAX_FILES),
@@ -2215,7 +2256,9 @@ def get_files(
 
     return [
         file
-        for file in query.order_by(models.File.is_folder.desc(), models.File.name.asc()).all()
+        for file in query.order_by(
+            models.File.is_folder.desc(), models.File.name.asc()
+        ).all()
         if not _is_ignored_system_file(file.name)
     ]
 
@@ -2307,9 +2350,7 @@ def upload_file(
     db: Session = Depends(database.get_db),
 ):
     if _is_ignored_system_file(file.filename):
-        raise HTTPException(
-            status_code=400, detail="System metadata files are ignored"
-        )
+        raise HTTPException(status_code=400, detail="System metadata files are ignored")
 
     # Create uploads directory if not exists
     upload_dir = f"uploads/{current_user.id}"
@@ -2688,7 +2729,9 @@ def delete_project_context_profile(
     )
     deleted = _delete_project_context_profile(directory_path)
     return {
-        "message": "Project context deleted" if deleted else "Project context not found",
+        "message": (
+            "Project context deleted" if deleted else "Project context not found"
+        ),
         "filename": PROJECT_CONTEXT_FILENAME,
         "deleted": deleted,
     }

@@ -6,7 +6,6 @@ import signal
 from scripts import manage_demo_instance as mgr
 
 
-
 def test_discover_demo_api_processes_filters_by_root_and_port(monkeypatch):
     root = Path("/home/weidf/deploy/pytc-client-demo2")
     other_root = Path("/home/weidf/other-project")
@@ -22,15 +21,23 @@ def test_discover_demo_api_processes_filters_by_root_and_port(monkeypatch):
         )
 
     monkeypatch.setattr(mgr.subprocess, "check_output", fake_ps)
-    monkeypatch.setattr(mgr, "_read_process_cwd", lambda pid: str({
-        2345: str(root),
-        3456: str(root),
-        4567: str(other_root),
-    }[pid]))
+    monkeypatch.setattr(
+        mgr,
+        "_read_process_cwd",
+        lambda pid: str(
+            {
+                2345: str(root),
+                3456: str(root),
+                4567: str(other_root),
+            }[pid]
+        ),
+    )
     monkeypatch.setattr(
         mgr,
         "_read_process_env",
-        lambda pid: {"PYTC_API_PORT": "4342"} if pid == 2345 else {"PYTC_API_PORT": "4343"},
+        lambda pid: (
+            {"PYTC_API_PORT": "4342"} if pid == 2345 else {"PYTC_API_PORT": "4343"}
+        ),
     )
 
     found = mgr.discover_demo_api_processes(api_port=4342, root=root)
@@ -85,7 +92,9 @@ def test_parse_extra_env(monkeypatch):
 def test_stop_demo_api_uses_sigterm_and_returns_success(monkeypatch):
     root = Path("/home/weidf/deploy/pytc-client-demo2")
     processes = [
-        mgr.DemoApiProcess(pid=2345, command="python -m server_api.main", cwd=str(root), env={}),
+        mgr.DemoApiProcess(
+            pid=2345, command="python -m server_api.main", cwd=str(root), env={}
+        ),
     ]
 
     killed = []

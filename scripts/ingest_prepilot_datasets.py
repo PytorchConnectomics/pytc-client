@@ -19,7 +19,6 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-
 SCRIPT_PATH = Path(__file__).resolve()
 REPO_ROOT = SCRIPT_PATH.parents[1]
 SEG_ROOT = REPO_ROOT.parent
@@ -227,7 +226,9 @@ def write_manifest(project_dir: Path, spec: ProjectSpec) -> None:
         "source_urls": spec.source_urls,
         "roles": [role.as_json(project_dir) for role in spec.roles],
         "recommended_configs": [
-            rel_or_abs(path, project_dir) for path in spec.recommended_configs if path.exists()
+            rel_or_abs(path, project_dir)
+            for path in spec.recommended_configs
+            if path.exists()
         ],
         "notes": spec.notes,
         "hdf5_inventory": hdf5,
@@ -273,9 +274,7 @@ def write_manifest(project_dir: Path, spec: ProjectSpec) -> None:
     (notes_dir / "README.md").write_text("\n".join(readme))
     prepilot_log = notes_dir / "prepilot-log.md"
     if not prepilot_log.exists():
-        prepilot_log.write_text(
-            textwrap.dedent(
-                """\
+        prepilot_log.write_text(textwrap.dedent("""\
                 # Prepilot Log
 
                 | Check | Result | Evidence path | Notes |
@@ -291,9 +290,7 @@ def write_manifest(project_dir: Path, spec: ProjectSpec) -> None:
                 | Export works | pending |  |  |
                 | Candidate metrics computed | pending |  |  |
                 | Evidence bundle exported | pending |  |  |
-                """
-            )
-        )
+                """))
 
 
 def patch_yaml_text(src: Path, dst: Path, replacements: dict[str, str]) -> None:
@@ -306,7 +303,15 @@ def patch_yaml_text(src: Path, dst: Path, replacements: dict[str, str]) -> None:
 
 def init_project(project_root: Path, slug: str) -> Path:
     project_dir = ensure_dir(project_root / slug)
-    for child in ["data/image", "data/seg", "data/prediction", "configs", "checkpoints", "outputs", "notes"]:
+    for child in [
+        "data/image",
+        "data/seg",
+        "data/prediction",
+        "configs",
+        "checkpoints",
+        "outputs",
+        "notes",
+    ]:
         ensure_dir(project_dir / child)
     return project_dir
 
@@ -318,7 +323,10 @@ def stage_local_mito25_smoke(project_root: Path, data_root: Path) -> ProjectSpec
     symlink_or_keep(source / "image", project_dir / "data/image/source")
     symlink_or_keep(source / "seg", project_dir / "data/seg/source")
     config = project_dir / "configs/Mito25-Local-Smoke-BC.yaml"
-    copy_file(REPO_ROOT / "pytorch_connectomics/configs/MitoEM/Mito25-Local-Smoke-BC.yaml", config)
+    copy_file(
+        REPO_ROOT / "pytorch_connectomics/configs/MitoEM/Mito25-Local-Smoke-BC.yaml",
+        config,
+    )
     spec = ProjectSpec(
         slug=slug,
         title="Prepilot Mito25 Smoke",
@@ -361,12 +369,23 @@ def stage_local_snemi(project_root: Path, data_root: Path) -> ProjectSpec:
     config_base = project_dir / "configs/SNEMI-Prepilot-Base.yaml"
     src_base = REPO_ROOT / "pytorch_connectomics/configs/SNEMI/SNEMI-Base.yaml"
     text = src_base.read_text()
-    text = text.replace("INPUT_PATH: datasets/SNEMI3D/ # or your own dataset path", f"INPUT_PATH: {project_dir / 'data'}")
-    text = text.replace("OUTPUT_PATH: outputs/SNEMI3D/test", f"OUTPUT_PATH: {project_dir / 'outputs/inference'}")
-    text = text.replace("OUTPUT_PATH: outputs/SNEMI3D/", f"OUTPUT_PATH: {project_dir / 'outputs/train'}")
+    text = text.replace(
+        "INPUT_PATH: datasets/SNEMI3D/ # or your own dataset path",
+        f"INPUT_PATH: {project_dir / 'data'}",
+    )
+    text = text.replace(
+        "OUTPUT_PATH: outputs/SNEMI3D/test",
+        f"OUTPUT_PATH: {project_dir / 'outputs/inference'}",
+    )
+    text = text.replace(
+        "OUTPUT_PATH: outputs/SNEMI3D/", f"OUTPUT_PATH: {project_dir / 'outputs/train'}"
+    )
     config_base.write_text(text)
     config_model = project_dir / "configs/SNEMI-Affinity-UNet.yaml"
-    copy_file(REPO_ROOT / "pytorch_connectomics/configs/SNEMI/SNEMI-Affinity-UNet.yaml", config_model)
+    copy_file(
+        REPO_ROOT / "pytorch_connectomics/configs/SNEMI/SNEMI-Affinity-UNet.yaml",
+        config_model,
+    )
     spec = ProjectSpec(
         slug=slug,
         title="Prepilot SNEMI3D Local",
@@ -374,9 +393,21 @@ def stage_local_snemi(project_root: Path, data_root: Path) -> ProjectSpec:
         source=str(source),
         roles=[
             Role("dataset_path", project_dir / "data", "Project data root"),
-            Role("image_path", project_dir / "data/image/source/train-input.tif", "Training image volume"),
-            Role("label_path", project_dir / "data/seg/source/train-labels.tif", "Training segmentation labels"),
-            Role("inference_image_path", project_dir / "data/image/source/test-input.tif", "Inference image volume"),
+            Role(
+                "image_path",
+                project_dir / "data/image/source/train-input.tif",
+                "Training image volume",
+            ),
+            Role(
+                "label_path",
+                project_dir / "data/seg/source/train-labels.tif",
+                "Training segmentation labels",
+            ),
+            Role(
+                "inference_image_path",
+                project_dir / "data/image/source/test-input.tif",
+                "Inference image volume",
+            ),
         ],
         recommended_configs=[config_base, config_model],
         notes=[
@@ -472,30 +503,58 @@ def stage_lucchi(project_root: Path) -> ProjectSpec:
         "test_label": None,
     }
     if candidates["train_im"]:
-        role_paths["train_im"] = project_dir / f"data/image/{candidates['train_im'].name}"
+        role_paths["train_im"] = (
+            project_dir / f"data/image/{candidates['train_im'].name}"
+        )
         symlink_or_keep(candidates["train_im"], role_paths["train_im"])
     if candidates["test_im"]:
         role_paths["test_im"] = project_dir / f"data/image/{candidates['test_im'].name}"
         symlink_or_keep(candidates["test_im"], role_paths["test_im"])
     if candidates["train_label"]:
-        role_paths["train_label"] = project_dir / f"data/seg/{candidates['train_label'].name}"
+        role_paths["train_label"] = (
+            project_dir / f"data/seg/{candidates['train_label'].name}"
+        )
         symlink_or_keep(candidates["train_label"], role_paths["train_label"])
     if candidates["test_label"]:
-        role_paths["test_label"] = project_dir / f"data/seg/{candidates['test_label'].name}"
+        role_paths["test_label"] = (
+            project_dir / f"data/seg/{candidates['test_label'].name}"
+        )
         symlink_or_keep(candidates["test_label"], role_paths["test_label"])
 
     config = project_dir / "configs/Lucchi-Prepilot-Mitochondria.yaml"
     src = REPO_ROOT / "pytorch_connectomics/configs/Lucchi-Mitochondria.yaml"
     text = src.read_text()
-    train_im_name = role_paths["train_im"].name if role_paths["train_im"] else "train_im.tif"
-    train_label_name = role_paths["train_label"].name if role_paths["train_label"] else "train_label.tif"
-    test_im_name = role_paths["test_im"].name if role_paths["test_im"] else "test_im.tif"
-    text = text.replace("INPUT_PATH: datasets/Lucchi/", f"INPUT_PATH: {project_dir / 'data'}")
-    text = text.replace("IMAGE_NAME: img/train_im.tif", f"IMAGE_NAME: image/{train_im_name}")
-    text = text.replace("LABEL_NAME: label/train_label.tif", f"LABEL_NAME: seg/{train_label_name}")
-    text = text.replace("IMAGE_NAME: img/test_im.tif", f"IMAGE_NAME: image/{test_im_name}")
-    text = text.replace("OUTPUT_PATH: outputs/Lucchi_UNet/test", f"OUTPUT_PATH: {project_dir / 'outputs/inference'}")
-    text = text.replace("OUTPUT_PATH: outputs/Lucchi_UNet/", f"OUTPUT_PATH: {project_dir / 'outputs/train'}")
+    train_im_name = (
+        role_paths["train_im"].name if role_paths["train_im"] else "train_im.tif"
+    )
+    train_label_name = (
+        role_paths["train_label"].name
+        if role_paths["train_label"]
+        else "train_label.tif"
+    )
+    test_im_name = (
+        role_paths["test_im"].name if role_paths["test_im"] else "test_im.tif"
+    )
+    text = text.replace(
+        "INPUT_PATH: datasets/Lucchi/", f"INPUT_PATH: {project_dir / 'data'}"
+    )
+    text = text.replace(
+        "IMAGE_NAME: img/train_im.tif", f"IMAGE_NAME: image/{train_im_name}"
+    )
+    text = text.replace(
+        "LABEL_NAME: label/train_label.tif", f"LABEL_NAME: seg/{train_label_name}"
+    )
+    text = text.replace(
+        "IMAGE_NAME: img/test_im.tif", f"IMAGE_NAME: image/{test_im_name}"
+    )
+    text = text.replace(
+        "OUTPUT_PATH: outputs/Lucchi_UNet/test",
+        f"OUTPUT_PATH: {project_dir / 'outputs/inference'}",
+    )
+    text = text.replace(
+        "OUTPUT_PATH: outputs/Lucchi_UNet/",
+        f"OUTPUT_PATH: {project_dir / 'outputs/train'}",
+    )
     config.write_text(text)
     spec = ProjectSpec(
         slug=slug,
@@ -505,9 +564,17 @@ def stage_lucchi(project_root: Path) -> ProjectSpec:
         roles=[
             Role("dataset_path", project_dir / "data", "Project data root"),
             Role("image_path", role_paths["train_im"], "Training image stack"),
-            Role("label_path", role_paths["train_label"], "Training semantic mitochondria labels"),
+            Role(
+                "label_path",
+                role_paths["train_label"],
+                "Training semantic mitochondria labels",
+            ),
             Role("inference_image_path", role_paths["test_im"], "Test image stack"),
-            Role("reference_label_path", role_paths["test_label"], "Test labels if present"),
+            Role(
+                "reference_label_path",
+                role_paths["test_label"],
+                "Test labels if present",
+            ),
         ],
         recommended_configs=[config],
         source_urls=[url],
@@ -532,16 +599,25 @@ def stage_cremi(project_root: Path) -> ProjectSpec:
         for name, url in urls.items():
             download(url, project_dir / "data/source" / name)
     config_base = project_dir / "configs/CREMI-Official-Base.yaml"
-    copy_file(REPO_ROOT / "pytorch_connectomics/configs/CREMI/CREMI-Base.yaml", config_base)
+    copy_file(
+        REPO_ROOT / "pytorch_connectomics/configs/CREMI/CREMI-Base.yaml", config_base
+    )
     config_model = project_dir / "configs/CREMI-Foreground-UNet.yaml"
-    copy_file(REPO_ROOT / "pytorch_connectomics/configs/CREMI/CREMI-Foreground-UNet.yaml", config_model)
+    copy_file(
+        REPO_ROOT / "pytorch_connectomics/configs/CREMI/CREMI-Foreground-UNet.yaml",
+        config_model,
+    )
     spec = ProjectSpec(
         slug=slug,
         title="Prepilot CREMI Official Crops",
         task="Synaptic cleft detection and HDF5-key stress test",
         source="CREMI challenge official cropped datasets",
         roles=[
-            Role("dataset_path", project_dir / "data/source", "Official CREMI HDF5 containers"),
+            Role(
+                "dataset_path",
+                project_dir / "data/source",
+                "Official CREMI HDF5 containers",
+            ),
             Role(
                 "image_path",
                 project_dir / "data/source/sample_A_20160501.hdf",
@@ -581,9 +657,15 @@ def stage_nucmm_mouse(project_root: Path) -> ProjectSpec:
             download(url, archive)
             extract_zip(archive, source_dir)
     config_base = project_dir / "configs/NucMM-Mouse-Base.yaml"
-    copy_file(REPO_ROOT / "pytorch_connectomics/configs/NucMM/NucMM-Mouse-Base.yaml", config_base)
+    copy_file(
+        REPO_ROOT / "pytorch_connectomics/configs/NucMM/NucMM-Mouse-Base.yaml",
+        config_base,
+    )
     config_model = project_dir / "configs/NucMM-Mouse-UNet-BC.yaml"
-    copy_file(REPO_ROOT / "pytorch_connectomics/configs/NucMM/NucMM-Mouse-UNet-BC.yaml", config_model)
+    copy_file(
+        REPO_ROOT / "pytorch_connectomics/configs/NucMM/NucMM-Mouse-UNet-BC.yaml",
+        config_model,
+    )
 
     h5_files = sorted(source_dir.rglob("*.h5"))
     image_guess = next((p for p in h5_files if p.name.startswith(("img", "im_"))), None)
@@ -600,8 +682,16 @@ def stage_nucmm_mouse(project_root: Path) -> ProjectSpec:
         source="pytc/NucMM Hugging Face dataset",
         roles=[
             Role("dataset_path", project_dir / "data", "Project data root"),
-            Role("image_path", project_dir / f"data/image/{image_guess.name}" if image_guess else None, "Guessed mouse nuclei image volume"),
-            Role("label_path", project_dir / f"data/seg/{seg_guess.name}" if seg_guess else None, "Guessed mouse nuclei label volume"),
+            Role(
+                "image_path",
+                project_dir / f"data/image/{image_guess.name}" if image_guess else None,
+                "Guessed mouse nuclei image volume",
+            ),
+            Role(
+                "label_path",
+                project_dir / f"data/seg/{seg_guess.name}" if seg_guess else None,
+                "Guessed mouse nuclei label volume",
+            ),
         ],
         recommended_configs=[config_base, config_model],
         source_urls=[url],
@@ -630,7 +720,9 @@ def write_index(project_root: Path, specs: list[ProjectSpec]) -> None:
         note = spec.notes[0] if spec.notes else ""
         lines.append(f"| `{spec.slug}` | {spec.task} | {spec.status} | {note} |")
     lines.append("")
-    lines.append("Large datasets intentionally omitted unless they fit local disk constraints: full MitoEM, MitoEM2.0, padded CREMI, and NucMM-Z.")
+    lines.append(
+        "Large datasets intentionally omitted unless they fit local disk constraints: full MitoEM, MitoEM2.0, padded CREMI, and NucMM-Z."
+    )
     lines.append("")
     (project_root / "README.md").write_text("\n".join(lines))
 

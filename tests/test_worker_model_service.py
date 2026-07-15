@@ -41,8 +41,12 @@ class WorkerModelServiceTests(unittest.TestCase):
             "--inference",
         ]
 
-        self.assertTrue(model_service._matches_pytc_mode_process(train_cmdline, "train"))
-        self.assertFalse(model_service._matches_pytc_mode_process(train_cmdline, "test"))
+        self.assertTrue(
+            model_service._matches_pytc_mode_process(train_cmdline, "train")
+        )
+        self.assertFalse(
+            model_service._matches_pytc_mode_process(train_cmdline, "test")
+        )
         self.assertTrue(
             model_service._matches_pytc_mode_process(inference_cmdline, "test")
         )

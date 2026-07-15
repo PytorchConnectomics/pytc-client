@@ -55,13 +55,17 @@ def _validate_same_shape(*arrays: np.ndarray) -> None:
         raise ValueError(f"Evaluation arrays must have identical shape; got {shapes}")
 
 
-def _safe_ratio(numerator: float, denominator: float, empty_value: float = 1.0) -> float:
+def _safe_ratio(
+    numerator: float, denominator: float, empty_value: float = 1.0
+) -> float:
     if denominator == 0:
         return empty_value
     return float(numerator / denominator)
 
 
-def _segmentation_metrics(prediction: np.ndarray, ground_truth: np.ndarray) -> Dict[str, Any]:
+def _segmentation_metrics(
+    prediction: np.ndarray, ground_truth: np.ndarray
+) -> Dict[str, Any]:
     prediction_binary = prediction > 0
     truth_binary = ground_truth > 0
     intersection = np.logical_and(prediction_binary, truth_binary).sum()

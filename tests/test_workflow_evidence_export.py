@@ -3,6 +3,7 @@ import tempfile
 import unittest
 
 import pytest
+
 pytest.importorskip("sqlalchemy")
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
@@ -134,7 +135,9 @@ class WorkflowEvidenceExportTests(unittest.TestCase):
 
         with self.SessionLocal() as db:
             workflow = (
-                db.query(WorkflowSession).filter(WorkflowSession.id == workflow_id).first()
+                db.query(WorkflowSession)
+                .filter(WorkflowSession.id == workflow_id)
+                .first()
             )
             events = (
                 db.query(WorkflowEvent)
@@ -167,7 +170,10 @@ class WorkflowEvidenceExportTests(unittest.TestCase):
                 for change in export_payload["user_status_changes"]
             )
         )
-        self.assertEqual(export_payload["agent_proposal_approval_links"][0]["approval_status"], "approved")
+        self.assertEqual(
+            export_payload["agent_proposal_approval_links"][0]["approval_status"],
+            "approved",
+        )
         self.assertIn("action", export_payload["agent_proposal_approval_links"][0])
         self.assertIn("model_context", export_payload)
 
@@ -177,15 +183,29 @@ class WorkflowEvidenceExportTests(unittest.TestCase):
         self.assertEqual(node["proposal"]["action"], "start_training_run")
         self.assertIsNotNone(node["approval"])
         self.assertEqual(node["approval"]["status"], "approved")
-        self.assertTrue(any(item["event_type"] == "training.run_approved" for item in node["action_events"]))
-        self.assertTrue(any(item.get("command_type") == "start_training" for item in node["commands"]))
+        self.assertTrue(
+            any(
+                item["event_type"] == "training.run_approved"
+                for item in node["action_events"]
+            )
+        )
+        self.assertTrue(
+            any(
+                item.get("command_type") == "start_training"
+                for item in node["commands"]
+            )
+        )
         self.assertEqual(len(node["runs"]), 1)
         run_node = node["runs"][0]
         self.assertEqual(run_node["run_type"], "training")
         self.assertEqual(run_node["run_id"], "evidence-run-1")
         self.assertGreaterEqual(len(run_node["progress_events"]), 2)
-        self.assertEqual(run_node["progress_events"][0]["event_type"], "training.started")
-        self.assertEqual(run_node["progress_events"][1]["event_type"], "training.completed")
+        self.assertEqual(
+            run_node["progress_events"][0]["event_type"], "training.started"
+        )
+        self.assertEqual(
+            run_node["progress_events"][1]["event_type"], "training.completed"
+        )
 
 
 if __name__ == "__main__":

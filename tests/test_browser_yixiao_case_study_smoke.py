@@ -64,7 +64,11 @@ def test_arg_parser_defaults_are_browser_ready() -> None:
 
 
 def test_run_smoke_raises_install_guidance_when_playwright_missing(monkeypatch) -> None:
-    monkeypatch.setattr(smoke, "_playwright_import_error", lambda: ModuleNotFoundError("no module named playwright"))
+    monkeypatch.setattr(
+        smoke,
+        "_playwright_import_error",
+        lambda: ModuleNotFoundError("no module named playwright"),
+    )
 
     with pytest.raises(RuntimeError) as exc:
         smoke.run_smoke(

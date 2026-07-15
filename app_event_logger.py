@@ -32,7 +32,11 @@ def _detect_stream_level(default_level: str, message: str) -> str:
     upper = text.upper()
     if upper.startswith("INFO:") or " INFO:" in upper:
         return "INFO"
-    if upper.startswith("WARNING:") or upper.startswith("WARN:") or " WARNING:" in upper:
+    if (
+        upper.startswith("WARNING:")
+        or upper.startswith("WARN:")
+        or " WARNING:" in upper
+    ):
         return "WARNING"
     if upper.startswith("DEBUG:") or " DEBUG:" in upper:
         return "DEBUG"

@@ -108,7 +108,9 @@ def generate_smoke_artifacts(output_dir: Path) -> Dict[str, str]:
         str(paths["candidate_prediction"]), candidate, photometric="minisblack"
     )
     paths["training_output"].mkdir(parents=True, exist_ok=True)
-    paths["checkpoint"].write_text("synthetic checkpoint placeholder\n", encoding="utf-8")
+    paths["checkpoint"].write_text(
+        "synthetic checkpoint placeholder\n", encoding="utf-8"
+    )
 
     return {key: str(value) for key, value in paths.items()}
 
@@ -309,7 +311,9 @@ def generate_real_pair_artifacts(
         "source_mask": str(Path(mask_path).expanduser()),
         "source_ground_truth": str(Path(ground_truth_source).expanduser()),
         "image": _write_tiff(artifact_dir / "image-crop.tif", image),
-        "initial_mask": _write_tiff(artifact_dir / "initial-mask-derived.tif", baseline),
+        "initial_mask": _write_tiff(
+            artifact_dir / "initial-mask-derived.tif", baseline
+        ),
         "corrected_mask": _write_tiff(
             artifact_dir / "corrected-mask-crop.tif", ground_truth
         ),
@@ -382,13 +386,17 @@ def run_closed_loop_smoke(
     output_dir.mkdir(parents=True, exist_ok=True)
     if image_path or mask_path:
         if not image_path or not mask_path:
-            raise ValueError("Real-artifact mode requires both image_path and mask_path")
+            raise ValueError(
+                "Real-artifact mode requires both image_path and mask_path"
+            )
         if require_explicit_ground_truth and not ground_truth_path:
             raise ValueError(
                 "Closed-loop real-artifact mode requires explicit --ground-truth-path for "
                 "evaluation in closed-loop rehearsal mode."
             )
-        has_prediction_inputs = bool(baseline_prediction_path or candidate_prediction_path)
+        has_prediction_inputs = bool(
+            baseline_prediction_path or candidate_prediction_path
+        )
         if has_prediction_inputs and not (
             baseline_prediction_path and candidate_prediction_path
         ):
@@ -708,9 +716,11 @@ def run_closed_loop_smoke(
                 "checkpoint": artifacts["checkpoint"],
                 "training_run_checkpoint": latest_training_run.get("checkpoint_path"),
                 "inference_run_checkpoint": latest_inference_run.get("checkpoint_path"),
-                "model_version_checkpoint": latest_model_version.get("checkpoint_path")
-                if latest_model_version
-                else None,
+                "model_version_checkpoint": (
+                    latest_model_version.get("checkpoint_path")
+                    if latest_model_version
+                    else None
+                ),
             },
             "runtime_overrides": {
                 "training_iterations": training_iterations,
@@ -761,12 +771,14 @@ def run_closed_loop_smoke(
                 "long-running job queue, cancellation, retry, and failure recovery",
             ],
             "supported_volume_formats": list(SUPPORTED_VOLUME_FORMATS),
-            "researcher_only_checks": [
-                "case-study readiness gate",
-                "bounded agent plan preview and approval audit",
-            ]
-            if include_research_plan
-            else ["case-study readiness gate without plan approval"],
+            "researcher_only_checks": (
+                [
+                    "case-study readiness gate",
+                    "bounded agent plan preview and approval audit",
+                ]
+                if include_research_plan
+                else ["case-study readiness gate without plan approval"]
+            ),
             "artifacts": artifacts,
         }
         _write_json(output_dir / "smoke-report.json", report)
@@ -775,9 +787,9 @@ def run_closed_loop_smoke(
         if previous_override is None:
             server_api_app.dependency_overrides.pop(auth_database.get_db, None)
         else:
-            server_api_app.dependency_overrides[
-                auth_database.get_db
-            ] = previous_override
+            server_api_app.dependency_overrides[auth_database.get_db] = (
+                previous_override
+            )
         engine.dispose()
 
 

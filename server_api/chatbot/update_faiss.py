@@ -39,9 +39,7 @@ def read_index_settings(faiss_directory: Path) -> Optional[dict]:
         return None
 
 
-def write_index_settings(
-    faiss_directory: Path, *, model: str, base_url: str
-) -> None:
+def write_index_settings(faiss_directory: Path, *, model: str, base_url: str) -> None:
     settings_path = faiss_directory / INDEX_SETTINGS_FILENAME
     settings_path.write_text(
         json.dumps({"model": model, "base_url": base_url}, indent=2) + "\n",

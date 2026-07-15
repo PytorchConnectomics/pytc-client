@@ -67,10 +67,12 @@ def test_side_axis_active_mask_uses_original_instance_labels(tmp_path):
     manager.load_dataset(str(image_path), str(mask_path))
     manager.ensure_instances()
 
-    image_slice, label_slice, active_mask, index, total = manager.get_instance_slice_axis(
-        instance_id=300,
-        axis="zx",
-        index=2,
+    image_slice, label_slice, active_mask, index, total = (
+        manager.get_instance_slice_axis(
+            instance_id=300,
+            axis="zx",
+            index=2,
+        )
     )
 
     assert index == 2

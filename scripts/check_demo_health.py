@@ -12,7 +12,6 @@ from urllib.parse import urljoin
 
 import requests
 
-
 DEFAULT_DEMO_BASE = "https://demo.seg.bio"
 DEFAULT_TIMEOUT = 5.0
 
@@ -100,7 +99,9 @@ def _check_workflow_routes(
     canonical_path = "/api/workflows/current"
     compat_path = "/api/api/workflows/current"
 
-    canonical_response = requests.get(_build_url(base_url, canonical_path), timeout=timeout)
+    canonical_response = requests.get(
+        _build_url(base_url, canonical_path), timeout=timeout
+    )
     canonical_result, canonical_payload = _check_json_dict(
         canonical_response,
         check_name="workflow.current",
@@ -160,11 +161,15 @@ def _check_files_root(base_url: str, timeout: float) -> CheckResult:
             "Files root returned non-list JSON",
         )
 
-    return CheckResult("files.root", True, f"Files root returned {len(payload)} entries")
+    return CheckResult(
+        "files.root", True, f"Files root returned {len(payload)} entries"
+    )
 
 
 def _check_project_suggestions(base_url: str, timeout: float) -> CheckResult:
-    response = requests.get(_build_url(base_url, "/api/files/project-suggestions"), timeout=timeout)
+    response = requests.get(
+        _build_url(base_url, "/api/files/project-suggestions"), timeout=timeout
+    )
     status_result = _require_status(
         response,
         expected=200,
@@ -215,7 +220,9 @@ def _check_app_log_event(base_url: str, timeout: float) -> CheckResult:
 
     payload = _to_json(response)
     if not isinstance(payload, dict):
-        return CheckResult("app.log_event", False, "App log event returned non-JSON payload")
+        return CheckResult(
+            "app.log_event", False, "App log event returned non-JSON payload"
+        )
 
     status_value = str(payload.get("status", "")).lower()
     if status_value not in {"ok", "success"}:

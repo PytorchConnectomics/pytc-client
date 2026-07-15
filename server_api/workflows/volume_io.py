@@ -44,7 +44,9 @@ def split_dataset_ref(path: str) -> Tuple[str, Optional[str]]:
 def parse_crop(crop: CropSpec) -> Optional[Tuple[slice, ...]]:
     if crop is None:
         return None
-    if isinstance(crop, (list, tuple)) and all(isinstance(item, slice) for item in crop):
+    if isinstance(crop, (list, tuple)) and all(
+        isinstance(item, slice) for item in crop
+    ):
         return tuple(crop)
     if not isinstance(crop, str):
         raise ValueError("crop must be a string like '0:16,0:256,0:256'")
@@ -237,7 +239,11 @@ def _read_hdf5(
 
 
 def _is_zarr_array(value: Any) -> bool:
-    return hasattr(value, "shape") and hasattr(value, "dtype") and hasattr(value, "__getitem__")
+    return (
+        hasattr(value, "shape")
+        and hasattr(value, "dtype")
+        and hasattr(value, "__getitem__")
+    )
 
 
 def _collect_zarr_arrays(group: Any, prefix: str = "") -> List[str]:
@@ -259,7 +265,9 @@ def _collect_zarr_arrays(group: Any, prefix: str = "") -> List[str]:
 def _select_zarr_array(store: Any, dataset_key: Optional[str]) -> Any:
     if _is_zarr_array(store):
         if dataset_key:
-            raise ValueError("Dataset key was provided, but Zarr path is already an array")
+            raise ValueError(
+                "Dataset key was provided, but Zarr path is already an array"
+            )
         return store
 
     if dataset_key:

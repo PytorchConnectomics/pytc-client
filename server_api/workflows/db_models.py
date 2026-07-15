@@ -281,9 +281,7 @@ class WorkflowModelRun(Base):
     )
 
     workflow = relationship("WorkflowSession", back_populates="model_runs")
-    input_artifact = relationship(
-        "WorkflowArtifact", foreign_keys=[input_artifact_id]
-    )
+    input_artifact = relationship("WorkflowArtifact", foreign_keys=[input_artifact_id])
     output_artifact = relationship(
         "WorkflowArtifact", foreign_keys=[output_artifact_id]
     )
@@ -300,7 +298,9 @@ class WorkflowModelVersion(Base):
     version_label = Column(String, nullable=False, index=True)
     status = Column(String, default="candidate", index=True)
     checkpoint_path = Column(Text, nullable=True)
-    training_run_id = Column(Integer, ForeignKey("workflow_model_runs.id"), nullable=True)
+    training_run_id = Column(
+        Integer, ForeignKey("workflow_model_runs.id"), nullable=True
+    )
     checkpoint_artifact_id = Column(
         Integer, ForeignKey("workflow_artifacts.id"), nullable=True
     )
@@ -346,8 +346,12 @@ class WorkflowEvaluationResult(Base):
         Integer, ForeignKey("workflow_sessions.id"), nullable=False, index=True
     )
     name = Column(String, nullable=True)
-    baseline_run_id = Column(Integer, ForeignKey("workflow_model_runs.id"), nullable=True)
-    candidate_run_id = Column(Integer, ForeignKey("workflow_model_runs.id"), nullable=True)
+    baseline_run_id = Column(
+        Integer, ForeignKey("workflow_model_runs.id"), nullable=True
+    )
+    candidate_run_id = Column(
+        Integer, ForeignKey("workflow_model_runs.id"), nullable=True
+    )
     model_version_id = Column(
         Integer, ForeignKey("workflow_model_versions.id"), nullable=True
     )

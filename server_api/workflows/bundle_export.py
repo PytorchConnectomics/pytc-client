@@ -29,7 +29,16 @@ from .service import (
 BUNDLE_SCHEMA_VERSION = "workflow-export-bundle/v1"
 DEFAULT_COPY_MAX_BYTES = 104_857_600
 DEFAULT_RAW_COPY_MAX_BYTES = 0
-IMAGE_FILE_EXTENSIONS = {".tif", ".tiff", ".h5", ".hdf5", ".nii", ".nii.gz", ".n5", ".zarr"}
+IMAGE_FILE_EXTENSIONS = {
+    ".tif",
+    ".tiff",
+    ".h5",
+    ".hdf5",
+    ".nii",
+    ".nii.gz",
+    ".n5",
+    ".zarr",
+}
 PROJECT_MEMORY_SUMMARY_VERSION = "pytc-project-memory-summary/v1"
 COPY_POLICY_DEFAULT = {"allow_copy": True, "reason": None, "policy_code": "default"}
 COPY_POLICY_EXPLICIT_REASONS = {
@@ -51,6 +60,8 @@ def _safe_len_relationship(workflow: WorkflowSession, attr_name: str) -> int:
     except DetachedInstanceError:
         return 0
     return len(records or [])
+
+
 REFERENCE_ONLY_PATH_KEYS = {
     "withheld_ground_truth",
     "withheld_ground_truth_path",
@@ -134,6 +145,7 @@ def _normalize_copy_policy_reason(
             return _merge_copy_reasons(str(base), reference_reason)
     return str(base)
 
+
 def _is_path_key(key: str) -> bool:
     lowered = key.lower()
     if not lowered:
@@ -148,17 +160,23 @@ def _is_path_key(key: str) -> bool:
         return True
     return False
 
-def _should_mark_reference_only(key: str, path_text: str, dataset_root: str | None) -> tuple[bool, Optional[str]]:
+
+def _should_mark_reference_only(
+    key: str, path_text: str, dataset_root: str | None
+) -> tuple[bool, Optional[str]]:
     lowered = key.lower()
     if lowered in REFERENCE_ONLY_PATH_KEYS or "withheld" in lowered:
         return True, "withheld_reference"
     if "ground_truth" in lowered:
-        return not _path_within_root(path_text, dataset_root), "ground_truth_reference_outside_dataset"
+        return (
+            not _path_within_root(path_text, dataset_root),
+            "ground_truth_reference_outside_dataset",
+        )
     return False, None
 
 
 def _copy_policy_from_metadata(
-    metadata: Optional[Dict[str, Any]]
+    metadata: Optional[Dict[str, Any]],
 ) -> Optional[Dict[str, Any]]:
     if not isinstance(metadata, dict):
         return None
@@ -199,7 +217,9 @@ def _build_copy_policy(
                 reason if isinstance(reason, str) else None
             ),
         }
-    should_reference_only, reason = _should_mark_reference_only(key, path_text, dataset_root)
+    should_reference_only, reason = _should_mark_reference_only(
+        key, path_text, dataset_root
+    )
     return {
         "allow_copy": not should_reference_only,
         "reason": reason,
@@ -229,8 +249,12 @@ def _merge_copy_policies(
     merged = dict(COPY_POLICY_DEFAULT)
     current = current or {}
     incoming = incoming or {}
-    current_reason = current.get("reason") if isinstance(current.get("reason"), str) else None
-    incoming_reason = incoming.get("reason") if isinstance(incoming.get("reason"), str) else None
+    current_reason = (
+        current.get("reason") if isinstance(current.get("reason"), str) else None
+    )
+    incoming_reason = (
+        incoming.get("reason") if isinstance(incoming.get("reason"), str) else None
+    )
     merged.update(current)
     merged_allow_copy = bool(current.get("allow_copy", True)) and bool(
         incoming.get("allow_copy", True)
@@ -273,7 +297,6 @@ def _coalesce_reference_scope(
             else current_scope.get("reference_key")
         ),
     }
-
 
 
 def _build_skipped_artifact_record(
@@ -348,7 +371,9 @@ def _looks_like_raw_image_path(path_text: str) -> bool:
         return True
     if re.search(r"(^|[._-])raw([._-]|$)", normalized):
         return True
-    return any(segment == "raw" for segment in normalized.strip("/").split("/") if segment)
+    return any(
+        segment == "raw" for segment in normalized.strip("/").split("/") if segment
+    )
 
 
 def _is_image_like_path(path_text: str) -> bool:
@@ -413,14 +438,18 @@ def _collect_paths(
                 continue
 
             if isinstance(inner, str) and _is_path_key(key):
-                _, reference_reason = _should_mark_reference_only(key, inner, dataset_root)
+                _, reference_reason = _should_mark_reference_only(
+                    key, inner, dataset_root
+                )
                 yield {
                     "path": inner,
                     "source_type": source_type,
                     "source_id": source_id,
                     "source_key": key,
                     "source_parent_key": parent_key,
-                    "copy_policy": _build_copy_policy(key, inner, dataset_root, metadata),
+                    "copy_policy": _build_copy_policy(
+                        key, inner, dataset_root, metadata
+                    ),
                     "reference_scope": _reference_scope(key, reference_reason),
                 }
 
@@ -445,9 +474,7 @@ def _collect_paths(
                 metadata=metadata,
             )
     elif isinstance(value, str) and path_key and _is_path_key(path_key):
-        _, reference_reason = _should_mark_reference_only(
-            path_key, value, dataset_root
-        )
+        _, reference_reason = _should_mark_reference_only(path_key, value, dataset_root)
         yield {
             "path": value,
             "source_type": source_type,
@@ -488,9 +515,7 @@ def _coalesce_path_reference(
     return merged
 
 
-def _dedupe_path_refs(
-    refs: Iterable[Dict[str, Any]]
-) -> List[Dict[str, Any]]:
+def _dedupe_path_refs(refs: Iterable[Dict[str, Any]]) -> List[Dict[str, Any]]:
     by_path: Dict[str, Dict[str, Any]] = {}
     for item in refs:
         path = item.get("path")
@@ -727,7 +752,9 @@ def write_export_bundle_directory(
     max_bytes = _parse_positive_int(
         copy_max_bytes,
         default=int(
-            os.environ.get("PYTC_WORKFLOW_BUNDLE_COPY_MAX_BYTES", str(DEFAULT_COPY_MAX_BYTES))
+            os.environ.get(
+                "PYTC_WORKFLOW_BUNDLE_COPY_MAX_BYTES", str(DEFAULT_COPY_MAX_BYTES)
+            )
         ),
         field_name="copy_max_bytes",
     )
@@ -735,7 +762,8 @@ def write_export_bundle_directory(
         raw_copy_max_bytes,
         default=int(
             os.environ.get(
-                "PYTC_WORKFLOW_BUNDLE_RAW_COPY_MAX_BYTES", str(DEFAULT_RAW_COPY_MAX_BYTES)
+                "PYTC_WORKFLOW_BUNDLE_RAW_COPY_MAX_BYTES",
+                str(DEFAULT_RAW_COPY_MAX_BYTES),
             )
         ),
         field_name="raw_copy_max_bytes",
@@ -799,12 +827,16 @@ def write_export_bundle_directory(
             )
             continue
         size_bytes = source.stat().st_size
-        is_likely_raw_image = _is_image_like_path(str(source)) and _looks_like_raw_image_path(
+        is_likely_raw_image = _is_image_like_path(
             str(source)
-        )
+        ) and _looks_like_raw_image_path(str(source))
         effective_max_bytes = raw_image_max_bytes if is_likely_raw_image else max_bytes
         if size_bytes > effective_max_bytes:
-            skip_reason = "raw_larger_than_copy_limit" if is_likely_raw_image else "larger_than_copy_limit"
+            skip_reason = (
+                "raw_larger_than_copy_limit"
+                if is_likely_raw_image
+                else "larger_than_copy_limit"
+            )
             skipped_artifacts.append(
                 _build_skipped_artifact_record(
                     path=path_text,
@@ -815,7 +847,9 @@ def write_export_bundle_directory(
                     reference_scope=reference_scope,
                     size_bytes=size_bytes,
                     copy_limit_bytes=effective_max_bytes,
-                    raw_copy_max_bytes=raw_image_max_bytes if is_likely_raw_image else None,
+                    raw_copy_max_bytes=(
+                        raw_image_max_bytes if is_likely_raw_image else None
+                    ),
                 )
             )
             continue

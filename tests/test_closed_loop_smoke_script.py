@@ -23,9 +23,10 @@ def test_closed_loop_smoke_script_writes_researcher_evidence_bundle(tmp_path):
     assert report["bundle_counts"]["evaluation_results"] == 1
     assert report["bundle_counts"]["agent_plans"] == 1
     assert "actual PyTC training subprocess" in report["simulated_or_not_exercised"]
-    assert "browser-level proofreading editor interaction" in report[
-        "simulated_or_not_exercised"
-    ]
+    assert (
+        "browser-level proofreading editor interaction"
+        in report["simulated_or_not_exercised"]
+    )
 
     assert (tmp_path / "smoke-report.json").exists()
     assert (tmp_path / "workflow-bundle.json").exists()
@@ -57,9 +58,10 @@ def test_closed_loop_smoke_script_accepts_real_hdf5_pair(tmp_path):
     assert report["ready_for_case_study"] is True
     assert report["source_data"]["image_dataset"] == "main"
     assert report["source_data"]["mask_dataset"] == "data"
-    assert "real biomedical/connectomics sample data" not in report[
-        "simulated_or_not_exercised"
-    ]
+    assert (
+        "real biomedical/connectomics sample data"
+        not in report["simulated_or_not_exercised"]
+    )
     assert any(
         item.startswith("baseline/candidate predictions derived")
         for item in report["simulated_or_not_exercised"]
@@ -124,9 +126,10 @@ def test_closed_loop_smoke_script_accepts_real_hdf5_predictions(tmp_path):
     assert report["metric_summary"]["dice_delta"] > 0
     assert report["source_data"]["baseline_dataset"] == "prediction"
     assert report["source_data"]["candidate_dataset"] == "prediction"
-    assert "real prediction artifacts supplied by caller" in report[
-        "real_checks_exercised"
-    ]
+    assert (
+        "real prediction artifacts supplied by caller"
+        in report["real_checks_exercised"]
+    )
     assert not any(
         item.startswith("baseline/candidate predictions derived")
         for item in report["simulated_or_not_exercised"]

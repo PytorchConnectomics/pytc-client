@@ -64,7 +64,9 @@ def _normalize_progress_labels(raw: str) -> str:
     return (raw or "").replace("\n", " ").strip()
 
 
-def _extract_progress_from_text(raw_text: str) -> Tuple[Dict[str, int], Optional[int], Optional[int]]:
+def _extract_progress_from_text(
+    raw_text: str,
+) -> Tuple[Dict[str, int], Optional[int], Optional[int]]:
     """Extract summary fields from visible page text.
 
     Returns:
@@ -75,7 +77,9 @@ def _extract_progress_from_text(raw_text: str) -> Tuple[Dict[str, int], Optional
     values: Dict[str, int] = {}
     for label, expected in EXPECTED_PROGRESS.items():
         # Keep this tolerant of layout-specific whitespace/newlines.
-        match = re.search(rf"{re.escape(label)}\s*[^0-9]*?(\"?\d+)?,?", text, re.IGNORECASE)
+        match = re.search(
+            rf"{re.escape(label)}\s*[^0-9]*?(\"?\d+)?,?", text, re.IGNORECASE
+        )
         if not match:
             continue
         if match.group(1):
@@ -116,10 +120,7 @@ def _build_arg_parser() -> argparse.ArgumentParser:
         "--timeout-ms",
         type=int,
         default=30_000,
-        help=(
-            "Timeout in ms for each high-level UI wait step. "
-            "Defaults to 30000."
-        ),
+        help=("Timeout in ms for each high-level UI wait step. " "Defaults to 30000."),
     )
     parser.add_argument(
         "--viewport",
@@ -165,6 +166,7 @@ def _parse_viewport(value: str) -> Tuple[int, int]:
 def _playwright_import_error() -> Optional[BaseException]:
     try:
         from playwright.sync_api import sync_playwright  # type: ignore
+
         return None
     except ModuleNotFoundError as exc:
         return exc
@@ -190,6 +192,7 @@ def _resolve_browser_playwright(playwright) -> None:
         f"No Playwright browser runtime was available. Attempts: {'; '.join(errors)}"
     )
 
+
 def _open_tab(page, label: str):
     menu_item = page.locator(".pytc-top-menu .ant-menu-item").filter(
         has_text=label,
@@ -210,7 +213,9 @@ def _wait_for_project_mount(page, timeout_ms: int) -> None:
     if _is_text_visible(page, PROJECT_NAME):
         return
 
-    suggest_button = page.get_by_role("button", name=re.compile(r"Use suggested project|Open suggested project", re.I))
+    suggest_button = page.get_by_role(
+        "button", name=re.compile(r"Use suggested project|Open suggested project", re.I)
+    )
     if suggest_button.count() > 0 and suggest_button.first.is_enabled():
         suggest_button.first.click()
         try:
@@ -231,15 +236,19 @@ def _assert_required_project_entries(page, timeout_ms: int) -> None:
     for entry in PROJECT_ROOT_ENTRIES:
         locator = page.get_by_text(re.compile(rf"\b{re.escape(entry)}\b", re.I))
         if locator.count() == 0:
-            raise AssertionError(f"Required project entry '{entry}' not visible on the page")
+            raise AssertionError(
+                f"Required project entry '{entry}' not visible on the page"
+            )
         try:
             locator.first.wait_for(timeout=timeout_ms)
         except Exception as exc:
-            raise AssertionError(f"Required project entry '{entry}' never appeared") from exc
+            raise AssertionError(
+                f"Required project entry '{entry}' never appeared"
+            ) from exc
 
 
 def _extract_progress_snapshot(page) -> Dict[str, Any]:
-    script = r'''
+    script = r"""
     () => {
       const labels = {
         "Tracked volumes": "tracked",
@@ -282,7 +291,7 @@ def _extract_progress_snapshot(page) -> Dict[str, Any]:
         segmentation_coverage_percent: segMatch ? Number(segMatch[1]) : null,
       };
     }
-    '''
+    """
     return page.evaluate(script)
 
 
@@ -297,7 +306,9 @@ def _assert_progress(snapshot: Dict[str, Any]) -> None:
     for key, expected in expected_metric_map.items():
         actual = metrics.get(key)
         if actual != expected:
-            raise AssertionError(f"Progress metric '{key}' expected {expected}, got {actual}")
+            raise AssertionError(
+                f"Progress metric '{key}' expected {expected}, got {actual}"
+            )
 
     completion_pct = snapshot.get("completion_percent")
     segcov_pct = snapshot.get("segmentation_coverage_percent")
@@ -313,7 +324,7 @@ def _assert_progress(snapshot: Dict[str, Any]) -> None:
 
 
 def _open_assistant(page) -> None:
-    open_buttons = page.locator('.pytc-top-nav button.ant-btn-circle')
+    open_buttons = page.locator(".pytc-top-nav button.ant-btn-circle")
     if open_buttons.count() < 1:
         raise AssertionError("Could not find assistant open button on top nav")
     open_buttons.last.click()
@@ -322,7 +333,7 @@ def _open_assistant(page) -> None:
 
 
 def _send_assistant_query(page, query: str, timeout_ms: int) -> str:
-    messages = page.locator('.ant-list-item')
+    messages = page.locator(".ant-list-item")
     before = messages.count()
 
     input_box = page.get_by_placeholder("Message")
@@ -354,7 +365,9 @@ def _send_assistant_query(page, query: str, timeout_ms: int) -> str:
 
 
 def _wait_for_training_proposal(page, timeout_ms: int):
-    locator = page.locator("section[aria-label^='proposal-']").filter(has_text="Approve Training Run")
+    locator = page.locator("section[aria-label^='proposal-']").filter(
+        has_text="Approve Training Run"
+    )
     locator.first.wait_for(timeout=timeout_ms)
     return locator.first
 
@@ -367,7 +380,9 @@ def _check_proposal_editing(page, proposal_locator) -> Dict[str, Any]:
 
     editable_fields = proposal_locator.locator('[aria-label^="Edit "]')
     if editable_fields.count() == 0:
-        raise AssertionError("Training proposal edit mode did not expose any editable fields.")
+        raise AssertionError(
+            "Training proposal edit mode did not expose any editable fields."
+        )
 
     editable_field = editable_fields.first
     field_label = editable_field.get_attribute("aria-label") or "Edit field"
@@ -378,7 +393,9 @@ def _check_proposal_editing(page, proposal_locator) -> Dict[str, Any]:
 
     approve_button = proposal_locator.locator('button:has-text("Approve with edits")')
     if approve_button.count() == 0:
-        raise AssertionError("Proposal edit flow did not flag edited fields as expected.")
+        raise AssertionError(
+            "Proposal edit flow did not flag edited fields as expected."
+        )
 
     cancel_button = proposal_locator.locator('button:has-text("Cancel edits")')
     if cancel_button.count() == 0:
@@ -483,8 +500,14 @@ def _refresh_and_reopen_checks(page, timeout_ms: int, skip_assistant: bool) -> N
         )
 
 
-def run_smoke(base_url: str, timeout_ms: int, viewport: Tuple[int, int],
-              headless: bool, skip_assistant: bool, skip_reload: bool) -> Dict[str, Any]:
+def run_smoke(
+    base_url: str,
+    timeout_ms: int,
+    viewport: Tuple[int, int],
+    headless: bool,
+    skip_assistant: bool,
+    skip_reload: bool,
+) -> Dict[str, Any]:
     result = {
         "passed": True,
         "base_url": base_url,
@@ -559,7 +582,9 @@ def run_smoke(base_url: str, timeout_ms: int, viewport: Tuple[int, int],
                 result["proposal_card_metrics"] = overflow_report
 
             if not skip_reload:
-                _refresh_and_reopen_checks(page, timeout_ms, skip_assistant=skip_assistant)
+                _refresh_and_reopen_checks(
+                    page, timeout_ms, skip_assistant=skip_assistant
+                )
                 result["checks"].append("refresh/reopen continuity check")
 
         finally:

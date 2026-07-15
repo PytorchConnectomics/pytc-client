@@ -143,9 +143,7 @@ class WorkflowArtifactRecordTests(unittest.TestCase):
         self.assertIn("correction_set", artifact_types)
         self.assertIn("model_checkpoint", artifact_types)
         ground_truth_artifacts = [
-            artifact
-            for artifact in artifacts
-            if artifact["role"] == "ground_truth"
+            artifact for artifact in artifacts if artifact["role"] == "ground_truth"
         ]
         self.assertEqual(ground_truth_artifacts[0]["path"], ground_truth_path)
 
@@ -268,7 +266,9 @@ class WorkflowArtifactRecordTests(unittest.TestCase):
         model_runs = self.client.get(f"/api/workflows/{workflow_id}/model-runs").json()
         runs_by_id = {run["run_id"]: run for run in model_runs}
         self.assertEqual(runs_by_id["train-run-a"]["checkpoint_path"], first_checkpoint)
-        self.assertEqual(runs_by_id["train-run-b"]["checkpoint_path"], second_checkpoint)
+        self.assertEqual(
+            runs_by_id["train-run-b"]["checkpoint_path"], second_checkpoint
+        )
 
     def test_manual_evaluation_records_and_readiness_endpoint(self):
         workflow_id = self._workflow_id()

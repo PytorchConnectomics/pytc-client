@@ -51,7 +51,11 @@ def _initial_project_defaults() -> Dict[str, Any]:
     if not INITIAL_PROJECT_ROOT:
         return {}
     normalized_root = INITIAL_PROJECT_ROOT.lower()
-    if "yixiao" in normalized_root or "tapereader" in normalized_root or "xri" in normalized_root:
+    if (
+        "yixiao" in normalized_root
+        or "tapereader" in normalized_root
+        or "xri" in normalized_root
+    ):
         image_path = os.getenv(
             "PYTC_INITIAL_IMAGE_PATH",
             os.path.join(INITIAL_PROJECT_ROOT, "data/raw/1/1-xri_raw.tif"),
@@ -153,7 +157,9 @@ def _now() -> datetime:
     return datetime.now(timezone.utc)
 
 
-def _merge_dicts(base: Optional[Dict[str, Any]], patch: Optional[Dict[str, Any]]) -> Dict[str, Any]:
+def _merge_dicts(
+    base: Optional[Dict[str, Any]], patch: Optional[Dict[str, Any]]
+) -> Dict[str, Any]:
     merged: Dict[str, Any] = dict(base or {})
     for key, value in (patch or {}).items():
         if isinstance(value, dict) and isinstance(merged.get(key), dict):
@@ -232,7 +238,9 @@ def event_to_dict(event: WorkflowEvent) -> Dict[str, Any]:
         "summary": event.summary,
         "payload_json": event.payload_json,
         "payload": decode_json(event.payload_json),
-        "schema_version": getattr(event, "schema_version", DEFAULT_EVENT_SCHEMA_VERSION),
+        "schema_version": getattr(
+            event, "schema_version", DEFAULT_EVENT_SCHEMA_VERSION
+        ),
         "idempotency_key": getattr(event, "idempotency_key", None),
         "approval_status": event.approval_status,
         "created_at": event.created_at,
@@ -602,12 +610,16 @@ def _correction_stats_from_events(
             edit_count += 1
 
     return {
-        "edit_count": to_int(explicit_edit_count, edit_count)
-        if explicit_edit_count is not None
-        else edit_count,
-        "region_count": to_int(explicit_region_count, len(region_keys))
-        if explicit_region_count is not None
-        else len(region_keys),
+        "edit_count": (
+            to_int(explicit_edit_count, edit_count)
+            if explicit_edit_count is not None
+            else edit_count
+        ),
+        "region_count": (
+            to_int(explicit_region_count, len(region_keys))
+            if explicit_region_count is not None
+            else len(region_keys)
+        ),
     }
 
 
@@ -935,7 +947,9 @@ def _artifact_specs_for_event(
         add("mask_path", "mask_volume", "mask")
         add("ground_truth_path", "label_volume", "ground_truth")
         add("source_ground_truth_path", "label_volume", "ground_truth")
-        add_non_copy_path("withheld_ground_truth", "label_volume", "withheld_ground_truth")
+        add_non_copy_path(
+            "withheld_ground_truth", "label_volume", "withheld_ground_truth"
+        )
         add_non_copy_path("source_ground_truth", "label_volume", "ground_truth")
         add_non_copy_path(
             "withheld_ground_truth_path", "label_volume", "withheld_ground_truth"

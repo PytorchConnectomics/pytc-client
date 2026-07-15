@@ -190,7 +190,9 @@ def _clear_runtime_process(kind: str, process=None):
         _inference_process = None
 
 
-def _reset_runtime_state(kind: str, *, phase: str = "idle", metadata: dict | None = None):
+def _reset_runtime_state(
+    kind: str, *, phase: str = "idle", metadata: dict | None = None
+):
     state = _new_runtime_state()
     timestamp = _utc_now()
     state["phase"] = phase
@@ -373,7 +375,9 @@ def _get_runtime_snapshot(kind: str) -> dict[str, Any]:
     if kind == "inference" and not snapshot["isRunning"]:
         metadata = snapshot.get("metadata") or {}
         if not (metadata.get("predictionPath") or metadata.get("latestPredictionPath")):
-            latest_prediction = _find_latest_prediction_output(metadata.get("outputPath"))
+            latest_prediction = _find_latest_prediction_output(
+                metadata.get("outputPath")
+            )
             if latest_prediction:
                 metadata = _merge_runtime_metadata(
                     kind,
@@ -709,19 +713,32 @@ def _apply_runtime_path_overrides(
     output_path = payload.get("outputPath") or payload.get("output_path")
 
     if kind == "training":
-        input_label_path = payload.get("inputLabelPath") or payload.get("input_label_path")
+        input_label_path = payload.get("inputLabelPath") or payload.get(
+            "input_label_path"
+        )
         input_image_path, input_label_path, training_path_reason = (
             _resolve_runtime_training_inputs(input_image_path, input_label_path)
         )
-        apply(("DATASET", "INPUT_PATH"), "", "clear_runtime_input_base", allow_empty=True)
+        apply(
+            ("DATASET", "INPUT_PATH"), "", "clear_runtime_input_base", allow_empty=True
+        )
         apply(("DATASET", "IMAGE_NAME"), input_image_path, training_path_reason)
         apply(("DATASET", "LABEL_NAME"), input_label_path, training_path_reason)
         apply(("DATASET", "OUTPUT_PATH"), output_path, "runtime_request_output_path")
     else:
-        apply(("DATASET", "INPUT_PATH"), "", "clear_runtime_input_base", allow_empty=True)
+        apply(
+            ("DATASET", "INPUT_PATH"), "", "clear_runtime_input_base", allow_empty=True
+        )
         apply(("DATASET", "IMAGE_NAME"), input_image_path, "runtime_request_image_path")
-        apply(("INFERENCE", "INPUT_PATH"), "", "clear_runtime_input_base", allow_empty=True)
-        apply(("INFERENCE", "IMAGE_NAME"), input_image_path, "runtime_request_image_path")
+        apply(
+            ("INFERENCE", "INPUT_PATH"),
+            "",
+            "clear_runtime_input_base",
+            allow_empty=True,
+        )
+        apply(
+            ("INFERENCE", "IMAGE_NAME"), input_image_path, "runtime_request_image_path"
+        )
         apply(("INFERENCE", "OUTPUT_PATH"), output_path, "runtime_request_output_path")
 
     if not changes:
@@ -737,7 +754,9 @@ def _runtime_path_exists(path_value: Any) -> bool:
     if not isinstance(path_value, str) or not path_value.strip():
         return False
     try:
-        return pathlib.Path(_resolve_runtime_data_path(path_value)).expanduser().exists()
+        return (
+            pathlib.Path(_resolve_runtime_data_path(path_value)).expanduser().exists()
+        )
     except Exception:
         return False
 
@@ -779,12 +798,21 @@ def _validate_runtime_launch_inputs(
     config_obj = _load_yaml_config(config_text)
     if kind == "training":
         required = [
-            ("training image", _get_nested_value(config_obj, ("DATASET", "IMAGE_NAME"))),
-            ("training label", _get_nested_value(config_obj, ("DATASET", "LABEL_NAME"))),
+            (
+                "training image",
+                _get_nested_value(config_obj, ("DATASET", "IMAGE_NAME")),
+            ),
+            (
+                "training label",
+                _get_nested_value(config_obj, ("DATASET", "LABEL_NAME")),
+            ),
         ]
     else:
         required = [
-            ("inference image", _get_nested_value(config_obj, ("INFERENCE", "IMAGE_NAME"))),
+            (
+                "inference image",
+                _get_nested_value(config_obj, ("INFERENCE", "IMAGE_NAME")),
+            ),
             ("checkpoint", (arguments or {}).get("checkpoint")),
         ]
 
@@ -800,8 +828,7 @@ def _validate_runtime_launch_inputs(
     if missing:
         raise FileNotFoundError(
             "Cannot start "
-            f"{kind}; required path(s) do not exist: "
-            + "; ".join(missing)
+            f"{kind}; required path(s) do not exist: " + "; ".join(missing)
         )
 
 
@@ -896,8 +923,10 @@ def _sanitize_direct_volume_paths(
         origin_value = _get_nested_value(origin_obj, path)
         replacement = None
         reason = None
-        if isinstance(origin_value, str) and origin_value.strip() and _config_path_exists(
-            origin_value
+        if (
+            isinstance(origin_value, str)
+            and origin_value.strip()
+            and _config_path_exists(origin_value)
         ):
             replacement = origin_value
             reason = "restored_existing_origin_path"
@@ -1157,9 +1186,7 @@ def _register_tensorboard_source(source_key: str, log_dir: str) -> str:
         "path": str(resolved),
         "registeredAt": _utc_now(),
     }
-    _append_tensorboard_log(
-        f"[TENSORBOARD] Watching {source_key} logs at {resolved}"
-    )
+    _append_tensorboard_log(f"[TENSORBOARD] Watching {source_key} logs at {resolved}")
     append_app_event(
         component="server_pytc",
         event="tensorboard_source_registered",
@@ -1487,10 +1514,9 @@ def _start_logged_process(
                         kind,
                         **discovered_artifacts,
                     )
-                    artifact_path = (
-                        discovered_artifacts.get("latestCheckpointPath")
-                        or discovered_artifacts.get("latestPredictionPath")
-                    )
+                    artifact_path = discovered_artifacts.get(
+                        "latestCheckpointPath"
+                    ) or discovered_artifacts.get("latestPredictionPath")
                     artifact_label = (
                         "checkpoint" if kind == "training" else "prediction output"
                     )
@@ -1498,14 +1524,18 @@ def _start_logged_process(
                         kind,
                         f"Latest {artifact_label} discovered: {artifact_path}",
                         event="runtime_artifact_discovered",
-                        checkpoint_path=discovered_artifacts.get("latestCheckpointPath"),
-                        prediction_path=discovered_artifacts.get("latestPredictionPath"),
+                        checkpoint_path=discovered_artifacts.get(
+                            "latestCheckpointPath"
+                        ),
+                        prediction_path=discovered_artifacts.get(
+                            "latestPredictionPath"
+                        ),
                         output_path=merged_metadata.get("outputPath"),
                     )
                 elif kind == "training":
-                    output_path = (_get_runtime_snapshot(kind).get("metadata") or {}).get(
-                        "outputPath"
-                    )
+                    output_path = (
+                        _get_runtime_snapshot(kind).get("metadata") or {}
+                    ).get("outputPath")
                     _append_runtime_event(
                         kind,
                         f"No checkpoint artifact was found in {output_path or 'the training output directory'}.",
@@ -1802,7 +1832,9 @@ def start_training(payload: dict):
             configPath=temp_filepath,
             configOriginPath=config_origin_path,
         )
-        _append_runtime_event("training", f"Config origin: {config_origin_path or 'none'}")
+        _append_runtime_event(
+            "training", f"Config origin: {config_origin_path or 'none'}"
+        )
         _append_runtime_event("training", f"Staged config path: {temp_filepath}")
         if config_corrections:
             _append_runtime_event(
@@ -1827,7 +1859,9 @@ def start_training(payload: dict):
         )
 
         print(f"[MODEL.PY] Final training command: {' '.join(command)}")
-        _append_runtime_event("training", f"Final training command: {' '.join(command)}")
+        _append_runtime_event(
+            "training", f"Final training command: {' '.join(command)}"
+        )
         process_env = os.environ.copy()
         process_env.setdefault("PYTORCH_ALLOC_CONF", "expandable_segments:True")
         if _training_uses_gpu(config_text):
@@ -1852,7 +1886,8 @@ def start_training(payload: dict):
             ollama_unloaded_models=unloaded_models,
             config_text=config_text,
             config_text_length=len(config_text or ""),
-            config_line_count=(config_text or "").count("\n") + (1 if config_text else 0),
+            config_line_count=(config_text or "").count("\n")
+            + (1 if config_text else 0),
             config_sanitized=bool(config_corrections),
             config_corrections=config_corrections,
         )
@@ -1898,9 +1933,7 @@ def _stop_processes(matcher, description: str):
                 cmdline = proc.info["cmdline"] or []
                 if not matcher(cmdline):
                     continue
-                print(
-                    f"Terminating process {proc.info['pid']}: {' '.join(cmdline)}"
-                )
+                print(f"Terminating process {proc.info['pid']}: {' '.join(cmdline)}")
                 proc.terminate()
                 proc.wait(timeout=10)
             except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.TimeoutExpired):
@@ -2041,9 +2074,7 @@ def initialize_tensorboard(logPath: str | None = None, source_key: str = "manual
         endedAt=None,
         lastError=None,
     )
-    _append_tensorboard_log(
-        f"[TENSORBOARD] Launching with logdir spec: {logdir_spec}"
-    )
+    _append_tensorboard_log(f"[TENSORBOARD] Launching with logdir spec: {logdir_spec}")
     append_app_event(
         component="server_pytc",
         event="tensorboard_launch",
@@ -2179,7 +2210,9 @@ def start_inference(payload: dict):
         if payload.get("checkpointPath") and not arguments.get("checkpoint"):
             arguments["checkpoint"] = payload["checkpointPath"]
         if arguments.get("checkpoint"):
-            arguments["checkpoint"] = _resolve_runtime_data_path(arguments["checkpoint"])
+            arguments["checkpoint"] = _resolve_runtime_data_path(
+                arguments["checkpoint"]
+            )
         _validate_runtime_launch_inputs(
             config_text,
             kind="inference",
@@ -2201,7 +2234,9 @@ def start_inference(payload: dict):
         )
 
         print(f"[MODEL.PY] Final inference command: {' '.join(command)}")
-        _append_runtime_event("inference", f"Final inference command: {' '.join(command)}")
+        _append_runtime_event(
+            "inference", f"Final inference command: {' '.join(command)}"
+        )
         _emit_runtime_app_event(
             "inference",
             "runtime_config_snapshot",
@@ -2217,7 +2252,8 @@ def start_inference(payload: dict):
             checkpoint_path=payload.get("checkpointPath"),
             config_text=config_text,
             config_text_length=len(config_text or ""),
-            config_line_count=(config_text or "").count("\n") + (1 if config_text else 0),
+            config_line_count=(config_text or "").count("\n")
+            + (1 if config_text else 0),
             config_sanitized=bool(config_corrections),
             config_corrections=config_corrections,
         )
@@ -2289,7 +2325,8 @@ def stop_inference():
     if _inference_process and _inference_process.poll() is None:
         try:
             _append_runtime_event(
-                "inference", f"Terminating inference process PID: {_inference_process.pid}"
+                "inference",
+                f"Terminating inference process PID: {_inference_process.pid}",
             )
             print(f"Terminating inference process PID: {_inference_process.pid}")
             _inference_process.terminate()

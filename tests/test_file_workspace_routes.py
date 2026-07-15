@@ -408,9 +408,7 @@ class FileWorkspaceRouteTests(unittest.TestCase):
         (project_root / "configs" / "Mito25-Local-Smoke.yaml").write_text(
             "SYSTEM: {}\n", encoding="utf-8"
         )
-        (project_root / "checkpoints" / "checkpoint_00001.pth.tar").write_bytes(
-            b"ckpt"
-        )
+        (project_root / "checkpoints" / "checkpoint_00001.pth.tar").write_bytes(b"ckpt")
         (project_root / "predictions" / "baseline_result_xy.h5").write_bytes(
             b"baseline"
         )
@@ -455,7 +453,9 @@ class FileWorkspaceRouteTests(unittest.TestCase):
             profile["schema"]["primary_paths"]["image"],
             "raw/sample_volume.ome.tif",
         )
-        self.assertEqual(profile["schema"]["stages"]["visualization"]["status"], "ready")
+        self.assertEqual(
+            profile["schema"]["stages"]["visualization"]["status"], "ready"
+        )
         self.assertEqual(
             profile["schema"]["stages"]["inference"]["status"],
             "needs_input",
@@ -582,8 +582,12 @@ class FileWorkspaceRouteTests(unittest.TestCase):
 
         self.assertEqual(profile["role_directories"]["image"][0]["path"], "data/raw")
         self.assertEqual(profile["role_directories"]["label"][0]["path"], "data/seg")
-        self.assertEqual(profile["schema"]["primary_paths"]["image"], "data/raw/1/1-xri_raw.tif")
-        self.assertEqual(profile["schema"]["primary_paths"]["label"], "data/seg/1/1-mask.tif")
+        self.assertEqual(
+            profile["schema"]["primary_paths"]["image"], "data/raw/1/1-xri_raw.tif"
+        )
+        self.assertEqual(
+            profile["schema"]["primary_paths"]["label"], "data/seg/1/1-mask.tif"
+        )
         self.assertEqual(
             profile["schema"]["primary_paths"]["config"],
             "configs/TapeReader-Fiber-BCS-AppCompat-Sanity.yaml",

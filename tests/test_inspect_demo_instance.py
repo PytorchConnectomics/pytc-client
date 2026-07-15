@@ -61,7 +61,9 @@ def test_check_runtime_events_reports_worker_mismatch(monkeypatch, tmp_path):
         neuroglancer_port=4244,
         neuroglancer_public_base="https://demo.seg.bio/neuroglancer",
     )
-    assert any(item.name == "api.runtime_config" and item.status == "warn" for item in results)
+    assert any(
+        item.name == "api.runtime_config" and item.status == "warn" for item in results
+    )
     assert any(
         item.name == "api.runtime_config_worker_url" and item.status == "warn"
         for item in results
@@ -125,7 +127,7 @@ def test_check_worker_path_detects_mismatched_proxy_target(monkeypatch, tmp_path
                 "path": "/training_status",
                 "worker_url": "http://proxy-target:4243",
             }
-        ]
+        ],
     )
 
     def fake_request_json(*, base_url, path, **kwargs):
@@ -170,7 +172,9 @@ def test_check_worker_path_training_status_timeout_is_warning(monkeypatch, tmp_p
         timeout=1,
     )
 
-    training_result = next(item for item in results if item.name == "api.training_status")
+    training_result = next(
+        item for item in results if item.name == "api.training_status"
+    )
     assert training_result.status == "warn"
     assert "temporary overload" in training_result.details["error"]
 
@@ -198,14 +202,19 @@ def test_check_disk_and_errors_uses_tail_for_error_count(tmp_path):
     assert error_result.details["error_count"] == 1
 
 
-def test_neuroglancer_checks_port_reachability_warning_on_connection_refused(monkeypatch):
+def test_neuroglancer_checks_port_reachability_warning_on_connection_refused(
+    monkeypatch,
+):
     def fake_create_connection(addr, timeout=1):
         raise ConnectionRefusedError("refused")
 
     monkeypatch.setattr(diag.socket, "create_connection", fake_create_connection)
     results = diag.check_neuroglancer(
         api_base="https://demo.seg.bio",
-        workflow={"id": 7, "neuroglancer_url": "https://demo.seg.bio/neuroglancer/v/abc"},
+        workflow={
+            "id": 7,
+            "neuroglancer_url": "https://demo.seg.bio/neuroglancer/v/abc",
+        },
         neuroglancer_port=4244,
         neuroglancer_public_base="https://demo.seg.bio/neuroglancer",
     )
@@ -269,10 +278,15 @@ def test_run_diagnostics_emits_consistent_reports(monkeypatch, tmp_path):
     assert "api.log_path" in names
     assert "workflow.current" in names
     assert any(name == "worker.url_mismatch" for name in names)
-    assert any(check.name == "worker.url_mismatch" and check.status == "pass" for check in results)
+    assert any(
+        check.name == "worker.url_mismatch" and check.status == "pass"
+        for check in results
+    )
 
 
-def test_run_diagnostics_tolerates_training_status_timeout_as_warning(monkeypatch, tmp_path):
+def test_run_diagnostics_tolerates_training_status_timeout_as_warning(
+    monkeypatch, tmp_path
+):
     def fake_request_json(*, base_url, path, **kwargs):
         if path == "/health":
             return 200, {"status": "ok"}, None
@@ -324,7 +338,8 @@ def test_run_diagnostics_tolerates_training_status_timeout_as_warning(monkeypatc
     timeout_result = next(
         item
         for item in results
-        if item.name == "api.training_status" and item.message == "API /training_status request failed"
+        if item.name == "api.training_status"
+        and item.message == "API /training_status request failed"
     )
     assert timeout_result.status == "warn"
 
@@ -336,7 +351,17 @@ def test_demo2_defaults_are_applied_for_demo_host(monkeypatch, tmp_path):
         if path == "/app/log-path":
             return 200, {"path": str(tmp_path / "app-events.jsonl")}, None
         if path == "/api/workflows/current":
-            return 200, {"workflow": {"id": 3, "neuroglancer_url": "https://demo.seg.bio/neuroglancer/v/abc"}, "events": []}, None
+            return (
+                200,
+                {
+                    "workflow": {
+                        "id": 3,
+                        "neuroglancer_url": "https://demo.seg.bio/neuroglancer/v/abc",
+                    },
+                    "events": [],
+                },
+                None,
+            )
         if path == "/training_status":
             return 200, {"worker_url": "http://localhost:4243"}, None
         if path == "/chat/status":

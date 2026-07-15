@@ -222,7 +222,9 @@ def _user_status_changes(events: List[WorkflowEvent]) -> List[Dict[str, Any]]:
     return status_changes
 
 
-def _safe_related_records(workflow: WorkflowSession, relationship_name: str) -> List[Any]:
+def _safe_related_records(
+    workflow: WorkflowSession, relationship_name: str
+) -> List[Any]:
     try:
         records = getattr(workflow, relationship_name)
     except DetachedInstanceError:
@@ -230,7 +232,9 @@ def _safe_related_records(workflow: WorkflowSession, relationship_name: str) -> 
     return list(records or [])
 
 
-def _timeline_snippet(events: List[WorkflowEvent], max_events: int = 20) -> List[Dict[str, Any]]:
+def _timeline_snippet(
+    events: List[WorkflowEvent], max_events: int = 20
+) -> List[Dict[str, Any]]:
     snippet: List[Dict[str, Any]] = []
     for event in events[:max_events]:
         payload = _event_payload(event)
@@ -282,13 +286,12 @@ def _run_for_event(
                 and row.created_at <= _parse_event_time(event.created_at)
             ]
             if candidates:
-                return max(candidates, key=lambda row: (row.created_at or datetime.min, row.id))
+                return max(
+                    candidates, key=lambda row: (row.created_at or datetime.min, row.id)
+                )
 
         candidates = [
-            row
-            for row in runs
-            if row.run_type == event_run_type
-            and row.id is not None
+            row for row in runs if row.run_type == event_run_type and row.id is not None
         ]
         if candidates:
             return max(candidates, key=lambda row: row.id)
@@ -315,7 +318,9 @@ def _run_for_command(
     if candidates:
         return min(candidates, key=lambda row: (row.created_at or datetime.min, row.id))
 
-    candidates = [row for row in runs if row.run_type == run_type and row.id is not None]
+    candidates = [
+        row for row in runs if row.run_type == run_type and row.id is not None
+    ]
     return min(candidates, key=lambda row: row.id) if candidates else None
 
 
@@ -345,7 +350,9 @@ def _progress_event_belongs_to_run(
     return False
 
 
-def _build_progress_event_summary(event: WorkflowEvent, run_id: str | None = None) -> Dict[str, Any]:
+def _build_progress_event_summary(
+    event: WorkflowEvent, run_id: str | None = None
+) -> Dict[str, Any]:
     payload = _event_payload(event)
     event_run_id = _event_run_id(payload)
     return {
@@ -412,12 +419,16 @@ def _build_proposal_approval_graph(
 ) -> List[Dict[str, Any]]:
     runs = _safe_related_records(workflow, "model_runs")
     commands = _safe_related_records(workflow, "commands")
-    proposal_events = [event for event in events if event.event_type == "agent.proposal_created"]
+    proposal_events = [
+        event for event in events if event.event_type == "agent.proposal_created"
+    ]
     if not proposal_events:
         return []
 
     approvals = [
-        event for event in events if event.event_type in {"agent.proposal_approved", "agent.proposal_rejected"}
+        event
+        for event in events
+        if event.event_type in {"agent.proposal_approved", "agent.proposal_rejected"}
     ]
     approval_index: Dict[int, List[WorkflowEvent]] = defaultdict(list)
     for approval in approvals:
@@ -426,11 +437,7 @@ def _build_proposal_approval_graph(
         if isinstance(proposal_id, int):
             approval_index[proposal_id].append(approval)
 
-    actions = [
-        event
-        for event in events
-        if event.event_type in ACTION_EVENT_TYPES
-    ]
+    actions = [event for event in events if event.event_type in ACTION_EVENT_TYPES]
 
     progress_events = [
         event for event in events if event.event_type in PROGRESS_EVENT_TYPES
@@ -440,7 +447,9 @@ def _build_proposal_approval_graph(
     for proposal in proposal_events:
         proposal_payload = _event_payload(proposal)
         proposal_id = proposal.id
-        approvals_for_proposal = approval_index.get(int(proposal_id), []) if proposal_id else []
+        approvals_for_proposal = (
+            approval_index.get(int(proposal_id), []) if proposal_id else []
+        )
         approval = approvals_for_proposal[0] if approvals_for_proposal else None
 
         action_events = [
@@ -467,7 +476,10 @@ def _build_proposal_approval_graph(
             if run is not None and run.id is not None:
                 linked_runs[run.id] = run
 
-        run_refs = [_build_run_summary(run, progress_events) for run in sorted(linked_runs.values(), key=lambda row: row.id)]
+        run_refs = [
+            _build_run_summary(run, progress_events)
+            for run in sorted(linked_runs.values(), key=lambda row: row.id)
+        ]
 
         graph.append(
             {
@@ -477,19 +489,25 @@ def _build_proposal_approval_graph(
                     "stage": proposal.stage,
                     "actor": proposal.actor,
                     "action": proposal_payload.get("action"),
-                    "params": proposal_payload.get("params") if isinstance(proposal_payload.get("params"), dict) else {},
+                    "params": (
+                        proposal_payload.get("params")
+                        if isinstance(proposal_payload.get("params"), dict)
+                        else {}
+                    ),
                     "created_at": _iso(proposal.created_at),
                 },
-                "approval": None
-                if approval is None
-                else {
-                    "event_id": approval.id,
-                    "status": approval.event_type.split("_")[-1],
-                    "stage": approval.stage,
-                    "actor": approval.actor,
-                    "approved_at": _iso(approval.created_at),
-                    "approval_payload": _event_payload(approval),
-                },
+                "approval": (
+                    None
+                    if approval is None
+                    else {
+                        "event_id": approval.id,
+                        "status": approval.event_type.split("_")[-1],
+                        "stage": approval.stage,
+                        "actor": approval.actor,
+                        "approved_at": _iso(approval.created_at),
+                        "approval_payload": _event_payload(approval),
+                    }
+                ),
                 "action_events": [
                     {
                         "event_id": event.id,
@@ -502,7 +520,9 @@ def _build_proposal_approval_graph(
                     }
                     for event in action_events
                 ],
-                "commands": [_build_command_summary(command) for command in proposal_commands],
+                "commands": [
+                    _build_command_summary(command) for command in proposal_commands
+                ],
                 "runs": run_refs,
             }
         )

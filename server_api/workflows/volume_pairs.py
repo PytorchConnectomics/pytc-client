@@ -4,7 +4,6 @@ import pathlib
 import re
 from typing import Any, Dict, List, Optional, Tuple
 
-
 NEUROGLANCER_VOLUME_FILE_SUFFIXES = (
     ".h5",
     ".hdf5",
@@ -180,9 +179,7 @@ def discover_neuroglancer_volume_pairs(
         used_images.add(str(image_candidate))
         used_labels.add(str(label_candidate))
 
-    unpaired_images = [
-        image for image in unpaired_images if image not in used_images
-    ]
+    unpaired_images = [image for image in unpaired_images if image not in used_images]
     unpaired_labels = [
         str(candidate)
         for candidate in label_candidates

@@ -23,7 +23,6 @@ from urllib.parse import urlsplit
 
 import requests
 
-
 DEMO_SEG_HOSTS = {"demo.seg.bio", "www.demo.seg.bio"}
 DEMO_SEG_PUBLIC_BASE = "https://demo.seg.bio/neuroglancer"
 DEMO_SEG_NEUROGLANCER_PORT = 4244
@@ -39,9 +38,7 @@ def _demo_seg_defaults(
 ) -> tuple[int, str, int]:
     host = (urlsplit(api_base).hostname or "").lower()
     if host in DEMO_SEG_HOSTS:
-        resolved_public_base = (
-            neuroglancer_public_base.strip() or DEMO_SEG_PUBLIC_BASE
-        )
+        resolved_public_base = neuroglancer_public_base.strip() or DEMO_SEG_PUBLIC_BASE
         resolved_port = neuroglancer_port or DEMO_SEG_NEUROGLANCER_PORT
         resolved_log_tail_lines = (
             DEMO_SEG_LOG_TAIL_LINES if log_tail_lines == 120 else log_tail_lines
@@ -203,7 +200,9 @@ def check_api_health(*, api_base: str, timeout: int) -> CheckResult:
     )
 
 
-def check_app_log_path(*, api_base: str, timeout: int) -> tuple[CheckResult, Path | None]:
+def check_app_log_path(
+    *, api_base: str, timeout: int
+) -> tuple[CheckResult, Path | None]:
     try:
         status, payload, _ = _http_request_json(
             base_url=api_base,
@@ -297,7 +296,9 @@ def check_runtime_events(
         return checks
 
     rows = _tail_json_lines(app_log_path, max_lines=timeout_lines)
-    configured_rows = [row for row in rows if row.get("event") == "api_runtime_configured"]
+    configured_rows = [
+        row for row in rows if row.get("event") == "api_runtime_configured"
+    ]
     if not configured_rows:
         _record_result(
             checks,
@@ -333,7 +334,9 @@ def check_runtime_events(
         )
     except (TypeError, ValueError):
         configured_ng_port_int = None
-    configured_public_base = str(configured.get("neuroglancer_public_base", "")).strip().rstrip("/")
+    configured_public_base = (
+        str(configured.get("neuroglancer_public_base", "")).strip().rstrip("/")
+    )
 
     mismatches: list[str] = []
     if expected_worker:
@@ -356,9 +359,11 @@ def check_runtime_events(
         checks,
         "pass" if not mismatches else "warn",
         "api.runtime_config",
-        "Runtime config in api log matches operator expectations"
-        if not mismatches
-        else "Runtime config in api log differs from operator expectations",
+        (
+            "Runtime config in api log matches operator expectations"
+            if not mismatches
+            else "Runtime config in api log differs from operator expectations"
+        ),
         {
             "expected": {
                 "worker_url": expected_worker,
@@ -393,9 +398,11 @@ def check_runtime_events(
             checks,
             "pass" if configured_worker_url == expected_worker else "warn",
             "api.runtime_config_worker_url",
-            "Configured worker URL aligns with expected worker URL"
-            if configured_worker_url == expected_worker
-            else "Configured worker URL differs from expected worker URL",
+            (
+                "Configured worker URL aligns with expected worker URL"
+                if configured_worker_url == expected_worker
+                else "Configured worker URL differs from expected worker URL"
+            ),
             {
                 "expected_worker_url": expected_worker,
                 "configured_worker_url": configured_worker_url,
@@ -404,7 +411,9 @@ def check_runtime_events(
 
     configured_ng_port = configured.get("neuroglancer_port")
     try:
-        configured_ng_port_int = int(configured_ng_port) if configured_ng_port is not None else None
+        configured_ng_port_int = (
+            int(configured_ng_port) if configured_ng_port is not None else None
+        )
     except (TypeError, ValueError):
         configured_ng_port_int = None
     if configured_ng_port_int is not None:
@@ -412,9 +421,11 @@ def check_runtime_events(
             checks,
             "pass" if configured_ng_port_int == int(neuroglancer_port) else "warn",
             "api.runtime_config_neuroglancer_port",
-            "Configured neuroglancer port aligns with expected value"
-            if configured_ng_port_int == int(neuroglancer_port)
-            else "Configured neuroglancer port differs from expected value",
+            (
+                "Configured neuroglancer port aligns with expected value"
+                if configured_ng_port_int == int(neuroglancer_port)
+                else "Configured neuroglancer port differs from expected value"
+            ),
             {
                 "expected_neuroglancer_port": int(neuroglancer_port),
                 "configured_neuroglancer_port": configured_ng_port_int,
@@ -434,17 +445,23 @@ def check_runtime_events(
 
     public_base = (neuroglancer_public_base or "").strip()
     if public_base:
-        configured_public_base = str(configured.get("neuroglancer_public_base", "")).strip()
+        configured_public_base = str(
+            configured.get("neuroglancer_public_base", "")
+        ).strip()
         if configured_public_base:
             _record_result(
                 checks,
-                "pass"
-                if configured_public_base.rstrip("/") == public_base.rstrip("/")
-                else "warn",
+                (
+                    "pass"
+                    if configured_public_base.rstrip("/") == public_base.rstrip("/")
+                    else "warn"
+                ),
                 "api.runtime_config_neuroglancer_public_base",
-                "Configured neuroglancer public base aligns with expected value"
-                if configured_public_base.rstrip("/") == public_base.rstrip("/")
-                else "Configured neuroglancer public base differs from expected value",
+                (
+                    "Configured neuroglancer public base aligns with expected value"
+                    if configured_public_base.rstrip("/") == public_base.rstrip("/")
+                    else "Configured neuroglancer public base differs from expected value"
+                ),
                 {
                     "expected_neuroglancer_public_base": public_base,
                     "configured_neuroglancer_public_base": configured_public_base,
@@ -541,7 +558,9 @@ def check_worker_path(
                 if isinstance(detail, dict):
                     observed_worker_url = str(detail.get("worker_url") or "").strip()
                 else:
-                    observed_worker_url = str(api_training_status.get("worker_url") or "").strip()
+                    observed_worker_url = str(
+                        api_training_status.get("worker_url") or ""
+                    ).strip()
     except Exception as exc:
         _record_result(
             checks,
@@ -588,9 +607,7 @@ def check_worker_path(
 
     if observed_worker_url:
         observed_normalized = _normalize_worker_url(
-            protocol=(
-                urlsplit(observed_worker_url).scheme or "http"
-            ),
+            protocol=(urlsplit(observed_worker_url).scheme or "http"),
             worker_url=observed_worker_url,
         )
         mismatch = observed_normalized != worker_url
@@ -598,9 +615,11 @@ def check_worker_path(
             checks,
             "pass" if not mismatch else "fail",
             "worker.url_mismatch",
-            "Worker URL matches API proxy target"
-            if not mismatch
-            else "Worker URL mismatch: API appears to proxy a different target",
+            (
+                "Worker URL matches API proxy target"
+                if not mismatch
+                else "Worker URL mismatch: API appears to proxy a different target"
+            ),
             {
                 "expected_worker_url": worker_url,
                 "observed_worker_url": observed_worker_url,
@@ -747,9 +766,11 @@ def check_neuroglancer(
             checks,
             "pass" if parsed.scheme else "warn",
             "neuroglancer.public_base",
-            "Neuroglancer public base URL format is valid"
-            if parsed.scheme
-            else "Neuroglancer public base is not absolute",
+            (
+                "Neuroglancer public base URL format is valid"
+                if parsed.scheme
+                else "Neuroglancer public base is not absolute"
+            ),
             {
                 "value": public_base,
                 "has_scheme": bool(parsed.scheme),
@@ -853,7 +874,8 @@ def check_ollama(*, api_base: str, timeout: int) -> list[CheckResult]:
             }
             configured = [
                 os.environ.get("OLLAMA_MODEL"),
-                os.environ.get("PYTC_WORKFLOW_INTENT_MODEL") or os.environ.get("OLLAMA_MODEL"),
+                os.environ.get("PYTC_WORKFLOW_INTENT_MODEL")
+                or os.environ.get("OLLAMA_MODEL"),
                 os.environ.get("OLLAMA_EMBED_MODEL"),
             ]
             required_models = [value for value in configured if value]
@@ -864,9 +886,11 @@ def check_ollama(*, api_base: str, timeout: int) -> list[CheckResult]:
                 checks,
                 "warn" if missing_models else "pass",
                 "ollama.models",
-                "Some configured Ollama models are missing from /api/tags"
-                if missing_models
-                else "Ollama API is reachable and configured models are present",
+                (
+                    "Some configured Ollama models are missing from /api/tags"
+                    if missing_models
+                    else "Ollama API is reachable and configured models are present"
+                ),
                 {
                     "ollama_base": base,
                     "configured_models": required_models,
@@ -1056,9 +1080,11 @@ def run_diagnostics(config: argparse.Namespace) -> list[CheckResult]:
     checks.extend(
         check_neuroglancer(
             api_base=api_base,
-            workflow=(workflow_check.details or {}).get("workflow")
-            if workflow_check.status == "pass"
-            else None,
+            workflow=(
+                (workflow_check.details or {}).get("workflow")
+                if workflow_check.status == "pass"
+                else None
+            ),
             neuroglancer_port=resolved_neuroglancer_port,
             neuroglancer_public_base=resolved_neuroglancer_public_base,
         )

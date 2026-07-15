@@ -3,6 +3,7 @@ import tempfile
 import unittest
 
 import pytest
+
 pytest.importorskip("sqlalchemy")
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
@@ -99,7 +100,9 @@ class WorkflowMetricsTests(unittest.TestCase):
             },
         ]
         for event in events:
-            response = self.client.post(f"/api/workflows/{workflow_id}/events", json=event)
+            response = self.client.post(
+                f"/api/workflows/{workflow_id}/events", json=event
+            )
             self.assertEqual(response.status_code, 200)
 
         response = self.client.get(f"/api/workflows/{workflow_id}/metrics")

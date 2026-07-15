@@ -212,9 +212,7 @@ class WorkflowCaseStudyAcceptanceTests(unittest.TestCase):
     def test_case_study_readiness_gate_taxonomy_surface(self):
         workflow_id = self._workflow_id()
 
-        response = self.client.get(
-            f"/api/workflows/{workflow_id}/case-study-readiness"
-        )
+        response = self.client.get(f"/api/workflows/{workflow_id}/case-study-readiness")
         self.assertEqual(response.status_code, 200)
         readiness = response.json()
 
@@ -248,7 +246,9 @@ class WorkflowCaseStudyAcceptanceTests(unittest.TestCase):
         ]:
             self.assertIn(required_gate, gate_ids)
 
-        self.assertLessEqual(len(readiness["next_required_items"]), readiness["total_count"])
+        self.assertLessEqual(
+            len(readiness["next_required_items"]), readiness["total_count"]
+        )
         if readiness["ready_for_case_study"]:
             self.assertEqual(readiness["completed_count"], readiness["total_count"])
             self.assertEqual(readiness["next_required_items"], [])

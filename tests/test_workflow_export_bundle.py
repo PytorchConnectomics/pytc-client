@@ -5,6 +5,7 @@ import unittest
 from unittest.mock import patch
 
 import pytest
+
 pytest.importorskip("sqlalchemy")
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
@@ -107,19 +108,20 @@ class WorkflowExportBundleTests(unittest.TestCase):
         self.assertEqual(payload["project_memory"]["workflow_id"], workflow_id)
         self.assertTrue(payload["agent_messages"])
         self.assertTrue(payload["trace_index"])
-        self.assertTrue(
-            all(entry.get("category") for entry in payload["trace_index"])
-        )
+        self.assertTrue(all(entry.get("category") for entry in payload["trace_index"]))
         self.assertIn("action_card_index", payload)
         self.assertGreaterEqual(len(payload["events"]), 2)  # includes workflow.created
 
-        artifacts = {entry["path"]: entry["exists"] for entry in payload["artifact_paths"]}
+        artifacts = {
+            entry["path"]: entry["exists"] for entry in payload["artifact_paths"]
+        }
         self.assertIn(str(existing_path), artifacts)
         self.assertIn(str(missing_path), artifacts)
         self.assertTrue(artifacts[str(existing_path)])
         self.assertFalse(artifacts[str(missing_path)])
         missing_skipped = {
-            entry["path"]: entry for entry in payload["skipped_artifacts"]
+            entry["path"]: entry
+            for entry in payload["skipped_artifacts"]
             if entry.get("path")
         }
         self.assertEqual(
@@ -163,7 +165,9 @@ class WorkflowExportBundleTests(unittest.TestCase):
 
     def test_export_bundle_raw_copy_limits_and_manifest_only_mode(self):
         workflow_id = self._current_workflow_id()
-        raw_image_path = pathlib.Path(self.temp_dir.name) / "data" / "raw" / "image-raw.tif"
+        raw_image_path = (
+            pathlib.Path(self.temp_dir.name) / "data" / "raw" / "image-raw.tif"
+        )
         raw_image_path.parent.mkdir(parents=True, exist_ok=True)
         raw_image_path.write_bytes(b"x" * 64)
 
@@ -228,10 +232,16 @@ class WorkflowExportBundleTests(unittest.TestCase):
         self.assertEqual(manifest_payload["copied_artifacts"], [])
         self.assertIn(str(raw_image_path), skipped_manifest)
         self.assertIn(str(config_path), skipped_manifest)
-        self.assertEqual(skipped_manifest[str(raw_image_path)]["reason"], "manifest_only")
+        self.assertEqual(
+            skipped_manifest[str(raw_image_path)]["reason"], "manifest_only"
+        )
         self.assertEqual(skipped_manifest[str(config_path)]["reason"], "manifest_only")
-        self.assertEqual(skipped_manifest[str(raw_image_path)]["copy_mode"], "manifest_only")
-        self.assertEqual(skipped_manifest[str(config_path)]["copy_mode"], "manifest_only")
+        self.assertEqual(
+            skipped_manifest[str(raw_image_path)]["copy_mode"], "manifest_only"
+        )
+        self.assertEqual(
+            skipped_manifest[str(config_path)]["copy_mode"], "manifest_only"
+        )
 
     def test_export_bundle_tracks_holdout_reference_only_artifacts(self):
         workflow_id = self._current_workflow_id()
@@ -285,11 +295,17 @@ class WorkflowExportBundleTests(unittest.TestCase):
         self.assertFalse(holdout_entry["copy_policy"]["allow_copy"])
         self.assertEqual(holdout_entry["copy_policy"]["reason"], "withheld_reference")
         self.assertTrue(
-            any(source.get("source_key") == "withheld_ground_truth" for source in holdout_entry.get("sources", []))
+            any(
+                source.get("source_key") == "withheld_ground_truth"
+                for source in holdout_entry.get("sources", [])
+            )
         )
-        self.assertIn(str(holdout_gt), [entry["path"] for entry in payload["skipped_artifacts"]])
+        self.assertIn(
+            str(holdout_gt), [entry["path"] for entry in payload["skipped_artifacts"]]
+        )
         skipped = {
-            entry["path"]: entry for entry in payload["skipped_artifacts"]
+            entry["path"]: entry
+            for entry in payload["skipped_artifacts"]
             if entry.get("path")
         }
         self.assertEqual(

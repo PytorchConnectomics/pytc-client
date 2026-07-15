@@ -7,7 +7,6 @@ import json
 from collections import Counter, defaultdict
 from pathlib import Path
 
-
 DEFAULT_LOG = Path(__file__).resolve().parents[1] / ".logs" / "app" / "app-events.jsonl"
 
 
@@ -59,7 +58,8 @@ def summarize(rows, *, session_id: str | None = None, last: int = 12):
         row
         for row in rows
         if row.get("level") == "ERROR"
-        or row.get("event") in {"api_response_error", "window_error", "unhandled_rejection"}
+        or row.get("event")
+        in {"api_response_error", "window_error", "unhandled_rejection"}
     ]
     if not issue_rows:
         print("  none")
@@ -80,8 +80,12 @@ def summarize(rows, *, session_id: str | None = None, last: int = 12):
 
 def main():
     parser = argparse.ArgumentParser(description="Summarize PyTC app event logs")
-    parser.add_argument("--log", default=str(DEFAULT_LOG), help="Path to app-events.jsonl")
-    parser.add_argument("--session", default=None, help="Optional client session_id filter")
+    parser.add_argument(
+        "--log", default=str(DEFAULT_LOG), help="Path to app-events.jsonl"
+    )
+    parser.add_argument(
+        "--session", default=None, help="Optional client session_id filter"
+    )
     parser.add_argument("--last", type=int, default=12, help="Recent rows to print")
     args = parser.parse_args()
 
