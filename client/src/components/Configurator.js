@@ -1,4 +1,3 @@
-// global localStorage
 import React, { useContext, useEffect, useMemo, useState } from "react";
 import { Alert, Button, message, Steps, theme } from "antd";
 import YamlFileUploader from "./YamlFileUploader";
@@ -13,7 +12,6 @@ function Configurator(props) {
     type === "training" ? context.trainingState : context.inferenceState;
   const [current, setCurrent] = useState(0);
   const [hasAttemptedAdvance, setHasAttemptedAdvance] = useState(false);
-  const storageKey = `configStep:${type}`;
 
   const next = () => {
     if (missingByStep.length > 0) {
@@ -80,18 +78,9 @@ function Configurator(props) {
   }, [current, missingInputs, missingBase]);
 
   useEffect(() => {
-    const stored = localStorage.getItem(storageKey);
-    if (stored !== null) {
-      const parsed = Number(stored);
-      if (!Number.isNaN(parsed) && parsed >= 0 && parsed <= 2) {
-        setCurrent(parsed);
-      }
-    }
-  }, [storageKey]);
-
-  useEffect(() => {
-    localStorage.setItem(storageKey, String(current));
-  }, [current, storageKey]);
+    setCurrent(0);
+    setHasAttemptedAdvance(false);
+  }, [type]);
 
   const items = [
     {

@@ -1,4 +1,4 @@
-import React, { createContext, useState, useEffect, useCallback } from "react";
+import React, { createContext, useState, useCallback, useEffect } from "react";
 import localforage from "localforage";
 
 export const AppContext = createContext(null);
@@ -10,99 +10,71 @@ const FILE_STATE_DEFAULTS = {
   labelFileList: [],
   currentImage: null,
   currentLabel: null,
+  trainingConfig: null,
+  inferenceConfig: null,
+  trainingConfigOriginPath: "",
+  inferenceConfigOriginPath: "",
+  trainingUploadedYamlFile: "",
+  inferenceUploadedYamlFile: "",
+  trainingSelectedYamlPreset: "",
+  inferenceSelectedYamlPreset: "",
+  trainingOutputPath: null,
+  inferenceOutputPath: null,
+  trainingLogPath: null,
+  inferenceCheckpointPath: null,
   trainingInputImage: null,
   trainingInputLabel: null,
   inferenceInputImage: null,
   inferenceInputLabel: null,
+  viewer: null,
+  tensorBoardURL: null,
+  visualizationScales: "",
 };
 
 const FILE_CACHE_KEYS = Object.keys(FILE_STATE_DEFAULTS);
-const FILE_OBJECT_STATE_KEYS = [
-  ...FILE_CACHE_KEYS.filter((key) => key !== "fileList"),
-  "trainingUploadedYamlFile",
-  "inferenceUploadedYamlFile",
-];
+const NON_PERSISTED_FILE_STATE_KEYS = new Set(["viewer"]);
 
-const sanitizeFileEntry = (file) => {
-  if (!file || typeof file !== "object") return file;
-  const {
-    uid,
-    name,
-    originalName,
-    path,
-    folderPath,
-    thumbUrl,
-    type,
-    status,
-    percent,
-    size,
-    response,
-    error,
-    lastModified,
-    lastModifiedDate,
-    url,
-  } = file;
-  return {
-    uid,
-    name,
-    originalName: originalName || name,
-    path,
-    folderPath,
-    thumbUrl,
-    type,
-    status,
-    percent,
-    size,
-    response,
-    error,
-    lastModified,
-    lastModifiedDate,
-    url,
-  };
-};
-
-const sanitizePersistedState = (key, state) => {
-  if (!FILE_OBJECT_STATE_KEYS.includes(key)) {
-    return state;
-  }
-  if (Array.isArray(state)) {
-    return state.map((entry) => sanitizeFileEntry(entry));
-  }
-  return sanitizeFileEntry(state);
-};
-
-// Solve delete button error issue
 function usePersistedState(key, defaultValue) {
   const [state, setState] = useState(defaultValue);
-  const [isLoaded, setIsLoaded] = useState(false);
+  const shouldPersist = !NON_PERSISTED_FILE_STATE_KEYS.has(key);
 
   useEffect(() => {
-    // Fetch the stored value asynchronously when the component mounts
+    if (!shouldPersist) return undefined;
+    let cancelled = false;
     localforage
       .getItem(key)
       .then((storedValue) => {
-        if (storedValue !== null) {
+        if (!cancelled && storedValue !== null && storedValue !== undefined) {
           setState(storedValue);
         }
-        setIsLoaded(true);
       })
-      .catch((err) => {
-        console.error("Error retrieving value from localforage:", err);
-        setIsLoaded(true);
+      .catch((error) => {
+        console.warn(`Failed to hydrate cached state for ${key}:`, error);
       });
-  }, [key]);
+    return () => {
+      cancelled = true;
+    };
+  }, [key, shouldPersist]);
 
-  useEffect(() => {
-    if (isLoaded) {
-      // Save the state to localforage asynchronously whenever it changes
-      const valueToPersist = sanitizePersistedState(key, state);
-      localforage.setItem(key, valueToPersist).catch((err) => {
-        console.error("Error setting value to localforage:", err);
+  const setPersistedState = useCallback(
+    (nextValueOrUpdater) => {
+      setState((previousValue) => {
+        const nextValue =
+          typeof nextValueOrUpdater === "function"
+            ? nextValueOrUpdater(previousValue)
+            : nextValueOrUpdater;
+        if (shouldPersist) {
+          localforage.setItem(key, nextValue).catch((error) => {
+            console.warn(`Failed to persist cached state for ${key}:`, error);
+          });
+        }
+        return nextValue;
       });
-    }
-  }, [key, state, isLoaded]);
+    },
+    [key, shouldPersist],
+  );
 
-  return [state, setState];
+  return [state, setPersistedState];
 }
 
 // function safeParseJSON(jsonString, defaultValue) {
@@ -130,25 +102,13 @@ export const ContextWrapper = (props) => {
   const [inferenceConfigOriginPath, setInferenceConfigOriginPath] =
     usePersistedState("inferenceConfigOriginPath", "");
   const [trainingUploadedYamlFile, setTrainingUploadedYamlFile] =
-    usePersistedState(
-      "trainingUploadedYamlFile",
-      "",
-    );
+    usePersistedState("trainingUploadedYamlFile", "");
   const [inferenceUploadedYamlFile, setInferenceUploadedYamlFile] =
-    usePersistedState(
-      "inferenceUploadedYamlFile",
-      "",
-    );
+    usePersistedState("inferenceUploadedYamlFile", "");
   const [trainingSelectedYamlPreset, setTrainingSelectedYamlPreset] =
-    usePersistedState(
-      "trainingSelectedYamlPreset",
-      "",
-    );
+    usePersistedState("trainingSelectedYamlPreset", "");
   const [inferenceSelectedYamlPreset, setInferenceSelectedYamlPreset] =
-    usePersistedState(
-      "inferenceSelectedYamlPreset",
-      "",
-    );
+    usePersistedState("inferenceSelectedYamlPreset", "");
   const [imageFileList, setImageFileList] = usePersistedState(
     "imageFileList",
     [],
@@ -170,10 +130,7 @@ export const ContextWrapper = (props) => {
     null,
   );
   const [inferenceCheckpointPath, setInferenceCheckpointPath] =
-    usePersistedState(
-      "inferenceCheckpointPath",
-      null,
-    );
+    usePersistedState("inferenceCheckpointPath", null);
   const [currentImage, setCurrentImage] = usePersistedState(
     "currentImage",
     null,
@@ -181,6 +138,10 @@ export const ContextWrapper = (props) => {
   const [currentLabel, setCurrentLabel] = usePersistedState(
     "currentLabel",
     null,
+  );
+  const [visualizationScales, setVisualizationScales] = usePersistedState(
+    "visualizationScales",
+    FILE_STATE_DEFAULTS.visualizationScales,
   );
   const [trainingInputImage, setTrainingInputImage] = usePersistedState(
     "trainingInputImage",
@@ -216,24 +177,62 @@ export const ContextWrapper = (props) => {
       setFileList(FILE_STATE_DEFAULTS.fileList);
       setImageFileList(FILE_STATE_DEFAULTS.imageFileList);
       setLabelFileList(FILE_STATE_DEFAULTS.labelFileList);
+      setTrainingConfig(FILE_STATE_DEFAULTS.trainingConfig);
+      setInferenceConfig(FILE_STATE_DEFAULTS.inferenceConfig);
+      setTrainingConfigOriginPath(FILE_STATE_DEFAULTS.trainingConfigOriginPath);
+      setInferenceConfigOriginPath(
+        FILE_STATE_DEFAULTS.inferenceConfigOriginPath,
+      );
+      setTrainingUploadedYamlFile(FILE_STATE_DEFAULTS.trainingUploadedYamlFile);
+      setInferenceUploadedYamlFile(
+        FILE_STATE_DEFAULTS.inferenceUploadedYamlFile,
+      );
+      setTrainingSelectedYamlPreset(
+        FILE_STATE_DEFAULTS.trainingSelectedYamlPreset,
+      );
+      setInferenceSelectedYamlPreset(
+        FILE_STATE_DEFAULTS.inferenceSelectedYamlPreset,
+      );
+      setTrainingOutputPath(FILE_STATE_DEFAULTS.trainingOutputPath);
+      setInferenceOutputPath(FILE_STATE_DEFAULTS.inferenceOutputPath);
+      setTrainingLogPath(FILE_STATE_DEFAULTS.trainingLogPath);
+      setInferenceCheckpointPath(FILE_STATE_DEFAULTS.inferenceCheckpointPath);
       setCurrentImage(FILE_STATE_DEFAULTS.currentImage);
       setCurrentLabel(FILE_STATE_DEFAULTS.currentLabel);
+      setVisualizationScales(FILE_STATE_DEFAULTS.visualizationScales);
       setTrainingInputImage(FILE_STATE_DEFAULTS.trainingInputImage);
       setTrainingInputLabel(FILE_STATE_DEFAULTS.trainingInputLabel);
       setInferenceInputImage(FILE_STATE_DEFAULTS.inferenceInputImage);
       setInferenceInputLabel(FILE_STATE_DEFAULTS.inferenceInputLabel);
+      setViewer(FILE_STATE_DEFAULTS.viewer);
+      setTensorBoardURL(FILE_STATE_DEFAULTS.tensorBoardURL);
     }
   }, [
     setFiles,
     setFileList,
     setImageFileList,
     setLabelFileList,
+    setTrainingConfig,
+    setInferenceConfig,
+    setTrainingConfigOriginPath,
+    setInferenceConfigOriginPath,
+    setTrainingUploadedYamlFile,
+    setInferenceUploadedYamlFile,
+    setTrainingSelectedYamlPreset,
+    setInferenceSelectedYamlPreset,
+    setTrainingOutputPath,
+    setInferenceOutputPath,
+    setTrainingLogPath,
+    setInferenceCheckpointPath,
     setCurrentImage,
     setCurrentLabel,
+    setVisualizationScales,
     setTrainingInputImage,
     setTrainingInputLabel,
     setInferenceInputImage,
     setInferenceInputLabel,
+    setViewer,
+    setTensorBoardURL,
   ]);
 
   const trainingState = {
@@ -281,6 +280,8 @@ export const ContextWrapper = (props) => {
         setCurrentImage,
         currentLabel,
         setCurrentLabel,
+        visualizationScales,
+        setVisualizationScales,
         viewer,
         setViewer,
         trainingConfig,

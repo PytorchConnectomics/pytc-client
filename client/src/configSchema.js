@@ -110,6 +110,10 @@ function resolveSliderPath(configObj, type, key) {
   return pickFirstExistingPath(configObj, candidates);
 }
 
+export function getSliderPath(configObj, type, key) {
+  return resolveSliderPath(configObj, type, key);
+}
+
 export function getSliderValue(configObj, type, key) {
   const path = resolveSliderPath(configObj, type, key);
   return path ? getPathValue(configObj, path) : undefined;
@@ -135,14 +139,26 @@ export function setTrainingOutputPath(configObj, outputPath) {
   }
   const checkpointsPath = joinPath(outputPath, "checkpoints");
   if (hasPath(configObj, ["train", "monitor", "checkpoint", "dirpath"])) {
-    setPathValue(configObj, ["train", "monitor", "checkpoint", "dirpath"], checkpointsPath);
+    setPathValue(
+      configObj,
+      ["train", "monitor", "checkpoint", "dirpath"],
+      checkpointsPath,
+    );
     return;
   }
   if (hasPath(configObj, ["monitor", "checkpoint", "dirpath"])) {
-    setPathValue(configObj, ["monitor", "checkpoint", "dirpath"], checkpointsPath);
+    setPathValue(
+      configObj,
+      ["monitor", "checkpoint", "dirpath"],
+      checkpointsPath,
+    );
     return;
   }
-  setPathValue(configObj, ["monitor", "checkpoint", "dirpath"], checkpointsPath);
+  setPathValue(
+    configObj,
+    ["monitor", "checkpoint", "dirpath"],
+    checkpointsPath,
+  );
 }
 
 export function setInferenceOutputPath(configObj, outputPath) {
@@ -152,7 +168,11 @@ export function setInferenceOutputPath(configObj, outputPath) {
     setPathValue(configObj, ["INFERENCE", "OUTPUT_PATH"], outputPath);
     return;
   }
-  setPathValue(configObj, ["inference", "save_prediction", "output_path"], outputPath);
+  setPathValue(
+    configObj,
+    ["inference", "save_prediction", "output_path"],
+    outputPath,
+  );
 }
 
 export function setInferenceExecutionDefaults(configObj) {
@@ -192,6 +212,14 @@ export function applyInputPaths(
       ["DATASET", "IMAGE_NAME"],
       inputImagePath.replace(inputPath, ""),
     );
+    if (mode === "inference") {
+      setPathValue(configObj, ["INFERENCE", "INPUT_PATH"], inputPath || null);
+      setPathValue(
+        configObj,
+        ["INFERENCE", "IMAGE_NAME"],
+        inputImagePath.replace(inputPath, ""),
+      );
+    }
     if (hasLabelPath) {
       setPathValue(
         configObj,
@@ -212,16 +240,14 @@ export function applyInputPaths(
   }
 
   if (mode === "training") {
-    const imagePath =
-      pickFirstExistingPath(configObj, [
-        ["train", "data", "train", "image"],
-        ["data", "train", "image"],
-      ]) || ["train", "data", "train", "image"];
-    const labelPath =
-      pickFirstExistingPath(configObj, [
-        ["train", "data", "train", "label"],
-        ["data", "train", "label"],
-      ]) || ["train", "data", "train", "label"];
+    const imagePath = pickFirstExistingPath(configObj, [
+      ["train", "data", "train", "image"],
+      ["data", "train", "image"],
+    ]) || ["train", "data", "train", "image"];
+    const labelPath = pickFirstExistingPath(configObj, [
+      ["train", "data", "train", "label"],
+      ["data", "train", "label"],
+    ]) || ["train", "data", "train", "label"];
     setPathValue(configObj, imagePath, inputImagePath);
     setPathValue(configObj, labelPath, inputLabelPath);
     if (outputPath) {
@@ -230,16 +256,14 @@ export function applyInputPaths(
     return;
   }
 
-  const imagePath =
-    pickFirstExistingPath(configObj, [
-      ["test", "data", "test", "image"],
-      ["data", "test", "image"],
-    ]) || ["test", "data", "test", "image"];
-  const labelPath =
-    pickFirstExistingPath(configObj, [
-      ["test", "data", "test", "label"],
-      ["data", "test", "label"],
-    ]) || ["test", "data", "test", "label"];
+  const imagePath = pickFirstExistingPath(configObj, [
+    ["test", "data", "test", "image"],
+    ["data", "test", "image"],
+  ]) || ["test", "data", "test", "image"];
+  const labelPath = pickFirstExistingPath(configObj, [
+    ["test", "data", "test", "label"],
+    ["data", "test", "label"],
+  ]) || ["test", "data", "test", "label"];
   setPathValue(configObj, imagePath, inputImagePath);
   if (hasLabelPath) {
     setPathValue(configObj, labelPath, inputLabelPath);
@@ -251,34 +275,27 @@ export function applyInputPaths(
   }
 }
 
-export function getArchitectureValue(configObj) {
-  if (!isObject(configObj)) return undefined;
-  const path = pickFirstExistingPath(configObj, [
+export function getArchitecturePath(configObj) {
+  if (!isObject(configObj)) return null;
+  return pickFirstExistingPath(configObj, [
     ["MODEL", "ARCHITECTURE"],
     ["model", "arch", "type"],
     ["default", "model", "arch", "profile"],
   ]);
+}
+
+export function getArchitectureValue(configObj) {
+  const path = getArchitecturePath(configObj);
   return path ? getPathValue(configObj, path) : undefined;
 }
 
 export function isArchitectureSupported(configObj) {
-  if (!isObject(configObj)) return false;
-  return Boolean(
-    pickFirstExistingPath(configObj, [
-      ["MODEL", "ARCHITECTURE"],
-      ["model", "arch", "type"],
-      ["default", "model", "arch", "profile"],
-    ]),
-  );
+  return Boolean(getArchitecturePath(configObj));
 }
 
 export function setArchitectureValue(configObj, value) {
   if (!isObject(configObj)) return false;
-  const existingPath = pickFirstExistingPath(configObj, [
-    ["MODEL", "ARCHITECTURE"],
-    ["model", "arch", "type"],
-    ["default", "model", "arch", "profile"],
-  ]);
+  const existingPath = getArchitecturePath(configObj);
   if (existingPath) {
     setPathValue(configObj, existingPath, value);
     return true;

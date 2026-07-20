@@ -15,12 +15,10 @@ RUN curl -LsSf https://astral.sh/uv/install.sh | sh -s -- --install-dir /usr/loc
 WORKDIR /app
 
 COPY pyproject.toml uv.lock ./
-RUN uv sync --frozen --no-dev --python 3.11
-
 COPY scripts/setup_pytorch_connectomics.sh ./scripts/setup_pytorch_connectomics.sh
 RUN chmod +x scripts/setup_pytorch_connectomics.sh && \
-    ./scripts/setup_pytorch_connectomics.sh --force && \
-    uv pip install --directory /app --editable /app/pytorch_connectomics && \
+    ./scripts/setup_pytorch_connectomics.sh && \
+    uv sync --frozen --no-dev --python 3.11 && \
     rm -rf /app/pytorch_connectomics/.git
 
 COPY server_api ./server_api

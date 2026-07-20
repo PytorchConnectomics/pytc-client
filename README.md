@@ -22,6 +22,11 @@ scripts\bootstrap.ps1     # Windows
 
 Re-run the relevant bootstrap script when you need to update dependencies.
 
+The bootstrap scripts fetch the legacy-compatible PyTorch Connectomics runtime
+from `pytc-client-legacy-runtime` and verify commit
+`04c2a35e78a1a7ca1138f83a98fc3ef27097abd4` before installation. The generated
+`pytorch_connectomics/` checkout is intentionally not tracked by this repository.
+
 ## Run the app
 
 ```
@@ -35,6 +40,10 @@ Optional runtime environment variables:
 PYTC_AUTH_SECRET=replace-me
 PYTC_ALLOWED_ORIGINS=http://localhost:3000,http://127.0.0.1:3000,null
 PYTC_NEUROGLANCER_PUBLIC_BASE=http://localhost:4244
+OLLAMA_MODEL=qwen3.6:27b
+PYTC_WORKFLOW_INTENT_MODEL=qwen3.6:27b
+OLLAMA_EMBED_MODEL=qwen3-embedding:8b
+PYTC_UNLOAD_OLLAMA_BEFORE_TRAINING=0  # set to 1 only on memory-constrained GPUs
 ```
 
 ## Chatbot Docs Index
@@ -53,6 +62,11 @@ You can override the embeddings endpoint if needed:
 ```
 OLLAMA_BASE_URL=http://cscigpu08.bc.edu:4443 uv run python server_api/chatbot/update_faiss.py
 ```
+
+The local assistant and workflow intent classifier default to `qwen3.6:27b` with
+`qwen3-embedding:8b`, matching the bundled FAISS index settings. For
+experimental local model upgrades, see
+`docs/research/on-device-llm-options-2026-04-26.md`.
 
 If restarting after a crash or interrupted session, kill any lingering processes first:
 

@@ -40,21 +40,21 @@ def _build_glasbey_palette(size: int = 256) -> None:
 def labels_to_rgba(label_slice: np.ndarray) -> np.ndarray:
     """Convert a label slice into an RGBA overlay using a Glasbey-style palette."""
     _build_glasbey_palette()
-    labels = np.unique(label_slice)
-    labels = labels[labels != 0]
-
-    h, w = label_slice.shape
+    label_array = np.asarray(label_slice)
+    h, w = label_array.shape
     rgba = np.zeros((h, w, 4), dtype=np.uint8)
-    if labels.size == 0:
+
+    foreground = label_array != 0
+    if not np.any(foreground):
         return rgba
 
-    for label in labels:
-        color = GLASBEY_COLORS[int(label) % len(GLASBEY_COLORS)]
-        mask = label_slice == label
-        rgba[mask, 0] = color[0]
-        rgba[mask, 1] = color[1]
-        rgba[mask, 2] = color[2]
-        rgba[mask, 3] = 255
+    palette = np.asarray(GLASBEY_COLORS, dtype=np.uint8)
+    label_indices = np.mod(
+        label_array[foreground].astype(np.int64, copy=False),
+        len(palette),
+    )
+    rgba[foreground, :3] = palette[label_indices]
+    rgba[foreground, 3] = 255
     return rgba
 
 

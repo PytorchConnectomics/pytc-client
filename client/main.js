@@ -1,23 +1,56 @@
 const path = require("path");
 const url = require("url");
+const fs = require("fs");
 const {
   app,
   BrowserWindow,
   ipcMain,
   dialog,
   Menu,
+  nativeImage,
   screen,
   shell,
 } = require("electron");
 
 let mainWindow;
+const APP_NAME = "PyTC Client";
+
+app.setName(APP_NAME);
+app.setAppUserModelId("bio.seg.pytc-client");
+process.title = APP_NAME;
+
+function getAppIconPath() {
+  const candidates = [
+    path.join(__dirname, "public", "pytc-app-icon.png"),
+    path.join(__dirname, "build", "pytc-app-icon.png"),
+    path.join(__dirname, "public", "favicon.ico"),
+    path.join(__dirname, "build", "favicon.ico"),
+  ];
+  return candidates.find((candidate) => fs.existsSync(candidate));
+}
+
+function loadAppIcon() {
+  const iconPath = getAppIconPath();
+  if (!iconPath) return undefined;
+
+  const icon = nativeImage.createFromPath(iconPath);
+  if (icon.isEmpty()) return undefined;
+
+  if (process.platform === "darwin" && app.dock) {
+    app.dock.setIcon(icon);
+  }
+
+  return icon;
+}
 
 function createWindow() {
   const { width, height } = screen.getPrimaryDisplay().workAreaSize;
+  const appIcon = loadAppIcon();
   mainWindow = new BrowserWindow({
+    title: APP_NAME,
     width,
     height,
-    icon: path.join(__dirname, "public", "favicon.ico"),
+    icon: appIcon,
     webPreferences: {
       preload: path.join(__dirname, "preload.js"),
       nodeIntegration: false,
@@ -42,6 +75,7 @@ function createWindow() {
     });
   }
   mainWindow.loadURL(startUrl);
+  mainWindow.setTitle(APP_NAME);
 
   mainWindow.on("closed", () => {
     mainWindow = null;
@@ -51,9 +85,11 @@ function createWindow() {
 }
 
 function createMenu() {
+  app.setName(APP_NAME);
+  app.setAboutPanelOptions({ applicationName: APP_NAME });
   const template = [
     {
-      label: "Electron",
+      label: APP_NAME,
       submenu: [{ role: "toggleDevTools" }, { role: "quit" }],
     },
     { role: "editMenu" },

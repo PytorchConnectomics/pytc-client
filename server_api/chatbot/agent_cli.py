@@ -18,19 +18,15 @@ sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
 from server_api.chatbot.chatbot import build_chain
 
-
 # ── Failed questions from 40-question test ──────────────────────────────────
 
 BATCH_QUESTIONS = [
     # Test #10 - Fabricated CLI flags --batch-size, --checkpoint-interval
     "Give me the command to train on CREMI with batch size 2 and save checkpoints every 5000 iterations",
-    
     # Test #14 - Didn't override scheduler explicitly
     "Train on MitoEM with the WarmupCosineLR scheduler and a base learning rate of 0.002",
-    
     # Test #17 - Wrong override format --inference.AUG_NUM=8
     "Generate an inference command for CREMI. Use configs/CREMI/CREMI-Base.yaml and checkpoint outputs/CREMI/checkpoint_100000.pth.tar with 8 TTA augmented views",
-    
     # Test #32 - Fabricated scripts/evaluate.py
     "How do I evaluate synapse detection results for the CREMI challenge?",
 ]
@@ -87,16 +83,16 @@ def run_single(question: str):
 
 def interactive_mode():
     """Interactive mode for testing custom questions."""
-    print("\n" + "="*80)
+    print("\n" + "=" * 80)
     print("INTERACTIVE AGENT TEST MODE")
-    print("="*80)
+    print("=" * 80)
     print("Type your questions to test the agent.")
     print("Type 'quit' or 'exit' to stop.\n")
     agent, reset_search_counter = build_chain()
     while True:
         try:
             question = input("\nYour question: ").strip()
-            if question.lower() in ['quit', 'exit', 'q']:
+            if question.lower() in ["quit", "exit", "q"]:
                 break
             if not question:
                 continue
@@ -111,14 +107,20 @@ def interactive_mode():
         except Exception as e:
             print(f"\nError: {e}")
             import traceback
+
             traceback.print_exc()
 
 
 if __name__ == "__main__":
     import argparse
+
     parser = argparse.ArgumentParser(description="Test the chatbot agent")
-    parser.add_argument("-b", "--batch", action="store_true", help="Run 20-question graded batch test")
-    parser.add_argument("-i", "--interactive", action="store_true", help="Interactive mode")
+    parser.add_argument(
+        "-b", "--batch", action="store_true", help="Run 20-question graded batch test"
+    )
+    parser.add_argument(
+        "-i", "--interactive", action="store_true", help="Interactive mode"
+    )
     parser.add_argument("question", nargs="*", help="Single question to test")
     args = parser.parse_args()
 

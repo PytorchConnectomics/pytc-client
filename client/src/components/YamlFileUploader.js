@@ -1,6 +1,7 @@
 // global FileReader
 import React, {
   Fragment,
+  useCallback,
   useContext,
   useEffect,
   useMemo,
@@ -26,16 +27,32 @@ import {
   getConfigPresetContent,
   getModelArchitectures,
 } from "../api";
+import InlineHelpChat from "./InlineHelpChat";
 import { findCommonPartOfString } from "../utils";
 import {
   applyInputPaths,
+  getArchitecturePath,
   getArchitectureValue,
+  getSliderPath,
   getSliderValue,
   isArchitectureSupported,
   isSliderSupported,
   setArchitectureValue,
   setSliderValue,
 } from "../configSchema";
+import { logClientEvent } from "../logging/appEventLog";
+import {
+  detectConfigDiagnostics,
+  summarizeConfigObject,
+} from "../logging/configLogSummary";
+
+const PROJECT_CONTEXT =
+  "Biomedical image segmentation using PyTorch Connectomics.";
+
+const BASE_CONFIG_TASK_CONTEXT = {
+  training: "Model training configuration — Step 2: Base Configuration.",
+  inference: "Model inference configuration — Step 2: Base Configuration.",
+};
 
 const YamlFileUploader = (props) => {
   const context = useContext(AppContext);
@@ -43,6 +60,20 @@ const YamlFileUploader = (props) => {
   const { type } = props;
   const workflow =
     type === "training" ? context.trainingState : context.inferenceState;
+  const {
+    trainingConfig,
+    inferenceConfig,
+    setTrainingConfig,
+    setInferenceConfig,
+  } = context;
+  const {
+    setAugNum,
+    setInferenceSamplesPerBatch,
+    setLearningRate,
+    setNumCPUs,
+    setNumGPUs,
+    setSolverSamplesPerBatch,
+  } = YAMLContext;
 
   const [yamlContent, setYamlContent] = useState("");
   const [presetOptions, setPresetOptions] = useState([]);
@@ -50,6 +81,11 @@ const YamlFileUploader = (props) => {
   const [architectureOptions, setArchitectureOptions] = useState([]);
   const [isLoadingPresets, setIsLoadingPresets] = useState(false);
   const [isLoadingArchitectures, setIsLoadingArchitectures] = useState(false);
+  const currentConfig = type === "training" ? trainingConfig : inferenceConfig;
+  const setConfigOriginPath = workflow.setConfigOriginPath;
+  const selectedYamlPreset = workflow.selectedYamlPreset;
+  const configOriginPath = workflow.configOriginPath;
+  const setSelectedYamlPreset = workflow.setSelectedYamlPreset;
 
   const sliderData = useMemo(() => {
     if (type === "training") {
@@ -97,11 +133,11 @@ const YamlFileUploader = (props) => {
       {
         key: "augmentations",
         label: "Augmentations",
-        min: 1,
+        min: 4,
         max: 16,
-        marks: { 1: 1, 8: 8, 16: 16 },
+        marks: { 4: 4, 8: 8, 16: 16 },
         value: YAMLContext.augNum,
-        step: 1,
+        step: null,
       },
     ];
   }, [
@@ -113,27 +149,30 @@ const YamlFileUploader = (props) => {
     YAMLContext.inferenceSamplesPerBatch,
   ]);
 
-  const getCurrentConfig = () =>
-    type === "training" ? context.trainingConfig : context.inferenceConfig;
+  const setCurrentOriginPath = useCallback(
+    (nextOriginPath) => {
+      setConfigOriginPath(nextOriginPath || "");
+    },
+    [setConfigOriginPath],
+  );
 
-  const setCurrentOriginPath = (nextOriginPath) => {
-    workflow.setConfigOriginPath(nextOriginPath || "");
-  };
+  const setCurrentConfig = useCallback(
+    (nextContent) => {
+      if (type === "training") {
+        setTrainingConfig(nextContent);
+      } else {
+        setInferenceConfig(nextContent);
+      }
+      setYamlContent(nextContent);
+    },
+    [setInferenceConfig, setTrainingConfig, type],
+  );
 
-  const setCurrentConfig = (nextContent) => {
-    if (type === "training") {
-      context.setTrainingConfig(nextContent);
-    } else {
-      context.setInferenceConfig(nextContent);
-    }
-    setYamlContent(nextContent);
-  };
-
-  const getPathValue = (val) => {
+  const getPathValue = useCallback((val) => {
     if (!val) return "";
     if (typeof val === "string") return val;
     return val.path || val.folderPath || "";
-  };
+  }, []);
 
   const getFileName = (path) => {
     if (!path) return "";
@@ -141,70 +180,117 @@ const YamlFileUploader = (props) => {
     return parts[parts.length - 1];
   };
 
-  const updateInputSelectorInformation = (yamlData) => {
-    const inputImagePath = getPathValue(workflow.inputImage);
-    const inputLabelPath = getPathValue(workflow.inputLabel);
-    const inputPath = findCommonPartOfString(inputImagePath, inputLabelPath);
-    const outputPath = getPathValue(workflow.outputPath);
-    applyInputPaths(yamlData, {
-      mode: type,
-      inputImagePath,
-      inputLabelPath,
-      inputPath,
-      outputPath,
-    });
-  };
+  const updateInputSelectorInformation = useCallback(
+    (yamlData) => {
+      const inputImagePath = getPathValue(workflow.inputImage);
+      const inputLabelPath = getPathValue(workflow.inputLabel);
+      const inputPath = findCommonPartOfString(inputImagePath, inputLabelPath);
+      const outputPath = getPathValue(workflow.outputPath);
+      applyInputPaths(yamlData, {
+        mode: type,
+        inputImagePath,
+        inputLabelPath,
+        inputPath,
+        outputPath,
+      });
+    },
+    [
+      getPathValue,
+      type,
+      workflow.inputImage,
+      workflow.inputLabel,
+      workflow.outputPath,
+    ],
+  );
 
-  const syncYamlContext = (yamlData) => {
-    if (!yamlData) return;
-    const gpus = getSliderValue(yamlData, "training", "gpus");
-    if (typeof gpus === "number") {
-      YAMLContext.setNumGPUs(gpus);
-    }
-    const cpus = getSliderValue(yamlData, "training", "cpus");
-    if (typeof cpus === "number") {
-      YAMLContext.setNumCPUs(cpus);
-    }
-    const trainBatch = getSliderValue(yamlData, "training", "batch_size");
-    if (typeof trainBatch === "number") {
-      YAMLContext.setSolverSamplesPerBatch(trainBatch);
-    }
-    const inferenceBatch = getSliderValue(yamlData, "inference", "batch_size");
-    if (typeof inferenceBatch === "number") {
-      YAMLContext.setInferenceSamplesPerBatch(inferenceBatch);
-    }
-    const augNum = getSliderValue(yamlData, "inference", "augmentations");
-    if (typeof augNum === "number") {
-      YAMLContext.setAugNum(augNum);
-    }
-    const learningRate =
-      yamlData.SOLVER?.BASE_LR ?? yamlData.optimization?.optimizer?.lr;
-    if (typeof learningRate === "number") {
-      YAMLContext.setLearningRate(learningRate);
-    }
-  };
+  const syncYamlContext = useCallback(
+    (yamlData) => {
+      if (!yamlData) return;
+      const gpus = getSliderValue(yamlData, "training", "gpus");
+      if (typeof gpus === "number") {
+        setNumGPUs(gpus);
+      }
+      const cpus = getSliderValue(yamlData, "training", "cpus");
+      if (typeof cpus === "number") {
+        setNumCPUs(cpus);
+      }
+      const trainBatch = getSliderValue(yamlData, "training", "batch_size");
+      if (typeof trainBatch === "number") {
+        setSolverSamplesPerBatch(trainBatch);
+      }
+      const inferenceBatch = getSliderValue(
+        yamlData,
+        "inference",
+        "batch_size",
+      );
+      if (typeof inferenceBatch === "number") {
+        setInferenceSamplesPerBatch(inferenceBatch);
+      }
+      const augNum = getSliderValue(yamlData, "inference", "augmentations");
+      if (typeof augNum === "number") {
+        setAugNum(augNum);
+      }
+      const learningRate =
+        yamlData.SOLVER?.BASE_LR ?? yamlData.optimization?.optimizer?.lr;
+      if (typeof learningRate === "number") {
+        setLearningRate(learningRate);
+      }
+    },
+    [
+      setAugNum,
+      setInferenceSamplesPerBatch,
+      setLearningRate,
+      setNumCPUs,
+      setNumGPUs,
+      setSolverSamplesPerBatch,
+    ],
+  );
 
-  const applyYamlData = (yamlData, sourceLabel) => {
-    if (!yamlData) {
-      message.error("Failed to load YAML configuration.");
-      return;
-    }
+  const applyYamlData = useCallback(
+    (yamlData, sourceLabel, originPath = "") => {
+      if (!yamlData) {
+        message.error("Failed to load YAML configuration.");
+        return;
+      }
 
-    updateInputSelectorInformation(yamlData);
-    const serialized = yaml
-      .dump(yamlData, { indent: 2 })
-      .replace(/^\s*\n/gm, "");
-    setCurrentConfig(serialized);
-    syncYamlContext(yamlData);
+      updateInputSelectorInformation(yamlData);
+      const serialized = yaml
+        .dump(yamlData, { indent: 2 })
+        .replace(/^\s*\n/gm, "");
+      setCurrentConfig(serialized);
+      syncYamlContext(yamlData);
 
-    if (sourceLabel) {
-      message.success(`${sourceLabel} loaded.`);
-    }
-  };
+      const configSummary = summarizeConfigObject(yamlData, type);
+      const diagnostics = detectConfigDiagnostics({ config: configSummary });
+      logClientEvent("yaml_config_applied", {
+        level: diagnostics.length ? "WARNING" : "INFO",
+        message: sourceLabel || `${type} YAML updated`,
+        source: "yaml-uploader",
+        data: {
+          type,
+          sourceLabel: sourceLabel || null,
+          originPath: originPath || workflow.configOriginPath || "",
+          configSummary,
+          diagnostics,
+        },
+      });
 
-  const serializeYaml = (yamlData) => {
+      if (sourceLabel) {
+        message.success(`${sourceLabel} loaded.`);
+      }
+    },
+    [
+      setCurrentConfig,
+      syncYamlContext,
+      type,
+      updateInputSelectorInformation,
+      workflow.configOriginPath,
+    ],
+  );
+
+  const serializeYaml = useCallback((yamlData) => {
     return yaml.dump(yamlData, { indent: 2 }).replace(/^\s*\n/gm, "");
-  };
+  }, []);
 
   const normalizeYamlText = (text) => {
     if (!text) return "";
@@ -216,17 +302,31 @@ const YamlFileUploader = (props) => {
     }
   };
 
-  const parseYaml = (yamlText, showError = true) => {
-    if (!yamlText) return null;
-    try {
-      return yaml.load(yamlText);
-    } catch (error) {
-      if (showError) {
-        message.error("Error parsing YAML content.");
+  const parseYaml = useCallback(
+    (yamlText, showError = true) => {
+      if (!yamlText) return null;
+      try {
+        return yaml.load(yamlText);
+      } catch (error) {
+        logClientEvent("yaml_parse_failed", {
+          level: "ERROR",
+          message: "Failed to parse YAML in uploader",
+          source: "yaml-uploader",
+          data: {
+            type,
+            showError,
+            error: error.message || "unknown error",
+            textLength: yamlText.length || 0,
+          },
+        });
+        if (showError) {
+          message.error("Error parsing YAML content.");
+        }
+        return null;
       }
-      return null;
-    }
-  };
+    },
+    [type],
+  );
 
   const handleFileUpload = (file) => {
     workflow.setUploadedYamlFile(file);
@@ -238,7 +338,7 @@ const YamlFileUploader = (props) => {
       const contents = e.target.result;
       const yamlData = parseYaml(contents);
       if (!yamlData) return;
-      applyYamlData(yamlData, "YAML file");
+      applyYamlData(yamlData, "YAML file", getPathValue(file));
     };
     reader.readAsText(file);
   };
@@ -253,7 +353,7 @@ const YamlFileUploader = (props) => {
       workflow.setSelectedYamlPreset(value);
       workflow.setUploadedYamlFile("");
       setCurrentOriginPath(value);
-      applyYamlData(yamlData, "Preset config");
+      applyYamlData(yamlData, "Preset config", value);
     } catch (error) {
       message.error(error?.message || "Failed to load preset config.");
     } finally {
@@ -265,11 +365,10 @@ const YamlFileUploader = (props) => {
     if (!presetYamlText) return;
     const yamlData = parseYaml(presetYamlText);
     if (!yamlData) return;
-    applyYamlData(yamlData, "Preset restored");
+    applyYamlData(yamlData, "Preset restored", workflow.selectedYamlPreset);
   };
 
   const handleSliderChange = (sliderKey, newValue) => {
-    const currentConfig = getCurrentConfig();
     if (!currentConfig) {
       message.warning("Load a preset or upload a YAML file first.");
       return;
@@ -284,7 +383,6 @@ const YamlFileUploader = (props) => {
   };
 
   const handleArchitectureChange = (value) => {
-    const currentConfig = getCurrentConfig();
     if (!currentConfig) {
       message.warning("Load a preset or upload a YAML file first.");
       return;
@@ -336,7 +434,38 @@ const YamlFileUploader = (props) => {
   }, []);
 
   useEffect(() => {
-    const currentConfig = getCurrentConfig();
+    if (!selectedYamlPreset || !presetOptions.length) return;
+    const selectedPresetStillExists = presetOptions.some(
+      (option) => option.value === selectedYamlPreset,
+    );
+    if (selectedPresetStillExists) return;
+
+    logClientEvent("yaml_preset_missing", {
+      level: "WARNING",
+      message: "Persisted YAML preset was not found in the current preset list",
+      source: "yaml-uploader",
+      data: {
+        type,
+        missingPreset: selectedYamlPreset,
+        currentOriginPath: configOriginPath || "",
+      },
+    });
+
+    setSelectedYamlPreset("");
+    setPresetYamlText(null);
+    if (configOriginPath === selectedYamlPreset) {
+      setCurrentOriginPath("");
+    }
+  }, [
+    configOriginPath,
+    presetOptions,
+    selectedYamlPreset,
+    setCurrentOriginPath,
+    setSelectedYamlPreset,
+    type,
+  ]);
+
+  useEffect(() => {
     if (currentConfig) {
       setYamlContent(currentConfig);
       const yamlData = parseYaml(currentConfig);
@@ -344,10 +473,9 @@ const YamlFileUploader = (props) => {
         syncYamlContext(yamlData);
       }
     }
-  }, [context.trainingConfig, context.inferenceConfig, type]);
+  }, [currentConfig, parseYaml, syncYamlContext]);
 
   useEffect(() => {
-    const currentConfig = getCurrentConfig();
     if (!currentConfig) return;
 
     const yamlData = parseYaml(currentConfig, false);
@@ -359,27 +487,31 @@ const YamlFileUploader = (props) => {
       setCurrentConfig(nextSerialized);
     }
   }, [
-    workflow.inputImage,
-    workflow.inputLabel,
-    workflow.outputPath,
-    context.trainingConfig,
-    context.inferenceConfig,
-    type,
+    currentConfig,
+    parseYaml,
+    serializeYaml,
+    setCurrentConfig,
+    updateInputSelectorInformation,
   ]);
 
   const currentYamlData = useMemo(() => {
-    const currentConfig = getCurrentConfig();
     if (!currentConfig) return null;
     return parseYaml(currentConfig, false);
-  }, [context.trainingConfig, context.inferenceConfig, type]);
+  }, [currentConfig, parseYaml]);
 
   const currentArchitecture = useMemo(() => {
     return getArchitectureValue(currentYamlData);
   }, [currentYamlData]);
 
+  const currentArchitecturePath = useMemo(() => {
+    return getArchitecturePath(currentYamlData);
+  }, [currentYamlData]);
+
   const architectureSupported = useMemo(() => {
     return isArchitectureSupported(currentYamlData);
   }, [currentYamlData]);
+
+  const baseConfigTaskContext = BASE_CONFIG_TASK_CONTEXT[type];
 
   return (
     <div style={{ margin: "10px" }}>
@@ -415,12 +547,12 @@ const YamlFileUploader = (props) => {
           {workflow.selectedYamlPreset && presetYamlText && (
             <>
               <span style={{ color: "#fa8c16", fontSize: 12 }}>
-                {normalizeYamlText(getCurrentConfig()) !==
+                {normalizeYamlText(currentConfig) !==
                 normalizeYamlText(presetYamlText)
                   ? "Modified"
                   : "Preset"}
               </span>
-              {normalizeYamlText(getCurrentConfig()) !==
+              {normalizeYamlText(currentConfig) !==
                 normalizeYamlText(presetYamlText) && (
                 <Button size="small" type="link" onClick={handleRevertPreset}>
                   Revert to preset
@@ -469,7 +601,21 @@ const YamlFileUploader = (props) => {
       <Row gutter={[16, 16]}>
         <Col span={12}>
           <div>
-            <h4>Model architecture</h4>
+            <Space align="center" size={4}>
+              <h4 style={{ marginBottom: 0 }}>Model architecture</h4>
+              <InlineHelpChat
+                taskKey={`${type}:base-config`}
+                label="Model architecture"
+                yamlKey={
+                  currentArchitecturePath
+                    ? currentArchitecturePath.join(".")
+                    : undefined
+                }
+                value={currentArchitecture}
+                projectContext={PROJECT_CONTEXT}
+                taskContext={baseConfigTaskContext}
+              />
+            </Space>
             <Space style={{ width: "100%" }} align="start">
               <Select
                 placeholder="Select architecture"
@@ -490,7 +636,12 @@ const YamlFileUploader = (props) => {
       {yamlContent ? (
         <Row>
           {sliderData.map((param, index) => {
-            const sliderValue = getSliderValue(currentYamlData, type, param.key);
+            const sliderValue = getSliderValue(
+              currentYamlData,
+              type,
+              param.key,
+            );
+            const sliderPath = getSliderPath(currentYamlData, type, param.key);
             const sliderSupported = isSliderSupported(
               currentYamlData,
               type,
@@ -502,12 +653,28 @@ const YamlFileUploader = (props) => {
                   <div>
                     <Space align="center">
                       <h4 style={{ marginBottom: 0 }}>{param.label}</h4>
+                      <InlineHelpChat
+                        taskKey={`${type}:base-config`}
+                        label={param.label}
+                        yamlKey={sliderPath ? sliderPath.join(".") : undefined}
+                        value={
+                          typeof sliderValue === "number"
+                            ? sliderValue
+                            : param.value
+                        }
+                        projectContext={PROJECT_CONTEXT}
+                        taskContext={baseConfigTaskContext}
+                      />
                     </Space>
                     <Slider
                       min={param.min}
                       max={param.max}
                       marks={param.marks}
-                      value={typeof sliderValue === "number" ? sliderValue : param.value}
+                      value={
+                        typeof sliderValue === "number"
+                          ? sliderValue
+                          : param.value
+                      }
                       disabled={!sliderSupported}
                       onChange={(newValue) =>
                         handleSliderChange(param.key, newValue)

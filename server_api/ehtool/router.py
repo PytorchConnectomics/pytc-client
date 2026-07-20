@@ -8,8 +8,38 @@ from sqlalchemy.orm import Session
 from typing import List, Optional
 import math
 import logging
+import time
 
 logger = logging.getLogger(__name__)
+
+
+def _extract_marching_cubes_surface(
+    measure,
+    padded_volume,
+    *,
+    initial_step: int,
+    face_limit: int,
+    max_step: int = 12,
+):
+    """Extract a valid surface by increasing marching-cubes stride if needed."""
+    mesh_step = max(1, int(initial_step or 1))
+    max_step = max(mesh_step, int(max_step or mesh_step))
+    last_result = None
+
+    while mesh_step <= max_step:
+        vertices, faces, normals, values = measure.marching_cubes(
+            padded_volume,
+            level=0.5,
+            step_size=mesh_step,
+            allow_degenerate=False,
+        )
+        last_result = (vertices, faces, normals, values, mesh_step)
+        if faces.shape[0] <= face_limit:
+            return last_result
+        mesh_step += 1
+
+    return last_result
+
 
 from server_api.auth.database import get_db
 from server_api.auth.router import get_current_user
@@ -42,16 +72,24 @@ from server_api.workflows.service import (
     get_user_workflow_or_404,
     update_workflow_fields,
 )
+from app_event_logger import append_app_event
 
 router = APIRouter()
 
-# DIAGNOSTIC: This should print when the module is loaded
-print("=" * 80)
-print("EHTOOL ROUTER MODULE LOADED - VERSION: DEBUG v2")
-print("=" * 80)
-
 # In-memory cache for DataManagers (session_id -> DataManager)
 _data_managers = {}
+
+
+def _append_ehtool_event(event: str, level: str = "INFO", **fields):
+    try:
+        append_app_event(
+            component="ehtool.router",
+            event=event,
+            level=level,
+            **fields,
+        )
+    except Exception:
+        logger.debug("Failed to append EHTool app event", exc_info=True)
 
 
 def get_data_manager(session_id: int, db: Session) -> DataManager:
@@ -97,6 +135,14 @@ async def load_detection_dataset(
             workflow = get_user_workflow_or_404(
                 db, workflow_id=request.workflow_id, user_id=current_user.id
             )
+
+        _append_ehtool_event(
+            "proofreading_load_requested",
+            dataset_path=request.dataset_path,
+            mask_path=request.mask_path,
+            project_name=request.project_name,
+            workflow_id=request.workflow_id,
+        )
 
         # Create DataManager and load dataset
         data_manager = DataManager()
@@ -176,6 +222,14 @@ async def load_detection_dataset(
                 },
             )
 
+        _append_ehtool_event(
+            "proofreading_load_completed",
+            session_id=db_session.id,
+            total_layers=dataset_info["total_layers"],
+            project_name=request.project_name,
+            workflow_id=request.workflow_id,
+        )
+
         return DetectionLoadResponse(
             session_id=db_session.id,
             total_layers=dataset_info["total_layers"],
@@ -183,10 +237,13 @@ async def load_detection_dataset(
         )
 
     except FileNotFoundError as e:
+        _append_ehtool_event("proofreading_load_failed", level="ERROR", error=str(e))
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
     except ValueError as e:
+        _append_ehtool_event("proofreading_load_failed", level="ERROR", error=str(e))
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
     except Exception as e:
+        _append_ehtool_event("proofreading_load_failed", level="ERROR", error=str(e))
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to load dataset: {str(e)}",
@@ -260,8 +317,11 @@ async def get_detection_layers(
                 layer_info.image_base64 = image_base64
                 layer_info.mask_base64 = mask_base64
             except Exception as e:
-                print(
-                    f"[GET_LAYERS] Warning: Failed to load image for layer {db_layer.layer_index}: {e}"
+                _append_ehtool_event(
+                    "layer_preview_load_failed",
+                    level="WARNING",
+                    layer_index=db_layer.layer_index,
+                    error=str(e),
                 )
 
         layers.append(layer_info)
@@ -479,6 +539,7 @@ async def get_instance_image(
             detail="No instance data available for this session",
         )
 
+    started_at = time.perf_counter()
     try:
         (
             image_bytes,
@@ -498,6 +559,24 @@ async def get_instance_image(
         )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+    elapsed_ms = (time.perf_counter() - started_at) * 1000.0
+    _append_ehtool_event(
+        "proofreading_instance_image_served",
+        session_id=session_id,
+        instance_id=instance_id,
+        kind=kind,
+        axis=resolved_axis,
+        z_index=resolved_index,
+        total_layers=total,
+        quality=quality,
+        format=format,
+        max_dim=max_dim,
+        bytes=len(image_bytes),
+        elapsed_ms=round(elapsed_ms, 2),
+        cache_hit=bool(perf_meta.get("cache_hit")),
+        decode_ms=round(float(perf_meta.get("decode_ms", 0.0)), 2),
+        resize_ms=round(float(perf_meta.get("resize_ms", 0.0)), 2),
+    )
 
     headers = {
         "X-Z-Index": str(resolved_index),
@@ -508,6 +587,212 @@ async def get_instance_image(
         "X-Resize-MS": f"{float(perf_meta.get('resize_ms', 0.0)):.2f}",
     }
     return Response(content=image_bytes, media_type=media_type, headers=headers)
+
+
+@router.get("/detection/instance-volume-preview")
+async def get_instance_volume_preview(
+    session_id: int,
+    instance_id: int,
+    max_points: int = 30000,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    db_session = (
+        db.query(EHToolSession)
+        .filter(
+            EHToolSession.id == session_id, EHToolSession.user_id == current_user.id
+        )
+        .first()
+    )
+    if not db_session:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Session not found"
+        )
+
+    data_manager = get_data_manager(session_id, db)
+    data_manager.ensure_instances()
+
+    if data_manager.instance_volume is None:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="No instance data available for this session",
+        )
+
+    import numpy as np
+
+    volume = data_manager.instance_volume
+    if volume.ndim == 2:
+        mask = volume == int(instance_id)
+        coords_yx = np.argwhere(mask)
+        coords = np.column_stack(
+            [
+                np.zeros(coords_yx.shape[0], dtype=np.int64),
+                coords_yx[:, 0],
+                coords_yx[:, 1],
+            ]
+        )
+        shape_zyx = [1, int(volume.shape[0]), int(volume.shape[1])]
+    else:
+        mask = volume == int(instance_id)
+        coords = np.argwhere(mask)
+        shape_zyx = [int(volume.shape[0]), int(volume.shape[1]), int(volume.shape[2])]
+
+    voxel_count = int(coords.shape[0])
+    if voxel_count == 0:
+        raise HTTPException(status_code=404, detail="Instance not found")
+
+    max_points = max(1000, min(int(max_points or 30000), 80000))
+    sample_step = max(1, int(math.ceil(voxel_count / max_points)))
+    sampled = coords[::sample_step]
+    bbox_min = coords.min(axis=0).astype(int).tolist()
+    bbox_max = coords.max(axis=0).astype(int).tolist()
+
+    return {
+        "session_id": session_id,
+        "instance_id": instance_id,
+        "mode": data_manager.instance_mode or "none",
+        "shape_zyx": shape_zyx,
+        "voxel_count": voxel_count,
+        "sample_step": sample_step,
+        "points_zyx": sampled.astype(int).tolist(),
+        "bbox_zyx": {"min": bbox_min, "max": bbox_max},
+    }
+
+
+@router.get("/detection/instance-mesh-preview")
+async def get_instance_mesh_preview(
+    session_id: int,
+    instance_id: int,
+    max_faces: int = 60000,
+    step_size: Optional[int] = None,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    db_session = (
+        db.query(EHToolSession)
+        .filter(
+            EHToolSession.id == session_id, EHToolSession.user_id == current_user.id
+        )
+        .first()
+    )
+    if not db_session:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Session not found"
+        )
+
+    data_manager = get_data_manager(session_id, db)
+    data_manager.ensure_instances()
+
+    if data_manager.instance_volume is None:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="No instance data available for this session",
+        )
+
+    try:
+        import numpy as np
+        from skimage import measure
+    except Exception as exc:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="3D mesh extraction requires scikit-image",
+        ) from exc
+
+    started_at = time.perf_counter()
+    volume = data_manager.instance_volume
+    label = int(instance_id)
+
+    if volume.ndim == 2:
+        mask = volume == label
+        coords_yx = np.argwhere(mask)
+        if coords_yx.size == 0:
+            raise HTTPException(status_code=404, detail="Instance not found")
+        bbox_min = np.array([0, coords_yx[:, 0].min(), coords_yx[:, 1].min()])
+        bbox_max = np.array([0, coords_yx[:, 0].max(), coords_yx[:, 1].max()])
+        crop_min = np.array(
+            [0, max(int(bbox_min[1]) - 1, 0), max(int(bbox_min[2]) - 1, 0)]
+        )
+        crop_max = np.array(
+            [
+                1,
+                min(int(bbox_max[1]) + 2, volume.shape[0]),
+                min(int(bbox_max[2]) + 2, volume.shape[1]),
+            ]
+        )
+        crop = mask[crop_min[1] : crop_max[1], crop_min[2] : crop_max[2]][
+            np.newaxis, :, :
+        ]
+        shape_zyx = [1, int(volume.shape[0]), int(volume.shape[1])]
+        voxel_count = int(coords_yx.shape[0])
+    else:
+        mask = volume == label
+        coords = np.argwhere(mask)
+        if coords.size == 0:
+            raise HTTPException(status_code=404, detail="Instance not found")
+        bbox_min = coords.min(axis=0).astype(int)
+        bbox_max = coords.max(axis=0).astype(int)
+        shape = np.array(volume.shape[:3], dtype=int)
+        crop_min = np.maximum(bbox_min - 1, 0)
+        crop_max = np.minimum(bbox_max + 2, shape)
+        crop = mask[
+            crop_min[0] : crop_max[0],
+            crop_min[1] : crop_max[1],
+            crop_min[2] : crop_max[2],
+        ]
+        shape_zyx = [int(volume.shape[0]), int(volume.shape[1]), int(volume.shape[2])]
+        voxel_count = int(coords.shape[0])
+
+    padded = np.pad(crop.astype(np.float32), 1, mode="constant", constant_values=0)
+    mesh_offset = crop_min.astype(float) - 1.0
+    crop_voxels = int(crop.size)
+    computed_step = max(1, int(math.ceil((crop_voxels / 4_000_000) ** (1 / 3))))
+    mesh_step = max(1, min(int(step_size or computed_step), 8))
+    face_limit = max(1000, min(int(max_faces or 60000), 200000))
+
+    try:
+        vertices, faces, _normals, _values, mesh_step = _extract_marching_cubes_surface(
+            measure,
+            padded,
+            initial_step=mesh_step,
+            face_limit=face_limit,
+        )
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Could not extract a surface for instance {instance_id}",
+        ) from exc
+
+    vertices = vertices + mesh_offset
+
+    elapsed_ms = (time.perf_counter() - started_at) * 1000.0
+    _append_ehtool_event(
+        "proofreading_instance_mesh_served",
+        session_id=session_id,
+        instance_id=instance_id,
+        vertex_count=int(vertices.shape[0]),
+        face_count=int(faces.shape[0]),
+        voxel_count=voxel_count,
+        mesh_step=mesh_step,
+        face_limit=face_limit,
+        crop_shape=[int(v) for v in crop.shape],
+        elapsed_ms=round(elapsed_ms, 2),
+    )
+
+    return {
+        "session_id": session_id,
+        "instance_id": instance_id,
+        "mode": data_manager.instance_mode or "none",
+        "shape_zyx": shape_zyx,
+        "voxel_count": voxel_count,
+        "mesh_step": mesh_step,
+        "face_limit": face_limit,
+        "vertices_zyx": np.round(vertices, 3).astype(float).tolist(),
+        "faces": faces.astype(int).tolist(),
+        "bbox_zyx": {
+            "min": bbox_min.astype(int).tolist(),
+            "max": bbox_max.astype(int).tolist(),
+        },
+    }
 
 
 @router.get("/detection/instance-filmstrip")
@@ -545,6 +830,7 @@ async def get_instance_filmstrip(
             detail="No instance data available for this session",
         )
 
+    started_at = time.perf_counter()
     try:
         (
             image_bytes,
@@ -567,6 +853,26 @@ async def get_instance_filmstrip(
         )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+    elapsed_ms = (time.perf_counter() - started_at) * 1000.0
+    _append_ehtool_event(
+        "proofreading_instance_filmstrip_served",
+        session_id=session_id,
+        instance_id=instance_id,
+        kind=kind,
+        axis=resolved_axis,
+        z_start=resolved_start,
+        z_count=resolved_count,
+        total_layers=total,
+        quality=quality,
+        format=format,
+        max_dim=max_dim,
+        bytes=len(image_bytes),
+        frame_height=frame_height,
+        elapsed_ms=round(elapsed_ms, 2),
+        cache_hit=bool(perf_meta.get("cache_hit")),
+        decode_ms=round(float(perf_meta.get("decode_ms", 0.0)), 2),
+        resize_ms=round(float(perf_meta.get("resize_ms", 0.0)), 2),
+    )
 
     headers = {
         "X-Z-Start": str(resolved_start),
@@ -814,7 +1120,14 @@ async def save_instance_mask(
 
     try:
         data_manager = get_data_manager(request.session_id, db)
-        data_manager.save_instance_mask_slice(
+        _append_ehtool_event(
+            "proofreading_mask_save_requested",
+            session_id=request.session_id,
+            instance_id=request.instance_id,
+            axis=request.axis,
+            z_index=request.z_index,
+        )
+        save_result = data_manager.save_instance_mask_slice(
             instance_id=request.instance_id,
             axis=request.axis,
             index=request.z_index,
@@ -836,13 +1149,48 @@ async def save_instance_mask(
                 "z_index": request.z_index,
             },
         )
-        return {"message": "Instance mask saved successfully"}
+        persistence = data_manager.get_persistence_status()
+        _append_ehtool_event(
+            "proofreading_mask_save_completed",
+            session_id=request.session_id,
+            instance_id=request.instance_id,
+            axis=request.axis,
+            z_index=request.z_index,
+            pixels_changed=save_result.get("pixels_changed"),
+            pixels_blocked=save_result.get("pixels_blocked"),
+            artifact_path=persistence.get("artifact_path"),
+            artifact_exists=persistence.get("artifact_exists"),
+            last_saved_at=persistence.get("last_saved_at"),
+        )
+        return {
+            "message": "Instance mask saved successfully",
+            "edit": save_result,
+            "persistence": persistence,
+        }
     except ValueError as exc:
+        _append_ehtool_event(
+            "proofreading_mask_save_failed",
+            level="ERROR",
+            session_id=request.session_id,
+            instance_id=request.instance_id,
+            axis=request.axis,
+            z_index=request.z_index,
+            error=str(exc),
+        )
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     except Exception as e:
         import traceback
 
         traceback.print_exc()
+        _append_ehtool_event(
+            "proofreading_mask_save_failed",
+            level="ERROR",
+            session_id=request.session_id,
+            instance_id=request.instance_id,
+            axis=request.axis,
+            z_index=request.z_index,
+            error=str(e),
+        )
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to save instance mask: {str(e)}",

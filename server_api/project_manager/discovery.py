@@ -86,7 +86,11 @@ def _discover_from_dir(
         for entry in files
         if _match_supported_suffix(entry, SUPPORTED_STACK_IMAGE_SUFFIXES)
     ]
-    if current != root and len(stack_slice_files) >= 2 and len(stack_slice_files) == len(files):
+    if (
+        current != root
+        and len(stack_slice_files) >= 2
+        and len(stack_slice_files) == len(files)
+    ):
         rel_path = str(current.relative_to(root))
         return [
             {

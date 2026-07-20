@@ -13,6 +13,21 @@ import {
 import yaml from "js-yaml";
 import { AppContext } from "../contexts/GlobalContext";
 import { hasPath } from "../configSchema";
+import InlineHelpChat from "./InlineHelpChat";
+import { logClientEvent } from "../logging/appEventLog";
+import {
+  detectConfigDiagnostics,
+  summarizeConfigObject,
+  summarizeConfigText,
+} from "../logging/configLogSummary";
+
+const PROJECT_CONTEXT =
+  "Biomedical image segmentation using PyTorch Connectomics.";
+
+const ADVANCED_CONFIG_TASK_CONTEXT = {
+  training: "Model training configuration — Step 3: Advanced Configuration.",
+  inference: "Model inference configuration — Step 3: Advanced Configuration.",
+};
 
 const getYamlValue = (data, path) => {
   if (!data) return undefined;
@@ -236,7 +251,7 @@ const CONTROL_SECTIONS = {
           label: "Augmentations",
           path: ["INFERENCE", "AUG_NUM"],
           type: "number",
-          min: 1,
+          min: 4,
         },
         {
           label: "Blending",
@@ -306,6 +321,20 @@ const YamlFileEditor = (props) => {
     } else {
       context.setInferenceConfig(updatedText);
     }
+    const configSummary = summarizeConfigObject(updated, type);
+    const diagnostics = detectConfigDiagnostics({ config: configSummary });
+    logClientEvent("yaml_advanced_control_updated", {
+      level: diagnostics.length ? "WARNING" : "INFO",
+      message: `Advanced YAML control updated: ${path.join(".")}`,
+      source: "yaml-editor",
+      data: {
+        type,
+        path: path.join("."),
+        value,
+        configSummary,
+        diagnostics,
+      },
+    });
   };
 
   const [rawError, setRawError] = useState("");
@@ -327,6 +356,19 @@ const YamlFileEditor = (props) => {
   };
 
   useEffect(() => {
+    if (!rawError) return;
+    logClientEvent("yaml_raw_validation_failed", {
+      level: "WARNING",
+      message: rawError,
+      source: "yaml-editor",
+      data: {
+        type,
+        textLength: yamlContent.length || 0,
+      },
+    });
+  }, [rawError, type, yamlContent]);
+
+  useEffect(() => {
     if (type === "training") {
       setYamlContent(context.trainingConfig || "");
     }
@@ -344,6 +386,19 @@ const YamlFileEditor = (props) => {
 
   const displayName =
     workflow.uploadedYamlFile?.name || workflow.selectedYamlPreset;
+
+  const advancedConfigTaskContext = ADVANCED_CONFIG_TASK_CONTEXT[type];
+
+  const renderControlHelp = (control) => (
+    <InlineHelpChat
+      taskKey={`${type}:advanced-config`}
+      label={control.label}
+      yamlKey={control.path.join(".")}
+      value={getYamlValue(yamlData, control.path)}
+      projectContext={PROJECT_CONTEXT}
+      taskContext={advancedConfigTaskContext}
+    />
+  );
 
   const renderControl = (control) => {
     const value = getYamlValue(yamlData, control.path);
@@ -460,15 +515,21 @@ const YamlFileEditor = (props) => {
                               }}
                             >
                               {renderControl(control)}
-                              <span style={{ fontSize: 12 }}>
-                                {control.label}
-                              </span>
+                              <Space align="center" size={4}>
+                                <span style={{ fontSize: 12 }}>
+                                  {control.label}
+                                </span>
+                                {renderControlHelp(control)}
+                              </Space>
                             </div>
                           ) : (
                             <>
-                              <span style={{ fontSize: 12 }}>
-                                {control.label}
-                              </span>
+                              <Space align="center" size={4}>
+                                <span style={{ fontSize: 12 }}>
+                                  {control.label}
+                                </span>
+                                {renderControlHelp(control)}
+                              </Space>
                               <div style={{ width: "100%" }}>
                                 {renderControl(control)}
                               </div>
@@ -484,7 +545,22 @@ const YamlFileEditor = (props) => {
           ))}
 
           <Space style={{ marginBottom: 8 }}>
-            <Button size="small" onClick={() => setShowRaw(true)}>
+            <Button
+              size="small"
+              onClick={() => {
+                logClientEvent("yaml_raw_editor_opened", {
+                  level: "INFO",
+                  message: "Opened raw YAML editor",
+                  source: "yaml-editor",
+                  data: {
+                    type,
+                    displayName: displayName || null,
+                    configSummary: summarizeConfigText(yamlContent, type),
+                  },
+                });
+                setShowRaw(true);
+              }}
+            >
               Open raw YAML
             </Button>
           </Space>
@@ -517,8 +593,27 @@ const YamlFileEditor = (props) => {
                     } else {
                       context.setInferenceConfig(formatted);
                     }
+                    logClientEvent("yaml_raw_formatted", {
+                      level: "INFO",
+                      message: "Formatted raw YAML",
+                      source: "yaml-editor",
+                      data: {
+                        type,
+                        configSummary: summarizeConfigText(formatted, type),
+                      },
+                    });
                     setRawError("");
                   } catch (error) {
+                    logClientEvent("yaml_raw_format_failed", {
+                      level: "ERROR",
+                      message: "Could not format YAML",
+                      source: "yaml-editor",
+                      data: {
+                        type,
+                        error: error.message || "unknown error",
+                        textLength: yamlContent.length || 0,
+                      },
+                    });
                     message.error("Could not format YAML.");
                   }
                 }}
