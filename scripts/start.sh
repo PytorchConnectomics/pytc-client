@@ -21,7 +21,7 @@ if command -v brew >/dev/null 2>&1; then
 fi
 
 export PATH
-export OLLAMA_BASE_URL="${OLLAMA_BASE_URL:-http://127.0.0.1:11434}"
+export OLLAMA_BASE_URL="${OLLAMA_BASE_URL:-http://cscigpu08.bc.edu:11434}"
 export OLLAMA_MODEL="${OLLAMA_MODEL:-qwen3.6:27b}"
 export PYTC_WORKFLOW_INTENT_MODEL="${PYTC_WORKFLOW_INTENT_MODEL:-${OLLAMA_MODEL}}"
 export OLLAMA_EMBED_MODEL="${OLLAMA_EMBED_MODEL:-qwen3-embedding:8b}"
@@ -135,14 +135,14 @@ start_service \
 	4242 \
 	"http://localhost:4242/health" \
 	"${LOG_DIR}/api-server.log" \
-	env PYTHONDONTWRITEBYTECODE=1 "${UV_BIN}" run --directory "${ROOT_DIR}" python -m server_api.main
+	env PYTHONDONTWRITEBYTECODE=1 "${UV_BIN}" run --directory "${ROOT_DIR}" python -u -m server_api.main
 
 start_service \
 	"PyTC server" \
 	4243 \
 	"http://localhost:4243/hello" \
 	"${LOG_DIR}/pytc-server.log" \
-	"${UV_BIN}" run --directory "${ROOT_DIR}" python -m server_pytc.main
+	"${UV_BIN}" run --directory "${ROOT_DIR}" python -u -m server_pytc.main
 
 ensure_client_dependencies() {
 	if [[ -x "${CLIENT_DIR}/node_modules/.bin/react-scripts" && -x "${CLIENT_DIR}/node_modules/.bin/cross-env" ]]; then
