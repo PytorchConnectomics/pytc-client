@@ -73,6 +73,18 @@ describe("api canonicalization", () => {
     expect(url).toBe("https://demo.example/api/files?parent=root");
   });
 
+  it("requests structured Problem Details responses", () => {
+    const { axiosMock } = loadApiModule(BASE_WITH_API_PREFIX);
+
+    expect(axiosMock.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        headers: {
+          Accept: "application/json, application/problem+json",
+        },
+      }),
+    );
+  });
+
   it("canonicalizes training approval/action paths for base URLs with /api/workflows", () => {
     const { api, apiClientMock } = loadApiModule(
       "https://demo.example/api/workflows",

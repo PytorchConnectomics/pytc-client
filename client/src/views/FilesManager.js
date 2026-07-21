@@ -111,6 +111,7 @@ const PROJECT_CONFIRMATION_ROLES = [
     provenanceOnly: true,
   },
 ];
+const FILE_MANAGER_PAGE_SIZE = 200;
 
 const getSelectedFilePath = (item) => {
   if (!item) return "";
@@ -757,8 +758,10 @@ function FilesManager() {
   const currentFolderRef = useRef("root");
   const [loadedParents, setLoadedParents] = useState([]);
   const [loadingParents, setLoadingParents] = useState([]);
+  const [folderPages, setFolderPages] = useState({});
   const loadedParentsRef = useRef(new Set());
   const loadingParentsRef = useRef(new Set());
+  const folderPagesRef = useRef({});
   const [expandedFolders, setExpandedFolders] = useState([]);
   const [viewMode, setViewMode] = useState("grid"); // 'grid' or 'list'
   const [selectedItems, setSelectedItems] = useState([]);
@@ -847,6 +850,10 @@ function FilesManager() {
     currentFolderRef.current = currentFolder;
   }, [currentFolder]);
 
+  useEffect(() => {
+    folderPagesRef.current = folderPages;
+  }, [folderPages]);
+
   const syncLoadedParents = React.useCallback((nextParents) => {
     loadedParentsRef.current = new Set(nextParents);
     setLoadedParents(nextParents);
@@ -885,14 +892,17 @@ function FilesManager() {
     filesRef.current = {};
     setFolders([]);
     setFiles({});
+    folderPagesRef.current = {};
+    setFolderPages({});
     syncLoadedParents([]);
     syncLoadingParents([]);
     setExpandedFolders([]);
   }, [syncLoadedParents, syncLoadingParents]);
 
   const replaceFolderChildren = React.useCallback(
-    (parentKey, fileList) => {
+    (parentKey, fileList, options = {}) => {
       const normalizedParent = String(parentKey || "root");
+      const { append = false } = options;
       const previousFolders = foldersRef.current;
       const previousFiles = filesRef.current;
       const { folders: nextFolders, files: nextFiles } =
@@ -903,18 +913,25 @@ function FilesManager() {
       const nextDirectChildIds = new Set(
         nextFolders.map((folder) => folder.key),
       );
-      const removedFolderIds = collectDescendantFolderIds(
-        previousFolders,
-        existingDirectChildIds.filter((id) => !nextDirectChildIds.has(id)),
-      );
+      const removedFolderIds = append
+        ? new Set()
+        : collectDescendantFolderIds(
+            previousFolders,
+            existingDirectChildIds.filter((id) => !nextDirectChildIds.has(id)),
+          );
 
+      const previousFolderIds = new Set(
+        previousFolders.map((folder) => folder.key),
+      );
       const mergedFolders = [
         ...previousFolders.filter(
           (folder) =>
-            folder.parent !== normalizedParent &&
+            (append || folder.parent !== normalizedParent) &&
             !removedFolderIds.has(folder.key),
         ),
-        ...nextFolders,
+        ...nextFolders.filter(
+          (folder) => !append || !previousFolderIds.has(folder.key),
+        ),
       ].sort((left, right) => {
         if (left.parent === right.parent) {
           return String(left.title || "").localeCompare(
@@ -927,12 +944,17 @@ function FilesManager() {
       });
 
       const mergedFiles = { ...previousFiles };
-      delete mergedFiles[normalizedParent];
+      if (!append) delete mergedFiles[normalizedParent];
       removedFolderIds.forEach((folderId) => {
         delete mergedFiles[folderId];
       });
       Object.entries(nextFiles).forEach(([key, value]) => {
-        mergedFiles[key] = value;
+        const existing = append ? mergedFiles[key] || [] : [];
+        const existingIds = new Set(existing.map((item) => item.key));
+        mergedFiles[key] = [
+          ...existing,
+          ...value.filter((item) => !existingIds.has(item.key)),
+        ];
       });
 
       foldersRef.current = mergedFolders;
@@ -1006,10 +1028,15 @@ function FilesManager() {
   const fetchFolderContents = React.useCallback(
     async (parentKey, options = {}) => {
       const normalizedParent = String(parentKey || "root");
-      const { force = false, silentNetworkError = false } = options;
+      const {
+        force = false,
+        silentNetworkError = false,
+        append = false,
+      } = options;
 
       if (
         !force &&
+        !append &&
         loadedParentsRef.current.has(normalizedParent) &&
         !loadingParentsRef.current.has(normalizedParent)
       ) {
@@ -1027,12 +1054,38 @@ function FilesManager() {
 
       setParentLoadingState(normalizedParent, true);
       try {
+        const previousPage = folderPagesRef.current[normalizedParent];
+        const pageOffset = append ? previousPage?.nextOffset || 0 : 0;
         const res = await apiClient.get("/files", {
-          params: { parent: normalizedParent },
+          params: {
+            parent: normalizedParent,
+            offset: pageOffset,
+            limit: FILE_MANAGER_PAGE_SIZE,
+          },
         });
-        replaceFolderChildren(normalizedParent, res.data);
+        const page = Array.isArray(res.data)
+          ? {
+              items: res.data,
+              total: res.data.length,
+              offset: 0,
+              limit: res.data.length || FILE_MANAGER_PAGE_SIZE,
+              has_more: false,
+            }
+          : res.data;
+        replaceFolderChildren(normalizedParent, page.items || [], { append });
+        const nextPage = {
+          total: page.total,
+          loaded: pageOffset + (page.items || []).length,
+          nextOffset: pageOffset + Number(page.limit || FILE_MANAGER_PAGE_SIZE),
+          hasMore: Boolean(page.has_more),
+        };
+        folderPagesRef.current = {
+          ...folderPagesRef.current,
+          [normalizedParent]: nextPage,
+        };
+        setFolderPages(folderPagesRef.current);
         setServerUnavailable(false);
-        return res.data;
+        return page.items || [];
       } catch (err) {
         const isNetworkError = !err.response;
         const isMissingParent =
@@ -4303,18 +4356,20 @@ function FilesManager() {
           onDragOver={handleDragOver}
           onDrop={(e) => handleDrop(e, currentFolder)}
         >
-          {loadingParents.includes(currentFolder) && (
-            <div
-              style={{
-                width: "100%",
-                marginTop: 64,
-                display: "flex",
-                justifyContent: "center",
-              }}
-            >
-              <Spin size="large" />
-            </div>
-          )}
+          {loadingParents.includes(currentFolder) &&
+            currentFolders.length === 0 &&
+            currentFiles.length === 0 && (
+              <div
+                style={{
+                  width: "100%",
+                  marginTop: 64,
+                  display: "flex",
+                  justifyContent: "center",
+                }}
+              >
+                <Spin size="large" />
+              </div>
+            )}
           {!loadingParents.includes(currentFolder) &&
             renderProjectInitializationEmptyState()}
           {!loadingParents.includes(currentFolder) &&
@@ -4331,6 +4386,25 @@ function FilesManager() {
           {currentFolders.map((f) => renderItem(f, "folder"))}
           {renderNewFolderPlaceholder()}
           {currentFiles.map((f) => renderItem(f, "file"))}
+          {folderPages[currentFolder]?.hasMore && (
+            <div
+              style={{
+                width: "100%",
+                display: "flex",
+                justifyContent: "center",
+                padding: 16,
+              }}
+            >
+              <Button
+                loading={loadingParents.includes(currentFolder)}
+                onClick={() =>
+                  fetchFolderContents(currentFolder, { append: true })
+                }
+              >
+                Load more files
+              </Button>
+            </div>
+          )}
           {selectionBox && (
             <div
               style={{

@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from "react";
+import React, { useState, useEffect, useMemo, useRef } from "react";
 import {
   Modal,
   List,
@@ -8,6 +8,7 @@ import {
   message,
   Progress,
   Result,
+  Empty,
 } from "antd";
 import {
   FolderFilled,
@@ -18,6 +19,10 @@ import {
 } from "@ant-design/icons";
 import { apiClient } from "../api";
 import { normalizeApiError } from "../errors/apiError";
+import { useInfiniteQuery, useQueryClient } from "@tanstack/react-query";
+import { useVirtualizer } from "@tanstack/react-virtual";
+
+const FILE_PAGE_SIZE = 100;
 
 const HIDDEN_SYSTEM_FILES = new Set([
   "workflow_preference.json",
@@ -55,121 +60,134 @@ const FilePickerModal = ({
   selectionType = "file",
 }) => {
   const [currentPath, setCurrentPath] = useState("root");
-  const [items, setItems] = useState([]);
-  const [loading, setLoading] = useState(false);
+  const [breadcrumbs, setBreadcrumbs] = useState([
+    { id: "root", name: "Projects", item: null },
+  ]);
   const [previewStatus, setPreviewStatus] = useState({});
   const [onlyImages, setOnlyImages] = useState(false);
   const [uploading, setUploading] = useState(false);
   const [uploadProgress, setUploadProgress] = useState(null);
-  const [loadError, setLoadError] = useState(null);
+  const scrollRef = useRef(null);
+  const queryClient = useQueryClient();
   const previewBaseUrl = apiClient.defaults.baseURL || "http://localhost:4242";
 
-  // Refactored fetch to get all files once
-  const [allData, setAllData] = useState([]);
-  const folderById = useMemo(() => {
-    const map = new Map();
-    allData.forEach((item) => {
-      if (item?.is_folder) {
-        map.set(String(item.id), item);
+  const filesQuery = useInfiniteQuery({
+    queryKey: ["files", "picker", currentPath, { onlyImages }],
+    enabled: visible,
+    initialPageParam: 0,
+    queryFn: async ({ pageParam, signal }) => {
+      const response = await apiClient.get("/files", {
+        params: {
+          parent: currentPath,
+          offset: pageParam,
+          limit: FILE_PAGE_SIZE,
+          volume_only: onlyImages,
+        },
+        signal,
+      });
+      if (Array.isArray(response.data)) {
+        return {
+          items: response.data,
+          total: response.data.length,
+          offset: 0,
+          limit: response.data.length || FILE_PAGE_SIZE,
+          has_more: false,
+        };
       }
+      return response.data;
+    },
+    getNextPageParam: (page) =>
+      page?.has_more
+        ? Number(page.offset || 0) + Number(page.limit || 0)
+        : null,
+  });
+
+  const allItems = useMemo(
+    () => filesQuery.data?.pages.flatMap((page) => page.items || []) || [],
+    [filesQuery.data],
+  );
+  const items = useMemo(() => {
+    const visibleItems = allItems.filter((item) => {
+      const nameLower = String(item.name || "").toLowerCase();
+      return item.is_folder || !HIDDEN_SYSTEM_FILES.has(nameLower);
     });
-    return map;
-  }, [allData]);
+    visibleItems.sort((a, b) => {
+      if (a.is_folder === b.is_folder) return a.name.localeCompare(b.name);
+      return a.is_folder ? -1 : 1;
+    });
+    return visibleItems;
+  }, [allItems]);
+  const loadError = useMemo(
+    () => (filesQuery.isError ? normalizeApiError(filesQuery.error) : null),
+    [filesQuery.error, filesQuery.isError],
+  );
+
+  const rowVirtualizer = useVirtualizer({
+    count: items.length,
+    getScrollElement: () => scrollRef.current,
+    estimateSize: () => 64,
+    overscan: 8,
+    initialRect: { width: 568, height: 400 },
+  });
+  const virtualRows = rowVirtualizer.getVirtualItems();
 
   useEffect(() => {
     if (visible) {
       setCurrentPath("root");
+      setBreadcrumbs([{ id: "root", name: "Projects", item: null }]);
       setOnlyImages(false);
       setPreviewStatus({});
       setUploadProgress(null);
-      setLoadError(null);
-      loadAllData();
     }
   }, [visible]);
 
-  const loadAllData = async () => {
-    setLoading(true);
-    setLoadError(null);
-    try {
-      const res = await apiClient.get("/files");
-      setAllData(res.data);
-    } catch (error) {
-      const normalizedError = normalizeApiError(error);
-      setLoadError(normalizedError);
-      message.error(normalizedError.message);
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  // Derive items for current view
   useEffect(() => {
-    const filtered = allData.filter((f) => {
-      const nameLower = String(f.name || "").toLowerCase();
-      if (!f.is_folder && HIDDEN_SYSTEM_FILES.has(nameLower)) return false;
-      if (currentPath === "root") return f.path === "root" || !f.path;
-      return String(f.path) === currentPath;
-    });
+    if (!visible) {
+      queryClient.cancelQueries({ queryKey: ["files", "picker"] });
+    }
+  }, [queryClient, visible]);
 
-    const filteredByType = onlyImages
-      ? filtered.filter((f) => f.is_folder || isImageFile(f))
-      : filtered;
+  useEffect(() => {
+    const lastRow = virtualRows[virtualRows.length - 1];
+    if (
+      lastRow &&
+      lastRow.index >= items.length - 8 &&
+      filesQuery.hasNextPage &&
+      !filesQuery.isFetchingNextPage
+    ) {
+      filesQuery.fetchNextPage();
+    }
+  }, [filesQuery, items.length, virtualRows]);
 
-    filteredByType.sort((a, b) => {
-      if (a.is_folder === b.is_folder) return a.name.localeCompare(b.name);
-      return a.is_folder ? -1 : 1;
-    });
-
-    setItems(filteredByType);
-  }, [currentPath, allData, onlyImages]);
+  useEffect(() => {
+    if (loadError) message.error(loadError.message);
+  }, [loadError]);
 
   const getParentPath = () => {
     if (currentPath === "root") return null;
-    const currentFolderObj = folderById.get(String(currentPath));
-    return currentFolderObj ? currentFolderObj.path || "root" : "root";
+    return breadcrumbs[breadcrumbs.length - 2]?.id || "root";
   };
 
   const goUp = () => {
     const parent = getParentPath();
-    if (parent) setCurrentPath(parent);
+    if (parent) {
+      setCurrentPath(parent);
+      setBreadcrumbs((current) => current.slice(0, -1));
+    }
   };
 
-  const getBreadcrumbs = () => {
-    const parts = [];
-    let curr = currentPath;
-    while (curr && curr !== "root") {
-      const folder = folderById.get(String(curr));
-      if (folder) {
-        parts.unshift({ id: String(folder.id), name: folder.name });
-        curr = folder.path;
-      } else {
-        break;
-      }
-    }
-    parts.unshift({ id: "root", name: "Projects" });
-    return parts;
+  const openFolder = (item) => {
+    const id = String(item.id);
+    setCurrentPath(id);
+    setBreadcrumbs((current) => [...current, { id, name: item.name, item }]);
+    scrollRef.current?.scrollTo({ top: 0 });
   };
 
   const constructFullPath = (item) => {
     if (!item) return "";
-    if (item.path === "root" || !item.path) return item.name;
-
-    const parts = [item.name];
-    let currParentId = item.path;
-
-    // Safety break to prevent infinite loops
-    let attempts = 0;
-    while (currParentId && currParentId !== "root" && attempts < 100) {
-      const parent = folderById.get(String(currParentId));
-      if (parent) {
-        parts.unshift(parent.name);
-        currParentId = parent.path;
-      } else {
-        break;
-      }
-      attempts++;
-    }
-    return parts.join("/");
+    return [...breadcrumbs.slice(1).map((part) => part.name), item.name].join(
+      "/",
+    );
   };
 
   const handleSelectCurrentDirectory = () => {
@@ -178,10 +196,13 @@ const FilePickerModal = ({
       onSelect({ name: "", path: "root", is_folder: true, logical_path: "" }); // Root
       return;
     }
-    const currentFolder = allData.find((f) => String(f.id) === currentPath);
-    if (currentFolder) {
-      const fullPath = constructFullPath(currentFolder);
-      onSelect({ ...currentFolder, logical_path: fullPath });
+    const currentFolder = breadcrumbs[breadcrumbs.length - 1];
+    if (currentFolder?.item) {
+      const fullPath = breadcrumbs
+        .slice(1)
+        .map((part) => part.name)
+        .join("/");
+      onSelect({ ...currentFolder.item, logical_path: fullPath });
     }
   };
 
@@ -253,7 +274,7 @@ const FilePickerModal = ({
           message.success(
             `Uploaded ${uploaded} file${uploaded > 1 ? "s" : ""} to this folder`,
           );
-          await loadAllData();
+          await filesQuery.refetch();
         }
       } finally {
         setUploading(false);
@@ -326,13 +347,16 @@ const FilePickerModal = ({
           style={{ marginRight: "12px" }}
         />
         <Breadcrumb
-          items={getBreadcrumbs().map((breadcrumb) => ({
+          items={breadcrumbs.map((breadcrumb, index) => ({
             key: breadcrumb.id,
             title: (
               <Button
                 type="link"
                 size="small"
-                onClick={() => setCurrentPath(breadcrumb.id)}
+                onClick={() => {
+                  setCurrentPath(breadcrumb.id);
+                  setBreadcrumbs((current) => current.slice(0, index + 1));
+                }}
                 style={{ padding: 0 }}
               >
                 {breadcrumb.name}
@@ -389,8 +413,8 @@ const FilePickerModal = ({
         </div>
       )}
 
-      <div style={{ height: "400px", overflow: "auto" }}>
-        {loading ? (
+      <div ref={scrollRef} style={{ height: "400px", overflow: "auto" }}>
+        {filesQuery.isPending ? (
           <div
             style={{
               display: "flex",
@@ -410,155 +434,198 @@ const FilePickerModal = ({
                 <Button
                   type="primary"
                   icon={<ReloadOutlined />}
-                  onClick={loadAllData}
+                  onClick={() => filesQuery.refetch()}
                 >
                   Try again
                 </Button>
               ) : null
             }
           />
+        ) : items.length === 0 ? (
+          <Empty
+            description={
+              onlyImages
+                ? "No volume files in this folder"
+                : "No files in this folder"
+            }
+            style={{ marginTop: 96 }}
+          />
         ) : (
-          <List
-            dataSource={items}
-            renderItem={(item) => (
-              <List.Item
-                style={{ cursor: "pointer", padding: "8px 16px" }}
-                className="file-picker-item"
-                onClick={() => {
-                  if (item.is_folder) {
-                    setCurrentPath(String(item.id));
-                  } else {
-                    if (selectionType === "file") {
-                      const fullPath = constructFullPath(item);
-                      onSelect({ ...item, logical_path: fullPath });
-                    }
-                  }
-                }}
-                actions={[
-                  item.is_folder && (
-                    <Button
-                      type="link"
-                      size="small"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        setCurrentPath(String(item.id));
-                      }}
-                    >
-                      Open
-                    </Button>
-                  ),
-                  (selectionType === "file" ||
-                    selectionType === "fileOrDirectory") &&
-                    !item.is_folder && (
-                      <Button
-                        type="link"
-                        size="small"
-                        onClick={(e) => {
-                          e.stopPropagation();
+          <div
+            style={{
+              height: `${rowVirtualizer.getTotalSize()}px`,
+              position: "relative",
+              width: "100%",
+            }}
+          >
+            {virtualRows.map((virtualRow) => {
+              const item = items[virtualRow.index];
+              return (
+                <div
+                  key={item.id}
+                  data-index={virtualRow.index}
+                  ref={rowVirtualizer.measureElement}
+                  style={{
+                    left: 0,
+                    position: "absolute",
+                    top: 0,
+                    transform: `translateY(${virtualRow.start}px)`,
+                    width: "100%",
+                  }}
+                >
+                  <List.Item
+                    style={{ cursor: "pointer", padding: "8px 16px" }}
+                    className="file-picker-item"
+                    onClick={() => {
+                      if (item.is_folder) {
+                        openFolder(item);
+                      } else {
+                        if (selectionType === "file") {
                           const fullPath = constructFullPath(item);
                           onSelect({ ...item, logical_path: fullPath });
-                        }}
-                      >
-                        Select file
-                      </Button>
-                    ),
-                  (selectionType === "directory" ||
-                    selectionType === "fileOrDirectory") &&
-                    item.is_folder && (
-                      <Button
-                        type="link"
-                        size="small"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          const fullPath = constructFullPath(item);
-                          onSelect({ ...item, logical_path: fullPath });
-                        }}
-                      >
-                        Use folder
-                      </Button>
-                    ),
-                ]}
-              >
-                <List.Item.Meta
-                  avatar={
-                    item.is_folder ? (
-                      <FolderFilled
-                        style={{
-                          color: "var(--seg-accent-primary, #3f37c9)",
-                          fontSize: "20px",
-                        }}
-                      />
-                    ) : isImageFile(item) ? (
-                      <div
-                        style={{
-                          width: 32,
-                          height: 32,
-                          borderRadius: 4,
-                          border: "1px solid #f0f0f0",
-                          display: "flex",
-                          alignItems: "center",
-                          justifyContent: "center",
-                          overflow: "hidden",
-                          position: "relative",
-                          background: "#fafafa",
-                        }}
-                      >
-                        {previewStatus[item.id] !== "loaded" && (
-                          <Spin size="small" />
-                        )}
-                        {previewStatus[item.id] !== "error" && (
-                          <img
-                            src={getPreviewUrl(item)}
-                            alt={item.name}
-                            loading="lazy"
-                            onLoad={() => markPreviewLoaded(item.id)}
-                            onError={() => markPreviewError(item.id)}
-                            style={{
-                              position: "absolute",
-                              inset: 0,
-                              width: "100%",
-                              height: "100%",
-                              objectFit: "cover",
-                              opacity:
-                                previewStatus[item.id] === "loaded" ? 1 : 0,
-                              transition: "opacity 0.2s ease",
-                            }}
-                          />
-                        )}
-                      </div>
-                    ) : (
-                      <FileOutlined style={{ fontSize: "20px" }} />
-                    )
-                  }
-                  title={
-                    <span>
-                      {item.name}
-                      {item.is_folder &&
-                        (item.path === "root" || !item.path) &&
-                        item.physical_path && (
-                          <span
-                            style={{
-                              marginLeft: 8,
-                              padding: "2px 6px",
-                              fontSize: 10,
-                              borderRadius: 10,
-                              background:
-                                "var(--seg-accent-primary-soft, #f0efff)",
-                              color: "var(--seg-accent-primary, #3f37c9)",
-                              border:
-                                "1px solid var(--seg-accent-primary-border, #c7c2ff)",
+                        }
+                      }
+                    }}
+                    actions={[
+                      item.is_folder && (
+                        <Button
+                          type="link"
+                          size="small"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            openFolder(item);
+                          }}
+                        >
+                          Open
+                        </Button>
+                      ),
+                      (selectionType === "file" ||
+                        selectionType === "fileOrDirectory") &&
+                        !item.is_folder && (
+                          <Button
+                            type="link"
+                            size="small"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              const fullPath = constructFullPath(item);
+                              onSelect({ ...item, logical_path: fullPath });
                             }}
                           >
-                            Mounted
-                          </span>
-                        )}
-                    </span>
-                  }
-                  description={item.size ? item.size : null}
-                />
-              </List.Item>
+                            Select file
+                          </Button>
+                        ),
+                      (selectionType === "directory" ||
+                        selectionType === "fileOrDirectory") &&
+                        item.is_folder && (
+                          <Button
+                            type="link"
+                            size="small"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              const fullPath = constructFullPath(item);
+                              onSelect({ ...item, logical_path: fullPath });
+                            }}
+                          >
+                            Use folder
+                          </Button>
+                        ),
+                    ]}
+                  >
+                    <List.Item.Meta
+                      avatar={
+                        item.is_folder ? (
+                          <FolderFilled
+                            style={{
+                              color: "var(--seg-accent-primary, #3f37c9)",
+                              fontSize: "20px",
+                            }}
+                          />
+                        ) : isImageFile(item) ? (
+                          <div
+                            style={{
+                              width: 32,
+                              height: 32,
+                              borderRadius: 4,
+                              border: "1px solid #f0f0f0",
+                              display: "flex",
+                              alignItems: "center",
+                              justifyContent: "center",
+                              overflow: "hidden",
+                              position: "relative",
+                              background: "#fafafa",
+                            }}
+                          >
+                            {previewStatus[item.id] !== "loaded" && (
+                              <Spin size="small" />
+                            )}
+                            {previewStatus[item.id] !== "error" && (
+                              <img
+                                src={getPreviewUrl(item)}
+                                alt={item.name}
+                                loading="lazy"
+                                onLoad={() => markPreviewLoaded(item.id)}
+                                onError={() => markPreviewError(item.id)}
+                                style={{
+                                  position: "absolute",
+                                  inset: 0,
+                                  width: "100%",
+                                  height: "100%",
+                                  objectFit: "cover",
+                                  opacity:
+                                    previewStatus[item.id] === "loaded" ? 1 : 0,
+                                  transition: "opacity 0.2s ease",
+                                }}
+                              />
+                            )}
+                          </div>
+                        ) : (
+                          <FileOutlined style={{ fontSize: "20px" }} />
+                        )
+                      }
+                      title={
+                        <span>
+                          {item.name}
+                          {item.is_folder &&
+                            (item.path === "root" || !item.path) &&
+                            item.physical_path && (
+                              <span
+                                style={{
+                                  marginLeft: 8,
+                                  padding: "2px 6px",
+                                  fontSize: 10,
+                                  borderRadius: 10,
+                                  background:
+                                    "var(--seg-accent-primary-soft, #f0efff)",
+                                  color: "var(--seg-accent-primary, #3f37c9)",
+                                  border:
+                                    "1px solid var(--seg-accent-primary-border, #c7c2ff)",
+                                }}
+                              >
+                                Mounted
+                              </span>
+                            )}
+                        </span>
+                      }
+                      description={item.size ? item.size : null}
+                    />
+                  </List.Item>
+                </div>
+              );
+            })}
+            {filesQuery.isFetchingNextPage && (
+              <div
+                style={{
+                  bottom: 12,
+                  left: 0,
+                  position: "sticky",
+                  textAlign: "center",
+                  width: "100%",
+                }}
+              >
+                <Spin size="small" />
+              </div>
             )}
-          />
+          </div>
         )}
       </div>
     </Modal>

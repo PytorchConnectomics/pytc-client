@@ -118,6 +118,9 @@ const apiDebugLog = (...args) => {
 export const apiClient = axios.create({
   baseURL: BASE_URL,
   withCredentials: true,
+  headers: {
+    Accept: "application/json, application/problem+json",
+  },
 });
 
 const summarizePayload = (payload) => {

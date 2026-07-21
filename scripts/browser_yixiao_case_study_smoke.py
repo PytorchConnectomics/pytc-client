@@ -174,18 +174,17 @@ def _playwright_import_error() -> Optional[BaseException]:
         return exc if isinstance(exc, ImportError) else ImportError(str(exc))
 
 
-def _resolve_browser_playwright(playwright) -> None:
+def _resolve_browser_playwright(playwright, *, headless: bool = True):
     browsers = [
-        ("chromium", playwright.chromium),
-        ("firefox", playwright.firefox),
-        ("webkit", playwright.webkit),
+        ("chromium", playwright.chromium, {}),
+        ("chromium-channel", playwright.chromium, {"channel": "chromium"}),
+        ("firefox", playwright.firefox, {}),
+        ("webkit", playwright.webkit, {}),
     ]
     errors: List[str] = []
-    for name, launcher in browsers:
+    for name, launcher, options in browsers:
         try:
-            browser = launcher.launch(headless=True)
-            browser.close()
-            return
+            return launcher.launch(headless=headless, **options)
         except Exception as exc:  # pragma: no cover - engine-specific runtime behavior
             errors.append(f"{name}: {exc}")
     raise RuntimeError(
@@ -522,12 +521,10 @@ def run_smoke(
     from playwright.sync_api import sync_playwright
 
     with sync_playwright() as p:
-        # Pick a working engine once to avoid launch failures at runtime.
         try:
-            _resolve_browser_playwright(p)
+            browser = _resolve_browser_playwright(p, headless=headless)
         except RuntimeError as exc:
             raise _raise_playwright_error(str(exc))
-        browser = p.chromium.launch(headless=headless)
         context = browser.new_context(viewport=viewport_config)
         page = context.new_page()
         page.set_default_timeout(timeout_ms)

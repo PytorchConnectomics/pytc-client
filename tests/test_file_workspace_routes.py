@@ -3,6 +3,8 @@ import shutil
 import tempfile
 import unittest
 import json
+from types import SimpleNamespace
+from unittest import mock
 
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine
@@ -133,6 +135,45 @@ class FileWorkspaceRouteTests(unittest.TestCase):
         self.assertEqual(response.status_code, 404)
         self.assertIn("no longer mounted", response.json()["detail"])
 
+    def test_file_listing_pagination_is_opt_in_and_filters_before_count(self):
+        self._create_file(name="nested", is_folder=True)
+        self._create_file(name="a-image.h5")
+        self._create_file(name="b-mask.tif")
+        self._create_file(name="notes.txt")
+        self._create_file(name=".DS_Store")
+        self._create_file(name="workflow_preference.json")
+
+        legacy_response = self.client.get("/files")
+        self.assertEqual(legacy_response.status_code, 200)
+        self.assertIsInstance(legacy_response.json(), list)
+        self.assertEqual(
+            [item["name"] for item in legacy_response.json()],
+            ["nested", "a-image.h5", "b-mask.tif", "notes.txt"],
+        )
+
+        first_page = self.client.get(
+            "/files",
+            params={"offset": 0, "limit": 2, "volume_only": True},
+        )
+        self.assertEqual(first_page.status_code, 200)
+        payload = first_page.json()
+        self.assertEqual(
+            [item["name"] for item in payload["items"]], ["nested", "a-image.h5"]
+        )
+        self.assertEqual(payload["total"], 3)
+        self.assertEqual(payload["offset"], 0)
+        self.assertEqual(payload["limit"], 2)
+        self.assertTrue(payload["has_more"])
+
+        second_page = self.client.get(
+            "/files",
+            params={"offset": 2, "limit": 2, "volume_only": True},
+        ).json()
+        self.assertEqual(
+            [item["name"] for item in second_page["items"]], ["b-mask.tif"]
+        )
+        self.assertFalse(second_page["has_more"])
+
     def test_file_preview_reads_one_hdf5_volume_slice(self):
         try:
             import h5py
@@ -158,6 +199,47 @@ class FileWorkspaceRouteTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.headers["content-type"], "image/png")
         self.assertTrue(response.content.startswith(b"\x89PNG\r\n\x1a\n"))
+
+    def test_file_preview_requests_bounded_middle_volume_region(self):
+        try:
+            import numpy as np
+        except Exception:
+            self.skipTest("NumPy preview dependency is not installed")
+
+        volume_path = pathlib.Path(self.temp_dir.name) / "bounded.tif"
+        volume_path.write_bytes(b"placeholder")
+        file_id = self._create_file(
+            name="bounded.tif",
+            physical_path=str(volume_path),
+            file_type="image/tiff",
+        )
+        requested_crops = []
+
+        class FakeStore:
+            metadata = SimpleNamespace(shape=(20, 2000, 3000))
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *_exc_info):
+                return None
+
+            def read(self, crop):
+                requested_crops.append(crop)
+                return np.zeros((1, 667, 1000), dtype=np.uint16)
+
+        with mock.patch(
+            "server_api.auth.router.open_volume_store",
+            return_value=FakeStore(),
+        ):
+            response = self.client.get(f"/files/preview/{file_id}")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(len(requested_crops), 1)
+        crop = requested_crops[0]
+        self.assertEqual(crop[0], slice(10, 11))
+        self.assertEqual(crop[1], slice(None, None, 3))
+        self.assertEqual(crop[2], slice(None, None, 3))
 
     def test_project_context_profile_is_saved_in_hidden_project_file(self):
         project_root = pathlib.Path(self.temp_dir.name) / "profile-project"

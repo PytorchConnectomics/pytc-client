@@ -12,6 +12,11 @@ from server_api.auth.database import get_db
 from server_api.auth.router import get_current_user
 
 from .db_models import WorkflowOperation
+from .agent_actions import (
+    AgentActionEnvelope,
+    action_envelope_json_schema,
+    validate_action_for_execution,
+)
 from .operation_service import (
     OPERATION_STATUSES,
     create_workflow_operation,
@@ -102,6 +107,58 @@ def _owned_operation(
         workflow_id=workflow_id,
         operation_id=operation_id,
     )
+
+
+@router.get("/action-envelopes/schema")
+def get_action_envelope_schema():
+    return action_envelope_json_schema()
+
+
+@router.post(
+    "/{workflow_id}/action-operations",
+    response_model=WorkflowOperationResponse,
+    status_code=202,
+)
+def stage_action_operation(
+    workflow_id: int,
+    body: AgentActionEnvelope,
+    user: auth_models.User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    workflow = get_user_workflow_or_404(db, workflow_id=workflow_id, user_id=user.id)
+    if body.workflow_id != workflow.id:
+        raise HTTPException(
+            status_code=409,
+            detail="Action envelope workflow_id does not match the request path",
+        )
+    try:
+        envelope = validate_action_for_execution(body)
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    if envelope.execution_owner == "browser_navigation":
+        raise HTTPException(
+            status_code=409,
+            detail="Browser-owned actions cannot be staged as server operations",
+        )
+
+    input_payload = envelope.model_dump(mode="json", exclude_none=True)
+    operation = create_workflow_operation(
+        db,
+        workflow_id=workflow.id,
+        operation_type=f"agent_action:{envelope.kind}",
+        idempotency_key=envelope.idempotency_key,
+        correlation_id=envelope.correlation_id,
+        actor=envelope.requested_by,
+        input_payload=input_payload,
+        metadata={
+            "action_id": envelope.action_id,
+            "action_schema_version": envelope.schema_version,
+            "execution_owner": envelope.execution_owner,
+            "risk_level": envelope.policy.risk_level,
+        },
+        commit=True,
+    )
+    return _response(operation)
 
 
 @router.post(

@@ -1,10 +1,17 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Annotated, Any, Dict, Literal, Optional, Union
+from datetime import datetime
+from typing import Annotated, Any, Dict, List, Literal, Optional, Union
 
-from pydantic import BaseModel, ConfigDict, Field
-
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    StringConstraints,
+    TypeAdapter,
+    model_validator,
+)
 
 RiskLevel = Literal[
     "read_only",
@@ -237,6 +244,456 @@ NAVIGATION_SPECIALISTS = {
     "inference": "inference_agent",
     "project-progress": "project_manager",
 }
+
+
+NonEmptyString = Annotated[
+    str,
+    StringConstraints(strip_whitespace=True, min_length=1, max_length=500),
+]
+IdempotencyKey = Annotated[
+    str,
+    StringConstraints(strip_whitespace=True, min_length=1, max_length=255),
+]
+CorrelationId = Annotated[
+    str,
+    StringConstraints(strip_whitespace=True, min_length=1, max_length=255),
+]
+ApprovalStatus = Literal["not_required", "pending", "approved", "rejected"]
+ExecutionOwner = Literal["browser_navigation", "server_workflow", "server_runtime"]
+OperationStatus = Literal["queued", "running", "succeeded", "failed", "cancelled"]
+ReceiptStatus = Literal["accepted", "running", "succeeded", "failed", "cancelled"]
+
+
+class _StrictBoundaryModel(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+
+class ArtifactReference(_StrictBoundaryModel):
+    """Stable artifact identity used at the action execution boundary."""
+
+    artifact_id: Optional[int] = Field(default=None, gt=0)
+    logical_name: Optional[NonEmptyString] = None
+    artifact_type: Optional[NonEmptyString] = None
+    role: Optional[NonEmptyString] = None
+    path: Optional[NonEmptyString] = None
+    uri: Optional[NonEmptyString] = None
+    checksum: Optional[NonEmptyString] = None
+    media_type: Optional[NonEmptyString] = None
+    immutable: bool = True
+
+    @model_validator(mode="after")
+    def require_identity(self) -> "ArtifactReference":
+        if not any(
+            (
+                self.artifact_id,
+                self.logical_name,
+                self.path,
+                self.uri,
+                self.checksum,
+            )
+        ):
+            raise ValueError(
+                "artifact reference requires artifact_id, logical_name, path, uri, "
+                "or checksum"
+            )
+        return self
+
+
+class WorkflowStagePrecondition(_StrictBoundaryModel):
+    kind: Literal["workflow_stage"]
+    allowed_stages: List[NonEmptyString] = Field(min_length=1)
+
+
+class ArtifactAvailablePrecondition(_StrictBoundaryModel):
+    kind: Literal["artifact_available"]
+    artifact: ArtifactReference
+
+
+class WorkflowFieldPrecondition(_StrictBoundaryModel):
+    kind: Literal["workflow_field_present"]
+    field_name: NonEmptyString
+
+
+class OperationStatusPrecondition(_StrictBoundaryModel):
+    kind: Literal["operation_status"]
+    operation_id: int = Field(gt=0)
+    allowed_statuses: List[OperationStatus] = Field(min_length=1)
+
+
+ActionPrecondition = Annotated[
+    Union[
+        WorkflowStagePrecondition,
+        ArtifactAvailablePrecondition,
+        WorkflowFieldPrecondition,
+        OperationStatusPrecondition,
+    ],
+    Field(discriminator="kind"),
+]
+
+
+class ActionPolicy(_StrictBoundaryModel):
+    risk_level: RiskLevel
+    requires_approval: bool
+    approval_reason: Optional[NonEmptyString] = None
+
+
+class ActionApproval(_StrictBoundaryModel):
+    status: ApprovalStatus
+    event_id: Optional[int] = Field(default=None, gt=0)
+    decided_by: Optional[NonEmptyString] = None
+    decided_at: Optional[datetime] = None
+
+    @model_validator(mode="after")
+    def require_decision_evidence(self) -> "ActionApproval":
+        if self.status in {"approved", "rejected"}:
+            if self.event_id is None or self.decided_by is None:
+                raise ValueError(
+                    "approved or rejected actions require event_id and decided_by"
+                )
+        elif any((self.event_id, self.decided_by, self.decided_at)):
+            raise ValueError(
+                "approval decision evidence is only valid for approved or rejected "
+                "actions"
+            )
+        return self
+
+
+ALL_ACTION_DEFINITIONS: Dict[str, AgentActionDefinition] = {
+    **RUNTIME_ACTIONS,
+    **WORKFLOW_ACTIONS,
+}
+
+
+class _ActionEnvelopeBase(_StrictBoundaryModel):
+    schema_version: Literal["workflow.action/v1"] = "workflow.action/v1"
+    action_id: NonEmptyString
+    kind: str
+    workflow_id: int = Field(gt=0)
+    requested_by: Literal["user", "agent", "system"]
+    idempotency_key: IdempotencyKey
+    correlation_id: CorrelationId
+    execution_owner: ExecutionOwner
+    policy: ActionPolicy
+    approval: ActionApproval
+    input_artifacts: List[ArtifactReference] = Field(default_factory=list)
+    expected_output_artifacts: List[ArtifactReference] = Field(default_factory=list)
+    preconditions: List[ActionPrecondition] = Field(default_factory=list)
+    created_at: Optional[datetime] = None
+
+    @model_validator(mode="after")
+    def enforce_registry_policy(self) -> "_ActionEnvelopeBase":
+        definition = ALL_ACTION_DEFINITIONS.get(self.kind)
+        if definition is None:
+            raise ValueError(f"Unsupported action envelope kind: {self.kind}")
+        if self.policy.risk_level != definition.risk_level:
+            raise ValueError(
+                f"risk_level for {self.kind} must be {definition.risk_level}"
+            )
+        if self.policy.requires_approval != definition.requires_approval:
+            raise ValueError(
+                f"requires_approval for {self.kind} must be "
+                f"{definition.requires_approval}"
+            )
+        if self.execution_owner != definition.execution_owner:
+            raise ValueError(
+                f"execution_owner for {self.kind} must be "
+                f"{definition.execution_owner}"
+            )
+        if definition.requires_approval:
+            if self.approval.status == "not_required":
+                raise ValueError(f"{self.kind} requires an approval status")
+        elif self.approval.status != "not_required":
+            raise ValueError(f"{self.kind} does not accept an approval decision")
+        return self
+
+
+class ChooseProjectDataAction(_ActionEnvelopeBase):
+    kind: Literal["choose_project_data"]
+
+
+class LoadVisualizationAction(_ActionEnvelopeBase):
+    kind: Literal["load_visualization"]
+
+
+class StartInferenceAction(_ActionEnvelopeBase):
+    kind: Literal["start_inference"]
+
+
+class StopInferenceAction(_ActionEnvelopeBase):
+    kind: Literal["stop_inference"]
+    operation_id: Optional[int] = Field(default=None, gt=0)
+
+
+class StartProofreadingAction(_ActionEnvelopeBase):
+    kind: Literal["start_proofreading"]
+
+
+class TrainingVolumeSubset(_StrictBoundaryModel):
+    selection_basis: Optional[NonEmptyString] = None
+    training_statuses: List[NonEmptyString] = Field(default_factory=list)
+    train_volume_count: Optional[int] = Field(default=None, ge=0)
+    target_volume_count: Optional[int] = Field(default=None, ge=0)
+    review_volume_count: Optional[int] = Field(default=None, ge=0)
+    manifest_path: Optional[NonEmptyString] = None
+
+
+class StartTrainingAction(_ActionEnvelopeBase):
+    kind: Literal["start_training"]
+    autopick_parameters: Optional[bool] = None
+    parameter_mode: Optional[NonEmptyString] = None
+    volume_subset: Optional[TrainingVolumeSubset] = None
+
+
+class StopTrainingAction(_ActionEnvelopeBase):
+    kind: Literal["stop_training"]
+    operation_id: Optional[int] = Field(default=None, gt=0)
+
+
+class ComputeEvaluationAction(_ActionEnvelopeBase):
+    kind: Literal["compute_evaluation"]
+    name: Optional[NonEmptyString] = None
+    baseline_prediction_path: Optional[NonEmptyString] = None
+    candidate_prediction_path: Optional[NonEmptyString] = None
+    ground_truth_path: Optional[NonEmptyString] = None
+    baseline_run_id: Optional[int] = Field(default=None, gt=0)
+    candidate_run_id: Optional[int] = Field(default=None, gt=0)
+    model_version_id: Optional[int] = Field(default=None, gt=0)
+
+
+class ExportBundleAction(_ActionEnvelopeBase):
+    kind: Literal["export_bundle"]
+
+
+class ProposeRetrainingStageAction(_ActionEnvelopeBase):
+    kind: Literal["propose_retraining_stage"]
+    corrected_mask_path: Optional[NonEmptyString] = None
+
+
+AgentActionEnvelope = Annotated[
+    Union[
+        ChooseProjectDataAction,
+        LoadVisualizationAction,
+        StartInferenceAction,
+        StopInferenceAction,
+        StartProofreadingAction,
+        StartTrainingAction,
+        StopTrainingAction,
+        ComputeEvaluationAction,
+        ExportBundleAction,
+        ProposeRetrainingStageAction,
+    ],
+    Field(discriminator="kind"),
+]
+
+
+class AgentActionError(_StrictBoundaryModel):
+    code: NonEmptyString
+    message: NonEmptyString
+    retryable: bool = False
+    details: Dict[str, Any] = Field(default_factory=dict)
+
+
+class _ActionReceiptBase(_StrictBoundaryModel):
+    schema_version: Literal["workflow.action-receipt/v1"] = "workflow.action-receipt/v1"
+    receipt_id: NonEmptyString
+    action_id: NonEmptyString
+    kind: str
+    workflow_id: int = Field(gt=0)
+    idempotency_key: IdempotencyKey
+    correlation_id: CorrelationId
+    status: ReceiptStatus
+    operation_id: Optional[int] = Field(default=None, gt=0)
+    produced_artifacts: List[ArtifactReference] = Field(default_factory=list)
+    error: Optional[AgentActionError] = None
+    started_at: Optional[datetime] = None
+    completed_at: Optional[datetime] = None
+
+    @model_validator(mode="after")
+    def validate_receipt_state(self) -> "_ActionReceiptBase":
+        if self.status == "failed" and self.error is None:
+            raise ValueError("failed action receipts require an error")
+        if self.status != "failed" and self.error is not None:
+            raise ValueError("error is only valid for failed action receipts")
+        if self.status in {"succeeded", "failed", "cancelled"}:
+            if self.completed_at is None:
+                raise ValueError("terminal action receipts require completed_at")
+        elif self.completed_at is not None:
+            raise ValueError("non-terminal action receipts cannot have completed_at")
+        if (
+            self.started_at is not None
+            and self.completed_at is not None
+            and self.completed_at < self.started_at
+        ):
+            raise ValueError("completed_at cannot precede started_at")
+
+        success_fields = {
+            "choose_project_data": "selected_artifacts",
+            "load_visualization": "viewer_url",
+            "start_inference": "run_id",
+            "stop_inference": "stopped",
+            "start_proofreading": "proofreading_session_id",
+            "start_training": "run_id",
+            "stop_training": "stopped",
+            "compute_evaluation": "evaluation_result_id",
+            "export_bundle": "bundle_artifact",
+            "propose_retraining_stage": "workflow_event_id",
+        }
+        success_field = success_fields.get(self.kind)
+        if self.status == "succeeded" and success_field:
+            if not getattr(self, success_field, None):
+                raise ValueError(
+                    f"succeeded {self.kind} receipts require {success_field}"
+                )
+        return self
+
+
+class ChooseProjectDataReceipt(_ActionReceiptBase):
+    kind: Literal["choose_project_data"]
+    selected_artifacts: List[ArtifactReference] = Field(default_factory=list)
+
+
+class LoadVisualizationReceipt(_ActionReceiptBase):
+    kind: Literal["load_visualization"]
+    viewer_url: Optional[NonEmptyString] = None
+
+
+class StartInferenceReceipt(_ActionReceiptBase):
+    kind: Literal["start_inference"]
+    run_id: Optional[NonEmptyString] = None
+
+
+class StopInferenceReceipt(_ActionReceiptBase):
+    kind: Literal["stop_inference"]
+    stopped: Optional[bool] = None
+
+
+class StartProofreadingReceipt(_ActionReceiptBase):
+    kind: Literal["start_proofreading"]
+    proofreading_session_id: Optional[int] = Field(default=None, gt=0)
+    viewer_url: Optional[NonEmptyString] = None
+
+
+class StartTrainingReceipt(_ActionReceiptBase):
+    kind: Literal["start_training"]
+    run_id: Optional[NonEmptyString] = None
+
+
+class StopTrainingReceipt(_ActionReceiptBase):
+    kind: Literal["stop_training"]
+    stopped: Optional[bool] = None
+
+
+class ComputeEvaluationReceipt(_ActionReceiptBase):
+    kind: Literal["compute_evaluation"]
+    evaluation_result_id: Optional[int] = Field(default=None, gt=0)
+    metrics: Dict[str, float] = Field(default_factory=dict)
+
+
+class ExportBundleReceipt(_ActionReceiptBase):
+    kind: Literal["export_bundle"]
+    bundle_artifact: Optional[ArtifactReference] = None
+
+
+class ProposeRetrainingStageReceipt(_ActionReceiptBase):
+    kind: Literal["propose_retraining_stage"]
+    workflow_event_id: Optional[int] = Field(default=None, gt=0)
+    staged_workflow_stage: Literal["retraining_staged"] = "retraining_staged"
+
+
+AgentActionReceipt = Annotated[
+    Union[
+        ChooseProjectDataReceipt,
+        LoadVisualizationReceipt,
+        StartInferenceReceipt,
+        StopInferenceReceipt,
+        StartProofreadingReceipt,
+        StartTrainingReceipt,
+        StopTrainingReceipt,
+        ComputeEvaluationReceipt,
+        ExportBundleReceipt,
+        ProposeRetrainingStageReceipt,
+    ],
+    Field(discriminator="kind"),
+]
+
+
+_ACTION_ENVELOPE_ADAPTER = TypeAdapter(AgentActionEnvelope)
+_ACTION_RECEIPT_ADAPTER = TypeAdapter(AgentActionReceipt)
+
+
+def canonical_action_policy(kind: str) -> ActionPolicy:
+    definition = ALL_ACTION_DEFINITIONS.get(kind)
+    if definition is None:
+        raise ValueError(f"Unsupported action envelope kind: {kind}")
+    return ActionPolicy(
+        risk_level=definition.risk_level,
+        requires_approval=definition.requires_approval,
+    )
+
+
+def validate_action_envelope(payload: Any) -> AgentActionEnvelope:
+    return _ACTION_ENVELOPE_ADAPTER.validate_python(payload)
+
+
+def validate_action_for_execution(payload: Any) -> AgentActionEnvelope:
+    envelope = validate_action_envelope(payload)
+    if envelope.policy.requires_approval and envelope.approval.status != "approved":
+        raise ValueError(
+            f"{envelope.kind} cannot execute without an approved action envelope"
+        )
+    return envelope
+
+
+def validate_action_receipt(payload: Any) -> AgentActionReceipt:
+    return _ACTION_RECEIPT_ADAPTER.validate_python(payload)
+
+
+def validate_receipt_for_action(
+    action_payload: Any, receipt_payload: Any
+) -> AgentActionReceipt:
+    action = validate_action_envelope(action_payload)
+    receipt = validate_action_receipt(receipt_payload)
+    matching_fields = (
+        "action_id",
+        "kind",
+        "workflow_id",
+        "idempotency_key",
+        "correlation_id",
+    )
+    mismatches = [
+        field
+        for field in matching_fields
+        if getattr(action, field) != getattr(receipt, field)
+    ]
+    if mismatches:
+        raise ValueError(
+            "action receipt does not match its envelope: " + ", ".join(mismatches)
+        )
+    return receipt
+
+
+def dump_action_envelope_json(payload: Any) -> bytes:
+    return _ACTION_ENVELOPE_ADAPTER.dump_json(validate_action_envelope(payload))
+
+
+def load_action_envelope_json(payload: Union[str, bytes]) -> AgentActionEnvelope:
+    return _ACTION_ENVELOPE_ADAPTER.validate_json(payload)
+
+
+def dump_action_receipt_json(payload: Any) -> bytes:
+    return _ACTION_RECEIPT_ADAPTER.dump_json(validate_action_receipt(payload))
+
+
+def load_action_receipt_json(payload: Union[str, bytes]) -> AgentActionReceipt:
+    return _ACTION_RECEIPT_ADAPTER.validate_json(payload)
+
+
+def action_envelope_json_schema() -> Dict[str, Any]:
+    return _ACTION_ENVELOPE_ADAPTER.json_schema()
+
+
+def action_receipt_json_schema() -> Dict[str, Any]:
+    return _ACTION_RECEIPT_ADAPTER.json_schema()
 
 
 def _validate_effects(client_effects: Dict[str, Any]) -> None:

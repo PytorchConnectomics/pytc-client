@@ -3,6 +3,8 @@ import { render, screen, waitFor } from "@testing-library/react";
 import Visualization from "./Visualization";
 import { AppContext } from "../contexts/GlobalContext";
 import { useWorkflow } from "../contexts/WorkflowContext";
+import { QueryClientProvider } from "@tanstack/react-query";
+import { createAppQueryClient } from "../queryClient";
 
 jest.mock("../contexts/WorkflowContext", () => ({
   useWorkflow: jest.fn(),
@@ -17,6 +19,17 @@ jest.mock("../api", () => ({
 }));
 
 describe("Visualization workflow defaults", () => {
+  const renderWithQueryClient = (ui) => {
+    const queryClient = createAppQueryClient();
+    return render(ui, {
+      wrapper: ({ children }) => (
+        <QueryClientProvider client={queryClient}>
+          {children}
+        </QueryClientProvider>
+      ),
+    });
+  };
+
   it("hydrates the canonical volume pair and voxel scales", async () => {
     const setCurrentImage = jest.fn();
     const setCurrentLabel = jest.fn();
@@ -42,7 +55,7 @@ describe("Visualization workflow defaults", () => {
       },
     });
 
-    render(
+    renderWithQueryClient(
       <AppContext.Provider
         value={{
           currentImage: null,
@@ -95,7 +108,7 @@ describe("Visualization workflow defaults", () => {
       setCurrentLabel,
       setVisualizationScales,
     };
-    const { rerender } = render(
+    const { rerender } = renderWithQueryClient(
       <AppContext.Provider value={context}>
         <Visualization viewers={[]} setViewers={jest.fn()} />
       </AppContext.Provider>,

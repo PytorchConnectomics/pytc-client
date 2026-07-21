@@ -474,11 +474,73 @@ describe("FilesManager", () => {
 
     await waitFor(() => {
       expect(apiClient.get).toHaveBeenCalledWith("/files", {
-        params: { parent: "root" },
+        params: { parent: "root", offset: 0, limit: 200 },
       });
     });
 
     expect(apiClient.get).not.toHaveBeenCalledWith("/files");
+  });
+
+  it("loads additional bounded pages only when requested", async () => {
+    let filePage = 0;
+    apiClient.get.mockImplementation((url) => {
+      if (url === "/files/project-suggestions") {
+        return Promise.resolve({ data: [] });
+      }
+      if (url !== "/files") {
+        return Promise.resolve({ data: { exists: false, profile: null } });
+      }
+      filePage += 1;
+      if (filePage === 1) {
+        return Promise.resolve({
+          data: {
+            items: [
+              {
+                id: 1,
+                name: "first-volume.tif",
+                path: "root",
+                is_folder: false,
+                size: "1KB",
+                type: "image/tiff",
+              },
+            ],
+            total: 201,
+            offset: 0,
+            limit: 200,
+            has_more: true,
+          },
+        });
+      }
+      return Promise.resolve({
+        data: {
+          items: [
+            {
+              id: 2,
+              name: "last-volume.tif",
+              path: "root",
+              is_folder: false,
+              size: "1KB",
+              type: "image/tiff",
+            },
+          ],
+          total: 201,
+          offset: 200,
+          limit: 200,
+          has_more: false,
+        },
+      });
+    });
+
+    renderFilesManager();
+    fireEvent.click(await screen.findByText("Load more files"));
+
+    await waitFor(() =>
+      expect(apiClient.get).toHaveBeenCalledWith("/files", {
+        params: { parent: "root", offset: 200, limit: 200 },
+      }),
+    );
+    expect(await screen.findByText("last-volume.tif")).toBeTruthy();
+    expect(screen.queryByText("Load more files")).toBeNull();
   });
 
   it("opens a confirmation modal before registering a suggested smoke project", async () => {
@@ -506,7 +568,7 @@ describe("FilesManager", () => {
       );
     });
     expect(apiClient.get).toHaveBeenCalledWith("/files", {
-      params: { parent: "7" },
+      params: { parent: "7", offset: 0, limit: 200 },
     });
     await continueWithProjectContext();
     await waitFor(() => {
@@ -1049,7 +1111,7 @@ describe("FilesManager", () => {
     await screen.findByText("Confirm project basics");
     await waitFor(() => {
       expect(apiClient.get).toHaveBeenCalledWith("/files", {
-        params: { parent: "7" },
+        params: { parent: "7", offset: 0, limit: 200 },
       });
       expect(mockWorkflowContext.consumeRuntimeAction).toHaveBeenCalledWith(
         "choose-data-action",

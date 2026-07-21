@@ -1,12 +1,23 @@
-from fastapi import APIRouter, Depends, HTTPException, status, UploadFile, File, Form
+from fastapi import (
+    APIRouter,
+    Depends,
+    File,
+    Form,
+    HTTPException,
+    Query,
+    UploadFile,
+    status,
+)
 from fastapi.responses import Response
 from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
+from sqlalchemy import func, or_
 from sqlalchemy.orm import Session
 from . import models, utils, database
 from jose import JWTError, jwt
-from typing import Any, List, Optional
+from typing import Any, List, Optional, Union
 from datetime import datetime, timezone
 from urllib.parse import parse_qs, unquote, urlparse
+import anyio
 import json
 import shutil
 import os
@@ -15,6 +26,7 @@ import mimetypes
 import re
 import math
 from server_api.utils.utils import resolve_existing_path
+from server_api.workflows.volume_io import open_volume_store
 
 try:  # Optional preview dependency
     import cv2
@@ -37,6 +49,7 @@ oauth2_scheme = OAuth2PasswordBearer(tokenUrl="token", auto_error=False)
 IGNORED_SYSTEM_FILENAMES = {
     ".ds_store",
     "thumbs.db",
+    "workflow_preference.json",
     ".pytc_proofreading.json",
     ".pytc_instance_labels.tif",
     ".pytc_project_context.json",
@@ -48,6 +61,11 @@ PROJECT_AUDIT_MAX_VOLUME_FILES = 16
 PROJECT_AUDIT_MAX_SAMPLE_VALUES = 250_000
 PROJECT_AUDIT_MAX_FINDINGS = 24
 PROJECT_CONTEXT_FILENAME = ".pytc_project_context.json"
+FILE_LIST_DEFAULT_LIMIT = 100
+FILE_LIST_MAX_LIMIT = 500
+FILE_LIST_MAINTENANCE_LIMIT = 500
+FILE_PREVIEW_MAX_SOURCE_DIM = 1024
+FILE_PREVIEW_LIMITER = anyio.CapacityLimiter(2)
 
 VOLUME_EXTENSIONS = {
     ".h5",
@@ -68,6 +86,14 @@ VOLUME_EXTENSIONS = {
 CONFIG_EXTENSIONS = {".yaml", ".yml", ".json", ".toml"}
 CHECKPOINT_EXTENSIONS = {".pt", ".pth", ".pth.tar", ".ckpt", ".onnx"}
 TEXT_SIGNAL_EXTENSIONS = CONFIG_EXTENSIONS | {".md", ".txt", ".csv", ".tsv"}
+FILE_PICKER_VOLUME_EXTENSIONS = VOLUME_EXTENSIONS | {
+    ".png",
+    ".jpg",
+    ".jpeg",
+    ".gif",
+    ".bmp",
+    ".webp",
+}
 
 
 def _format_size(size_bytes: int) -> str:
@@ -2024,16 +2050,24 @@ def _is_managed_upload_path(user_id: int, physical_path: Optional[str]) -> bool:
         return False
 
 
-def _repair_stale_mounted_entries(db: Session, user_id: int) -> None:
-    candidates = (
-        db.query(models.File)
-        .filter(
-            models.File.user_id == user_id,
-            models.File.physical_path.isnot(None),
-            models.File.path != "root",
-        )
-        .all()
+def _repair_stale_mounted_entries(
+    db: Session,
+    user_id: int,
+    *,
+    parent: Optional[str] = None,
+    max_candidates: Optional[int] = None,
+) -> None:
+    query = db.query(models.File).filter(
+        models.File.user_id == user_id,
+        models.File.physical_path.isnot(None),
+        models.File.path != "root",
     )
+    if parent is not None:
+        query = query.filter(models.File.path == parent)
+    query = query.order_by(models.File.id.asc())
+    if max_candidates is not None:
+        query = query.limit(max_candidates)
+    candidates = query.all()
 
     changed = False
     for entry in candidates:
@@ -2066,16 +2100,24 @@ def _repair_stale_mounted_entries(db: Session, user_id: int) -> None:
         db.commit()
 
 
-def _prune_missing_managed_upload_entries(db: Session, user_id: int) -> None:
-    candidates = (
-        db.query(models.File)
-        .filter(
-            models.File.user_id == user_id,
-            models.File.is_folder.is_(False),
-            models.File.physical_path.isnot(None),
-        )
-        .all()
+def _prune_missing_managed_upload_entries(
+    db: Session,
+    user_id: int,
+    *,
+    parent: Optional[str] = None,
+    max_candidates: Optional[int] = None,
+) -> None:
+    query = db.query(models.File).filter(
+        models.File.user_id == user_id,
+        models.File.is_folder.is_(False),
+        models.File.physical_path.isnot(None),
     )
+    if parent is not None:
+        query = query.filter(models.File.path == parent)
+    query = query.order_by(models.File.id.asc())
+    if max_candidates is not None:
+        query = query.limit(max_candidates)
+    candidates = query.all()
 
     removed = False
     for entry in candidates:
@@ -2249,14 +2291,53 @@ def list_current_user_projects(
 # File Management Endpoints
 
 
-@router.get("/files", response_model=List[models.FileResponse])
+def _visible_files_query(query):
+    lower_name = func.lower(models.File.name)
+    return query.filter(
+        ~lower_name.in_(sorted(IGNORED_SYSTEM_FILENAMES)),
+        ~lower_name.like(".__pytc_runtime_%"),
+    )
+
+
+def _volume_picker_files_query(query):
+    lower_name = func.lower(models.File.name)
+    return query.filter(
+        or_(
+            models.File.is_folder.is_(True),
+            *(
+                lower_name.like(f"%{extension}")
+                for extension in sorted(FILE_PICKER_VOLUME_EXTENSIONS)
+            ),
+        )
+    )
+
+
+@router.get(
+    "/files",
+    response_model=Union[List[models.FileResponse], models.FilePageResponse],
+)
 def get_files(
     parent: Optional[str] = None,
+    offset: Optional[int] = Query(default=None, ge=0),
+    limit: Optional[int] = Query(default=None, ge=1, le=FILE_LIST_MAX_LIMIT),
+    volume_only: bool = False,
     current_user: models.User = Depends(get_current_user),
     db: Session = Depends(database.get_db),
 ):
-    _repair_stale_mounted_entries(db, current_user.id)
-    _prune_missing_managed_upload_entries(db, current_user.id)
+    paged = offset is not None or limit is not None
+    maintenance_limit = FILE_LIST_MAINTENANCE_LIMIT if paged else None
+    _repair_stale_mounted_entries(
+        db,
+        current_user.id,
+        parent=parent,
+        max_candidates=maintenance_limit,
+    )
+    _prune_missing_managed_upload_entries(
+        db,
+        current_user.id,
+        parent=parent,
+        max_candidates=maintenance_limit,
+    )
     query = db.query(models.File).filter(models.File.user_id == current_user.id)
     if parent is not None:
         if parent != "root":
@@ -2280,24 +2361,33 @@ def get_files(
                 )
         query = query.filter(models.File.path == parent)
 
-    return [
-        file
-        for file in query.order_by(
+    query = _visible_files_query(query)
+    ordered_query = query.order_by(models.File.is_folder.desc(), models.File.name.asc())
+    if not paged:
+        return ordered_query.all()
+
+    page_offset = offset or 0
+    page_limit = limit or FILE_LIST_DEFAULT_LIMIT
+    if volume_only:
+        ordered_query = _volume_picker_files_query(query).order_by(
             models.File.is_folder.desc(), models.File.name.asc()
-        ).all()
-        if not _is_ignored_system_file(file.name)
-    ]
+        )
+    total = ordered_query.order_by(None).count()
+    items = ordered_query.offset(page_offset).limit(page_limit).all()
+    return models.FilePageResponse(
+        items=items,
+        total=total,
+        offset=page_offset,
+        limit=page_limit,
+        has_more=page_offset + len(items) < total,
+    )
 
 
-@router.get("/files/preview/{file_id}")
-def file_preview(
+def _get_preview_file(
     file_id: int,
     current_user: models.User = Depends(get_current_user),
     db: Session = Depends(database.get_db),
-):
-    if cv2 is None or np is None:
-        raise HTTPException(status_code=500, detail="Preview dependencies missing")
-
+) -> models.File:
     file = (
         db.query(models.File)
         .filter(models.File.id == file_id, models.File.user_id == current_user.id)
@@ -2307,72 +2397,81 @@ def file_preview(
         raise HTTPException(status_code=404, detail="File not found")
     if not file.physical_path or not os.path.exists(file.physical_path):
         raise HTTPException(status_code=404, detail="File not found on disk")
+    return file
 
-    def to_uint8(arr):
-        if arr is None:
-            return None
-        if arr.dtype == np.uint8:
-            return arr
-        arr = arr.astype(np.float32)
-        min_val = np.nanmin(arr)
-        max_val = np.nanmax(arr)
-        if max_val <= min_val:
-            return np.zeros_like(arr, dtype=np.uint8)
-        scaled = (arr - min_val) / (max_val - min_val)
-        return np.clip(scaled * 255.0, 0, 255).astype(np.uint8)
 
-    def load_image(path: str) -> Optional["np.ndarray"]:
-        ext = os.path.splitext(path)[1].lower()
-        if ext in {".h5", ".hdf5"}:
-            try:
-                import h5py  # type: ignore
-
-                with h5py.File(path, "r") as handle:
-                    datasets = []
-
-                    def collect_dataset(_name, obj):
-                        if isinstance(obj, h5py.Dataset) and obj.ndim >= 2:
-                            datasets.append(obj)
-
-                    handle.visititems(collect_dataset)
-                    if not datasets:
-                        return None
-                    dataset = datasets[0]
-                    leading_indices = tuple(
-                        dimension // 2 for dimension in dataset.shape[:-2]
-                    )
-                    img = dataset[(*leading_indices, slice(None), slice(None))]
-            except Exception:
-                img = None
-        elif ext in {".tif", ".tiff"} and tifffile is not None:
-            try:
-                img = tifffile.imread(path)
-            except Exception:
-                img = None
-        else:
-            img = cv2.imread(path, cv2.IMREAD_UNCHANGED)
-        if img is None:
-            return None
-
-        img = np.asarray(img)
-        if img.ndim == 2:
-            return to_uint8(img)
-        if img.ndim == 3:
-            if img.shape[2] in (3, 4):
-                if img.shape[2] == 4:
-                    img = img[:, :, :3]
-                return to_uint8(img)
-            mid = img.shape[0] // 2
-            return to_uint8(img[mid])
-        if img.ndim == 4:
-            mid = img.shape[0] // 2
-            img = img[mid]
-            if img.ndim == 3 and img.shape[2] == 4:
-                img = img[:, :, :3]
-            return to_uint8(img)
+def _to_preview_uint8(arr):
+    if arr is None:
         return None
+    if arr.dtype == np.uint8:
+        return arr
+    arr = arr.astype(np.float32)
+    min_val = np.nanmin(arr)
+    max_val = np.nanmax(arr)
+    if max_val <= min_val:
+        return np.zeros_like(arr, dtype=np.uint8)
+    scaled = (arr - min_val) / (max_val - min_val)
+    return np.clip(scaled * 255.0, 0, 255).astype(np.uint8)
 
-    image = load_image(file.physical_path)
+
+def _volume_preview_crop(shape: tuple[int, ...]) -> tuple[tuple[slice, ...], int]:
+    if len(shape) < 2:
+        raise ValueError("Preview volume must have at least two dimensions")
+
+    has_color_axis = len(shape) >= 3 and shape[-1] in (3, 4)
+    retained_dimensions = 3 if has_color_axis else 2
+    leading_dimensions = len(shape) - retained_dimensions
+    height_axis = leading_dimensions
+    width_axis = leading_dimensions + 1
+    source_max = max(shape[height_axis], shape[width_axis])
+    stride = max(1, math.ceil(source_max / FILE_PREVIEW_MAX_SOURCE_DIM))
+    crop = [
+        slice(dimension // 2, dimension // 2 + 1)
+        for dimension in shape[:leading_dimensions]
+    ]
+    crop.extend(
+        [
+            slice(None, None, stride),
+            slice(None, None, stride),
+        ]
+    )
+    if has_color_axis:
+        crop.append(slice(None))
+    return tuple(crop), leading_dimensions
+
+
+def _load_preview_image(path: str) -> Optional["np.ndarray"]:
+    extension = _project_extension(path)
+    if extension in VOLUME_EXTENSIONS:
+        try:
+            with open_volume_store(path) as store:
+                crop, leading_dimensions = _volume_preview_crop(store.metadata.shape)
+                img = store.read(crop)
+            img = np.asarray(img)
+            for _ in range(leading_dimensions):
+                img = np.take(img, 0, axis=0)
+        except Exception:
+            return None
+    else:
+        img = cv2.imread(path, cv2.IMREAD_UNCHANGED)
+
+    if img is None:
+        return None
+    img = np.asarray(img)
+    if img.ndim == 2:
+        return _to_preview_uint8(img)
+    if img.ndim == 3 and img.shape[2] in (3, 4):
+        if img.shape[2] == 4:
+            img = img[:, :, :3]
+        return _to_preview_uint8(img)
+    return None
+
+
+def _render_file_preview(path: str) -> bytes:
+    if cv2 is None or np is None:
+        raise HTTPException(status_code=500, detail="Preview dependencies missing")
+
+    image = _load_preview_image(path)
     if image is None:
         raise HTTPException(status_code=415, detail="Unsupported image format")
 
@@ -2386,7 +2485,19 @@ def file_preview(
     success, buffer = cv2.imencode(".png", image)
     if not success:
         raise HTTPException(status_code=500, detail="Failed to encode preview")
-    return Response(content=buffer.tobytes(), media_type="image/png")
+    return buffer.tobytes()
+
+
+@router.get("/files/preview/{file_id}")
+async def file_preview(
+    file: models.File = Depends(_get_preview_file),
+):
+    content = await anyio.to_thread.run_sync(
+        _render_file_preview,
+        file.physical_path,
+        limiter=FILE_PREVIEW_LIMITER,
+    )
+    return Response(content=content, media_type="image/png")
 
 
 @router.post("/files/upload", response_model=models.FileResponse)

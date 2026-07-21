@@ -60,6 +60,104 @@ class WorkflowOperationRouteTests(unittest.TestCase):
             json=body,
         )
 
+    def _training_action(self, **overrides):
+        body = {
+            "action_id": "action-training-1",
+            "kind": "start_training",
+            "workflow_id": self.workflow_id,
+            "requested_by": "agent",
+            "idempotency_key": "action:start-training:1",
+            "correlation_id": "conversation-1",
+            "execution_owner": "server_runtime",
+            "policy": {
+                "risk_level": "runs_job",
+                "requires_approval": True,
+                "approval_reason": "Training consumes compute resources.",
+            },
+            "approval": {
+                "status": "approved",
+                "event_id": 1,
+                "decided_by": "test-user",
+            },
+            "input_artifacts": [
+                {
+                    "logical_name": "synthetic-training-config",
+                    "role": "config",
+                    "path": "configs/Synthetic-Core-Loop-BC.yaml",
+                }
+            ],
+            "preconditions": [
+                {
+                    "kind": "workflow_stage",
+                    "allowed_stages": ["training_ready"],
+                }
+            ],
+            "autopick_parameters": True,
+        }
+        body.update(overrides)
+        return body
+
+    def test_approved_action_envelope_stages_one_idempotent_operation(self):
+        url = f"/api/workflows/{self.workflow_id}/action-operations"
+        body = self._training_action()
+
+        first_response = self.client.post(url, json=body)
+        second_response = self.client.post(url, json=body)
+
+        self.assertEqual(first_response.status_code, 202)
+        self.assertEqual(second_response.status_code, 202)
+        first = first_response.json()
+        self.assertEqual(second_response.json()["id"], first["id"])
+        self.assertEqual(first["status"], "queued")
+        self.assertEqual(first["operation_type"], "agent_action:start_training")
+        self.assertEqual(first["input"]["kind"], "start_training")
+        self.assertEqual(first["metadata"]["action_id"], "action-training-1")
+        self.assertEqual(first["correlation_id"], "conversation-1")
+
+    def test_action_operation_rejects_unapproved_and_wrong_workflow_envelopes(self):
+        url = f"/api/workflows/{self.workflow_id}/action-operations"
+        unapproved = self._training_action(
+            approval={"status": "pending"},
+            idempotency_key="action:start-training:pending",
+        )
+        unapproved_response = self.client.post(url, json=unapproved)
+        self.assertEqual(unapproved_response.status_code, 409)
+        self.assertIn("approved", unapproved_response.json()["detail"])
+
+        wrong_workflow = self._training_action(
+            workflow_id=self.workflow_id + 1,
+            idempotency_key="action:start-training:wrong-workflow",
+        )
+        wrong_response = self.client.post(url, json=wrong_workflow)
+        self.assertEqual(wrong_response.status_code, 409)
+        self.assertIn("workflow_id", wrong_response.json()["detail"])
+
+    def test_action_operation_rejects_browser_owned_actions(self):
+        url = f"/api/workflows/{self.workflow_id}/action-operations"
+        body = {
+            **self._training_action(),
+            "action_id": "action-choose-project-1",
+            "kind": "choose_project_data",
+            "idempotency_key": "action:choose-project:1",
+            "execution_owner": "browser_navigation",
+            "policy": {
+                "risk_level": "prefills_form",
+                "requires_approval": False,
+            },
+            "approval": {"status": "not_required"},
+        }
+        body.pop("autopick_parameters")
+        response = self.client.post(url, json=body)
+        self.assertEqual(response.status_code, 409)
+        self.assertIn("Browser-owned", response.json()["detail"])
+
+    def test_action_envelope_schema_is_exposed_with_a_discriminator(self):
+        response = self.client.get("/api/workflows/action-envelopes/schema")
+        self.assertEqual(response.status_code, 200)
+        schema = response.json()
+        self.assertEqual(schema["discriminator"]["propertyName"], "kind")
+        self.assertGreaterEqual(len(schema["oneOf"]), 10)
+
     def test_operation_lifecycle_is_persisted_and_queryable(self):
         created_response = self._create_operation()
         self.assertEqual(created_response.status_code, 200)

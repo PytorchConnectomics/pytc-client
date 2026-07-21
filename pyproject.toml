@@ -43,5 +43,7 @@ dependencies = [
 [dependency-groups]
 dev = [
     "black==26.5.1",
+    "dbos[aiosqlite]==2.28.0",
+    "playwright>=1.54,<2",
     "pytest==9.0.2",
 ]
