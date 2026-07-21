@@ -2,6 +2,19 @@
   text-align: center;
 }
 
+.app-error-boundary {
+  align-items: center;
+  background: var(--seg-bg-canvas, #f7f4ed);
+  display: flex;
+  justify-content: center;
+  min-height: 100vh;
+  padding: 24px;
+}
+
+.app-error-boundary .ant-result {
+  max-width: 680px;
+}
+
 :root {
   --seg-bg-canvas: #f7f4ed;
   --seg-bg-panel: #fffdfa;

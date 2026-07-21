@@ -10,7 +10,7 @@ from typing import Any, Dict, List, Optional
 
 import requests
 from fastapi import APIRouter, Depends, HTTPException
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, ValidationError
 from sqlalchemy.orm import Session
 
 from app_event_logger import append_app_event
@@ -64,6 +64,7 @@ from .service import (
 )
 from .bundle_export import build_export_bundle, write_export_bundle_directory
 from .agent_plan import build_case_study_plan_graph
+from .agent_actions import resolve_agent_action, validate_agent_proposal
 from .evaluation import compute_before_after_evaluation, write_evaluation_report
 from .metrics import compute_workflow_metrics
 from .volume_pairs import discover_neuroglancer_volume_pairs
@@ -1390,44 +1391,11 @@ def _client_effects_to_command(client_effects: Dict[str, Any]) -> str:
 
 
 def _infer_action_risk(client_effects: Optional[Dict[str, Any]]) -> str:
-    effects = client_effects or {}
-    runtime_kind = (effects.get("runtime_action") or {}).get("kind")
-    workflow_action_kind = (effects.get("workflow_action") or {}).get("kind")
-    if runtime_kind in {"start_inference", "start_training"}:
-        return "runs_job"
-    if runtime_kind in {"stop_inference", "stop_training"}:
-        return "controls_job"
-    if runtime_kind == "start_proofreading":
-        return "loads_editor"
-    if runtime_kind == "choose_project_data":
-        return "prefills_form"
-    if effects.get("mount_project") or effects.get("reset_workspace"):
-        return "modifies_workspace"
-    if effects.get("start_new_workflow"):
-        return "writes_workflow_record"
-    if workflow_action_kind == "export_bundle":
-        return "exports_evidence"
-    if workflow_action_kind in {"compute_evaluation", "propose_retraining_stage"}:
-        return "writes_workflow_record"
-    if any(key.startswith("set_") for key in effects):
-        return "prefills_form"
-    if effects.get("navigate_to") or effects.get("show_workflow_context"):
-        return "read_only"
-    if effects.get("refresh_insights"):
-        return "read_only"
-    return "read_only"
+    return resolve_agent_action("workflow_action", client_effects).risk_level
 
 
 def _requires_action_approval(client_effects: Optional[Dict[str, Any]]) -> bool:
-    risk = _infer_action_risk(client_effects)
-    return risk in {
-        "runs_job",
-        "controls_job",
-        "loads_editor",
-        "exports_evidence",
-        "writes_workflow_record",
-        "modifies_workspace",
-    }
+    return resolve_agent_action("workflow_action", client_effects).requires_approval
 
 
 def _action_risk_tier(risk_level: str) -> str:
@@ -1540,58 +1508,15 @@ def _agent_trace_kwargs(agent: Dict[str, Any]) -> Dict[str, str]:
 def _specialist_agent_for_action(
     action_type: str, client_effects: Dict[str, Any]
 ) -> Dict[str, Any]:
-    navigate_to = str((client_effects or {}).get("navigate_to") or "")
-    if action_type in {"start_training", "open_training"} or "training" in navigate_to:
-        return _agent_descriptor("training_agent")
-    if (
-        action_type in {"start_inference", "open_inference"}
-        or "inference" in navigate_to
-    ):
-        return _agent_descriptor("inference_agent")
-    if action_type in {"start_proofreading"} or "proofreading" in navigate_to:
-        return _agent_descriptor("proofreading_agent")
-    if "visualization" in navigate_to or action_type.startswith("open_visualization"):
-        return _agent_descriptor("visualization_agent")
-    if action_type in {"export_bundle"}:
-        return _agent_descriptor("evidence_agent")
-    if action_type in {"compute_evaluation"}:
-        return _agent_descriptor("evaluation_agent")
-    if (
-        action_type in {"mount_project", "choose_project_data"}
-        or navigate_to == "files"
-    ):
-        return _agent_descriptor("data_agent")
-    if action_type in {
-        "show_workflow_context",
-        "refresh_context",
-        "open_project-progress",
-    }:
-        return _agent_descriptor("project_manager")
-    return _agent_descriptor("project_manager")
+    definition = resolve_agent_action(action_type, client_effects)
+    return _agent_descriptor(definition.specialist_agent_type)
 
 
 def _action_type_from_effects(
     action_id: str,
     client_effects: Optional[Dict[str, Any]],
 ) -> str:
-    effects = client_effects or {}
-    runtime_kind = (effects.get("runtime_action") or {}).get("kind")
-    workflow_kind = (effects.get("workflow_action") or {}).get("kind")
-    if runtime_kind:
-        return str(runtime_kind)
-    if workflow_kind:
-        return str(workflow_kind)
-    if effects.get("mount_project"):
-        return "mount_project"
-    if effects.get("start_new_workflow"):
-        return "start_new_workflow"
-    if effects.get("show_workflow_context"):
-        return "show_workflow_context"
-    if effects.get("refresh_insights"):
-        return "refresh_context"
-    if effects.get("navigate_to"):
-        return f"open_{effects.get('navigate_to')}"
-    return action_id
+    return resolve_agent_action(action_id, client_effects).action_type
 
 
 def _action_target_from_effects(
@@ -1829,7 +1754,8 @@ def _build_action_card_payload(
     requires_approval: bool,
     disabled_reason: Optional[str],
 ) -> Dict[str, Any]:
-    action_type = _action_type_from_effects(action_id, client_effects)
+    definition = resolve_agent_action(action_id, client_effects)
+    action_type = definition.action_type
     specialist_agent = _specialist_agent_for_action(action_type, client_effects)
     blockers = [disabled_reason] if disabled_reason else []
     return {
@@ -1855,6 +1781,12 @@ def _build_action_card_payload(
         "summary_fields": _summary_fields_from_effects(client_effects),
         "expected_effects": _expected_effects_from_client_effects(client_effects),
         "executor": "bounded_app_routine",
+        "execution_owner": definition.execution_owner,
+        "registry_policy": {
+            "risk_level": definition.risk_level,
+            "requires_approval": definition.requires_approval,
+            "specialist_agent_type": definition.specialist_agent_type,
+        },
     }
 
 
@@ -8947,6 +8879,10 @@ async def create_agent_action(
     db: Session = Depends(get_db),
 ):
     workflow = get_user_workflow_or_404(db, workflow_id=workflow_id, user_id=user.id)
+    try:
+        definition = validate_agent_proposal(body.action, body.payload)
+    except (ValidationError, ValueError) as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
     summary = body.summary or f"Agent proposed: {body.action}"
     event = append_workflow_event(
         db,
@@ -8955,7 +8891,17 @@ async def create_agent_action(
         event_type="agent.proposal_created",
         stage=workflow.stage,
         summary=summary,
-        payload={"action": body.action, "params": body.payload},
+        payload={
+            "action": body.action,
+            "params": body.payload,
+            "registry": {
+                "action_type": definition.action_type,
+                "risk_level": definition.risk_level,
+                "requires_approval": definition.requires_approval,
+                "execution_owner": definition.execution_owner,
+                "specialist_agent_type": definition.specialist_agent_type,
+            },
+        },
         approval_status="pending",
         commit=True,
     )
@@ -8997,6 +8943,7 @@ async def approve_agent_action(
 
     if action == "start_training_run":
         client_effects = _training_run_effects_from_proposal(workflow, params)
+        resolve_agent_action(str(action), client_effects)
         corrected_mask_path = (
             client_effects.get("set_training_label_path")
             or params.get("label_path")
@@ -9080,6 +9027,10 @@ async def approve_agent_action(
                 status_code=400,
                 detail="Approved client-effect action is missing client_effects.",
             )
+        try:
+            resolve_agent_action(str(action), client_effects)
+        except ValidationError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
         proposal.approval_status = "approved"
         db.commit()
         db.refresh(proposal)

@@ -1631,11 +1631,7 @@ class DataManager:
 
         # Single file
         if path_obj.is_file():
-            lower_name = path_obj.name.lower()
-            if lower_name.endswith((".tif", ".tiff")):
-                volume = tifffile.imread(file_path)
-            else:
-                volume = load_volume(path)
+            volume = load_volume(path)
 
             if volume.ndim == 2:
                 return {

@@ -1,6 +1,7 @@
 import axios from "axios";
 import yaml from "js-yaml";
 import { logClientEvent } from "./logging/appEventLog";
+import { attachApiError, normalizeApiError } from "./errors/apiError";
 import {
   detectConfigDiagnostics,
   summarizeConfigText,
@@ -190,6 +191,7 @@ const attachApiLogging = (instance, source) => {
       return response;
     },
     (error) => {
+      attachApiError(error);
       const config = error.config || {};
       const startedAt = config.metadata?.startedAt;
       const endedAt =
@@ -209,6 +211,8 @@ const attachApiLogging = (instance, source) => {
               ? Number((endedAt - startedAt).toFixed(2))
               : null,
           detail: error.response?.data?.detail || null,
+          errorCode: error.apiError?.code || null,
+          requestId: error.apiError?.requestId || null,
         },
       });
       return Promise.reject(error);
@@ -231,33 +235,6 @@ const buildFilePath = (file) => {
 };
 
 const hasBrowserFile = (file) => file && file.originFileObj instanceof File;
-
-const getErrorDetailMessage = (detail) => {
-  if (!detail) return "";
-  if (typeof detail === "string") return detail;
-  if (Array.isArray(detail)) {
-    return detail.map(getErrorDetailMessage).filter(Boolean).join("; ");
-  }
-  if (typeof detail === "object") {
-    if (detail.user_message) {
-      return getErrorDetailMessage(detail.user_message);
-    }
-    const nestedUpstream =
-      detail.upstream_body !== undefined
-        ? getErrorDetailMessage(detail.upstream_body)
-        : "";
-    return [
-      detail.message,
-      detail.detail,
-      detail.reason,
-      nestedUpstream,
-      detail.error,
-    ]
-      .filter(Boolean)
-      .join(" | ");
-  }
-  return String(detail);
-};
 
 export async function getNeuroglancerViewer(
   image,
@@ -392,13 +369,11 @@ export async function checkFile(file) {
 
 function handleError(error) {
   if (error.response) {
-    const detail = error.response.data?.detail;
-    const detailMessage = getErrorDetailMessage(detail);
-    throw new Error(
-      `${error.response.status}: ${detailMessage || error.response.statusText}`,
-    );
+    const apiError = normalizeApiError(error);
+    error.apiError = apiError;
+    error.message = `${error.response.status}: ${apiError.message}`;
   }
-  throw error;
+  throw attachApiError(error);
 }
 
 export async function makeApiRequest(url, method, data = null) {

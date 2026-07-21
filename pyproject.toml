@@ -25,6 +25,7 @@ dependencies = [
     "requests>=2.31",
     "scikit-image>=0.25",
     "scipy>=1.11",
+    "sqlalchemy>=2.0,<3",
     "tensorboard==2.20.0",
     "tensorboard-data-server==0.7.2",
     "tifffile>=2025.5.10",

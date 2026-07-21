@@ -19,6 +19,7 @@ from urllib.parse import urlsplit, urlunsplit
 
 import requests
 import uvicorn
+import numpy as np
 from fastapi import Depends, FastAPI, HTTPException, Request, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
@@ -39,12 +40,23 @@ from server_api.auth import models, database, router as auth_router
 from server_api.auth.database import get_db
 from server_api.auth.router import get_current_user
 from server_api.ehtool import router as ehtool_router
+from server_api.errors import install_error_handlers
 from server_api.chatbot.logging_utils import (
     log_request_summary,
     request_id_from_request,
 )
 from server_api.workflows import router as workflow_router
-from server_api.workflows.db_models import WorkflowCommand, WorkflowEvent
+from server_api.workflows import operation_router as workflow_operation_router
+from server_api.workflows.db_models import (
+    WorkflowCommand,
+    WorkflowEvent,
+    WorkflowOperation,
+)
+from server_api.workflows.operation_service import (
+    create_workflow_operation,
+    operation_to_dict,
+    transition_workflow_operation,
+)
 from server_api.workflows.service import (
     append_event_for_workflow_if_present,
     command_to_dict,
@@ -56,7 +68,7 @@ from server_api.workflows.service import (
     update_workflow_fields,
 )
 from server_api.project_manager import router as pm_router
-from server_api.workflows.volume_io import load_volume
+from server_api.workflows.volume_io import VolumeStore, open_volume_store
 from server_api.workflows.volume_pairs import (
     _is_chunked_volume_directory,
     _is_neuroglancer_volume_file,
@@ -251,6 +263,7 @@ _ensure_sqlite_column(
 )
 
 app = FastAPI()
+install_error_handlers(app)
 
 # Ensure uploads directory exists
 os.makedirs("uploads", exist_ok=True)
@@ -259,6 +272,11 @@ app.mount("/uploads", StaticFiles(directory="uploads"), name="uploads")
 app.include_router(auth_router.router)
 app.include_router(ehtool_router.router, prefix="/eh", tags=["ehtool"])
 app.include_router(workflow_router.router, prefix="/api/workflows", tags=["workflows"])
+app.include_router(
+    workflow_operation_router.router,
+    prefix="/api/workflows",
+    tags=["workflow-operations"],
+)
 app.include_router(pm_router.router, prefix="/api/pm", tags=["project-manager"])
 
 app.add_middleware(
@@ -267,6 +285,7 @@ app.add_middleware(
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
+    expose_headers=["x-request-id"],
 )
 
 logger = logging.getLogger(__name__)
@@ -382,6 +401,79 @@ def _build_neuroglancer_layer(
         )
     shader = image_shader or _resolve_raw_image_shader()
     return _with_neuroglancer_image_shader(neuroglancer_module, source, shader)
+
+
+class _NeuroglancerSegmentationStore:
+    """Validate and convert segmentation labels one requested chunk at a time."""
+
+    def __init__(self, store: VolumeStore):
+        if store.ndim != 3:
+            raise ValueError(
+                "Storage-backed segmentation viewing requires a 3D label volume. "
+                "Convert multi-channel predictions to a 3D label volume first."
+            )
+        self._store = store
+        self.shape = store.shape
+        source_dtype = np.dtype(store.dtype)
+        if np.issubdtype(source_dtype, np.bool_):
+            self.dtype = np.dtype(np.uint8)
+        elif np.issubdtype(source_dtype, np.unsignedinteger):
+            self.dtype = source_dtype
+        elif np.issubdtype(source_dtype, np.integer) or np.issubdtype(
+            source_dtype, np.floating
+        ):
+            self.dtype = np.dtype(np.uint64)
+        else:
+            raise ValueError(
+                f"Segmentation volume dtype {source_dtype} is not supported."
+            )
+
+    def __getitem__(self, key):
+        chunk = np.asarray(self._store[key])
+        if chunk.size == 0:
+            return chunk.astype(self.dtype, copy=False)
+        if np.issubdtype(chunk.dtype, np.floating):
+            if not np.all(np.isfinite(chunk)):
+                raise ValueError(
+                    "Segmentation volumes must not contain NaN or infinite values."
+                )
+            rounded = np.rint(chunk)
+            if not np.allclose(chunk, rounded):
+                raise ValueError("Segmentation volumes must use integer-valued labels.")
+            chunk = rounded
+        if np.issubdtype(chunk.dtype, np.signedinteger) or np.issubdtype(
+            chunk.dtype, np.floating
+        ):
+            if int(chunk.min()) < 0:
+                raise ValueError(
+                    "Segmentation volumes must contain non-negative label ids."
+                )
+        return chunk.astype(self.dtype, copy=False)
+
+
+def _open_neuroglancer_volume_sources(
+    image_path: pathlib.Path,
+    label_path: Optional[pathlib.Path],
+):
+    resources: List[VolumeStore] = []
+    try:
+        image_store = open_volume_store(str(image_path))
+        resources.append(image_store)
+        if image_store.ndim != 3:
+            raise ValueError(
+                f"Image volume must be 3D for Neuroglancer, got {image_store.shape}."
+            )
+
+        label_source = None
+        if label_path is not None:
+            label_store = open_volume_store(str(label_path))
+            resources.append(label_store)
+            label_source = _NeuroglancerSegmentationStore(label_store)
+        return image_store, label_source, resources
+    except Exception:
+        for resource in resources:
+            resource.close()
+        raise
 
 
 class ClientAppLogEvent(BaseModel):
@@ -726,6 +818,54 @@ def _build_training_body_from_command(
     }
 
 
+def _workflow_command_run_response(
+    workflow,
+    command: WorkflowCommand,
+    operation: WorkflowOperation,
+) -> dict[str, Any]:
+    result = decode_json(operation.result_json)
+    return {
+        "workflow_id": workflow.id,
+        "command": command_to_dict(command),
+        "operation": operation_to_dict(operation),
+        "worker": result.get("worker", {}),
+        "run_id": result.get("run_id"),
+        "started_event_id": result.get("started_event_id"),
+    }
+
+
+def _fail_command_operation(
+    db: Session,
+    *,
+    command: WorkflowCommand,
+    operation: WorkflowOperation,
+    error_payload: dict[str, Any],
+    retryable: bool,
+) -> None:
+    fail_workflow_command(
+        db,
+        command,
+        error_payload=error_payload,
+        retryable=retryable,
+        commit=False,
+    )
+    if operation.status in {"queued", "running"}:
+        transition_workflow_operation(
+            db,
+            operation,
+            status="failed",
+            expected_status=operation.status,
+            error_payload=error_payload,
+            lease_owner=(
+                "server_api.training_runner" if operation.status == "running" else None
+            ),
+            commit=False,
+        )
+    db.commit()
+    db.refresh(command)
+    db.refresh(operation)
+
+
 @app.on_event("startup")
 async def configure_app_event_logging():
     log_path = configure_process_logging("server_api")
@@ -911,6 +1051,17 @@ def _neuroglancer_token_from_url(viewer_url: str) -> Optional[str]:
     return None
 
 
+def _close_neuroglancer_entry_resources(entry: dict[str, Any]) -> None:
+    for resource in entry.get("resources") or []:
+        try:
+            resource.close()
+        except Exception:
+            logger.warning(
+                "Failed to close an evicted Neuroglancer backing resource.",
+                exc_info=True,
+            )
+
+
 def _cleanup_retained_neuroglancer_viewers(now: Optional[float] = None):
     if now is None:
         now = time.time()
@@ -928,11 +1079,14 @@ def _cleanup_retained_neuroglancer_viewers(now: Optional[float] = None):
                         "mode": entry.get("mode"),
                     }
                 )
-                _retained_neuroglancer_viewers.pop(token, None)
+                removed = _retained_neuroglancer_viewers.pop(token, None)
+                if removed is not None:
+                    _close_neuroglancer_entry_resources(removed)
 
     max_viewers = max(PYTC_NEUROGLANCER_MAX_VIEWERS, 0)
     while max_viewers and len(_retained_neuroglancer_viewers) > max_viewers:
         token, entry = _retained_neuroglancer_viewers.popitem(last=False)
+        _close_neuroglancer_entry_resources(entry)
         evicted.append(
             {
                 "token": token,
@@ -954,6 +1108,7 @@ def _retain_neuroglancer_viewer(
     workflow_id: Optional[int] = None,
     image_path: Optional[str] = None,
     label_path: Optional[str] = None,
+    resources: Optional[List[VolumeStore]] = None,
 ) -> Optional[str]:
     token = getattr(viewer, "token", None) or _neuroglancer_token_from_url(
         internal_viewer_url
@@ -974,6 +1129,8 @@ def _retain_neuroglancer_viewer(
     now = time.time()
     with _retained_neuroglancer_viewers_lock:
         if PYTC_NEUROGLANCER_MAX_VIEWERS <= 0:
+            for entry in _retained_neuroglancer_viewers.values():
+                _close_neuroglancer_entry_resources(entry)
             _retained_neuroglancer_viewers.clear()
             append_app_event(
                 component="server_api",
@@ -988,6 +1145,9 @@ def _retain_neuroglancer_viewer(
             return token
 
         evicted = _cleanup_retained_neuroglancer_viewers(now)
+        replaced = _retained_neuroglancer_viewers.pop(token, None)
+        if replaced is not None:
+            _close_neuroglancer_entry_resources(replaced)
         _retained_neuroglancer_viewers[token] = {
             "viewer": viewer,
             "public_url": public_url,
@@ -996,6 +1156,7 @@ def _retain_neuroglancer_viewer(
             "workflow_id": workflow_id,
             "image_path": image_path,
             "label_path": label_path,
+            "resources": list(resources or []),
             "created_at": now,
         }
         _retained_neuroglancer_viewers.move_to_end(token)
@@ -1779,23 +1940,15 @@ async def neuroglancer(
             names=["z", "y", "x"], units=["nm", "nm", "nm"], scales=scales
         )
         try:
-            im = load_volume(str(resolved_image_path), label="image")
+            im, gt, volume_resources = _open_neuroglancer_volume_sources(
+                resolved_image_path,
+                resolved_label_path,
+            )
         except Exception as e:
             raise HTTPException(
-                status_code=400, detail=f"Failed to read image volume: {str(e)}"
-            )
-        try:
-            gt = (
-                load_volume(str(resolved_label_path), label="label")
-                if resolved_label_path
-                else None
-            )
-            if gt is not None:
-                gt = _normalize_segmentation_volume_for_neuroglancer(gt)
-        except Exception as e:
-            raise HTTPException(
-                status_code=400, detail=f"Failed to prepare label volume: {str(e)}"
-            )
+                status_code=400,
+                detail=f"Failed to prepare storage-backed volume layers: {str(e)}",
+            ) from e
 
         def ngLayer(
             data,
@@ -1844,6 +1997,7 @@ async def neuroglancer(
             workflow_id=workflow_id,
             image_path=str(resolved_image_path),
             label_path=str(resolved_label_path) if resolved_label_path else None,
+            resources=volume_resources,
         )
         append_app_event(
             component="server_api",
@@ -2051,22 +2205,15 @@ async def neuroglancer_proofread(
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
     try:
-        im = load_volume(str(resolved_image_path), label="image")
+        im, gt, volume_resources = _open_neuroglancer_volume_sources(
+            resolved_image_path,
+            resolved_label_path,
+        )
     except Exception as exc:
         raise HTTPException(
-            status_code=400, detail=f"Failed to read image volume: {str(exc)}"
+            status_code=400,
+            detail=f"Failed to prepare storage-backed proofreading layers: {str(exc)}",
         ) from exc
-
-    gt = None
-    if resolved_label_path:
-        try:
-            gt = load_volume(str(resolved_label_path), label="label")
-            gt = _normalize_segmentation_volume_for_neuroglancer(gt)
-        except Exception as exc:
-            raise HTTPException(
-                status_code=400,
-                detail=f"Failed to prepare label volume for proofreading: {str(exc)}",
-            ) from exc
 
     neuroglancer.set_server_bind_address(
         PYTC_NEUROGLANCER_BIND_HOST, PYTC_NEUROGLANCER_PORT
@@ -2281,6 +2428,7 @@ async def neuroglancer_proofread(
         workflow_id=workflow_id,
         image_path=str(resolved_image_path),
         label_path=str(resolved_label_path) if resolved_label_path else None,
+        resources=volume_resources,
     )
     response_payload = {
         "url": public_url,
@@ -2450,6 +2598,70 @@ async def run_workflow_command(
             detail=f"Unsupported workflow command type: {command.command_type}",
         )
 
+    if command.status == "submitted":
+        completed_operation = (
+            db.query(WorkflowOperation)
+            .filter(
+                WorkflowOperation.workflow_id == workflow.id,
+                WorkflowOperation.command_id == command.id,
+                WorkflowOperation.status == "succeeded",
+            )
+            .order_by(WorkflowOperation.id.desc())
+            .first()
+        )
+        if completed_operation is not None:
+            return _workflow_command_run_response(
+                workflow,
+                command,
+                completed_operation,
+            )
+        raise HTTPException(
+            status_code=409, detail="Workflow command was already submitted."
+        )
+
+    operation_query = db.query(WorkflowOperation).filter(
+        WorkflowOperation.workflow_id == workflow.id,
+        WorkflowOperation.command_id == command.id,
+    )
+    latest_operation = operation_query.order_by(WorkflowOperation.id.desc()).first()
+    if latest_operation is not None and latest_operation.status in {
+        "queued",
+        "running",
+        "succeeded",
+    }:
+        operation = latest_operation
+    else:
+        operation = create_workflow_operation(
+            db,
+            workflow_id=workflow.id,
+            operation_type="start_training",
+            idempotency_key=(
+                f"workflow-command:{command.id}:attempt:{operation_query.count() + 1}"
+            ),
+            actor=command.actor,
+            command_id=command.id,
+            input_payload=decode_json(command.input_json),
+            metadata={
+                "command_type": command.command_type,
+                "execution_scope": "worker_submission",
+            },
+            commit=True,
+        )
+    if operation.status == "succeeded":
+        if command.status != "submitted":
+            command = submit_workflow_command(
+                db,
+                command,
+                result_payload=decode_json(operation.result_json),
+                commit=True,
+            )
+        return _workflow_command_run_response(workflow, command, operation)
+    if operation.status != "queued":
+        raise HTTPException(
+            status_code=409,
+            detail=f"Workflow command operation is already {operation.status}.",
+        )
+
     try:
         body = _build_training_body_from_command(command, workflow)
         body = _runtime_body_with_workflow_fallbacks(body, workflow, mode="training")
@@ -2457,8 +2669,20 @@ async def run_workflow_command(
             db,
             command,
             lease_owner="server_api.training_runner",
-            commit=True,
+            commit=False,
         )
+        operation = transition_workflow_operation(
+            db,
+            operation,
+            status="running",
+            expected_status="queued",
+            lease_owner="server_api.training_runner",
+            metadata={"run_id": body.get("run_id")},
+            commit=False,
+        )
+        db.commit()
+        db.refresh(command)
+        db.refresh(operation)
         update_workflow_fields(
             db,
             workflow,
@@ -2494,36 +2718,43 @@ async def run_workflow_command(
             json_body=body,
             timeout=30,
         )
-        command = submit_workflow_command(
-            db,
-            command,
-            result_payload={
-                "worker": worker_data,
-                "run_id": body.get("run_id"),
-                "started_event_id": started_event.id if started_event else None,
-                "submitted": True,
-            },
-            commit=True,
-        )
-        return {
-            "workflow_id": workflow.id,
-            "command": command_to_dict(command),
+        operation_result = {
             "worker": worker_data,
             "run_id": body.get("run_id"),
             "started_event_id": started_event.id if started_event else None,
+            "submitted": True,
         }
+        command = submit_workflow_command(
+            db,
+            command,
+            result_payload=operation_result,
+            commit=False,
+        )
+        operation = transition_workflow_operation(
+            db,
+            operation,
+            status="succeeded",
+            expected_status="running",
+            result_payload=operation_result,
+            lease_owner="server_api.training_runner",
+            commit=False,
+        )
+        db.commit()
+        db.refresh(command)
+        db.refresh(operation)
+        return _workflow_command_run_response(workflow, command, operation)
     except HTTPException as exc:
         error_payload = {
             "error": "HTTPException",
             "status_code": exc.status_code,
             "detail": exc.detail,
         }
-        fail_workflow_command(
+        _fail_command_operation(
             db,
-            command,
+            command=command,
+            operation=operation,
             error_payload=error_payload,
             retryable=exc.status_code in {503, 504},
-            commit=True,
         )
         append_event_for_workflow_if_present(
             db,
@@ -2545,12 +2776,12 @@ async def run_workflow_command(
             "error": type(exc).__name__,
             "detail": str(exc),
         }
-        fail_workflow_command(
+        _fail_command_operation(
             db,
-            command,
+            command=command,
+            operation=operation,
             error_payload=error_payload,
             retryable=False,
-            commit=True,
         )
         append_event_for_workflow_if_present(
             db,

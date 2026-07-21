@@ -12,6 +12,14 @@ class DummyViewer:
         self.token = token
 
 
+class DummyResource:
+    def __init__(self):
+        self.closed = False
+
+    def close(self):
+        self.closed = True
+
+
 def make_request(*, host="localhost:4242", scheme="http", extra_headers=None):
     headers = [(b"host", host.encode("utf-8"))]
     for key, value in (extra_headers or {}).items():
@@ -122,6 +130,29 @@ class NeuroglancerUrlContractTests(unittest.TestCase):
 
             self.assertNotIn("old", server_main._retained_neuroglancer_viewers)
             self.assertIn("new", server_main._retained_neuroglancer_viewers)
+        finally:
+            server_main.PYTC_NEUROGLANCER_MAX_VIEWERS = previous_limit
+
+    def test_evicted_viewer_closes_storage_backing_resources(self):
+        previous_limit = server_main.PYTC_NEUROGLANCER_MAX_VIEWERS
+        server_main.PYTC_NEUROGLANCER_MAX_VIEWERS = 1
+        old_resource = DummyResource()
+        try:
+            server_main._retain_neuroglancer_viewer(
+                DummyViewer("old"),
+                public_url="https://viewer.example.com/ng/v/old/",
+                internal_viewer_url="http://127.0.0.1:4244/v/old/",
+                mode="visualization",
+                resources=[old_resource],
+            )
+            server_main._retain_neuroglancer_viewer(
+                DummyViewer("new"),
+                public_url="https://viewer.example.com/ng/v/new/",
+                internal_viewer_url="http://127.0.0.1:4244/v/new/",
+                mode="visualization",
+            )
+
+            self.assertTrue(old_resource.closed)
         finally:
             server_main.PYTC_NEUROGLANCER_MAX_VIEWERS = previous_limit
 
