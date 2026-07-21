@@ -55,6 +55,7 @@ const HIDDEN_SYSTEM_FILES = new Set([
   "thumbs.db",
 ]);
 const DEFAULT_REMOTE_PROJECT_PATH =
+  process.env.REACT_APP_INITIAL_PROJECT_ROOT ||
   process.env.REACT_APP_DEFAULT_PROJECT_PATH ||
   "/home/weidf/demo_data/yixiao_tapereader_xri_case_study";
 const IMAGE_EXTENSIONS = new Set([

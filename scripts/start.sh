@@ -44,6 +44,36 @@ fi
 
 mkdir -p "${LOG_DIR}"
 
+configure_synthetic_project() {
+	if [[ "${PYTC_SYNTHETIC_PROJECT:-1}" != "1" || -n "${PYTC_INITIAL_PROJECT_ROOT:-}" ]]; then
+		return 0
+	fi
+
+	local project_root="${PYTC_SYNTHETIC_PROJECT_ROOT:-${ROOT_DIR}/.pytc/synthetic-core-project}"
+	local generator_args=(
+		python scripts/create_synthetic_project.py
+		--output-dir "${project_root}"
+	)
+	if [[ "${PYTC_SYNTHETIC_PROJECT_RESET:-0}" == "1" ]]; then
+		generator_args+=(--reset)
+	fi
+
+	echo "Preparing deterministic synthetic project..."
+	"${UV_BIN}" run --directory "${ROOT_DIR}" "${generator_args[@]}"
+	export PYTC_INITIAL_PROJECT_ROOT="${project_root}"
+	export PYTC_INITIAL_PROJECT_KIND="synthetic"
+	export PYTC_INITIAL_PROJECT_TITLE="Synthetic Segmentation Core Loop"
+	export PYTC_INITIAL_IMAGE_PATH="${project_root}/data/raw"
+	export PYTC_INITIAL_LABEL_PATH="${project_root}/data/seg"
+	export PYTC_INITIAL_MASK_PATH="${project_root}/data/seg"
+	export PYTC_INITIAL_CONFIG_PATH="${project_root}/configs/Synthetic-Core-Loop-BC.yaml"
+	export PYTC_DATABASE_URL="${PYTC_DATABASE_URL:-sqlite:///${ROOT_DIR}/.pytc/synthetic-core.db}"
+	export PYTC_AUTOMOUNT_INITIAL_PROJECT="${PYTC_AUTOMOUNT_INITIAL_PROJECT:-1}"
+	export REACT_APP_INITIAL_PROJECT_ROOT="${project_root}"
+}
+
+configure_synthetic_project
+
 STARTED_PIDS=()
 
 relative_log_path() {
@@ -136,6 +166,24 @@ start_service \
 	"http://localhost:4242/health" \
 	"${LOG_DIR}/api-server.log" \
 	env PYTHONDONTWRITEBYTECODE=1 "${UV_BIN}" run --directory "${ROOT_DIR}" python -m server_api.main
+
+initialize_local_project() {
+	if [[ "${PYTC_AUTOMOUNT_INITIAL_PROJECT:-0}" != "1" || -z "${PYTC_INITIAL_PROJECT_ROOT:-}" ]]; then
+		return 0
+	fi
+
+	local payload
+	payload="$(PYTC_MOUNT_ROOT="${PYTC_INITIAL_PROJECT_ROOT}" "${UV_BIN}" run --directory "${ROOT_DIR}" python -c 'import json, os; print(json.dumps({"directory_path": os.environ["PYTC_MOUNT_ROOT"], "destination_path": "root"}))')"
+	curl -sf "http://localhost:4242/api/workflows/current" >/dev/null
+	curl -sf \
+		-X POST \
+		-H "Content-Type: application/json" \
+		--data-binary "${payload}" \
+		"http://localhost:4242/files/mount" >/dev/null
+	echo "Initial project mounted: ${PYTC_INITIAL_PROJECT_ROOT}"
+}
+
+initialize_local_project
 
 start_service \
 	"PyTC server" \

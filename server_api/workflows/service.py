@@ -52,6 +52,53 @@ def _initial_project_defaults() -> Dict[str, Any]:
         return {}
     normalized_root = INITIAL_PROJECT_ROOT.lower()
     if (
+        os.getenv("PYTC_INITIAL_PROJECT_KIND", "").lower() == "synthetic"
+        or "synthetic-core-project" in normalized_root
+    ):
+        image_path = os.getenv(
+            "PYTC_INITIAL_IMAGE_PATH",
+            os.path.join(INITIAL_PROJECT_ROOT, "data/raw"),
+        )
+        label_path = os.getenv(
+            "PYTC_INITIAL_LABEL_PATH",
+            os.path.join(INITIAL_PROJECT_ROOT, "data/seg"),
+        )
+        return {
+            "title": os.getenv(
+                "PYTC_INITIAL_PROJECT_TITLE",
+                "Synthetic Segmentation Core Loop",
+            ),
+            "dataset_path": INITIAL_PROJECT_ROOT,
+            "image_path": image_path,
+            "label_path": label_path,
+            "mask_path": os.getenv("PYTC_INITIAL_MASK_PATH", label_path),
+            "config_path": os.getenv(
+                "PYTC_INITIAL_CONFIG_PATH",
+                os.path.join(
+                    INITIAL_PROJECT_ROOT,
+                    "configs/Synthetic-Core-Loop-BC.yaml",
+                ),
+            ),
+            "metadata": {
+                "created_from": "initial_project_default",
+                "synthetic": True,
+                "project_context": {
+                    "imaging_modality": "Synthetic volumetric microscopy",
+                    "target_structure": "synthetic organelles",
+                    "task_family": "3D instance segmentation",
+                    "task_goal": "segmentation, proofreading, retraining, and evaluation",
+                    "optimization_priority": "workflow contract and recovery behavior",
+                    "mask_status": "mixed: 2 ground-truth masks, 1 draft mask, 1 image-only target",
+                    "training_policy": "train only on confirmed ground-truth masks",
+                    "image_only_strategy": "run inference on image-only volumes after training",
+                    "voxel_size_nm": [40, 8, 8],
+                    "voxel_size_source": "project_manifest.json",
+                },
+                "visualization_scales": [40, 8, 8],
+                "visualization_scales_source": "project_manifest.json",
+            },
+        }
+    if (
         "yixiao" in normalized_root
         or "tapereader" in normalized_root
         or "xri" in normalized_root

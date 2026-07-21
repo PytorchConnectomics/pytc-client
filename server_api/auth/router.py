@@ -90,7 +90,8 @@ def _is_ignored_system_file(name: Optional[str]) -> bool:
 def _project_suggestion_candidates() -> List[dict]:
     repo_root = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
     workspace_root = os.path.abspath(os.path.join(repo_root, ".."))
-    return [
+    initial_project_root = os.getenv("PYTC_INITIAL_PROJECT_ROOT", "").strip()
+    candidates = [
         {
             "id": "yixiao-tapereader-xri-case-study",
             "name": "yixiao_tapereader_xri_case_study",
@@ -169,6 +170,31 @@ def _project_suggestion_candidates() -> List[dict]:
             "recommended": False,
         },
     ]
+    if initial_project_root:
+        candidates.insert(
+            0,
+            {
+                "id": "initial-project",
+                "name": os.path.basename(initial_project_root.rstrip(os.sep)),
+                "directory_path": initial_project_root,
+                "description": "Active local development project.",
+                "recommended": True,
+            },
+        )
+        for candidate in candidates[1:]:
+            candidate["recommended"] = False
+
+    unique_candidates = []
+    seen_paths = set()
+    for candidate in candidates:
+        normalized_path = os.path.abspath(
+            os.path.expanduser(candidate["directory_path"])
+        )
+        if normalized_path in seen_paths:
+            continue
+        seen_paths.add(normalized_path)
+        unique_candidates.append(candidate)
+    return unique_candidates
 
 
 def _lower_path_parts(path: str) -> List[str]:
