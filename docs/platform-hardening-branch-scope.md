@@ -24,6 +24,8 @@ it does not redesign the participant workflow or replace PyTorch Connectomics.
    and execution ownership independently of language-model intent routing.
 6. Focused tests and compatibility shims that preserve the current closed-loop smoke
    path while new primitives are adopted incrementally.
+7. Bounded file-workspace listing and preview behavior, plus a deterministic browser
+   acceptance check for the synthetic core project.
 
 ## Out of Scope
 
@@ -56,6 +58,9 @@ it does not redesign the participant workflow or replace PyTorch Connectomics.
   user-triggered recovery path.
 - Existing workflow, EHTool, runtime, and agent proposal tests remain green or receive
   narrowly justified compatibility updates.
+- The deterministic synthetic project mounts in a real browser, exposes a bounded
+  volume preview, reports the expected `4 / 2 / 1 / 1` progress state, and survives a
+  page reload without API 5xx or browser errors.
 - The production frontend build completes.
 - No new critical path depends on full-volume NumPy materialization when only metadata
   or a subvolume is required.
@@ -78,12 +83,26 @@ it does not redesign the participant workflow or replace PyTorch Connectomics.
 - Agent effects resolve through strict, discriminated runtime and workflow action
   schemas. The registry owns risk, approval, execution-owner, and specialist policy;
   unknown proposal types, effect keys, and nested action parameters are rejected.
+- File listings support opt-in, server-filtered pagination while preserving the legacy
+  array response. The file picker uses cached paged queries and virtualized rows.
+  Preview decoding requests a sampled middle-plane region and is isolated behind a
+  two-request AnyIO capacity limiter instead of materializing complete volumes.
+- Persisted operations are visible in the Workflow UI with reconnect-aware polling,
+  cancellation, and constrained retry controls. The first approval-bound server action
+  executor computes and persists before/after evaluation evidence with a typed receipt.
+- GitHub Actions now creates a clean synthetic fixture, starts FastAPI and React without
+  Electron, runs the Chromium browser smoke, tears services down, and retains its JSON
+  report and service logs for diagnosis.
 
 ## Verification
 
-- Backend: full suite passes (`278 passed`, plus five subtests), including an actual
+- Backend: full suite passes (`334 passed`, plus five subtests), including an actual
   on-demand Neuroglancer chunk read from HDF5-backed image and label sources.
-- Frontend: all 26 suites pass (`138 passed`).
+- Frontend: all 29 suites pass (`154 passed`).
+- Browser: the deterministic Chromium smoke passes all six checks locally, including
+  bounded file-picker navigation, decoded volume preview, progress verification,
+  reload continuity, and rendered durable operation history. CI uploads the report
+  screenshot, and both service logs on every run.
 - Production frontend build succeeds. Existing React hook and bundle-size warnings
   remain unchanged.
 
@@ -94,8 +113,8 @@ This branch intentionally creates migration points. A subsequent branch should:
 1. Synchronize worker completion, failure, and cancellation into long-running training
    and inference operations; current training-command success means the worker accepted
    submission.
-2. Add a frontend task center backed by operation records so reconnecting clients can
-   resume progress and cancellation state.
+2. Connect worker-side cancellation checkpoints and completion callbacks to the task
+   panel so accepted training and inference submissions expose their full lifecycle.
 3. Materialize multiscale OME-Zarr for repeated large-volume access and preprocess 4D
    prediction tensors into 3D label volumes before Neuroglancer launch.
 4. Convert EHTool proofreading persistence from retained full arrays to chunk-aligned

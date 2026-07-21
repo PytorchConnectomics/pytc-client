@@ -14,8 +14,14 @@ from server_api.auth.router import get_current_user
 from .db_models import WorkflowOperation
 from .agent_actions import (
     AgentActionEnvelope,
+    AgentActionReceipt,
+    ComputeEvaluationAction,
     action_envelope_json_schema,
     validate_action_for_execution,
+)
+from .agent_action_execution import (
+    execute_compute_evaluation_operation,
+    validate_persisted_action_approval,
 )
 from .operation_service import (
     OPERATION_STATUSES,
@@ -26,7 +32,7 @@ from .operation_service import (
     request_workflow_operation_cancellation,
     transition_workflow_operation,
 )
-from .service import get_user_workflow_or_404
+from .service import decode_json, get_user_workflow_or_404
 
 router = APIRouter()
 
@@ -140,6 +146,15 @@ def stage_action_operation(
             status_code=409,
             detail="Browser-owned actions cannot be staged as server operations",
         )
+    approval_metadata: Dict[str, Any] = {}
+    if isinstance(envelope, ComputeEvaluationAction):
+        approval_event = validate_persisted_action_approval(db, envelope)
+        approval_metadata = {
+            "approval_event_id": approval_event.id,
+            "proposal_event_id": decode_json(approval_event.payload_json).get(
+                "proposal_event_id"
+            ),
+        }
 
     input_payload = envelope.model_dump(mode="json", exclude_none=True)
     operation = create_workflow_operation(
@@ -155,10 +170,30 @@ def stage_action_operation(
             "action_schema_version": envelope.schema_version,
             "execution_owner": envelope.execution_owner,
             "risk_level": envelope.policy.risk_level,
+            **approval_metadata,
         },
         commit=True,
     )
     return _response(operation)
+
+
+@router.post(
+    "/{workflow_id}/action-operations/{operation_id}/execute",
+    response_model=AgentActionReceipt,
+)
+def execute_action_operation(
+    workflow_id: int,
+    operation_id: int,
+    user: auth_models.User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    operation = _owned_operation(
+        db,
+        workflow_id=workflow_id,
+        operation_id=operation_id,
+        user_id=user.id,
+    )
+    return execute_compute_evaluation_operation(db, operation)
 
 
 @router.post(

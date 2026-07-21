@@ -3,6 +3,7 @@ import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 
 import { AppContext } from "./GlobalContext";
 import { WorkflowProvider, useWorkflow } from "./WorkflowContext";
+import { appQueryClient } from "../queryClient";
 import {
   approveAgentAction,
   appendWorkflowEvent,
@@ -66,6 +67,13 @@ jest.mock("../api", () => ({
 
 jest.mock("../logging/appEventLog", () => ({
   logClientEvent: jest.fn(),
+}));
+
+jest.mock("../queryClient", () => ({
+  appQueryClient: {
+    invalidateQueries: jest.fn(),
+    setQueryData: jest.fn(),
+  },
 }));
 
 const baseWorkflow = {
@@ -487,6 +495,46 @@ describe("WorkflowProvider", () => {
     await waitFor(() => {
       expect(screen.getByText("retraining_staged")).toBeTruthy();
     });
+  });
+
+  it("refreshes durable operation and evidence state after server execution", async () => {
+    const completedOperation = {
+      id: 42,
+      workflow_id: 1,
+      operation_type: "agent_action:compute_evaluation",
+      status: "succeeded",
+    };
+    approveAgentAction.mockResolvedValue({
+      workflow: baseWorkflow,
+      client_effects: { refresh_insights: true },
+      operation: completedOperation,
+      receipt: { status: "succeeded", evaluation_result_id: 9 },
+    });
+
+    renderProvider({});
+    await screen.findByText("setup");
+    const evidenceCallsBeforeApproval =
+      listWorkflowEvaluationResults.mock.calls.length;
+
+    fireEvent.click(screen.getByText("Approve proposal"));
+
+    await waitFor(() => {
+      expect(appQueryClient.setQueryData).toHaveBeenCalledWith(
+        ["workflow", 1, "operations"],
+        expect.any(Function),
+      );
+      expect(appQueryClient.invalidateQueries).toHaveBeenCalledWith({
+        queryKey: ["workflow", 1, "operations"],
+      });
+      expect(listWorkflowEvaluationResults.mock.calls.length).toBeGreaterThan(
+        evidenceCallsBeforeApproval,
+      );
+    });
+
+    const cacheUpdater = appQueryClient.setQueryData.mock.calls[0][1];
+    expect(
+      cacheUpdater([{ ...completedOperation, status: "running" }]),
+    ).toEqual([completedOperation]);
   });
 
   it("submits durable commands after approval without queueing runtime effects locally", async () => {

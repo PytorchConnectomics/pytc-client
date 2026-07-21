@@ -58,6 +58,8 @@ jest.mock("@ant-design/icons", () => {
     BugOutlined: Icon,
     ProjectOutlined: Icon,
     MessageOutlined: Icon,
+    PlusOutlined: Icon,
+    QuestionCircleOutlined: Icon,
   };
 });
 

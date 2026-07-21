@@ -19,7 +19,6 @@ from scripts.browser_yixiao_case_study_smoke import (
     DEFAULT_BASE_URL,
     VIEWPORT_DEFAULT,
     _extract_progress_snapshot,
-    _open_tab,
     _parse_viewport,
     _playwright_import_error,
     _raise_playwright_error,
@@ -35,11 +34,33 @@ EXPECTED_PROGRESS = {
     "missing": 1,
 }
 DEFAULT_REPORT = "/tmp/synthetic-core-browser-smoke.json"
+DEFAULT_API_BASE_URL = "http://127.0.0.1:4242"
+
+
+def _open_synthetic_tab(page, label: str, timeout_ms: int) -> None:
+    menu_item = page.locator(".pytc-top-menu .ant-menu-item").filter(has_text=label)
+    if menu_item.count() and menu_item.first.is_visible():
+        menu_item.first.click()
+        page.wait_for_timeout(250)
+        return
+
+    overflow = page.locator(".pytc-top-menu .ant-menu-overflow-item-rest")
+    if not overflow.count() or not overflow.first.is_visible():
+        raise AssertionError(f"Top-level tab '{label}' not found.")
+    overflow.first.click()
+    popup_item = page.locator(".ant-menu-submenu-popup .ant-menu-item").filter(
+        has_text=label
+    )
+    popup_item.first.wait_for(state="visible", timeout=timeout_ms)
+    popup_item.first.click()
+    page.keyboard.press("Escape")
+    page.wait_for_timeout(250)
 
 
 def _build_arg_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--base-url", default=DEFAULT_BASE_URL)
+    parser.add_argument("--api-base-url", default=DEFAULT_API_BASE_URL)
     parser.add_argument("--timeout-ms", type=int, default=30_000)
     parser.add_argument(
         "--viewport",
@@ -48,6 +69,7 @@ def _build_arg_parser() -> argparse.ArgumentParser:
     parser.add_argument("--no-headless", action="store_true")
     parser.add_argument("--skip-reload", action="store_true")
     parser.add_argument("--report", default=DEFAULT_REPORT)
+    parser.add_argument("--screenshot")
     return parser
 
 
@@ -63,7 +85,7 @@ def _assert_progress(page) -> Dict[str, Any]:
 
 
 def _open_file_picker(page, timeout_ms: int) -> None:
-    _open_tab(page, "Visualize")
+    _open_synthetic_tab(page, "Visualize", timeout_ms)
     page.get_by_role("button", name="Browse", exact=True).first.click()
     dialog = page.get_by_role("dialog", name="Select File")
     dialog.wait_for(state="visible", timeout=timeout_ms)
@@ -97,23 +119,95 @@ def _exercise_core_ui(page, timeout_ms: int) -> Dict[str, Any]:
     page.get_by_text(PROJECT_TITLE, exact=True).first.wait_for(
         state="visible", timeout=timeout_ms
     )
-    _open_tab(page, "Files")
+    _open_synthetic_tab(page, "Files", timeout_ms)
     page.get_by_text(PROJECT_MOUNT_LABEL, exact=True).first.wait_for(
         state="visible", timeout=timeout_ms
     )
     _open_file_picker(page, timeout_ms)
-    _open_tab(page, "Workflow")
+    _open_synthetic_tab(page, "Workflow", timeout_ms)
     page.wait_for_timeout(300)
     return _assert_progress(page)
+
+
+def _exercise_operation_history(
+    context, page, *, api_base_url: str, timeout_ms: int
+) -> None:
+    current_response = context.request.get(
+        f"{api_base_url}/api/workflows/current", timeout=timeout_ms
+    )
+    if not current_response.ok:
+        raise AssertionError(
+            f"Workflow lookup failed with HTTP {current_response.status}"
+        )
+    workflow_id = current_response.json()["workflow"]["id"]
+    operation_response = context.request.post(
+        f"{api_base_url}/api/workflows/{workflow_id}/operations",
+        data={
+            "operation_type": "browser_smoke",
+            "idempotency_key": "browser-smoke:operation-history:v1",
+            "correlation_id": "browser-smoke-operation-history",
+            "actor": "system",
+            "input": {"source": "synthetic_browser_smoke"},
+            "metadata": {"source": "synthetic_browser_smoke"},
+        },
+        timeout=timeout_ms,
+    )
+    if not operation_response.ok:
+        raise AssertionError(
+            f"Operation creation failed with HTTP {operation_response.status}"
+        )
+    operation_id = operation_response.json()["id"]
+    transition_url = (
+        f"{api_base_url}/api/workflows/{workflow_id}/operations/"
+        f"{operation_id}/transitions"
+    )
+    for payload in (
+        {"status": "running", "expected_status": "queued", "progress": 0.5},
+        {
+            "status": "succeeded",
+            "expected_status": "running",
+            "result": {"source": "synthetic_browser_smoke"},
+        },
+    ):
+        transition_response = context.request.post(
+            transition_url,
+            data=payload,
+            timeout=timeout_ms,
+        )
+        if not transition_response.ok:
+            raise AssertionError(
+                "Operation transition failed with HTTP " f"{transition_response.status}"
+            )
+
+    _open_synthetic_tab(page, "Workflow", timeout_ms)
+    operations_panel = page.locator(".ant-card").filter(
+        has=page.get_by_text("Operations", exact=True)
+    )
+    operations_panel.first.wait_for(state="visible", timeout=timeout_ms)
+    operations_panel.first.get_by_role("button", name="Refresh operations").click()
+    operation_row = operations_panel.first.locator(".workflow-operation-row").filter(
+        has_text="Browser smoke"
+    )
+    operation_row.first.wait_for(state="visible", timeout=timeout_ms)
+    operation_row.first.get_by_text("Succeeded", exact=True).wait_for(
+        state="visible", timeout=timeout_ms
+    )
+    operation_row.first.get_by_text(
+        "Ref browser-smoke-operation-history", exact=True
+    ).wait_for(state="visible", timeout=timeout_ms)
+    page.mouse.move(5, 600)
+    page.wait_for_timeout(500)
 
 
 def run_smoke(
     *,
     base_url: str,
+    api_base_url: str,
     timeout_ms: int,
     viewport: Tuple[int, int],
     headless: bool,
     skip_reload: bool,
+    screenshot_path: Optional[str],
 ) -> Dict[str, Any]:
     playwright_error = _playwright_import_error()
     if playwright_error is not None:
@@ -163,6 +257,19 @@ def run_smoke(
                 _exercise_core_ui(page, timeout_ms)
                 result["checks"].append("reload continuity verified")
 
+            _exercise_operation_history(
+                context,
+                page,
+                api_base_url=api_base_url,
+                timeout_ms=timeout_ms,
+            )
+            result["checks"].append("durable operation history rendered")
+            if screenshot_path:
+                screenshot = Path(screenshot_path)
+                screenshot.parent.mkdir(parents=True, exist_ok=True)
+                page.screenshot(path=str(screenshot), full_page=True)
+                result["screenshot"] = str(screenshot)
+
             if page_errors:
                 raise AssertionError(f"Browser page errors: {page_errors}")
             if api_failures:
@@ -176,8 +283,11 @@ def run_smoke(
 def main(argv: Optional[List[str]] = None) -> int:
     args = _build_arg_parser().parse_args(argv)
     base_url = args.base_url.rstrip("/")
+    api_base_url = args.api_base_url.rstrip("/")
     if urlparse(base_url).scheme not in {"http", "https"}:
         raise ValueError("base-url must include an http or https scheme")
+    if urlparse(api_base_url).scheme not in {"http", "https"}:
+        raise ValueError("api-base-url must include an http or https scheme")
 
     report: Dict[str, Any] = {
         "generated_at_unix": time.time(),
@@ -187,10 +297,12 @@ def main(argv: Optional[List[str]] = None) -> int:
         report.update(
             run_smoke(
                 base_url=base_url,
+                api_base_url=api_base_url,
                 timeout_ms=max(5_000, args.timeout_ms),
                 viewport=_parse_viewport(args.viewport),
                 headless=not args.no_headless,
                 skip_reload=args.skip_reload,
+                screenshot_path=args.screenshot,
             )
         )
     except Exception as exc:

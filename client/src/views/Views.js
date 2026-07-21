@@ -7,7 +7,9 @@ import {
   ThunderboltOutlined,
   BugOutlined,
   MessageOutlined,
+  PlusOutlined,
   ProjectOutlined,
+  QuestionCircleOutlined,
 } from "@ant-design/icons";
 import FilesManager from "./FilesManager";
 import Visualization from "./Visualization";
@@ -418,14 +420,21 @@ function Views() {
           }}
         />
         <Button
+          className="pytc-top-nav-action"
+          icon={<QuestionCircleOutlined />}
           onClick={handleAskWhatNext}
           title="Ask the assistant for the best next workflow step"
           disabled={!workflowContext?.workflow?.id}
         >
-          What next?
+          <span className="pytc-top-nav-action__label">What next?</span>
         </Button>
-        <Button onClick={handleStartNewProject} title="Start a fresh workflow">
-          New project
+        <Button
+          className="pytc-top-nav-action"
+          icon={<PlusOutlined />}
+          onClick={handleStartNewProject}
+          title="Start a fresh workflow"
+        >
+          <span className="pytc-top-nav-action__label">New project</span>
         </Button>
         <Button
           type="primary"

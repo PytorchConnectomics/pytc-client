@@ -322,6 +322,8 @@ def transition_workflow_operation(
             operation.result_json = encode_json(result_payload or {})
             operation.error_json = None
         elif status == "failed":
+            if result_payload is not None:
+                operation.result_json = encode_json(result_payload)
             operation.error_json = encode_json(error_payload or {})
         elif status == "cancelled" and error_payload is not None:
             operation.error_json = encode_json(error_payload)

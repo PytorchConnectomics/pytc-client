@@ -76,3 +76,59 @@ jobs:
 
       - name: Build frontend
         run: npm run build
+
+  synthetic-browser-smoke:
+    name: Synthetic browser smoke
+    needs:
+      - backend
+      - frontend
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+
+      - name: Set up Python
+        uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6.3.0
+        with:
+          python-version: "3.11"
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@11f9893b081a58869d3b5fccaea48c9e9e46f990 # v8.3.2
+        with:
+          version: "0.7.3"
+          enable-cache: true
+
+      - name: Set up Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: client/package-lock.json
+
+      - name: Fetch pinned PyTorch Connectomics runtime
+        run: bash scripts/setup_pytorch_connectomics.sh
+
+      - name: Install Python dependencies
+        run: uv sync --frozen --python 3.11 --group dev
+
+      - name: Install frontend dependencies
+        working-directory: client
+        run: npm ci --fetch-retries=5 --fetch-retry-maxtimeout=120000
+
+      - name: Install Chromium
+        run: uv run playwright install --with-deps chromium
+
+      - name: Run deterministic synthetic browser smoke
+        run: bash scripts/run_browser_synthetic_core_smoke_ci.sh
+
+      - name: Upload browser smoke diagnostics
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: synthetic-browser-smoke-${{ github.run_attempt }}
+          path: .ci/synthetic-browser-smoke/
+          if-no-files-found: warn
+          retention-days: 14

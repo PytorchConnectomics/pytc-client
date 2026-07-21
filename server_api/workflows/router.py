@@ -34,6 +34,7 @@ from .db_models import (
     WorkflowEvent,
     WorkflowModelRun,
     WorkflowModelVersion,
+    WorkflowOperation,
     WorkflowRegionHotspot,
     WorkflowSession,
     WorkflowVolumeState,
@@ -64,8 +65,17 @@ from .service import (
 )
 from .bundle_export import build_export_bundle, write_export_bundle_directory
 from .agent_plan import build_case_study_plan_graph
-from .agent_actions import resolve_agent_action, validate_agent_proposal
-from .evaluation import compute_before_after_evaluation, write_evaluation_report
+from .agent_actions import (
+    AgentActionReceipt,
+    resolve_agent_action,
+    validate_agent_proposal,
+)
+from .agent_action_execution import (
+    execute_compute_evaluation_operation,
+    stage_and_execute_compute_evaluation_proposal,
+)
+from .operation_service import operation_to_dict
+from .evaluation_service import create_computed_evaluation_result
 from .metrics import compute_workflow_metrics
 from .volume_pairs import discover_neuroglancer_volume_pairs
 
@@ -299,6 +309,8 @@ class AgentActionResult(BaseModel):
     events: List[WorkflowEventResponse]
     client_effects: Dict[str, Any] = Field(default_factory=dict)
     commands: List[WorkflowCommandResponse] = Field(default_factory=list)
+    operation: Optional[Dict[str, Any]] = None
+    receipt: Optional[AgentActionReceipt] = None
 
 
 class WorkflowHotspotItem(BaseModel):
@@ -884,6 +896,32 @@ def _get_pending_proposal_or_404(
     if event.approval_status != "pending":
         raise HTTPException(status_code=400, detail="Agent proposal is not pending")
     return event
+
+
+def _related_proposal_event(
+    db: Session,
+    *,
+    workflow_id: int,
+    proposal_id: int,
+    event_type: str,
+) -> Optional[WorkflowEvent]:
+    candidates = (
+        db.query(WorkflowEvent)
+        .filter(
+            WorkflowEvent.workflow_id == workflow_id,
+            WorkflowEvent.event_type == event_type,
+        )
+        .order_by(WorkflowEvent.id.desc())
+        .all()
+    )
+    return next(
+        (
+            event
+            for event in candidates
+            if decode_json(event.payload_json).get("proposal_event_id") == proposal_id
+        ),
+        None,
+    )
 
 
 def _get_agent_plan_or_404(
@@ -8142,7 +8180,9 @@ def compute_evaluation_result(
 ):
     workflow = get_user_workflow_or_404(db, workflow_id=workflow_id, user_id=user.id)
     try:
-        metrics = compute_before_after_evaluation(
+        result = create_computed_evaluation_result(
+            db,
+            workflow_id=workflow.id,
             baseline_prediction_path=body.baseline_prediction_path,
             candidate_prediction_path=body.candidate_prediction_path,
             ground_truth_path=body.ground_truth_path,
@@ -8153,6 +8193,13 @@ def compute_evaluation_result(
             baseline_channel=body.baseline_channel,
             candidate_channel=body.candidate_channel,
             ground_truth_channel=body.ground_truth_channel,
+            name=body.name,
+            baseline_run_id=body.baseline_run_id,
+            candidate_run_id=body.candidate_run_id,
+            model_version_id=body.model_version_id,
+            report_path=body.report_path,
+            metadata=body.metadata,
+            commit=True,
         )
     except FileNotFoundError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
@@ -8160,62 +8207,6 @@ def compute_evaluation_result(
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     except RuntimeError as exc:
         raise HTTPException(status_code=500, detail=str(exc)) from exc
-
-    metadata = {
-        **body.metadata,
-        "baseline_prediction_path": body.baseline_prediction_path,
-        "candidate_prediction_path": body.candidate_prediction_path,
-        "ground_truth_path": body.ground_truth_path,
-        "baseline_dataset": body.baseline_dataset,
-        "candidate_dataset": body.candidate_dataset,
-        "ground_truth_dataset": body.ground_truth_dataset,
-        "crop": body.crop,
-        "baseline_channel": body.baseline_channel,
-        "candidate_channel": body.candidate_channel,
-        "ground_truth_channel": body.ground_truth_channel,
-    }
-    summary = (
-        "Before/after evaluation computed. "
-        f"Dice delta: {metrics.get('summary', {}).get('dice_delta')}."
-    )
-    report_path = body.report_path
-    if report_path:
-        report_payload = {
-            "workflow_id": workflow.id,
-            "name": body.name,
-            "summary": summary,
-            "metrics": metrics,
-            "metadata": metadata,
-        }
-        report_path = write_evaluation_report(report_path, report_payload)
-
-    report_artifact = None
-    if report_path:
-        report_artifact = create_workflow_artifact(
-            db,
-            workflow_id=workflow.id,
-            artifact_type="evaluation_report",
-            role="case_study_evidence",
-            path=report_path,
-            metadata={"source": "computed_evaluation_result"},
-            commit=False,
-        )
-
-    result = WorkflowEvaluationResult(
-        workflow_id=workflow.id,
-        name=body.name or "before-after-evaluation",
-        baseline_run_id=body.baseline_run_id,
-        candidate_run_id=body.candidate_run_id,
-        model_version_id=body.model_version_id,
-        report_artifact_id=report_artifact.id if report_artifact else None,
-        report_path=report_path,
-        summary=summary,
-        metrics_json=encode_json(metrics),
-        metadata_json=encode_json(metadata),
-    )
-    db.add(result)
-    db.commit()
-    db.refresh(result)
     return _evaluation_response(result)
 
 
@@ -8940,14 +8931,95 @@ async def approve_agent_action(
     db: Session = Depends(get_db),
 ):
     workflow = get_user_workflow_or_404(db, workflow_id=workflow_id, user_id=user.id)
-    proposal = _get_pending_proposal_or_404(
-        db, workflow_id=workflow.id, event_id=event_id
+    proposal = (
+        db.query(WorkflowEvent)
+        .filter(
+            WorkflowEvent.id == event_id,
+            WorkflowEvent.workflow_id == workflow.id,
+            WorkflowEvent.event_type == "agent.proposal_created",
+        )
+        .first()
     )
+    if proposal is None:
+        raise HTTPException(status_code=404, detail="Agent proposal not found")
     action_payload = _proposal_action_payload(proposal)
     action = action_payload.get("action")
     params = action_payload.get("params", {})
     if not isinstance(params, dict):
         params = {}
+    if proposal.approval_status == "approved":
+        client_effects = params.get("client_effects")
+        workflow_action = (
+            client_effects.get("workflow_action")
+            if isinstance(client_effects, dict)
+            else None
+        )
+        if (
+            action != "run_client_effects"
+            or not isinstance(workflow_action, dict)
+            or workflow_action.get("kind") != "compute_evaluation"
+        ):
+            raise HTTPException(status_code=400, detail="Agent proposal is not pending")
+        approved = _related_proposal_event(
+            db,
+            workflow_id=workflow.id,
+            proposal_id=proposal.id,
+            event_type="agent.proposal_approved",
+        )
+        staged = _related_proposal_event(
+            db,
+            workflow_id=workflow.id,
+            proposal_id=proposal.id,
+            event_type="evaluation.agent_action_approved",
+        )
+        if approved is None:
+            raise HTTPException(
+                status_code=409,
+                detail="Approved proposal is missing its decision event",
+            )
+        operation = (
+            db.query(WorkflowOperation)
+            .filter(
+                WorkflowOperation.workflow_id == workflow.id,
+                WorkflowOperation.idempotency_key
+                == f"agent-proposal:{proposal.id}:compute_evaluation",
+            )
+            .first()
+        )
+        if operation is None:
+            requested_correlation_id = params.get("correlation_id")
+            operation, receipt = stage_and_execute_compute_evaluation_proposal(
+                db,
+                workflow_id=workflow.id,
+                proposal=proposal,
+                approval_event=approved,
+                workflow_action=workflow_action,
+                user_id=user.id,
+                correlation_id=(
+                    requested_correlation_id
+                    if isinstance(requested_correlation_id, str)
+                    else None
+                ),
+            )
+        else:
+            receipt = execute_compute_evaluation_operation(db, operation)
+        replay_effects = dict(client_effects)
+        replay_effects.pop("workflow_action", None)
+        return AgentActionResult(
+            workflow=_workflow_response(workflow),
+            proposal=_event_response(proposal),
+            events=[
+                _event_response(event)
+                for event in (approved, staged)
+                if event is not None
+            ],
+            client_effects={**replay_effects, "workflow_stage": workflow.stage},
+            commands=[],
+            operation=operation_to_dict(operation),
+            receipt=receipt,
+        )
+    if proposal.approval_status != "pending":
+        raise HTTPException(status_code=400, detail="Agent proposal is not pending")
     params, applied_overrides = _apply_agent_action_overrides(
         str(action or ""),
         params,
@@ -9069,13 +9141,26 @@ async def approve_agent_action(
             ),
             commit=True,
         )
+        workflow_action = client_effects.get("workflow_action")
+        server_executes_evaluation = (
+            isinstance(workflow_action, dict)
+            and workflow_action.get("kind") == "compute_evaluation"
+        )
         staged = append_workflow_event(
             db,
             workflow_id=workflow.id,
             actor="system",
-            event_type="agent.client_effects_approved",
+            event_type=(
+                "evaluation.agent_action_approved"
+                if server_executes_evaluation
+                else "agent.client_effects_approved"
+            ),
             stage=workflow.stage,
-            summary="Approved in-app assistant action for client execution.",
+            summary=(
+                "Approved agent evaluation action for server execution."
+                if server_executes_evaluation
+                else "Approved in-app assistant action for client execution."
+            ),
             payload={
                 "proposal_event_id": proposal.id,
                 "item_id": params.get("item_id"),
@@ -9087,12 +9172,37 @@ async def approve_agent_action(
             },
             commit=True,
         )
+        operation_payload = None
+        receipt = None
+        approved_client_effects = dict(client_effects)
+        if server_executes_evaluation:
+            requested_correlation_id = params.get("correlation_id")
+            operation, receipt = stage_and_execute_compute_evaluation_proposal(
+                db,
+                workflow_id=workflow.id,
+                proposal=proposal,
+                approval_event=approved,
+                workflow_action=workflow_action,
+                user_id=user.id,
+                correlation_id=(
+                    requested_correlation_id
+                    if isinstance(requested_correlation_id, str)
+                    else None
+                ),
+            )
+            operation_payload = operation_to_dict(operation)
+            approved_client_effects.pop("workflow_action", None)
         return AgentActionResult(
             workflow=_workflow_response(workflow),
             proposal=_event_response(proposal),
             events=[_event_response(approved), _event_response(staged)],
-            client_effects={**client_effects, "workflow_stage": workflow.stage},
+            client_effects={
+                **approved_client_effects,
+                "workflow_stage": workflow.stage,
+            },
             commands=[],
+            operation=operation_payload,
+            receipt=receipt,
         )
 
     corrected_mask_path = (

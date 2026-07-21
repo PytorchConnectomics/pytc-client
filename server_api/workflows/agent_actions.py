@@ -80,9 +80,17 @@ class ComputeEvaluationPayload(_StrictActionPayload):
     baseline_prediction_path: Optional[str] = None
     candidate_prediction_path: Optional[str] = None
     ground_truth_path: Optional[str] = None
+    baseline_dataset: Optional[str] = None
+    candidate_dataset: Optional[str] = None
+    ground_truth_dataset: Optional[str] = None
+    crop: Optional[str] = None
+    baseline_channel: Optional[int] = Field(default=None, ge=0)
+    candidate_channel: Optional[int] = Field(default=None, ge=0)
+    ground_truth_channel: Optional[int] = Field(default=None, ge=0)
     baseline_run_id: Optional[int] = None
     candidate_run_id: Optional[int] = None
     model_version_id: Optional[int] = None
+    report_path: Optional[str] = None
     metadata: Optional[Dict[str, Any]] = None
 
 
@@ -455,9 +463,18 @@ class ComputeEvaluationAction(_ActionEnvelopeBase):
     baseline_prediction_path: Optional[NonEmptyString] = None
     candidate_prediction_path: Optional[NonEmptyString] = None
     ground_truth_path: Optional[NonEmptyString] = None
+    baseline_dataset: Optional[NonEmptyString] = None
+    candidate_dataset: Optional[NonEmptyString] = None
+    ground_truth_dataset: Optional[NonEmptyString] = None
+    crop: Optional[NonEmptyString] = None
+    baseline_channel: Optional[int] = Field(default=None, ge=0)
+    candidate_channel: Optional[int] = Field(default=None, ge=0)
+    ground_truth_channel: Optional[int] = Field(default=None, ge=0)
     baseline_run_id: Optional[int] = Field(default=None, gt=0)
     candidate_run_id: Optional[int] = Field(default=None, gt=0)
     model_version_id: Optional[int] = Field(default=None, gt=0)
+    report_path: Optional[NonEmptyString] = None
+    metadata: Dict[str, Any] = Field(default_factory=dict)
 
 
 class ExportBundleAction(_ActionEnvelopeBase):

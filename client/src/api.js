@@ -951,6 +951,36 @@ export async function listWorkflowEvents(workflowId) {
   }
 }
 
+export async function listWorkflowOperations(workflowId, { limit = 12 } = {}) {
+  try {
+    const res = await apiClient.get(
+      canonicalizeApiPath(`/api/workflows/${workflowId}/operations`),
+      { params: { limit } },
+    );
+    return res.data;
+  } catch (error) {
+    handleError(error);
+  }
+}
+
+export async function cancelWorkflowOperation(
+  workflowId,
+  operationId,
+  reason = "",
+) {
+  try {
+    const res = await apiClient.post(
+      canonicalizeApiPath(
+        `/api/workflows/${workflowId}/operations/${operationId}/cancel`,
+      ),
+      reason ? { reason } : undefined,
+    );
+    return res.data;
+  } catch (error) {
+    handleError(error);
+  }
+}
+
 export async function getWorkflowHotspots(workflowId) {
   try {
     const res = await apiClient.get(

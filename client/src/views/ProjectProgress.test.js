@@ -13,6 +13,10 @@ jest.mock("../logging/appEventLog", () => ({
   logClientEvent: jest.fn(),
 }));
 
+jest.mock("../components/workflow/WorkflowOperationsPanel", () => () => (
+  <div>Operations</div>
+));
+
 describe("ProjectProgress", () => {
   beforeEach(() => {
     jest.clearAllMocks();

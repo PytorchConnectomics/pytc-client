@@ -19,6 +19,7 @@ import {
 } from "@ant-design/icons";
 import { useWorkflow } from "../contexts/WorkflowContext";
 import { logClientEvent } from "../logging/appEventLog";
+import WorkflowOperationsPanel from "../components/workflow/WorkflowOperationsPanel";
 
 const { Text, Title } = Typography;
 
@@ -361,6 +362,10 @@ function ProjectProgress() {
           </Text>
         </Space>
       </Card>
+
+      <div style={{ marginBottom: 16 }}>
+        <WorkflowOperationsPanel />
+      </div>
 
       {(blockers.length > 0 || actions.length > 0) && (
         <div

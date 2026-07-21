@@ -104,4 +104,23 @@ describe("api canonicalization", () => {
       "/99/commands/321/run",
     );
   });
+
+  it("uses canonical durable operation list and cancellation paths", async () => {
+    const { api, apiClientMock } = loadApiModule(BASE_WITH_API_PREFIX);
+    apiClientMock.get.mockResolvedValue({ data: [] });
+    apiClientMock.post.mockResolvedValue({
+      data: { id: 8, status: "cancelled" },
+    });
+
+    await api.listWorkflowOperations(42, { limit: 6 });
+    expect(apiClientMock.get).toHaveBeenCalledWith("/workflows/42/operations", {
+      params: { limit: 6 },
+    });
+
+    await api.cancelWorkflowOperation(42, 8, "No longer needed");
+    expect(apiClientMock.post).toHaveBeenCalledWith(
+      "/workflows/42/operations/8/cancel",
+      { reason: "No longer needed" },
+    );
+  });
 });
