@@ -57,11 +57,14 @@ def _initial_project_defaults() -> Dict[str, Any]:
     ):
         image_path = os.getenv(
             "PYTC_INITIAL_IMAGE_PATH",
-            os.path.join(INITIAL_PROJECT_ROOT, "data/raw"),
+            os.path.join(INITIAL_PROJECT_ROOT, "data/raw/train-01_image.h5"),
         )
         label_path = os.getenv(
             "PYTC_INITIAL_LABEL_PATH",
-            os.path.join(INITIAL_PROJECT_ROOT, "data/seg"),
+            os.path.join(
+                INITIAL_PROJECT_ROOT,
+                "data/seg/ground_truth/train-01_ground_truth.h5",
+            ),
         )
         return {
             "title": os.getenv(

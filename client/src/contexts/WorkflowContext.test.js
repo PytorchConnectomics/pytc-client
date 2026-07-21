@@ -96,6 +96,9 @@ function Probe() {
       >
         Approve proposal
       </button>
+      <button type="button" onClick={() => workflowContext.startNewWorkflow()}>
+        Start new workflow
+      </button>
       <button
         type="button"
         onClick={() =>
@@ -434,6 +437,33 @@ describe("WorkflowProvider", () => {
     expect(getWorkflowAgentRecommendation).toHaveBeenCalledWith(1);
     expect(getWorkflowPreflight).toHaveBeenCalledWith(1);
     expect(getWorkflowOverview).toHaveBeenCalledWith(1, { refresh: true });
+  });
+
+  it("remounts the canonical dataset after starting a new workflow", async () => {
+    const resetFileState = jest.fn();
+    startNewWorkflow.mockResolvedValueOnce({
+      workflow: {
+        ...baseWorkflow,
+        id: 2,
+        title: "Synthetic project",
+        dataset_path: "/tmp/synthetic-project",
+      },
+      events: [],
+    });
+    renderProvider({ resetFileState });
+    await screen.findByText("setup");
+
+    fireEvent.click(screen.getByText("Start new workflow"));
+
+    await waitFor(() => {
+      expect(resetFileWorkspace).toHaveBeenCalled();
+      expect(resetFileState).toHaveBeenCalled();
+      expect(mountProjectDirectory).toHaveBeenCalledWith({
+        directoryPath: "/tmp/synthetic-project",
+        mountName: "Synthetic project",
+        destinationPath: "root",
+      });
+    });
   });
 
   it("applies client effects when an agent proposal is approved", async () => {

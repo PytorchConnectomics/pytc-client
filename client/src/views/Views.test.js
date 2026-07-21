@@ -106,6 +106,7 @@ describe("Views", () => {
       },
       loading: false,
       startNewWorkflow: jest.fn().mockResolvedValue({}),
+      runClientEffects: jest.fn().mockResolvedValue(),
       consumeClientEffects: jest.fn(),
     };
   });
@@ -187,5 +188,30 @@ describe("Views", () => {
 
     expect(screen.getByText("Chatbot")).toBeTruthy();
     expect(screen.getByText("What should I do next?")).toBeTruthy();
+  });
+
+  it("applies overview action targets before navigating", async () => {
+    const clientEffects = {
+      navigate_to: "mask-proofreading",
+      set_proofreading_dataset_path: "/tmp/review-image.h5",
+      set_proofreading_mask_path: "/tmp/review-mask.h5",
+    };
+    mockWorkflowContext.workflowOverview.recommended_next_actions = [
+      {
+        id: "proofread-draft-masks",
+        label: "Proofread draft masks",
+        target_view: "mask-proofreading",
+        client_effects: clientEffects,
+      },
+    ];
+
+    render(<Views />);
+    fireEvent.click(screen.getByText("Proofread draft masks"));
+
+    await waitFor(() => {
+      expect(mockWorkflowContext.runClientEffects).toHaveBeenCalledWith(
+        clientEffects,
+      );
+    });
   });
 });

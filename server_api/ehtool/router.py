@@ -182,17 +182,20 @@ async def load_detection_dataset(
         _data_managers[db_session.id] = data_manager
 
         if workflow:
+            workflow_patch = {
+                "stage": "proofreading",
+                "title": request.project_name or workflow.title,
+                "image_path": request.dataset_path,
+                "label_path": request.mask_path,
+                "mask_path": request.mask_path,
+                "proofreading_session_id": db_session.id,
+            }
+            if not workflow.dataset_path:
+                workflow_patch["dataset_path"] = request.dataset_path
             update_workflow_fields(
                 db,
                 workflow,
-                {
-                    "stage": "proofreading",
-                    "title": request.project_name or workflow.title,
-                    "dataset_path": request.dataset_path,
-                    "image_path": request.dataset_path,
-                    "mask_path": request.mask_path,
-                    "proofreading_session_id": db_session.id,
-                },
+                workflow_patch,
                 commit=True,
             )
             append_workflow_event(

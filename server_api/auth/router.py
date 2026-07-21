@@ -2323,7 +2323,28 @@ def file_preview(
 
     def load_image(path: str) -> Optional["np.ndarray"]:
         ext = os.path.splitext(path)[1].lower()
-        if ext in {".tif", ".tiff"} and tifffile is not None:
+        if ext in {".h5", ".hdf5"}:
+            try:
+                import h5py  # type: ignore
+
+                with h5py.File(path, "r") as handle:
+                    datasets = []
+
+                    def collect_dataset(_name, obj):
+                        if isinstance(obj, h5py.Dataset) and obj.ndim >= 2:
+                            datasets.append(obj)
+
+                    handle.visititems(collect_dataset)
+                    if not datasets:
+                        return None
+                    dataset = datasets[0]
+                    leading_indices = tuple(
+                        dimension // 2 for dimension in dataset.shape[:-2]
+                    )
+                    img = dataset[(*leading_indices, slice(None), slice(None))]
+            except Exception:
+                img = None
+        elif ext in {".tif", ".tiff"} and tifffile is not None:
             try:
                 img = tifffile.imread(path)
             except Exception:

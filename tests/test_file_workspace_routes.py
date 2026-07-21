@@ -133,6 +133,32 @@ class FileWorkspaceRouteTests(unittest.TestCase):
         self.assertEqual(response.status_code, 404)
         self.assertIn("no longer mounted", response.json()["detail"])
 
+    def test_file_preview_reads_one_hdf5_volume_slice(self):
+        try:
+            import h5py
+            import numpy as np
+        except Exception:
+            self.skipTest("HDF5 preview dependencies are not installed")
+
+        volume_path = pathlib.Path(self.temp_dir.name) / "preview.h5"
+        with h5py.File(volume_path, "w") as handle:
+            handle.create_dataset(
+                "data",
+                data=np.arange(5 * 20 * 24, dtype=np.uint16).reshape(5, 20, 24),
+                chunks=(1, 20, 24),
+            )
+        file_id = self._create_file(
+            name="preview.h5",
+            physical_path=str(volume_path),
+            file_type="application/x-hdf5",
+        )
+
+        response = self.client.get(f"/files/preview/{file_id}")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.headers["content-type"], "image/png")
+        self.assertTrue(response.content.startswith(b"\x89PNG\r\n\x1a\n"))
+
     def test_project_context_profile_is_saved_in_hidden_project_file(self):
         project_root = pathlib.Path(self.temp_dir.name) / "profile-project"
         project_root.mkdir()

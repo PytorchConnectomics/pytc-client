@@ -59,7 +59,7 @@ const workflowPhaseTone = {
   evaluate: "#7c3aed",
 };
 
-function WorkflowOverviewStrip({ overview, workflow, onNavigate }) {
+function WorkflowOverviewStrip({ overview, workflow, onNavigate, onAction }) {
   const summary = overview?.volume_summary || {};
   const phase = overview?.phase || workflow?.stage || "setup";
   const phaseLabel =
@@ -156,7 +156,9 @@ function WorkflowOverviewStrip({ overview, workflow, onNavigate }) {
       {action && (
         <Button
           size="small"
-          onClick={() => onNavigate(action.target_view)}
+          onClick={() =>
+            onAction ? onAction(action) : onNavigate(action.target_view)
+          }
           style={{ marginLeft: "auto" }}
         >
           {action.label}
@@ -221,6 +223,22 @@ function Views() {
     setCurrent(targetKey);
     setVisitedTabs((prev) => new Set(prev).add(targetKey));
   }, []);
+
+  const handleOverviewAction = useCallback(
+    async (action) => {
+      if (!action) return;
+      if (workflowContext?.runClientEffects) {
+        await workflowContext.runClientEffects(
+          action.client_effects?.navigate_to
+            ? action.client_effects
+            : { navigate_to: action.target_view },
+        );
+        return;
+      }
+      navigateTo(action.target_view);
+    },
+    [navigateTo, workflowContext],
+  );
 
   const startResizing = useCallback((e) => {
     isResizing.current = true;
@@ -301,12 +319,18 @@ function Views() {
     if (!confirmed) return;
 
     try {
-      await workflowContext?.startNewWorkflow?.({
+      const result = await workflowContext?.startNewWorkflow?.({
         metadata: { created_from: "new_project_button" },
       });
       setCurrent("files");
       setVisitedTabs(new Set(["files"]));
-      message.success("Started a fresh workflow.");
+      if (result?.project_mount_failed) {
+        message.warning(
+          "Workflow started, but its project files could not be mounted. Use Mount Project to retry.",
+        );
+      } else {
+        message.success("Started a fresh workflow.");
+      }
     } catch (error) {
       console.error("Could not start a new workflow", error);
       message.error("Could not start a fresh workflow.");
@@ -415,6 +439,7 @@ function Views() {
         overview={workflowContext?.workflowOverview}
         workflow={workflowContext?.workflow}
         onNavigate={navigateTo}
+        onAction={handleOverviewAction}
       />
       <Content
         style={{

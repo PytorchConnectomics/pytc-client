@@ -493,8 +493,24 @@ export function WorkflowProvider({ children }) {
       await resetFileWorkspace();
       await clearLocalWorkflowInputs();
       const data = await startNewWorkflowApi(body);
-      applyWorkflowDetail(data);
-      return data;
+      const projectPath = data?.workflow?.dataset_path;
+      if (!projectPath) {
+        applyWorkflowDetail(data);
+        return data;
+      }
+      try {
+        await mountProjectDirectory({
+          directoryPath: projectPath,
+          mountName: data?.workflow?.title || "",
+          destinationPath: "root",
+        });
+        applyWorkflowDetail(data);
+        return data;
+      } catch (error) {
+        console.error("Fresh workflow project mount failed:", error);
+        applyWorkflowDetail(data);
+        return { ...data, project_mount_failed: true };
+      }
     },
     [applyWorkflowDetail, clearLocalWorkflowInputs],
   );

@@ -4928,7 +4928,13 @@ def _project_progress_volume_candidates(
         return []
 
     def is_candidate(child: pathlib.Path) -> bool:
-        if any(part.startswith(".") or part == "__pycache__" for part in child.parts):
+        try:
+            relative_parts = child.relative_to(absolute).parts
+        except ValueError:
+            relative_parts = child.parts
+        if any(
+            part.startswith(".") or part == "__pycache__" for part in relative_parts
+        ):
             return False
         if not child.is_file() and not (
             child.is_dir() and _project_extension(child.name) in {".zarr", ".n5"}
@@ -6010,6 +6016,14 @@ def _workflow_overview_actions(
             )
         )
     if needs_proofreading > 0:
+        draft_volume = next(
+            (
+                volume
+                for volume in progress.get("volumes") or []
+                if volume.get("status") == "needs_proofreading"
+            ),
+            {},
+        )
         actions.append(
             WorkflowOverviewAction(
                 id="proofread-draft-masks",
@@ -6017,7 +6031,13 @@ def _workflow_overview_actions(
                 detail=f"Review {needs_proofreading} volume(s) before treating them as ground truth.",
                 target_view="mask-proofreading",
                 priority="high" if ground_truth <= 0 else "normal",
-                client_effects={"navigate_to": "mask-proofreading"},
+                client_effects={
+                    "navigate_to": "mask-proofreading",
+                    "set_proofreading_dataset_path": draft_volume.get("image_path"),
+                    "set_proofreading_mask_path": draft_volume.get("segmentation_path"),
+                    "set_proofreading_project_name": workflow.title,
+                    "runtime_action": {"kind": "start_proofreading"},
+                },
             )
         )
     if ground_truth > 0 and missing_segmentation > 0:

@@ -1,12 +1,23 @@
 import React, { useState, useEffect, useMemo } from "react";
-import { Modal, List, Breadcrumb, Button, Spin, message, Progress } from "antd";
+import {
+  Modal,
+  List,
+  Breadcrumb,
+  Button,
+  Spin,
+  message,
+  Progress,
+  Result,
+} from "antd";
 import {
   FolderFilled,
   FileOutlined,
   ArrowLeftOutlined,
   UploadOutlined,
+  ReloadOutlined,
 } from "@ant-design/icons";
 import { apiClient } from "../api";
+import { normalizeApiError } from "../errors/apiError";
 
 const HIDDEN_SYSTEM_FILES = new Set([
   "workflow_preference.json",
@@ -50,6 +61,7 @@ const FilePickerModal = ({
   const [onlyImages, setOnlyImages] = useState(false);
   const [uploading, setUploading] = useState(false);
   const [uploadProgress, setUploadProgress] = useState(null);
+  const [loadError, setLoadError] = useState(null);
   const previewBaseUrl = apiClient.defaults.baseURL || "http://localhost:4242";
 
   // Refactored fetch to get all files once
@@ -70,17 +82,21 @@ const FilePickerModal = ({
       setOnlyImages(false);
       setPreviewStatus({});
       setUploadProgress(null);
+      setLoadError(null);
       loadAllData();
     }
   }, [visible]);
 
   const loadAllData = async () => {
     setLoading(true);
+    setLoadError(null);
     try {
       const res = await apiClient.get("/files");
       setAllData(res.data);
     } catch (error) {
-      message.error("Failed to load files");
+      const normalizedError = normalizeApiError(error);
+      setLoadError(normalizedError);
+      message.error(normalizedError.message);
     } finally {
       setLoading(false);
     }
@@ -293,7 +309,7 @@ const FilePickerModal = ({
         ) : null
       }
       width={600}
-      bodyStyle={{ padding: 0 }}
+      styles={{ body: { padding: 0 } }}
     >
       <div
         style={{
@@ -309,20 +325,21 @@ const FilePickerModal = ({
           disabled={currentPath === "root"}
           style={{ marginRight: "12px" }}
         />
-        <Breadcrumb>
-          {getBreadcrumbs().map((b) => (
-            <Breadcrumb.Item key={b.id}>
+        <Breadcrumb
+          items={getBreadcrumbs().map((breadcrumb) => ({
+            key: breadcrumb.id,
+            title: (
               <Button
                 type="link"
                 size="small"
-                onClick={() => setCurrentPath(b.id)}
+                onClick={() => setCurrentPath(breadcrumb.id)}
                 style={{ padding: 0 }}
               >
-                {b.name}
+                {breadcrumb.name}
               </Button>
-            </Breadcrumb.Item>
-          ))}
-        </Breadcrumb>
+            ),
+          }))}
+        />
         <Button
           icon={<UploadOutlined />}
           onClick={handleUploadFromLocal}
@@ -383,6 +400,23 @@ const FilePickerModal = ({
           >
             <Spin />
           </div>
+        ) : loadError ? (
+          <Result
+            status="error"
+            title="Files unavailable"
+            subTitle={loadError.message}
+            extra={
+              loadError.retryable ? (
+                <Button
+                  type="primary"
+                  icon={<ReloadOutlined />}
+                  onClick={loadAllData}
+                >
+                  Try again
+                </Button>
+              ) : null
+            }
+          />
         ) : (
           <List
             dataSource={items}

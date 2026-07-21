@@ -1123,7 +1123,12 @@ function FilesManager() {
       isMounted = false;
       clearInterval(retryId);
     };
-  }, [currentFolder, fetchFolderContents, serverUnavailable]); // Retry when server unavailable
+  }, [
+    currentFolder,
+    fetchFolderContents,
+    serverUnavailable,
+    workflowContext?.workflow?.id,
+  ]); // Refresh when a new workflow remounts its project.
 
   useEffect(() => {
     const refreshVisibleFolders = () => {

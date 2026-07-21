@@ -29,7 +29,9 @@ from server_api.workflows import service as workflow_service
 class SyntheticProjectTests(unittest.TestCase):
     def setUp(self):
         self.temp_dir = tempfile.TemporaryDirectory()
-        self.project_root = pathlib.Path(self.temp_dir.name) / "synthetic-core-project"
+        self.project_root = (
+            pathlib.Path(self.temp_dir.name) / ".pytc/synthetic-core-project"
+        )
 
     def tearDown(self):
         self.temp_dir.cleanup()
@@ -100,7 +102,7 @@ class SyntheticProjectTests(unittest.TestCase):
         self.assertEqual(profile["context_hints"]["voxel_size_nm"], [40.0, 8.0, 8.0])
 
     def test_generator_refuses_to_overwrite_an_unmarked_directory(self):
-        self.project_root.mkdir()
+        self.project_root.mkdir(parents=True)
         (self.project_root / "important.txt").write_text("keep", encoding="utf-8")
 
         with self.assertRaisesRegex(ValueError, "non-synthetic directory"):
@@ -135,7 +137,10 @@ class SyntheticProjectTests(unittest.TestCase):
         self.assertTrue(candidates[0]["recommended"])
         self.assertFalse(any(item["recommended"] for item in candidates[1:]))
         self.assertEqual(defaults["title"], "Synthetic Segmentation Core Loop")
-        self.assertEqual(defaults["image_path"], str(self.project_root / "data/raw"))
+        self.assertEqual(
+            defaults["image_path"],
+            str(self.project_root / "data/raw/train-01_image.h5"),
+        )
         self.assertTrue(defaults["metadata"]["synthetic"])
         self.assertEqual(
             defaults["metadata"]["project_context"]["training_policy"],
@@ -146,7 +151,9 @@ class SyntheticProjectTests(unittest.TestCase):
 class SyntheticProjectProgressTests(unittest.TestCase):
     def setUp(self):
         self.temp_dir = tempfile.TemporaryDirectory()
-        self.project_root = pathlib.Path(self.temp_dir.name) / "synthetic-core-project"
+        self.project_root = (
+            pathlib.Path(self.temp_dir.name) / ".pytc/synthetic-core-project"
+        )
         create_synthetic_project(self.project_root)
 
         self.engine = create_engine(
