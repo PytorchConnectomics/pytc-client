@@ -156,19 +156,31 @@ def _exercise_operation_history(
         raise AssertionError(
             f"Operation creation failed with HTTP {operation_response.status}"
         )
-    operation_id = operation_response.json()["id"]
+    operation = operation_response.json()
+    operation_id = operation["id"]
     transition_url = (
         f"{api_base_url}/api/workflows/{workflow_id}/operations/"
         f"{operation_id}/transitions"
     )
-    for payload in (
-        {"status": "running", "expected_status": "queued", "progress": 0.5},
-        {
-            "status": "succeeded",
-            "expected_status": "running",
-            "result": {"source": "synthetic_browser_smoke"},
-        },
-    ):
+    transition_payloads = []
+    if operation["status"] == "queued":
+        transition_payloads.append(
+            {"status": "running", "expected_status": "queued", "progress": 0.5}
+        )
+    if operation["status"] in {"queued", "running"}:
+        transition_payloads.append(
+            {
+                "status": "succeeded",
+                "expected_status": "running",
+                "result": {"source": "synthetic_browser_smoke"},
+            }
+        )
+    elif operation["status"] != "succeeded":
+        raise AssertionError(
+            "Browser smoke operation is unexpectedly terminal: "
+            f"{operation['status']}"
+        )
+    for payload in transition_payloads:
         transition_response = context.request.post(
             transition_url,
             data=payload,
