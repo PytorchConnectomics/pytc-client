@@ -8,12 +8,24 @@ import {
   getInferenceStatus,
   syncWorkflowInferenceRuntime,
 } from "../api";
+import { launchInferenceFromContext } from "../runtime/modelLaunch";
 
 const mockAppendWorkflowEvent = jest.fn();
 const mockRefreshWorkflow = jest.fn();
 const mockRefreshEvents = jest.fn();
 const mockRefreshInsights = jest.fn();
 const mockRefreshEvidence = jest.fn();
+const mockConsumeRuntimeAction = jest.fn();
+const mockWorkflowContext = {
+  workflow: { id: 42, stage: "inference" },
+  appendEvent: mockAppendWorkflowEvent,
+  refreshWorkflow: mockRefreshWorkflow,
+  refreshEvents: mockRefreshEvents,
+  refreshInsights: mockRefreshInsights,
+  refreshEvidence: mockRefreshEvidence,
+  pendingRuntimeAction: null,
+  consumeRuntimeAction: mockConsumeRuntimeAction,
+};
 
 jest.mock("../api", () => ({
   getInferenceLogs: jest.fn(),
@@ -28,16 +40,7 @@ jest.mock("../runtime/modelLaunch", () => ({
 }));
 
 jest.mock("../contexts/WorkflowContext", () => ({
-  useWorkflow: () => ({
-    workflow: { id: 42, stage: "inference" },
-    appendEvent: mockAppendWorkflowEvent,
-    refreshWorkflow: mockRefreshWorkflow,
-    refreshEvents: mockRefreshEvents,
-    refreshInsights: mockRefreshInsights,
-    refreshEvidence: mockRefreshEvidence,
-    pendingRuntimeAction: null,
-    consumeRuntimeAction: jest.fn(),
-  }),
+  useWorkflow: () => mockWorkflowContext,
 }));
 
 jest.mock("../components/Configurator", () => () => <div>Configurator</div>);
@@ -70,6 +73,7 @@ describe("ModelInference", () => {
   beforeEach(() => {
     jest.useFakeTimers();
     jest.clearAllMocks();
+    mockWorkflowContext.pendingRuntimeAction = null;
     getInferenceLogs.mockResolvedValue({ phase: "finished", metadata: {} });
     getInferenceStatus.mockResolvedValue({
       isRunning: false,
@@ -134,5 +138,24 @@ describe("ModelInference", () => {
         }),
       );
     });
+  });
+
+  it("monitors an accepted durable inference command without launching it again", async () => {
+    mockWorkflowContext.pendingRuntimeAction = {
+      id: "monitor_inference:23",
+      kind: "monitor_inference",
+      commandId: 23,
+    };
+    const { setIsInferring } = renderInference({ isInferring: false });
+
+    await act(async () => {
+      await Promise.resolve();
+    });
+    expect(mockConsumeRuntimeAction).toHaveBeenCalledWith(
+      "monitor_inference:23",
+    );
+    expect(setIsInferring).toHaveBeenCalledWith(true);
+    expect(getInferenceLogs).toHaveBeenCalled();
+    expect(launchInferenceFromContext).not.toHaveBeenCalled();
   });
 });

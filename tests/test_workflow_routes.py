@@ -512,7 +512,11 @@ class WorkflowRouteTests(unittest.TestCase):
         )
         self.assertEqual(effects_approval.status_code, 200)
         effects_payload = effects_approval.json()
-        self.assertEqual(effects_payload["commands"], [])
+        self.assertEqual(len(effects_payload["commands"]), 1)
+        self.assertEqual(
+            effects_payload["commands"][0]["command_type"], "start_inference"
+        )
+        self.assertEqual(effects_payload["commands"][0]["status"], "queued")
         self.assertEqual(
             effects_payload["client_effects"]["set_inference_output_path"],
             "/tmp/inference-out",
@@ -526,7 +530,7 @@ class WorkflowRouteTests(unittest.TestCase):
         event_types = [event["event_type"] for event in events_response.json()]
         self.assertIn("agent.proposal_approved", event_types)
         self.assertIn("agent.proposal_rejected", event_types)
-        self.assertIn("agent.client_effects_approved", event_types)
+        self.assertIn("inference.run_approved", event_types)
         self.assertIn("retraining.staged", event_types)
 
     def test_agent_plan_preview_control_and_bundle_export(self):

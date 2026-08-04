@@ -46,7 +46,10 @@ export const WorkflowContext = createContext(null);
 
 const PENDING_RUNTIME_ACTION_KEY = "pytc.workflow.pendingRuntimeAction.v1";
 const PENDING_RUNTIME_ACTION_TTL_MS = 6 * 60 * 60 * 1000;
-const PERSISTABLE_RUNTIME_KINDS = new Set(["monitor_training"]);
+const PERSISTABLE_RUNTIME_KINDS = new Set([
+  "monitor_training",
+  "monitor_inference",
+]);
 
 const isPersistableRuntimeAction = (kind) =>
   PERSISTABLE_RUNTIME_KINDS.has(kind);
@@ -955,11 +958,19 @@ export function WorkflowProvider({ children }) {
           workflow.id,
           durableCommand.id,
         );
-        if ((approvedEffects?.runtime_action || {}).kind === "start_training") {
+        const runtimeKind = (approvedEffects?.runtime_action || {}).kind;
+        if (
+          runtimeKind === "start_training" ||
+          runtimeKind === "start_inference"
+        ) {
+          const monitorKind =
+            runtimeKind === "start_training"
+              ? "monitor_training"
+              : "monitor_inference";
           registerPendingRuntimeAction(
             {
-              id: `monitor_training:${Date.now()}`,
-              kind: "monitor_training",
+              id: `${monitorKind}:${Date.now()}`,
+              kind: monitorKind,
               commandId: durableCommand.id,
               commandResult,
               clientEffects: approvedEffects,

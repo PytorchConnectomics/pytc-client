@@ -259,6 +259,16 @@ function ModelInference({ isInferring, setIsInferring }) {
     startInferenceRun(action);
   }, [consumeRuntimeAction, pendingRuntimeAction, startInferenceRun]);
 
+  useEffect(() => {
+    if (pendingRuntimeAction?.kind !== "monitor_inference") return;
+    const action = pendingRuntimeAction;
+    consumeRuntimeAction?.(action.id);
+    terminalLoggedRef.current = false;
+    setIsInferring(true);
+    setInferenceStatus("Model run accepted. Monitoring process...");
+    refreshInferenceLogs();
+  }, [consumeRuntimeAction, pendingRuntimeAction, setIsInferring]);
+
   const handleStartButton = async () => {
     await startInferenceRun();
   };

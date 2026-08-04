@@ -589,6 +589,47 @@ describe("WorkflowProvider", () => {
     });
   });
 
+  it("monitors an approved durable inference command without queuing a browser launch", async () => {
+    approveAgentAction.mockResolvedValue({
+      workflow: { ...baseWorkflow, stage: "inference" },
+      client_effects: {
+        navigate_to: "inference",
+        set_inference_image_path: "/tmp/image.h5",
+        set_inference_checkpoint_path: "/tmp/checkpoint.pth.tar",
+        set_inference_output_path: "/tmp/inference-output",
+        runtime_action: { kind: "start_inference" },
+      },
+      commands: [
+        {
+          id: 23,
+          title: "Start inference",
+          command: "pytc inference",
+        },
+      ],
+    });
+
+    renderProvider({
+      inferenceState: {
+        setInputImage: jest.fn(),
+        setCheckpointPath: jest.fn(),
+        setOutputPath: jest.fn(),
+      },
+    });
+    await screen.findByText("setup");
+
+    fireEvent.click(screen.getByText("Approve proposal"));
+
+    await waitFor(() => {
+      expect(runWorkflowCommand).toHaveBeenCalledWith(1, 23);
+      expect(screen.getByText("monitor_inference")).toBeTruthy();
+    });
+    const persisted = JSON.parse(
+      window.sessionStorage.getItem("pytc.workflow.pendingRuntimeAction.v1"),
+    );
+    expect(persisted?.action?.kind).toBe("monitor_inference");
+    expect(persisted?.action?.commandId).toBe(23);
+  });
+
   it("exposes direct client-effect execution for chat action cards", async () => {
     const setOutputPath = jest.fn();
 

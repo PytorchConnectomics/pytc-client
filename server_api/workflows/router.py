@@ -9124,8 +9124,29 @@ async def approve_agent_action(
         except ValidationError as exc:
             raise HTTPException(status_code=422, detail=str(exc)) from exc
         proposal.approval_status = "approved"
+        runtime_action = client_effects.get("runtime_action")
+        server_executes_inference = (
+            isinstance(runtime_action, dict)
+            and runtime_action.get("kind") == "start_inference"
+        )
+        if server_executes_inference:
+            update_payload: Dict[str, Any] = {"stage": "inference"}
+            if client_effects.get("set_inference_output_path"):
+                update_payload["inference_output_path"] = client_effects[
+                    "set_inference_output_path"
+                ]
+            if client_effects.get("set_inference_checkpoint_path"):
+                update_payload["checkpoint_path"] = client_effects[
+                    "set_inference_checkpoint_path"
+                ]
+            if client_effects.get("set_inference_config_preset"):
+                update_payload["config_path"] = client_effects[
+                    "set_inference_config_preset"
+                ]
+            update_workflow_fields(db, workflow, update_payload, commit=False)
         db.commit()
         db.refresh(proposal)
+        db.refresh(workflow)
 
         approved = append_workflow_event(
             db,
@@ -9151,15 +9172,23 @@ async def approve_agent_action(
             workflow_id=workflow.id,
             actor="system",
             event_type=(
-                "evaluation.agent_action_approved"
-                if server_executes_evaluation
-                else "agent.client_effects_approved"
+                "inference.run_approved"
+                if server_executes_inference
+                else (
+                    "evaluation.agent_action_approved"
+                    if server_executes_evaluation
+                    else "agent.client_effects_approved"
+                )
             ),
             stage=workflow.stage,
             summary=(
-                "Approved agent evaluation action for server execution."
-                if server_executes_evaluation
-                else "Approved in-app assistant action for client execution."
+                "Inference run approved for server execution."
+                if server_executes_inference
+                else (
+                    "Approved agent evaluation action for server execution."
+                    if server_executes_evaluation
+                    else "Approved in-app assistant action for client execution."
+                )
             ),
             payload={
                 "proposal_event_id": proposal.id,
@@ -9175,6 +9204,24 @@ async def approve_agent_action(
         operation_payload = None
         receipt = None
         approved_client_effects = dict(client_effects)
+        commands = []
+        if server_executes_inference:
+            command = create_workflow_command(
+                db,
+                workflow_id=workflow.id,
+                command_type="start_inference",
+                idempotency_key=f"agent-proposal:{proposal.id}:start_inference",
+                actor="agent",
+                source_event_id=proposal.id,
+                approval_event_id=approved.id,
+                input_payload={
+                    "client_effects": client_effects,
+                    "workflow_stage": workflow.stage,
+                    "proposal_event_id": proposal.id,
+                },
+                commit=True,
+            )
+            commands = [_command_response(command)]
         if server_executes_evaluation:
             requested_correlation_id = params.get("correlation_id")
             operation, receipt = stage_and_execute_compute_evaluation_proposal(
@@ -9200,7 +9247,7 @@ async def approve_agent_action(
                 **approved_client_effects,
                 "workflow_stage": workflow.stage,
             },
-            commands=[],
+            commands=commands,
             operation=operation_payload,
             receipt=receipt,
         )
