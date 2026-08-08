@@ -5,6 +5,7 @@ from server_api.main import (
     _NeuroglancerSegmentationStore,
     _build_neuroglancer_local_volume_source,
     _open_neuroglancer_volume_sources,
+    _resolve_neuroglancer_local_volume_policy,
 )
 from server_api.workflows.volume_io import ArrayVolumeStore
 
@@ -24,6 +25,134 @@ class RecordingLabelArray:
     def __getitem__(self, key):
         self.requested_keys.append(key)
         return np.full((2, 4, 6), self.fill_value, dtype=self.dtype)
+
+
+class FakeDimensions:
+    def __init__(self, scales):
+        self.scales = np.asarray(scales, dtype=np.float64)
+
+
+class RecordingLocalVolume:
+    calls = []
+
+    def __init__(self, data, **kwargs):
+        self.data = data
+        self.kwargs = kwargs
+        self.__class__.calls.append((data, kwargs))
+
+
+class RecordingNeuroglancer:
+    LocalVolume = RecordingLocalVolume
+
+
+class LegacyLocalVolume:
+    calls = []
+
+    def __init__(self, data, *, dimensions, volume_type, voxel_offset):
+        self.data = data
+        self.dimensions = dimensions
+        self.volume_type = volume_type
+        self.voxel_offset = voxel_offset
+        self.__class__.calls.append(
+            {
+                "data": data,
+                "dimensions": dimensions,
+                "volume_type": volume_type,
+                "voxel_offset": voxel_offset,
+            }
+        )
+
+
+class LegacyNeuroglancer:
+    LocalVolume = LegacyLocalVolume
+
+
+@pytest.fixture(autouse=True)
+def clear_recording_local_volume_calls():
+    RecordingLocalVolume.calls.clear()
+    LegacyLocalVolume.calls.clear()
+
+
+def test_neuroglancer_policy_uses_2d_downsampling_for_anisotropic_data():
+    policy = _resolve_neuroglancer_local_volume_policy(
+        np.zeros((8, 16, 24), dtype=np.uint8),
+        FakeDimensions([40, 8, 8]),
+    )
+
+    assert policy == {
+        "downsampling": "2d",
+        "chunk_layout": "flat",
+        "max_voxels_per_chunk_log2": 18,
+        "max_downsampling": 64,
+        "max_downsampled_size": 128,
+        "max_downsampling_scales": 8,
+    }
+
+
+def test_neuroglancer_policy_uses_3d_downsampling_for_isotropic_data():
+    policy = _resolve_neuroglancer_local_volume_policy(
+        np.zeros((8, 16, 24), dtype=np.uint8),
+        FakeDimensions([8, 8, 8]),
+    )
+
+    assert policy["downsampling"] == "3d"
+    assert policy["chunk_layout"] == "isotropic"
+
+
+def test_neuroglancer_local_volume_policy_is_consistent_for_image_and_labels():
+    dimensions = FakeDimensions([40, 8, 8])
+    image = np.zeros((8, 16, 24), dtype=np.uint8)
+    labels = np.zeros((8, 16, 24), dtype=np.uint64)
+
+    _build_neuroglancer_local_volume_source(
+        RecordingNeuroglancer, image, dimensions, volume_type="image"
+    )
+    _build_neuroglancer_local_volume_source(
+        RecordingNeuroglancer, labels, dimensions, volume_type="segmentation"
+    )
+
+    image_kwargs = RecordingLocalVolume.calls[0][1]
+    label_kwargs = RecordingLocalVolume.calls[1][1]
+    adaptive_keys = {
+        "downsampling",
+        "chunk_layout",
+        "max_voxels_per_chunk_log2",
+        "max_downsampling",
+        "max_downsampled_size",
+        "max_downsampling_scales",
+    }
+    assert {key: image_kwargs[key] for key in adaptive_keys} == {
+        key: label_kwargs[key] for key in adaptive_keys
+    }
+    assert image_kwargs["volume_type"] == "image"
+    assert label_kwargs["volume_type"] == "segmentation"
+    assert image_kwargs["max_voxels_per_chunk_log2"] == 18
+    assert image_kwargs["max_downsampling"] == 64
+    assert image_kwargs["max_downsampled_size"] == 128
+    assert image_kwargs["max_downsampling_scales"] == 8
+
+
+def test_neuroglancer_local_volume_retries_without_adaptive_options_for_legacy_api():
+    data = np.zeros((8, 16, 24), dtype=np.uint8)
+    dimensions = FakeDimensions([40, 8, 8])
+
+    volume = _build_neuroglancer_local_volume_source(
+        LegacyNeuroglancer,
+        data,
+        dimensions,
+        volume_type="image",
+        voxel_offset=(1, 2, 3),
+    )
+
+    assert volume.data is data
+    assert LegacyLocalVolume.calls == [
+        {
+            "data": data,
+            "dimensions": dimensions,
+            "volume_type": "image",
+            "voxel_offset": (1, 2, 3),
+        }
+    ]
 
 
 def test_segmentation_source_validates_and_converts_only_requested_chunk(tmp_path):

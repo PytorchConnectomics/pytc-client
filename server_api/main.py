@@ -312,6 +312,15 @@ UM_NEUROGLANCER_MASK_RED_SHADER = """void main() {
 }
 """
 
+# Keep LocalVolume's on-the-fly pyramid work bounded.  These values are part of
+# the local-source policy (and are included in viewer provenance below), rather
+# than relying on Neuroglancer defaults that have changed between releases.
+NEUROGLANCER_ANISOTROPY_THRESHOLD = 2.0
+NEUROGLANCER_MAX_VOXELS_PER_CHUNK_LOG2 = 18
+NEUROGLANCER_MAX_DOWNSAMPLING = 64
+NEUROGLANCER_MAX_DOWNSAMPLED_SIZE = 128
+NEUROGLANCER_MAX_DOWNSAMPLING_SCALES = 8
+
 
 def _has_single_neuroglancer_main(shader: str) -> bool:
     return len(re.findall(r"\bvoid\s+main\s*\(", shader)) == 1
@@ -375,12 +384,132 @@ def _build_neuroglancer_local_volume_source(
     volume_type: str = "image",
     voxel_offset=(0, 0, 0),
 ):
-    return neuroglancer_module.LocalVolume(
-        data,
-        dimensions=dimensions,
-        volume_type=volume_type,
-        voxel_offset=voxel_offset,
+    base_kwargs = {
+        "dimensions": dimensions,
+        "volume_type": volume_type,
+        "voxel_offset": voxel_offset,
+    }
+    policy = _resolve_neuroglancer_local_volume_policy(data, dimensions)
+    constructor = neuroglancer_module.LocalVolume
+
+    # Prefer capability detection over exception-based fallback: a TypeError
+    # from LocalVolume may indicate invalid data/dimensions and must not be
+    # mistaken for an old constructor signature.
+    try:
+        signature = py_inspect.signature(constructor)
+    except (TypeError, ValueError):
+        signature = None
+    if signature is not None:
+        parameters = signature.parameters
+        accepts_arbitrary_kwargs = any(
+            parameter.kind == py_inspect.Parameter.VAR_KEYWORD
+            for parameter in parameters.values()
+        )
+        supported_policy = (
+            policy
+            if accepts_arbitrary_kwargs
+            else {key: value for key, value in policy.items() if key in parameters}
+        )
+        if len(supported_policy) != len(policy):
+            logger.debug(
+                "Neuroglancer LocalVolume supports only part of the adaptive "
+                "pyramid policy; unsupported options were omitted."
+            )
+        if not accepts_arbitrary_kwargs:
+            return constructor(data, **base_kwargs, **supported_policy)
+
+    try:
+        return constructor(data, **base_kwargs, **policy)
+    except TypeError as exc:
+        error_text = str(exc).lower()
+        unsupported_keyword_error = (
+            "unexpected keyword" in error_text
+            or "takes no keyword" in error_text
+            or (
+                "keyword" in error_text
+                and any(key.lower() in error_text for key in policy)
+            )
+        )
+        if not unsupported_keyword_error:
+            raise
+        # Signature inspection is not always available for extension-backed
+        # or wrapper constructors.  Retry only when TypeError specifically
+        # identifies unsupported keyword arguments.
+        logger.debug(
+            "Neuroglancer LocalVolume does not accept adaptive pyramid policy; "
+            "falling back to legacy constructor arguments.",
+            exc_info=True,
+        )
+        return constructor(data, **base_kwargs)
+
+
+def _resolve_neuroglancer_local_volume_policy(data, dimensions) -> dict[str, Any]:
+    """Return the deterministic, bounded LocalVolume pyramid policy.
+
+    Physical scales normally come from the CoordinateSpace supplied by the
+    request.  When that is unavailable, NGFF/OME metadata exposed by a
+    ``VolumeStore`` supplies the selected level's scales.  Axis metadata is also
+    used to avoid considering non-spatial axes when deciding anisotropy.
+    """
+
+    shape = tuple(getattr(data, "shape", ()) or ())
+    rank = len(shape)
+    metadata = getattr(data, "metadata", None)
+
+    spatial_indexes: list[int] = []
+    axes = tuple(getattr(metadata, "axes", ()) or ())
+    if len(axes) == rank:
+        for index, axis in enumerate(axes):
+            name = str(getattr(axis, "name", "") or "").lower()
+            axis_type = str(getattr(axis, "type", "") or "").lower()
+            if axis_type == "space" or name in {"x", "y", "z"}:
+                spatial_indexes.append(index)
+    if not spatial_indexes and rank == 3:
+        spatial_indexes = [0, 1, 2]
+
+    raw_scales = getattr(dimensions, "scales", None)
+    scales: tuple[float, ...] = ()
+    if raw_scales is not None:
+        try:
+            candidate = tuple(float(value) for value in raw_scales)
+            if len(candidate) == rank and all(
+                math.isfinite(value) and value > 0 for value in candidate
+            ):
+                scales = candidate
+        except (TypeError, ValueError):
+            pass
+
+    if not scales and metadata is not None:
+        levels = tuple(getattr(metadata, "levels", ()) or ())
+        selected_level = int(getattr(metadata, "selected_level", 0) or 0)
+        if 0 <= selected_level < len(levels):
+            try:
+                candidate = tuple(
+                    float(value) for value in (levels[selected_level].scale or ())
+                )
+                if len(candidate) == rank and all(
+                    math.isfinite(value) and value > 0 for value in candidate
+                ):
+                    scales = candidate
+            except (TypeError, ValueError):
+                pass
+
+    spatial_scales = [scales[index] for index in spatial_indexes] if scales else []
+    materially_anisotropic = (
+        len(spatial_indexes) == 3
+        and len(spatial_scales) == 3
+        and max(spatial_scales) / min(spatial_scales)
+        >= NEUROGLANCER_ANISOTROPY_THRESHOLD
     )
+    downsampling = "2d" if materially_anisotropic else "3d"
+    return {
+        "downsampling": downsampling,
+        "chunk_layout": "flat" if downsampling == "2d" else "isotropic",
+        "max_voxels_per_chunk_log2": NEUROGLANCER_MAX_VOXELS_PER_CHUNK_LOG2,
+        "max_downsampling": NEUROGLANCER_MAX_DOWNSAMPLING,
+        "max_downsampled_size": NEUROGLANCER_MAX_DOWNSAMPLED_SIZE,
+        "max_downsampling_scales": NEUROGLANCER_MAX_DOWNSAMPLING_SCALES,
+    }
 
 
 def _build_neuroglancer_layer(
@@ -434,6 +563,10 @@ class _NeuroglancerSegmentationStore:
             raise ValueError(
                 f"Segmentation volume dtype {source_dtype} is not supported."
             )
+
+    @property
+    def metadata(self):
+        return self._store.metadata
 
     def __getitem__(self, key):
         chunk = np.asarray(self._store[key])
@@ -2040,6 +2173,7 @@ async def neuroglancer(
                 status_code=400,
                 detail=f"Failed to prepare storage-backed volume layers: {str(e)}",
             ) from e
+        local_volume_policy = _resolve_neuroglancer_local_volume_policy(im, res)
 
         def ngLayer(
             data,
@@ -2110,6 +2244,7 @@ async def neuroglancer(
                 list(getattr(gt, "shape", []) or []) if gt is not None else None
             ),
             scales=scales,
+            local_volume_policy=local_volume_policy,
             workflow_id=workflow_id,
             viewer_token=viewer_token,
         )
@@ -2126,6 +2261,7 @@ async def neuroglancer(
             "image_resolution_note": image_resolution_note,
             "label_resolution_note": label_resolution_note,
             "scales": scales,
+            "local_volume_policy": local_volume_policy,
             "pair_discovery": pair_discovery,
             "pair_question": (
                 (
@@ -2149,6 +2285,7 @@ async def neuroglancer(
             }
             metadata["visualization_scales"] = scales
             metadata["visualization_scales_source"] = "visualization"
+            metadata["neuroglancer_local_volume_policy"] = local_volume_policy
             if pair_discovery["pair_count"]:
                 metadata["volume_pair_discovery"] = {
                     "source": "neuroglancer",
@@ -2191,6 +2328,7 @@ async def neuroglancer(
                     "requested_label_path": (
                         str(original_label_path) if original_label_path else None
                     ),
+                    "local_volume_policy": local_volume_policy,
                     "image_resolution_note": image_resolution_note,
                     "label_resolution_note": label_resolution_note,
                     "pair_discovery": pair_discovery,
@@ -2313,6 +2451,7 @@ async def neuroglancer_proofread(
     dimensions = neuroglancer.CoordinateSpace(
         names=["z", "y", "x"], units=["nm", "nm", "nm"], scales=scales
     )
+    local_volume_policy = _resolve_neuroglancer_local_volume_policy(im, dimensions)
 
     def make_local_volume(data, volume_type: str, voxel_offset=(0, 0, 0)):
         try:
@@ -2535,6 +2674,7 @@ async def neuroglancer_proofread(
         "image_resolution_note": image_resolution_note,
         "label_resolution_note": label_resolution_note,
         "scales": scales,
+        "local_volume_policy": local_volume_policy,
         "workflow_id": workflow_id,
         "session_id": session_id,
         "active_instance_id": active_instance_id,
@@ -2557,6 +2697,7 @@ async def neuroglancer_proofread(
             "session_id": session_id,
             "active_instance_id": active_instance_id,
             "controls": response_payload["controls"],
+            "local_volume_policy": local_volume_policy,
             "launched_at": datetime.now(timezone.utc).isoformat(),
         }
         update_workflow_fields(
@@ -2592,6 +2733,7 @@ async def neuroglancer_proofread(
         label_path=str(resolved_label_path) if resolved_label_path else None,
         neuroglancer_url=public_url,
         viewer_token=viewer_token,
+        local_volume_policy=local_volume_policy,
     )
     return response_payload
 
