@@ -12,6 +12,7 @@ permissions:
   pull_request:
     branches:
       - main
+      - "agent/**"
 
 jobs:
   super-lint:
