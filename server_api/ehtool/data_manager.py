@@ -9,6 +9,7 @@ import time
 import shutil
 import tempfile
 import logging
+import threading
 from datetime import datetime, timezone
 import glob
 import numpy as np
@@ -19,7 +20,12 @@ from pathlib import Path
 from scipy import ndimage
 from collections import OrderedDict
 from app_event_logger import append_app_event
-from server_api.workflows.volume_io import load_volume, split_dataset_ref
+from server_api.workflows.volume_io import (
+    VolumeStore,
+    load_volume,
+    open_volume_store,
+    split_dataset_ref,
+)
 
 from .utils import (
     to_uint8,
@@ -45,7 +51,14 @@ class DataManager:
     """
 
     def __init__(self):
-        self.image_volume: Optional[np.ndarray] = None
+        # Single-file image artifacts stay storage-backed.  ``image_volume``
+        # intentionally remains the compatibility-facing array-like object,
+        # while masks are still materialized at authoritative level 0.
+        self.image_volume: Optional[Any] = None
+        self._image_store: Optional[VolumeStore] = None
+        self._image_level_stores: Dict[int, VolumeStore] = {}
+        self._image_source_revision: Optional[str] = None
+        self._image_store_lock = threading.RLock()
         self.mask_volume: Optional[np.ndarray] = None
         self.mask_path: Optional[str] = None
         self.dataset_path: Optional[str] = None
@@ -102,16 +115,26 @@ class DataManager:
         self, dataset_path: str, mask_path: Optional[str] = None
     ) -> Dict[str, Any]:
         """Load image dataset and optional mask dataset"""
+        self._close_image_stores()
         # Discover and load images
-        image_data = self._load_volume(dataset_path)
+        image_data = self._load_image_volume(dataset_path)
 
         # Load masks if provided
         mask_data = None
         if mask_path:
-            mask_data = self._load_volume(mask_path)
+            try:
+                mask_data = self._load_volume(mask_path)
+            except Exception:
+                image_store = image_data.get("store")
+                if image_store is not None:
+                    image_store.close()
+                raise
 
             # Validate mask dimensions match image
             if image_data["num_slices"] != mask_data["num_slices"]:
+                image_store = image_data.get("store")
+                if image_store is not None:
+                    image_store.close()
                 raise ValueError(
                     f"Mask layer count ({mask_data['num_slices']}) does not match "
                     f"image layer count ({image_data['num_slices']})"
@@ -121,6 +144,9 @@ class DataManager:
             img_shape = image_data["shape"]
             mask_shape = mask_data["shape"]
             if img_shape[-2:] != mask_shape[-2:]:
+                image_store = image_data.get("store")
+                if image_store is not None:
+                    image_store.close()
                 raise ValueError(
                     f"Mask dimensions {mask_shape[-2:]} do not match "
                     f"image dimensions {img_shape[-2:]}"
@@ -128,9 +154,14 @@ class DataManager:
 
         # Store volume data
         self.image_volume = image_data["volume"]
+        self._image_store = image_data.get("store")
+        self._image_level_stores = (
+            {0: self._image_store} if self._image_store is not None else {}
+        )
         self.mask_volume = mask_data["volume"] if mask_data else None
         self.mask_path = mask_path
         self.dataset_path = dataset_path
+        self._image_source_revision = self._build_image_source_revision(dataset_path)
         self.is_3d = image_data["is_3d"]
         self.total_layers = image_data["num_slices"]
         self.image_shape = image_data["shape"]
@@ -177,6 +208,38 @@ class DataManager:
             "image_shape": self.image_shape,
             "has_masks": mask_data is not None,
         }
+
+    def close(self) -> None:
+        """Release storage-backed image resources owned by this manager."""
+        self._close_image_stores()
+
+    def __del__(self) -> None:
+        try:
+            self._close_image_stores()
+        except Exception:
+            pass
+
+    def _close_image_stores(self) -> None:
+        with self._image_store_lock:
+            stores = list(self._image_level_stores.values())
+            if self._image_store is not None:
+                stores.append(self._image_store)
+            seen: set[int] = set()
+            for store in stores:
+                identity = id(store)
+                if identity in seen:
+                    continue
+                seen.add(identity)
+                try:
+                    store.close()
+                except Exception:
+                    logger.debug(
+                        "Failed to close proofreading image store", exc_info=True
+                    )
+            self._image_level_stores = {}
+            self._image_store = None
+            self._image_source_revision = None
+            self.image_volume = None
 
     def save_mask(self, layer_index: int, mask_base64: str) -> None:
         """Update mask for a specific layer and save to disk"""
@@ -615,6 +678,197 @@ class DataManager:
             else:
                 self._atomic_write_image(target, slice_data)
 
+    def _image_levels(self) -> Tuple[Any, ...]:
+        if self._image_store is None:
+            return ()
+        return tuple(getattr(self._image_store.metadata, "levels", ()) or ())
+
+    def _image_store_for_level(self, level: int) -> Optional[VolumeStore]:
+        with self._image_store_lock:
+            if self._image_store is None:
+                return None
+            cached = self._image_level_stores.get(level)
+            if cached is not None:
+                return cached
+            store = open_volume_store(str(self.dataset_path), level=level)
+            self._image_level_stores[level] = store
+            return store
+
+    def _pyramid_level_metadata(self, level: int) -> Optional[Any]:
+        levels = self._image_levels()
+        if levels and 0 <= level < len(levels):
+            return levels[level]
+        return None
+
+    def _select_image_pyramid_level(
+        self, axis: str, *, quality: str, max_dim: Optional[int]
+    ) -> int:
+        """Choose a native image mip before reading any pixels."""
+        if quality != "preview" or not max_dim or max_dim <= 0:
+            return 0
+        levels = self._image_levels()
+        if len(levels) <= 1:
+            return 0
+
+        axis = axis.lower()
+        plane_axes = {
+            "xy": (-2, -1),
+            "zx": (0, -1),
+            "zy": (0, 1),
+        }.get(axis)
+        if plane_axes is None:
+            return 0
+
+        selected = 0
+        base = levels[0]
+        for candidate in levels:
+            shape = tuple(int(value) for value in candidate.shape)
+            if len(shape) == 2:
+                largest = max(shape)
+            elif len(shape) == 3:
+                largest = max(shape[plane_axes[0]], shape[plane_axes[1]])
+            else:
+                continue
+            candidate_scale = tuple(float(value) for value in candidate.scale)
+            if candidate_scale and any(value <= 0 for value in candidate_scale):
+                continue
+            # The base-resolution label overlay is rendered independently. Until
+            # the client applies full affine transforms, only use native mips
+            # whose in-plane origin is identical to the authoritative level.
+            base_translation = tuple(float(value) for value in base.translation)
+            candidate_translation = tuple(
+                float(value) for value in candidate.translation
+            )
+            if base_translation and candidate_translation:
+                if any(
+                    abs(candidate_translation[index] - base_translation[index]) > 1e-9
+                    for index in plane_axes
+                ):
+                    continue
+            base_scale = tuple(float(value) for value in base.scale)
+            if base_scale and candidate_scale:
+                compatible_extent = all(
+                    np.isclose(
+                        float(base.shape[index]) * base_scale[index],
+                        float(candidate.shape[index]) * candidate_scale[index],
+                        rtol=0.02,
+                        atol=max(base_scale[index], candidate_scale[index]),
+                    )
+                    for index in plane_axes
+                )
+                if not compatible_extent:
+                    continue
+            # Do not choose a level that has already fallen below the requested
+            # output size; that would enlarge a low-resolution native mip.
+            if largest >= int(max_dim):
+                selected = int(candidate.index)
+
+        return selected
+
+    def _map_base_coordinate(self, base_index: int, axis_index: int, level: int) -> int:
+        levels = self._image_levels()
+        if not levels or level == 0:
+            shape = tuple(int(value) for value in self.image_shape or ())
+            return max(0, min(int(base_index), shape[axis_index] - 1))
+
+        base = levels[0]
+        target = levels[level]
+        ndim = len(target.shape)
+        base_scale = tuple(base.scale) or tuple(1.0 for _ in range(ndim))
+        base_translation = tuple(base.translation) or tuple(0.0 for _ in range(ndim))
+        target_scale = tuple(target.scale) or tuple(1.0 for _ in range(ndim))
+        target_translation = tuple(target.translation) or tuple(
+            0.0 for _ in range(ndim)
+        )
+        world_coordinate = float(base_index) * float(base_scale[axis_index]) + float(
+            base_translation[axis_index]
+        )
+        target_axis_scale = float(target_scale[axis_index])
+        if not np.isfinite(target_axis_scale) or target_axis_scale <= 0:
+            raise ValueError("Pyramid coordinate scale must be finite and positive")
+        target_coordinate = (
+            world_coordinate - float(target_translation[axis_index])
+        ) / target_axis_scale
+        mapped = int(np.floor(target_coordinate + 0.5))
+        return max(0, min(mapped, int(target.shape[axis_index]) - 1))
+
+    def _read_image_slice_axis(
+        self, axis: str, index: int, *, level: int = 0, enhance: bool = True
+    ) -> np.ndarray:
+        """Read one bounded image plane, mapping a base coordinate to ``level``."""
+        axis = axis.lower()
+        store = self._image_store_for_level(level)
+        source = store if store is not None else self.image_volume
+        if source is None:
+            raise ValueError("Image volume is not available")
+        shape = tuple(int(value) for value in source.shape)
+
+        if len(shape) == 2:
+            image = (
+                store.read(label="proofreading image") if store else np.asarray(source)
+            )
+        elif len(shape) == 3:
+            coordinate_axis = {"xy": 0, "zx": 1, "zy": 2}.get(axis)
+            if coordinate_axis is None:
+                raise ValueError(f"Unsupported axis: {axis}")
+            mapped_index = self._map_base_coordinate(index, coordinate_axis, level)
+            crop = [slice(None), slice(None), slice(None)]
+            crop[coordinate_axis] = slice(mapped_index, mapped_index + 1)
+            if store is not None:
+                image = store.read(tuple(crop), label="proofreading image")
+            else:
+                image = np.asarray(source[tuple(crop)])
+            image = np.squeeze(image, axis=coordinate_axis)
+        else:
+            raise ValueError(f"Unsupported image volume dimensions: {len(shape)}")
+
+        image = ensure_grayscale_2d(np.asarray(image))
+        return enhance_contrast(image) if enhance else to_uint8(image)
+
+    def _pyramid_perf_meta(self, level: int) -> Dict[str, Any]:
+        level_meta = self._pyramid_level_metadata(level)
+        base_meta = self._pyramid_level_metadata(0)
+        metadata = self._image_store.metadata if self._image_store is not None else None
+        shape = tuple(int(value) for value in (self.image_shape or ()))
+        return {
+            "pyramid_level": int(level),
+            "pyramid_scale": (
+                list(level_meta.scale) if level_meta else [1.0] * len(shape)
+            ),
+            "pyramid_translation": (
+                list(level_meta.translation) if level_meta else [0.0] * len(shape)
+            ),
+            "pyramid_base_shape": list(base_meta.shape) if base_meta else list(shape),
+            "pyramid_dataset_key": (
+                level_meta.dataset_key
+                if level_meta is not None
+                else getattr(metadata, "dataset_key", None)
+            ),
+            "pyramid_source": (
+                str(metadata.path)
+                if metadata is not None
+                else str(self.dataset_path or "")
+            ),
+            "pyramid_revision": self._image_source_revision,
+            "pyramid_authoritative_level": 0,
+        }
+
+    def _resolve_base_axis_index(
+        self, axis: str, index: Optional[int]
+    ) -> Tuple[str, int, int]:
+        if self.instance_volume is None:
+            raise ValueError("Instance volume is not available")
+        axis = axis.lower()
+        if self.instance_volume.ndim == 2:
+            return "xy", 0, 1
+        axis_dimension = {"xy": 0, "zx": 1, "zy": 2}.get(axis)
+        if axis_dimension is None:
+            raise ValueError(f"Unsupported axis: {axis}")
+        total = int(self.instance_volume.shape[axis_dimension])
+        default = 0 if axis == "xy" else total // 2
+        resolved = default if index is None else int(index)
+        return axis, max(0, min(resolved, total - 1)), total
+
     def get_layer(
         self, layer_index: int, enhance: bool = True
     ) -> Tuple[np.ndarray, Optional[np.ndarray]]:
@@ -625,17 +879,7 @@ class DataManager:
             )
 
         # Get image slice
-        if self.image_volume.ndim == 3:
-            image = self.image_volume[layer_index]
-        else:
-            image = self.image_volume
-
-        image = ensure_grayscale_2d(image)
-
-        if enhance:
-            image = enhance_contrast(image)
-        else:
-            image = to_uint8(image)
+        image = self._read_image_slice_axis("xy", layer_index, level=0, enhance=enhance)
 
         # Get mask slice if exists
         mask = None
@@ -1153,8 +1397,7 @@ class DataManager:
 
         if self.instance_volume.ndim == 2:
             z_index = 0
-            image = ensure_grayscale_2d(self.image_volume)
-            image = enhance_contrast(image)
+            image = self._read_image_slice_axis("xy", 0, level=0, enhance=True)
             label_slice = self.instance_volume
         else:
             if z_index is None:
@@ -1171,13 +1414,24 @@ class DataManager:
         self, instance_id: int, axis: str, index: Optional[int] = None
     ) -> Tuple[np.ndarray, np.ndarray, np.ndarray, int, int]:
         """Return image/mask slice for a given axis (xy, zx, zy)."""
+        label_slice, active_mask, axis, index, total = (
+            self._get_instance_label_slice_axis(instance_id, axis, index)
+        )
+        image_slice = self._read_image_slice_axis(axis, index, level=0, enhance=True)
+        return image_slice, label_slice, active_mask, index, total
+
+    def _get_instance_label_slice_axis(
+        self, instance_id: int, axis: str, index: Optional[int] = None
+    ) -> Tuple[np.ndarray, np.ndarray, str, int, int]:
+        """Return label planes without touching the image pyramid."""
         if self.instance_volume is None:
             raise ValueError("Instance volume is not available")
 
         axis = axis.lower()
         if self.instance_volume.ndim == 2:
-            axis = "xy"
-            index = 0
+            label_slice = ensure_grayscale_2d(self.instance_volume)
+            active_mask = (label_slice == instance_id).astype(np.uint8)
+            return label_slice, active_mask, "xy", 0, 1
 
         if axis not in {"xy", "zx", "zy"}:
             raise ValueError(f"Unsupported axis: {axis}")
@@ -1185,35 +1439,27 @@ class DataManager:
         if axis == "xy":
             z_index = 0 if index is None else int(index)
             z_index = max(0, min(z_index, self.total_layers - 1))
-            image, _ = self.get_layer(z_index, enhance=True)
             label_slice = self.instance_volume[z_index]
             active_mask = (label_slice == instance_id).astype(np.uint8)
-            return image, label_slice, active_mask, z_index, self.total_layers
+            return label_slice, active_mask, axis, z_index, self.total_layers
 
-        # For ZX and ZY, we swap axes for a view slice
-        volume = self.image_volume
         label_volume = self.instance_volume
         if axis == "zx":
-            # Slice across Y dimension
-            max_index = volume.shape[1] - 1
+            max_index = label_volume.shape[1] - 1
             index = max_index // 2 if index is None else int(index)
             index = max(0, min(index, max_index))
-            image_slice = volume[:, index, :]
             label_slice = label_volume[:, index, :]
-            total = volume.shape[1]
+            total = label_volume.shape[1]
         else:  # zy
-            max_index = volume.shape[2] - 1
+            max_index = label_volume.shape[2] - 1
             index = max_index // 2 if index is None else int(index)
             index = max(0, min(index, max_index))
-            image_slice = volume[:, :, index]
             label_slice = label_volume[:, :, index]
-            total = volume.shape[2]
+            total = label_volume.shape[2]
 
-        image_slice = ensure_grayscale_2d(image_slice)
-        image_slice = enhance_contrast(image_slice)
         label_slice = ensure_grayscale_2d(label_slice)
         active_mask = (label_slice == instance_id).astype(np.uint8)
-        return image_slice, label_slice, active_mask, index, total
+        return label_slice, active_mask, axis, index, total
 
     def _resize_to_max_dim(
         self, array: np.ndarray, max_dim: Optional[int], is_mask: bool = False
@@ -1343,27 +1589,36 @@ class DataManager:
         quality = (quality or "full").lower()
         if quality not in {"full", "preview"}:
             raise ValueError(f"Unsupported quality: {quality}")
-        (
-            image,
-            label_slice,
-            active_mask,
-            resolved_index,
-            total,
-        ) = self.get_instance_slice_axis(
-            instance_id=instance_id, axis=axis, index=z_index
-        )
-
         kind = kind.lower()
         output_format, media_type = self._normalize_output_format(kind, format)
         resize_ms = 0.0
         max_dim_value = int(max_dim) if max_dim is not None else None
         if quality == "preview" and (not max_dim_value or max_dim_value <= 0):
             max_dim_value = 384
+        pyramid_level = (
+            self._select_image_pyramid_level(
+                axis, quality=quality, max_dim=max_dim_value
+            )
+            if kind == "image"
+            else 0
+        )
+        if kind == "image":
+            axis, resolved_index, total = self._resolve_base_axis_index(axis, z_index)
+            image = None
+            label_slice = active_mask = None
+        else:
+            label_slice, active_mask, axis, resolved_index, total = (
+                self._get_instance_label_slice_axis(
+                    instance_id=instance_id, axis=axis, index=z_index
+                )
+            )
+            image = None
         if max_dim_value and max_dim_value > 0:
             cache_key = (
                 instance_id,
                 axis,
                 resolved_index,
+                pyramid_level,
                 kind,
                 max_dim_value,
                 quality,
@@ -1371,14 +1626,22 @@ class DataManager:
             )
             cached = self._cache_get(self._resized_cache, cache_key)
             if cached:
+                perf_meta = self._pyramid_perf_meta(pyramid_level)
+                perf_meta.update(
+                    {"cache_hit": True, "decode_ms": 0.0, "resize_ms": 0.0}
+                )
                 return (
                     cached,
                     resolved_index,
                     total,
                     axis,
                     media_type,
-                    {"cache_hit": True, "decode_ms": 0.0, "resize_ms": 0.0},
+                    perf_meta,
                 )
+        if kind == "image" and image is None:
+            image = self._read_image_slice_axis(
+                axis, resolved_index, level=pyramid_level, enhance=True
+            )
         resize_started = time.perf_counter()
         if kind == "image":
             array = image
@@ -1396,11 +1659,12 @@ class DataManager:
         elif kind == "mask_raw":
             if axis != "xy":
                 raise ValueError("Raw mask only supported for XY view")
-            _, mask_raw = self.get_layer(resolved_index, enhance=False)
-            if mask_raw is None:
-                array = np.zeros_like(image)
+            if self.mask_volume is None:
+                array = np.zeros_like(label_slice)
+            elif self.mask_volume.ndim == 3:
+                array = ensure_grayscale_2d(self.mask_volume[resolved_index])
             else:
-                array = ensure_grayscale_2d(mask_raw)
+                array = ensure_grayscale_2d(self.mask_volume)
             array = self._resize_to_max_dim(array, max_dim_value, is_mask=True)
         else:
             raise ValueError(f"Unsupported image kind: {kind}")
@@ -1415,6 +1679,7 @@ class DataManager:
                     instance_id,
                     axis,
                     resolved_index,
+                    pyramid_level,
                     kind,
                     max_dim_value,
                     quality,
@@ -1423,13 +1688,15 @@ class DataManager:
                 encoded_bytes,
                 self._resized_cache_limit,
             )
+        perf_meta = self._pyramid_perf_meta(pyramid_level)
+        perf_meta.update({"cache_hit": False, "decode_ms": 0.0, "resize_ms": resize_ms})
         return (
             encoded_bytes,
             resolved_index,
             total,
             axis,
             media_type,
-            {"cache_hit": False, "decode_ms": 0.0, "resize_ms": resize_ms},
+            perf_meta,
         )
 
     def get_instance_filmstrip_bytes(
@@ -1463,9 +1730,9 @@ class DataManager:
         elif axis == "xy":
             total = self.total_layers
         elif axis == "zx":
-            total = int(self.image_volume.shape[1])
+            total = int(self.instance_volume.shape[1])
         else:
-            total = int(self.image_volume.shape[2])
+            total = int(self.instance_volume.shape[2])
 
         if z_count is None:
             z_count = 1
@@ -1478,11 +1745,19 @@ class DataManager:
         max_dim_value = int(max_dim) if max_dim is not None else None
         if quality == "preview" and (not max_dim_value or max_dim_value <= 0):
             max_dim_value = 384
+        pyramid_level = (
+            self._select_image_pyramid_level(
+                axis, quality=quality, max_dim=max_dim_value
+            )
+            if kind == "image"
+            else 0
+        )
         cache_key = (
             instance_id,
             axis,
             z_start,
             z_count,
+            pyramid_level,
             kind,
             max_dim_value,
             quality,
@@ -1494,6 +1769,8 @@ class DataManager:
                 cached_bytes, cached_height = cached
             else:
                 cached_bytes, cached_height = cached, int(max_dim_value or 0)
+            perf_meta = self._pyramid_perf_meta(pyramid_level)
+            perf_meta.update({"cache_hit": True, "decode_ms": 0.0, "resize_ms": 0.0})
             return (
                 cached_bytes,
                 z_start,
@@ -1502,7 +1779,7 @@ class DataManager:
                 axis,
                 cached_height,
                 media_type,
-                {"cache_hit": True, "decode_ms": 0.0, "resize_ms": 0.0},
+                perf_meta,
             )
 
         resize_started = time.perf_counter()
@@ -1513,6 +1790,7 @@ class DataManager:
                 instance_id,
                 axis,
                 z_index,
+                pyramid_level,
                 kind,
                 max_dim_value or 0,
                 quality,
@@ -1523,9 +1801,18 @@ class DataManager:
                 else None
             )
             if frame is None:
-                image, label_slice, active_mask, _, _ = self.get_instance_slice_axis(
-                    instance_id=instance_id, axis=axis, index=z_index
-                )
+                if kind == "image":
+                    image = self._read_image_slice_axis(
+                        axis, z_index, level=pyramid_level, enhance=True
+                    )
+                    label_slice = active_mask = None
+                else:
+                    label_slice, active_mask, _, _, _ = (
+                        self._get_instance_label_slice_axis(
+                            instance_id=instance_id, axis=axis, index=z_index
+                        )
+                    )
+                    image = None
 
                 if kind == "image":
                     frame = image
@@ -1543,12 +1830,12 @@ class DataManager:
                 elif kind == "mask_raw":
                     if axis != "xy":
                         raise ValueError("Raw mask only supported for XY view")
-                    _, raw_mask = self.get_layer(z_index, enhance=False)
-                    frame = (
-                        np.zeros_like(image)
-                        if raw_mask is None
-                        else ensure_grayscale_2d(raw_mask)
-                    )
+                    if self.mask_volume is None:
+                        frame = np.zeros_like(label_slice)
+                    elif self.mask_volume.ndim == 3:
+                        frame = ensure_grayscale_2d(self.mask_volume[z_index])
+                    else:
+                        frame = ensure_grayscale_2d(self.mask_volume)
                     frame = self._resize_to_max_dim(frame, max_dim_value, is_mask=True)
                 else:
                     raise ValueError(f"Unsupported image kind: {kind}")
@@ -1576,6 +1863,8 @@ class DataManager:
             (encoded_bytes, frame_height),
             self._filmstrip_cache_limit,
         )
+        perf_meta = self._pyramid_perf_meta(pyramid_level)
+        perf_meta.update({"cache_hit": False, "decode_ms": 0.0, "resize_ms": resize_ms})
         return (
             encoded_bytes,
             z_start,
@@ -1584,7 +1873,7 @@ class DataManager:
             axis,
             frame_height,
             media_type,
-            {"cache_hit": False, "decode_ms": 0.0, "resize_ms": resize_ms},
+            perf_meta,
         )
 
     def get_sparse_active_mask(
@@ -1623,6 +1912,70 @@ class DataManager:
             "total": total,
             "axis": axis,
         }
+
+    def _load_image_volume(self, path: str) -> Dict[str, Any]:
+        """Open random-access image artifacts without materializing the volume."""
+        file_path, _dataset_key = split_dataset_ref(path)
+        path_obj = Path(file_path)
+        storage_backed = path_obj.is_file() or (
+            path_obj.is_dir() and path_obj.name.lower().endswith((".zarr", ".n5"))
+        )
+        if not storage_backed:
+            return self._load_volume(path)
+
+        store = open_volume_store(path, level=0)
+        try:
+            shape = tuple(int(value) for value in store.shape)
+            axes = tuple(axis.name.lower() for axis in store.metadata.axes)
+            expected_axes = ("y", "x") if store.ndim == 2 else ("z", "y", "x")
+            if (
+                store.metadata.format in {"zarr", "n5"}
+                and axes
+                and axes != expected_axes
+            ):
+                raise ValueError(
+                    "Proofreading image axes must be "
+                    f"{''.join(expected_axes).upper()}, got {axes!r}"
+                )
+            if store.ndim == 2:
+                return {
+                    "volume": store,
+                    "store": store,
+                    "shape": shape,
+                    "num_slices": 1,
+                    "is_3d": False,
+                }
+            if store.ndim == 3:
+                return {
+                    "volume": store,
+                    "store": store,
+                    "shape": shape,
+                    "num_slices": shape[0],
+                    "is_3d": True,
+                }
+            raise ValueError(f"Unsupported volume dimensions: {store.ndim}")
+        except Exception:
+            store.close()
+            raise
+
+    @staticmethod
+    def _build_image_source_revision(path: str) -> str:
+        """Return a cheap cache revision for an immutable image artifact."""
+        file_path, dataset_key = split_dataset_ref(path)
+        source = Path(file_path).resolve()
+        candidates = [source]
+        if source.is_dir():
+            candidates.extend(
+                source / name for name in (".zattrs", ".zgroup", "zarr.json")
+            )
+        stats = []
+        for candidate in candidates:
+            try:
+                stat = candidate.stat()
+            except OSError:
+                continue
+            stats.append(f"{candidate.name}:{stat.st_mtime_ns}:{stat.st_size}")
+        return "|".join((str(source), dataset_key or "", *stats))
 
     def _load_volume(self, path: str) -> Dict[str, Any]:
         """Load volume data from a path"""
