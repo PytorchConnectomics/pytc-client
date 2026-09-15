@@ -4,6 +4,7 @@ import React, {
   useContext,
   useEffect,
   useState,
+  useRef,
 } from "react";
 import { message } from "antd";
 import {
@@ -31,6 +32,7 @@ import {
   resetFileWorkspace,
   runWorkflowCommand,
   startNewWorkflow as startNewWorkflowApi,
+  stageWorkflowCorrections,
   stopModelInference,
   stopModelTraining,
   updateWorkflow as updateWorkflowApi,
@@ -100,6 +102,45 @@ export function WorkflowProvider({ children }) {
   const [loading, setLoading] = useState(true);
   const [lastClientEffects, setLastClientEffects] = useState(null);
   const [pendingRuntimeAction, setPendingRuntimeAction] = useState(null);
+
+  const appContextRef = useRef(appContext);
+  appContextRef.current = appContext;
+  // Hydrate only when persisted paths change, not on every form keystroke.
+  useEffect(() => {
+    if (!workflow) return;
+    const context = appContextRef.current;
+    context?.setCurrentImage?.(workflow.image_path || null);
+    context?.setCurrentLabel?.(workflow.mask_path || workflow.label_path || null);
+    context?.trainingState?.setInputImage?.(workflow.image_path || null);
+    context?.trainingState?.setInputLabel?.(
+      workflow.corrected_mask_path || workflow.label_path || workflow.mask_path || null,
+    );
+    context?.inferenceState?.setInputImage?.(workflow.image_path || null);
+    context?.inferenceState?.setInputLabel?.(workflow.label_path || null);
+    context?.trainingState?.setOutputPath?.(workflow.training_output_path || null);
+    context?.inferenceState?.setCheckpointPath?.(workflow.checkpoint_path || null);
+  // Individual paths deliberately preserve unsaved form values across unrelated events.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [workflow?.id, workflow?.image_path, workflow?.label_path, workflow?.mask_path,
+      workflow?.corrected_mask_path, workflow?.training_output_path, workflow?.checkpoint_path]);
+
+  useEffect(() => {
+    if (!workflow) return;
+    const context = appContextRef.current;
+    const saved = workflow.metadata || {};
+    if (saved.training_config) {
+      context?.setTrainingConfig?.(saved.training_config);
+      context?.trainingState?.setConfigOriginPath?.(saved.training_config_origin || "");
+    }
+    const inferenceConfig = saved.inference_config || saved.training_config;
+    if (inferenceConfig) {
+      context?.setInferenceConfig?.(inferenceConfig);
+      context?.inferenceState?.setConfigOriginPath?.(
+        saved.inference_config_origin || saved.training_config_origin || "",
+      );
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [workflow?.id, workflow?.metadata?.training_config, workflow?.metadata?.inference_config]);
 
   const clientEffectsWithoutRuntime = useCallback((effects) => {
     if (!effects || typeof effects !== "object") return effects;
@@ -412,6 +453,19 @@ export function WorkflowProvider({ children }) {
       cancelled = true;
     };
   }, [applyWorkflowDetail]);
+
+  const stageCorrections = useCallback(async (sessionId) => {
+    if (!workflow?.id) throw new Error("Open a project first.");
+    const result = await stageWorkflowCorrections(workflow.id, sessionId);
+    setWorkflow(result.workflow);
+    setEvents((previous) => previous.some((event) => event.id === result.event.id)
+      ? previous : [...previous, result.event]);
+    const context = appContextRef.current;
+    context?.trainingState?.setInputImage?.(result.client_effects.set_training_image_path);
+    context?.trainingState?.setInputLabel?.(result.client_effects.set_training_label_path);
+    setLastClientEffects(result.client_effects);
+    return result;
+  }, [workflow?.id]);
 
   const proposeAgentAction = useCallback(
     async (action) => {
@@ -889,6 +943,7 @@ export function WorkflowProvider({ children }) {
         updateWorkflow,
         appendEvent,
         proposeAgentAction,
+        stageCorrections,
         approveAgentAction,
         rejectAgentAction,
         queryAgent,

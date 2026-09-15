@@ -21,6 +21,7 @@ import AgentProposalCard from "./chat/AgentProposalCard";
 import AssistantActionCard from "./chat/AssistantActionCard";
 import AssistantCommandCard from "./chat/AssistantCommandCard";
 import AssistantTrace from "./chat/AssistantTrace";
+import AgentTeamPanel from "./chat/AgentTeamPanel";
 import WorkflowEvidencePanel from "./workflow/WorkflowEvidencePanel";
 import { logClientEvent } from "../logging/appEventLog";
 
@@ -53,6 +54,9 @@ const WORKFLOW_SLASH_COMMANDS = {
 };
 
 const WORKFLOW_AGENT_KEYWORDS = [
+  "specialist",
+  "delegate",
+  "team",
   "workflow",
   "project",
   "dataset",
@@ -374,6 +378,14 @@ function Chatbot({
   const [inputValue, setInputValue] = useState("");
   const [isSending, setIsSending] = useState(false);
   const [showWorkflowInspector, setShowWorkflowInspector] = useState(false);
+  const [showTeam, setShowTeam] = useState(false);
+  const [teamRunId, setTeamRunId] = useState(null);
+  const integrateTeamResult = useCallback((run) => {
+    setMessages((old) => {
+      if (!old.some((item) => item.team_run_id === run.id && item.workflow_id === run.workflow_id && item.content !== run.summary)) return old;
+      return old.map((item) => item.team_run_id === run.id && item.workflow_id === run.workflow_id ? { ...item, content: run.summary } : item);
+    });
+  }, []);
   const [showWorkflowTimeline, setShowWorkflowTimeline] = useState(false);
 
   const lastMessageRef = useRef(null);
@@ -547,8 +559,8 @@ function Chatbot({
   }, []);
 
   useEffect(() => {
-    scrollToBottom();
-  }, [messages, isSending, scrollToBottom]);
+    if (!showTeam) scrollToBottom();
+  }, [messages, isSending, scrollToBottom, showTeam]);
 
   useEffect(() => {
     saveContinuousChatState({ activeConvoId, messages });
@@ -602,6 +614,7 @@ function Chatbot({
           agentQuery,
           activeConvoId,
         );
+        if (data?.team_run_id) { setTeamRunId(data.team_run_id); setShowTeam(true); }
         const response =
           data?.response ||
           "I could not inspect the workflow state for that request.";
@@ -618,6 +631,7 @@ function Chatbot({
             commands: isGreeting ? [] : data?.commands || [],
             proposals: isGreeting ? [] : data?.proposals || [],
             trace: isGreeting ? [] : data?.trace || [],
+            team_run_id: data?.team_run_id || null,
           },
         ]);
         if (!activeConvoId && returnedConvoId) {
@@ -689,6 +703,10 @@ function Chatbot({
     if (!inputValue.trim() || isSending) return;
     const query = inputValue;
     setInputValue("");
+    if (/^\/?(team|specialists|delegate|project team)\s*[.!?]*$/i.test(query.trim())) {
+      setShowTeam(true);
+      return;
+    }
     try {
       if (shouldUseWorkflowAgent(query)) {
         await sendWorkflowAgentMessage(query);
@@ -838,7 +856,7 @@ function Chatbot({
         message: error.message || "Assistant in-app item run failed",
         data: { workflowId: workflow?.id || null, activeConvoId, itemId },
       });
-      throw error;
+      message.error(error.message || "Could not run this action. Please try again.");
     }
   };
 
@@ -1062,11 +1080,13 @@ function Chatbot({
                   letterSpacing: "0.02em",
                 }}
               >
-                Assistant
+                Project manager
               </Text>
+              <Text type="secondary" style={{ fontSize: 12 }}>Active: {workflow?.title || "No project"}</Text>
             </div>
           </Space>
           <Space>
+            {workflow?.id && <Button type="text" size="small" onClick={() => setShowTeam((current) => !current)}>{showTeam ? "Hide team" : "Team"}</Button>}
             {workflow?.id && (
               <Button
                 type="text"
@@ -1118,6 +1138,7 @@ function Chatbot({
             background: "#f6f5f2",
           }}
         >
+          {showTeam && workflow?.id && <AgentTeamPanel workflowId={workflow.id} projectName={workflow.title} focusRunId={teamRunId} onResult={integrateTeamResult} onAction={async (item) => { if (item.workflow_id !== workflow.id) return; setShowTeam(false); if (item.requires_approval) setMessages((old) => [...old, { role: "assistant", content: `Review ${item.label.toLowerCase()} for ${workflow.title}.`, workflow_id: workflow.id, source: "workflow_orchestrator" }]); await handleRunAssistantItem(item); }} />}
           <List
             dataSource={messages}
             renderItem={(message, index) => {
@@ -1162,6 +1183,7 @@ function Chatbot({
                         >
                           {message.content}
                         </ReactMarkdown>
+                        {message.team_run_id && message.workflow_id === workflow?.id && <Button size="small" onClick={() => { setTeamRunId(message.team_run_id); setShowTeam(true); }}>View specialist results</Button>}
                         {message.trace?.length > 0 && (
                           <AssistantTrace trace={message.trace} />
                         )}

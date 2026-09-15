@@ -2264,48 +2264,16 @@ function DetectionWorkflow({
   };
 
   const handleStageForRetraining = async () => {
-    const correctedMaskPath =
-      persistence?.artifact_path ||
-      persistence?.last_export_path ||
-      activeWorkflow?.corrected_mask_path ||
-      activeWorkflow?.mask_path ||
-      activeWorkflow?.label_path;
-    if (!correctedMaskPath) {
-      message.warning("No edited mask artifact is available yet.");
-      return;
-    }
     if (!workflowContext?.workflow?.id) {
-      message.warning("Workflow state is not available yet.");
+      message.warning("Open a project first.");
       return;
     }
-
     try {
-      await workflowContext.updateWorkflow({
-        stage: "retraining_staged",
-        corrected_mask_path: correctedMaskPath,
-      });
-      await workflowContext.appendEvent({
-        actor: "user",
-        event_type: "retraining.staged",
-        stage: "retraining_staged",
-        summary: "Staged corrected masks for retraining.",
-        payload: {
-          corrected_mask_path: correctedMaskPath,
-          ehtool_session_id: sessionId,
-          source: "proofreading_persistence",
-        },
-      });
-      if (appContext?.trainingState?.setInputLabel) {
-        appContext.trainingState.setInputLabel(correctedMaskPath);
-      }
-      message.success("Corrected masks staged for retraining.");
+      await workflowContext.stageCorrections(sessionId);
+      message.success("Saved edits ready for training.");
     } catch (error) {
-      message.error(
-        getErrorMessage(
-          error,
-          "Failed to stage corrected masks for retraining",
-        ),
-      );
+      message.error(error.response?.data?.detail || error.message ||
+        "Could not stage edits. Save your mask edits and try again.");
     }
   };
 

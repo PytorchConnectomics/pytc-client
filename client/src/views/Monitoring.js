@@ -19,9 +19,10 @@ function formatValue(value) {
   return String(value);
 }
 
-function Monitoring() {
+function Monitoring({ active = true }) {
   const [tensorboardStatus, setTensorboardStatus] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [statusError, setStatusError] = useState(null);
   const [starting, setStarting] = useState(false);
 
   const loadTensorboardStatus = useCallback(async ({ silent = false } = {}) => {
@@ -31,13 +32,9 @@ function Monitoring() {
     try {
       const status = await getTensorboardStatus();
       setTensorboardStatus(status);
+      setStatusError(null);
     } catch (error) {
-      console.error("Error loading TensorBoard status:", error);
-      if (!silent) {
-        message.error(
-          error.message || "Failed to load TensorBoard monitoring status.",
-        );
-      }
+      setStatusError("Compute worker unavailable. Start the demo services, then refresh.");
     } finally {
       if (!silent) {
         setLoading(false);
@@ -46,12 +43,13 @@ function Monitoring() {
   }, []);
 
   useEffect(() => {
+    if (!active) return undefined;
     loadTensorboardStatus();
     const intervalId = setInterval(() => {
       loadTensorboardStatus({ silent: true });
     }, 3000);
     return () => clearInterval(intervalId);
-  }, [loadTensorboardStatus]);
+  }, [active, loadTensorboardStatus]);
 
   const handleStartTensorboard = async () => {
     try {
@@ -215,7 +213,7 @@ function Monitoring() {
           <Alert
             type={hasSources ? "warning" : "info"}
             showIcon
-            message={hasSources ? "TensorBoard is stopped." : "No log directory yet."}
+            message={statusError || (hasSources ? "TensorBoard is stopped." : "No log directory yet.")}
           />
         )}
       </Card>

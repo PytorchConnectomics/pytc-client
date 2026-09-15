@@ -1,0 +1,157 @@
+# Engineering smoke preset: two CPU steps, not a scientific-quality model.
+SYSTEM:
+  NUM_GPUS: 0
+  NUM_CPUS: 0
+  PARALLEL: single
+MODEL:
+  ARCHITECTURE: unet_plus_3d
+  BLOCK_TYPE: residual_se
+  INPUT_SIZE:
+  - 9
+  - 33
+  - 33
+  OUTPUT_SIZE:
+  - 9
+  - 33
+  - 33
+  IN_PLANES: 1
+  OUT_PLANES: 2
+  NORM_MODE: gn
+  FILTERS:
+  - 16
+  - 24
+  - 32
+  - 48
+  - 64
+  TARGET_OPT:
+  - '0'
+  - 4-1-1
+  LOSS_OPTION:
+  - - WeightedBCEWithLogitsLoss
+    - DiceLoss
+  - - WeightedBCEWithLogitsLoss
+    - DiceLoss
+  LOSS_WEIGHT:
+  - - 1.0
+    - 0.5
+  - - 1.0
+    - 0.5
+  WEIGHT_OPT:
+  - - '1'
+    - '0'
+  - - '1'
+    - '0'
+  OUTPUT_ACT:
+  - - none
+    - sigmoid
+  - - none
+    - sigmoid
+DATASET:
+  INPUT_PATH: ''
+  IMAGE_NAME: uploads/NucMM/image.tif
+  LABEL_NAME: uploads/NucMM/labels.tif
+  OUTPUT_PATH: uploads/NucMM/runs/cpu-training
+  PAD_SIZE:
+  - 4
+  - 16
+  - 16
+  PAD_MODE: reflect
+  IMAGE_SCALE:
+  - 1.0
+  - 1.0
+  - 1.0
+  LABEL_SCALE:
+  - 1.0
+  - 1.0
+  - 1.0
+  DATA_SCALE:
+  - 1.0
+  - 1.0
+  - 1.0
+  NORMALIZE_RANGE: true
+  MEAN: 0.5
+  STD: 0.5
+  MATCH_ACT: none
+  IS_ABSOLUTE_PATH: true
+  DISTRIBUTED: false
+  DO_2D: false
+  LOAD_2D: false
+  DO_CHUNK_TITLE: 0
+  DROP_CHANNEL: false
+  ENSURE_MIN_SIZE: false
+  LABEL_BINARY: false
+  LABEL_MAG: 0
+  LABEL_VAST: false
+  REDUCE_LABEL: true
+  VALID_RATIO: 0.5
+  VALID_MASK_NAME: None
+  VAL_IMAGE_NAME: None
+  VAL_LABEL_NAME: None
+  VAL_VALID_MASK_NAME: None
+  VAL_PAD_SIZE:
+  - 0
+  - 0
+  - 0
+  REJECT_SAMPLING:
+    SIZE_THRES: -1
+    DIVERSITY: -1
+    NUM_TRIAL: 10
+    P: 0.95
+AUGMENTOR:
+  ENABLED: false
+SOLVER:
+  NAME: AdamW
+  LR_SCHEDULER_NAME: WarmupCosineLR
+  BASE_LR: 0.0003
+  BETAS:
+  - 0.9
+  - 0.999
+  WEIGHT_DECAY: 0.0001
+  ITERATION_STEP: 1
+  ITERATION_SAVE: 2
+  ITERATION_VAL: 1000000
+  ITERATION_TOTAL: 2
+  SAMPLES_PER_BATCH: 1
+  ITERATION_RESTART: false
+  WARMUP_FACTOR: 0.001
+  WARMUP_ITERS: 1
+  WARMUP_METHOD: linear
+MONITOR:
+  ITERATION_NUM:
+  - 1
+  - 2
+  LOG_OPT:
+  - 1
+  - 1
+  - 0
+  VIS_OPT:
+  - 0
+  - 16
+INFERENCE:
+  INPUT_SIZE:
+  - 9
+  - 33
+  - 33
+  OUTPUT_SIZE:
+  - 9
+  - 33
+  - 33
+  IMAGE_NAME: uploads/NucMM/image.tif
+  OUTPUT_PATH: uploads/NucMM/runs/cpu-inference
+  OUTPUT_NAME: result.h5
+  OUTPUT_ACT:
+  - sigmoid
+  - sigmoid
+  PAD_SIZE:
+  - 4
+  - 16
+  - 16
+  AUG_MODE: mean
+  AUG_NUM: 0
+  STRIDE:
+  - 8
+  - 32
+  - 32
+  SAMPLES_PER_BATCH: 1
+  DO_EVAL: false
+  UNPAD: true

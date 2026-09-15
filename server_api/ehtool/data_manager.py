@@ -292,7 +292,7 @@ class DataManager:
         overwrite_blocked = binary & ~writable
 
         slice_ref[remove_pixels] = 0
-        slice_ref[old_active | add_pixels] = instance_id
+        slice_ref[add_pixels] = instance_id
 
         # Keep mask_volume aligned with instance edits
         if self.mask_volume is not None:
@@ -314,14 +314,14 @@ class DataManager:
                     add_mask = add_pixels
                     remove_mask = remove_pixels
                     mask_slice[remove_mask] = 0
-                    mask_slice[old_mask_active | add_mask] = foreground_value
+                    mask_slice[add_mask] = foreground_value
                 else:
                     old_mask_active = previous_mask == instance_id
                     writable_mask = (previous_mask == 0) | old_mask_active
                     add_mask = binary & writable_mask & ~old_mask_active
                     remove_mask = old_mask_active & ~binary
                     mask_slice[remove_mask] = 0
-                    mask_slice[old_mask_active | add_mask] = instance_id
+                    mask_slice[add_mask] = instance_id
 
         # Update active instance stats without resetting classifications.
         self._update_instance_stats(instance_id)
@@ -334,6 +334,8 @@ class DataManager:
         )
         self.persistence_dirty = True
         self._persist_instance_artifact(force=True)
+        if self.last_persist_error:
+            raise OSError(f"Could not save mask edits: {self.last_persist_error}")
         blocked_pixels = int(np.count_nonzero(overwrite_blocked))
         event_payload = {
             "instance_id": int(instance_id),

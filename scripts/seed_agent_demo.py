@@ -18,6 +18,7 @@ def main():
     os.chdir(ROOT)
     import numpy as np
     import tifffile
+    import yaml
     from server_api.auth import database, models
     from server_api.auth.utils import get_password_hash
     from server_api.workflows.db_models import WorkflowSession
@@ -43,12 +44,23 @@ def main():
             raise SystemExit('Expected image and label TIFFs with the same 3D shape.')
         ids = np.unique(mask)
         count = int(np.count_nonzero(ids))
+        config = yaml.safe_load((ROOT / 'demo_configs/NucMM-CPU-demo.yaml').read_text())
+        output = image.parent / 'runs' / 'cpu-training'
+        config['DATASET'].update(IMAGE_NAME=str(image), LABEL_NAME=str(labels), OUTPUT_PATH=str(output))
+        config['INFERENCE'].update(IMAGE_NAME=str(image), OUTPUT_PATH=str(image.parent / 'runs' / 'cpu-inference'))
+        config_text = yaml.safe_dump(config, sort_keys=False)
         workflow = create_workflow_session(db, user_id=guest.id, title='NucMM dummy project')
         update_workflow_fields(db, workflow, {
             'dataset_path': str(image.parent), 'image_path': str(image),
             'label_path': str(labels), 'mask_path': str(labels), 'stage': 'proofreading',
+            'config_path': 'demo_configs/NucMM-CPU-demo.yaml',
+            'training_output_path': str(output),
             'metadata': {
                 'created_from': 'agent_demo_seed',
+                'training_config': config_text,
+                'inference_config': config_text,
+                'training_config_origin': 'demo_configs/NucMM-CPU-demo.yaml',
+                'inference_config_origin': 'demo_configs/NucMM-CPU-demo.yaml',
                 'project_context': {'imaging_modality': 'micro-CT', 'target_structure': 'nuclei',
                                     'task_goal': 'instance segmentation', 'voxel_size_nm': [720,720,720]},
                 'visualization_scales': [720,720,720],

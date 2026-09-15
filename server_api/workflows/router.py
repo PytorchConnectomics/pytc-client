@@ -9,7 +9,7 @@ from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 
 import requests
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
@@ -67,6 +67,53 @@ from .metrics import compute_workflow_metrics
 from .volume_pairs import discover_neuroglancer_volume_pairs
 
 router = APIRouter()
+
+
+class StageCorrectionsRequest(BaseModel):
+    session_id: int
+
+
+@router.post("/{workflow_id}/stage-corrections")
+def stage_saved_corrections(
+    workflow_id: int,
+    body: StageCorrectionsRequest,
+    user: auth_models.User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Stage persisted edits and their evidence together; never relabel source masks."""
+    from server_api.ehtool.router import get_data_manager
+    from server_api.ehtool.db_models import EHToolSession
+
+    workflow = get_user_workflow_or_404(db, workflow_id=workflow_id, user_id=user.id)
+    session = db.query(EHToolSession).filter_by(
+        id=body.session_id, workflow_id=workflow.id, user_id=user.id
+    ).first()
+    if session is None:
+        raise HTTPException(404, "This proofreading session does not belong to the project.")
+    manager = get_data_manager(session.id, db)
+    manager.ensure_instances()
+    persistence = manager.get_persistence_status()
+    path = persistence.get("artifact_path")
+    if (not persistence.get("artifact_exists") or persistence.get("dirty")
+            or persistence.get("last_error") or not path):
+        raise HTTPException(409, "Save your mask edits before using them for training.")
+    update_workflow_fields(db, workflow, {
+        "stage": "retraining_staged", "corrected_mask_path": path,
+    }, commit=False)
+    event = append_workflow_event(
+        db, workflow_id=workflow.id, actor="user", event_type="retraining.staged",
+        stage="retraining_staged", summary="Saved mask edits staged for training.",
+        payload={"corrected_mask_path": path, "ehtool_session_id": session.id,
+                 "source": "proofreading_persistence"},
+        idempotency_key=f"stage-corrections:{session.id}:{persistence.get('last_saved_at')}",
+        commit=False,
+    )
+    db.commit()
+    db.refresh(workflow)
+    return {"workflow": _workflow_response(workflow), "event": _event_response(event),
+            "client_effects": {"navigate_to": "training",
+                "set_training_image_path": session.dataset_path,
+                "set_training_label_path": path}}
 
 
 class WorkflowResponse(BaseModel):
@@ -194,6 +241,7 @@ class AgentTraceItem(BaseModel):
 
 
 class AgentQueryResponse(BaseModel):
+    team_run_id: Optional[str] = None
     response: str
     source: str = "workflow_orchestrator"
     intent: str = "recommendation"
@@ -4176,7 +4224,7 @@ def _safe_subset_token(value: Any, *, fallback: str = "item") -> str:
 def _training_subset_base_dir(project_root: str) -> pathlib.Path:
     configured = os.getenv(
         "PYTC_TRAINING_SUBSET_ROOT",
-        "/home/weidf/demo_data/.pytc_training_subsets",
+        str(pathlib.Path(project_root) / ".pytc_training_subsets"),
     )
     project_token = _safe_subset_token(
         pathlib.Path(project_root).name,
@@ -6341,6 +6389,7 @@ def _persist_workflow_agent_chat_exchange(
 async def query_workflow_agent(
     workflow_id: int,
     body: AgentQueryRequest,
+    background_tasks: BackgroundTasks,
     user: auth_models.User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
@@ -6356,6 +6405,57 @@ async def query_workflow_agent(
         conversation_id=body.conversation_id or body.conversationId,
         query=raw_query,
     )
+    from .agent_team import TeamRequest, delegation_scope, start_run
+    from . import team_llm
+    if team_llm.enabled() and not command_alias:
+        from .agent_team import AgentTeamRun, fingerprint, snapshot
+        run = start_run(workflow_id, TeamRequest(scope="project", goal=raw_query[:2000]), background_tasks, user, db)
+        row = db.get(AgentTeamRun, run["id"])
+        payload = decode_json(row.payload_json)
+        recent_turns = db.query(auth_models.ChatMessage).filter(
+            auth_models.ChatMessage.conversation_id == conversation.id,
+            auth_models.ChatMessage.workflow_id == workflow_id).order_by(auth_models.ChatMessage.id.desc()).limit(6).all()
+        memory = [{"type": "dialogue", "role": message.role, "content": message.content[:800]} for message in reversed(recent_turns)]
+        previous = db.query(AgentTeamRun).filter(AgentTeamRun.workflow_id == workflow_id,
+            AgentTeamRun.id != run["id"], AgentTeamRun.status == "completed").order_by(AgentTeamRun.created_at.desc()).limit(2).all()
+        for old in previous:
+            result = decode_json(old.payload_json)
+            if result["context_fingerprint"] == fingerprint(snapshot(workflow)):
+                memory.append({"type": "previous_check", "run_id": old.id,
+                    "facts": [t.get("result", {}).get("observations", []) for t in result["tasks"]]})
+        payload.update(memory=memory, conversation_id=conversation.id)
+        row.payload_json = json.dumps(payload)
+        response = f"The project manager is working on your request for {workflow.title}."
+        trace = [AgentTraceItem(label="Model-driven project manager", detail=f"Project {workflow.id}; run {run['id']}; model {payload['model_config']['model']}.")]
+        _persist_workflow_agent_chat_exchange(db, workflow_id=workflow.id, conversation=conversation,
+            query=raw_query, response=response, actions=[], commands=[], proposals=[], trace=trace)
+        db.commit()
+        return AgentQueryResponse(response=response, intent="delegation", team_run_id=run["id"],
+            conversation_id=conversation.id, conversationId=conversation.id, trace=trace)
+    team_scope = delegation_scope(raw_query)
+    if team_scope:
+        run = start_run(workflow_id, TeamRequest(scope=team_scope, goal=raw_query[:2000]), background_tasks, user, db)
+        response = f"I delegated a {team_scope} check for {workflow.title}. The task results will appear here."
+        trace = [AgentTraceItem(label="Delegated specialist check", detail=f"Project {workflow.id}; run {run['id']}; tool-backed execution.")]
+        _persist_workflow_agent_chat_exchange(db, workflow_id=workflow.id, conversation=conversation,
+            query=raw_query, response=response, actions=[], commands=[], proposals=[], trace=trace)
+        db.commit()
+        return AgentQueryResponse(response=response, intent="delegation", team_run_id=run["id"],
+            conversation_id=conversation.id, conversationId=conversation.id, trace=trace)
+    if re.search(r"\b(specialist|specialists|team)\b", raw_query, re.I) and re.search(r"\b(find|found|results|report|reported|say|summary)\b", raw_query, re.I):
+        from .agent_team import AgentTeamRun, serialize
+        rows = db.query(AgentTeamRun).filter_by(workflow_id=workflow.id).order_by(AgentTeamRun.created_at.desc()).limit(20).all()
+        requested_role = next((role for role, pattern in [("data", r"\bdata\b"), ("annotation", r"\b(annotation|proofreading)\b"), ("model", r"\b(model|training|inference)\b")] if re.search(pattern, raw_query, re.I)), None)
+        found = next((serialize(row, workflow) for row in rows if not requested_role or any(t["role"] == requested_role for t in decode_json(row.payload_json).get("tasks", []))), None)
+        if found:
+            observations = [line for task in found["tasks"] if not requested_role or task["role"] == requested_role for line in task.get("result", {}).get("observations", [])]
+            response = ("These findings refer to earlier project inputs; run a fresh check. " if found["stale"] else "") + (" ".join(observations) or found["summary"])
+            trace = [AgentTraceItem(label="Saved specialist evidence", detail=f"Project {workflow.id}; run {found['id']}; status {found['status']}.")]
+            _persist_workflow_agent_chat_exchange(db, workflow_id=workflow.id, conversation=conversation,
+                query=raw_query, response=response, actions=[], commands=[], proposals=[], trace=trace)
+            db.commit()
+            return AgentQueryResponse(response=response, intent="specialist_results", team_run_id=found["id"],
+                conversation_id=conversation.id, conversationId=conversation.id, trace=trace)
     event_rows = _event_rows(db, workflow.id)
     agent_recommendation = _build_workflow_agent_recommendation(db, workflow)
     proposals: List[WorkflowEventResponse] = []

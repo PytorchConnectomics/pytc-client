@@ -1,0 +1,3 @@
+[submodule "pytorch_connectomics"]
+	path = pytorch_connectomics
+	url = https://github.com/PytorchConnectomics/pytorch_connectomics.git

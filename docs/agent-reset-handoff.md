@@ -1,5 +1,13 @@
 # seg.bio: May 5 baseline, project manager and task agents
 
+**Latest:** [Local model-driven project manager and specialists](agent-team-model-layer.md).
+Qwen3:4b is installed locally; ordinary chat now plans tasks, invokes bounded
+read-only specialist tools, and synthesizes app recommendations. The scaffold
+record below is historical; the model-layer document describes current behavior.
+[Baseline repairs and verified CPU run](baseline-working-state.md) remain in place.
+The launcher now includes the compute worker; the older reset-only verification
+below describes the state before that repair pass.
+
 Direction confirmed by Adam on September 15, 2026. This document supersedes older
 DSL/DAG-oriented implementation priorities and the stale branch instructions in
 `remote-codex-handoff.md`. The presentation is context, not an implementation spec.

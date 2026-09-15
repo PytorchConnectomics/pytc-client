@@ -952,6 +952,10 @@ def _sanitize_inference_aug_num(
     ]
 
 
+def _requests_cpu(config_text: str) -> bool:
+    return (_load_yaml_config(config_text).get("SYSTEM") or {}).get("NUM_GPUS") == 0
+
+
 def _sanitize_runtime_config_text(
     config_text: str,
     config_origin_path: str | None,
@@ -969,6 +973,13 @@ def _sanitize_runtime_config_text(
         _resolve_config_origin_path(config_origin_path)
     )
     changes: list[dict[str, Any]] = []
+    system = config_obj.get("SYSTEM") or {}
+    if system.get("NUM_GPUS") == 0:
+        # Legacy PyTC multiplies inference batch size by this value. A CPU is
+        # one logical device; the child environment below disables CUDA.
+        system["NUM_GPUS"] = 1
+        changes.append({"path": "SYSTEM.NUM_GPUS", "before": 0, "after": 1,
+                        "reason": "One logical CPU device for legacy batch sizing"})
     changes.extend(_sanitize_fractional_float_paths(config_obj, origin_obj))
     changes.extend(_sanitize_direct_volume_paths(config_obj, origin_obj))
     changes.extend(_sanitize_inference_aug_num(config_obj, origin_obj))
@@ -1754,6 +1765,7 @@ def start_training(payload: dict):
         stop_training()
 
     config_text = payload.get("trainingConfig", "")
+    force_cpu = _requests_cpu(config_text)
     temp_filepath = None
     config_origin_path = payload.get("configOriginPath")
     auto_parameters = bool(
@@ -1829,8 +1841,10 @@ def start_training(payload: dict):
         print(f"[MODEL.PY] Final training command: {' '.join(command)}")
         _append_runtime_event("training", f"Final training command: {' '.join(command)}")
         process_env = os.environ.copy()
+        if force_cpu:
+            process_env["CUDA_VISIBLE_DEVICES"] = "-1"
         process_env.setdefault("PYTORCH_ALLOC_CONF", "expandable_segments:True")
-        if _training_uses_gpu(config_text):
+        if not force_cpu and _training_uses_gpu(config_text):
             unloaded_models = _unload_ollama_before_gpu_training("training")
         else:
             unloaded_models = []
@@ -2123,6 +2137,7 @@ def start_inference(payload: dict):
         stop_inference()
 
     config_text = payload.get("inferenceConfig", "")
+    force_cpu = _requests_cpu(config_text)
     temp_filepath = None
     config_origin_path = payload.get("configOriginPath")
     config_corrections: list[dict[str, Any]] = []
@@ -2230,11 +2245,15 @@ def start_inference(payload: dict):
                 level="WARNING",
                 diagnostic=config_diagnostic,
             )
+        process_env = os.environ.copy()
+        if force_cpu:
+            process_env["CUDA_VISIBLE_DEVICES"] = "-1"
         _inference_process = _start_logged_process(
             command,
             current_dir,
             "INFERENCE",
             "inference",
+            env=process_env,
         )
         log_dir = _launch_tensorboard(payload.get("outputPath"), config_text, "test")
         if log_dir:

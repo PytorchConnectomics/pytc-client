@@ -20,7 +20,7 @@ function formatValue(value) {
 const ERROR_PATTERNS = [
   { label: "Python error", regex: /traceback|exception|runtimeerror/i },
   { label: "missing file", regex: /no such file|not found|does not exist/i },
-  { label: "memory error", regex: /out of memory|cuda.*memory|mps.*memory/i },
+  { label: "memory error", regex: /out of memory|MemoryError|CUDA_ERROR_OUT_OF_MEMORY/i },
   { label: "failed step", regex: /failed|error/i },
 ];
 
@@ -49,13 +49,13 @@ function summarizeRuntime(runtime, text) {
     };
   }
 
-  if (phase === "finished" && !hasNonZeroExit && !firstError) {
+  if (phase === "finished" && !hasNonZeroExit) {
     return {
-      type: warningCount ? "warning" : "success",
-      label: warningCount ? "Completed with warnings" : "Completed",
+      type: warningCount || firstError ? "warning" : "success",
+      label: warningCount || firstError ? "Completed with warnings" : "Completed",
       message: warningCount
         ? `${warningCount} warning${warningCount === 1 ? "" : "s"} found. Outputs may still be usable.`
-        : "Run completed successfully.",
+        : firstError ? "Run completed; diagnostic messages are available in the log." : "Run completed successfully.",
     };
   }
 

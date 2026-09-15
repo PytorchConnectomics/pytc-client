@@ -178,7 +178,7 @@ class ServerApiProxyTests(unittest.TestCase):
                 )
 
         self.assertEqual(response.status_code, 200)
-        self.assertEqual(response.json()["path"], str(config_path))
+        self.assertEqual(pathlib.Path(response.json()["path"]).resolve(), config_path.resolve())
         self.assertEqual(response.json()["content"], "DATASET: {}\n")
 
     def test_start_model_training_proxy_returns_504_on_timeout(self):
@@ -377,7 +377,7 @@ class WorkflowInferenceRuntimeSyncTests(unittest.TestCase):
                 "autopick_parameters": True,
                 "parameter_mode": "agent_default",
             },
-            "set_training_config_preset": "configs/MitoEM/Mito-CaseStudy-BC.yaml",
+            "set_training_config_preset": "demo_configs/NucMM-CPU-demo.yaml",
             "set_training_image_path": str(image_path),
             "set_training_label_path": str(label_path),
             "set_training_output_path": str(output_path),
@@ -430,8 +430,8 @@ class WorkflowInferenceRuntimeSyncTests(unittest.TestCase):
             f"workflow-command-{command['id']}",
         )
         self.assertIn("DATASET", captured["json_body"]["trainingConfig"])
-        self.assertEqual(captured["json_body"]["inputImagePath"], str(image_path))
-        self.assertEqual(captured["json_body"]["inputLabelPath"], str(label_path))
+        self.assertEqual(pathlib.Path(captured["json_body"]["inputImagePath"]).resolve(), image_path.resolve())
+        self.assertEqual(pathlib.Path(captured["json_body"]["inputLabelPath"]).resolve(), label_path.resolve())
 
         commands_response = self.client.get(f"/api/workflows/{workflow_id}/commands")
         self.assertEqual(commands_response.status_code, 200)
@@ -634,9 +634,9 @@ DATASET:
             )
             rewritten = model_service._load_yaml_config(rewritten_text)
 
-            self.assertEqual(rewritten["DATASET"]["IMAGE_NAME"], str(image_path))
-            self.assertEqual(rewritten["INFERENCE"]["IMAGE_NAME"], str(image_path))
-            self.assertEqual(rewritten["INFERENCE"]["OUTPUT_PATH"], str(output_path))
+            self.assertEqual(rewritten["DATASET"]["IMAGE_NAME"], str(image_path.resolve()))
+            self.assertEqual(rewritten["INFERENCE"]["IMAGE_NAME"], str(image_path.resolve()))
+            self.assertEqual(rewritten["INFERENCE"]["OUTPUT_PATH"], str(output_path.resolve()))
             self.assertEqual(rewritten["DATASET"]["INPUT_PATH"], "")
             self.assertEqual(rewritten["INFERENCE"]["INPUT_PATH"], "")
             self.assertGreaterEqual(len(changes), 4)

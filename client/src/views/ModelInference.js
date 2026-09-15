@@ -1,5 +1,5 @@
 import React, { useCallback, useContext, useEffect, useRef, useState } from "react";
-import { Button, Space } from "antd";
+import { Button, Space, message } from "antd";
 import {
   getInferenceLogs,
   getInferenceStatus,
@@ -34,7 +34,12 @@ function ModelInference({ isInferring, setIsInferring }) {
   const refreshInferenceLogs = async () => {
     try {
       const runtime = await getInferenceLogs();
+      if (runtime?.metadata?.workflowId && Number(runtime.metadata.workflowId) !== Number(workflowId)) {
+        setInferenceRuntime(null);
+        return null;
+      }
       setInferenceRuntime(runtime);
+      setIsInferring(["running", "starting"].includes(runtime?.phase));
       return runtime;
     } catch (error) {
       console.error("Error loading inference logs:", error);
@@ -264,6 +269,22 @@ function ModelInference({ isInferring, setIsInferring }) {
   };
 
   const [componentSize] = useState("default");
+  const predictionPath = inferenceRuntime?.metadata?.latestPredictionPath ||
+    workflowContext?.workflow?.inference_output_path;
+  const canViewPrediction = !isInferring && /\.(h5|hdf5|tif|tiff|zarr)$/i.test(predictionPath || "");
+  const viewPrediction = async () => {
+    try {
+      await workflowContext.runClientEffects({
+        navigate_to: "visualization",
+        set_visualization_image_path: workflowContext.workflow.image_path,
+        set_visualization_label_path: predictionPath,
+        set_visualization_scales: workflowContext.workflow.metadata?.visualization_scales || [1, 1, 1],
+        runtime_action: {kind: "load_visualization"},
+      });
+    } catch (error) {
+      message.error(error.message || "Could not open the prediction.");
+    }
+  };
 
   return (
     <>
@@ -292,6 +313,7 @@ function ModelInference({ isInferring, setIsInferring }) {
           </Button>
         </Space>
         <p style={{ marginTop: 4 }}>{inferenceStatus}</p>
+        {canViewPrediction && <Button onClick={viewPrediction}>View prediction</Button>}
         <RuntimeLogPanel
           title="Run Model Runtime"
           runtime={inferenceRuntime}

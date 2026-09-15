@@ -229,7 +229,8 @@ function Views() {
           style={{
             lineHeight: "48px",
             paddingLeft: "12px",
-            flex: 1,
+            flex: "1 1 0",
+            minWidth: 0,
             borderBottom: "none",
           }}
         />
@@ -265,7 +266,7 @@ function Views() {
           <Visualization viewers={viewers} setViewers={setViewers} />,
         )}
         {renderTabContent("training", <ModelTraining />)}
-        {renderTabContent("monitoring", <Monitoring />)}
+        {renderTabContent("monitoring", <Monitoring active={current === "monitoring"} />)}
         {renderTabContent("project-progress", <ProjectProgress />)}
         {renderTabContent(
           "inference",

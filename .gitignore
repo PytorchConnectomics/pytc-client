@@ -15,3 +15,6 @@ uploads
 pytorch_connectomics
 server_api/chatbot/faiss_index/
 .logs/
+
+# Local demo recordings and generated artifacts
+artifacts/

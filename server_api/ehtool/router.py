@@ -3,6 +3,8 @@ FastAPI router for EHTool detection workflow
 Handles error detection endpoints
 """
 
+import pathlib
+
 from fastapi import APIRouter, Depends, HTTPException, status, Response
 from sqlalchemy.orm import Session
 from typing import List, Optional
@@ -193,7 +195,10 @@ async def load_detection_dataset(
                 {
                     "stage": "proofreading",
                     "title": request.project_name or workflow.title,
-                    "dataset_path": request.dataset_path,
+                    "dataset_path": workflow.dataset_path or (
+                        str(pathlib.Path(request.dataset_path).parent)
+                        if pathlib.Path(request.dataset_path).is_file() else request.dataset_path
+                    ),
                     "image_path": request.dataset_path,
                     "mask_path": request.mask_path,
                     "proofreading_session_id": db_session.id,

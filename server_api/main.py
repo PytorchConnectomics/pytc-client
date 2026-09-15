@@ -205,6 +205,8 @@ PYTC_NEUROGLANCER_MAX_VIEWERS = _env_int("PYTC_NEUROGLANCER_MAX_VIEWERS", 12)
 _retained_neuroglancer_viewers = OrderedDict()
 _retained_neuroglancer_viewers_lock = threading.RLock()
 
+from server_api.workflows import agent_team
+
 models.Base.metadata.create_all(bind=database.engine)
 
 
@@ -240,6 +242,12 @@ app = FastAPI()
 # Ensure uploads directory exists
 os.makedirs("uploads", exist_ok=True)
 app.mount("/uploads", StaticFiles(directory="uploads"), name="uploads")
+
+app.include_router(agent_team.router, prefix="/api/workflows", tags=["agent-team"])
+
+@app.on_event("startup")
+def recover_agent_team_runs():
+    agent_team.recover_interrupted_runs(database.engine)
 
 app.include_router(auth_router.router)
 app.include_router(ehtool_router.router, prefix="/eh", tags=["ehtool"])
@@ -928,6 +936,7 @@ PYTC_ROOT = BASE_DIR / "pytorch_connectomics"
 PYTC_CONFIG_ROOTS = (
     PYTC_ROOT / "tutorials",
     PYTC_ROOT / "configs",
+    BASE_DIR / "demo_configs",
 )
 PYTC_CONFIG_SUFFIXES = (".yaml", ".yml")
 
@@ -943,7 +952,7 @@ def _list_pytc_configs() -> List[str]:
     for root in _iter_existing_config_roots():
         for suffix in PYTC_CONFIG_SUFFIXES:
             for path in root.rglob(f"*{suffix}"):
-                configs.append(str(path.relative_to(PYTC_ROOT)).replace("\\", "/"))
+                configs.append(_config_response_path(path))
     return sorted(set(configs))
 
 
@@ -959,8 +968,6 @@ def _is_valid_config_path(path: pathlib.Path) -> bool:
     if not path.is_file():
         return False
     if path.suffix.lower() not in PYTC_CONFIG_SUFFIXES:
-        return False
-    if not _is_relative_to(path, PYTC_ROOT.resolve()):
         return False
     return any(
         _is_relative_to(path, root.resolve()) for root in _iter_existing_config_roots()
@@ -1012,7 +1019,7 @@ def _resolve_requested_config(path: str) -> Optional[pathlib.Path]:
     if ".." in pathlib.PurePosixPath(normalized).parts:
         return None
 
-    candidates = [(PYTC_ROOT / normalized).resolve()]
+    candidates = [(PYTC_ROOT / normalized).resolve(), (BASE_DIR / normalized).resolve()]
     for root in _iter_existing_config_roots():
         candidates.append((root / normalized).resolve())
 
@@ -1026,6 +1033,8 @@ def _config_response_path(path: pathlib.Path) -> str:
     try:
         return str(path.relative_to(PYTC_ROOT)).replace("\\", "/")
     except ValueError:
+        if _is_relative_to(path, BASE_DIR / "demo_configs"):
+            return str(path.relative_to(BASE_DIR)).replace("\\", "/")
         return str(path)
 
 
@@ -1624,9 +1633,9 @@ async def neuroglancer(
                 db,
                 workflow,
                 {
-                    "stage": "visualization",
-                    "image_path": str(resolved_image_path),
-                    "label_path": str(resolved_label_path) if resolved_label_path else None,
+                    "stage": workflow.stage if workflow.image_path else "visualization",
+                    "image_path": workflow.image_path or str(resolved_image_path),
+                    "label_path": workflow.label_path or (str(resolved_label_path) if resolved_label_path else None),
                     "neuroglancer_url": public_url,
                     "metadata": metadata,
                 },
@@ -2076,12 +2085,21 @@ async def start_model_training(
             workflow,
             mode="training",
         )
+    worker_data = _proxy_to_worker(
+        "post",
+        "/start_model_training",
+        json_body=body,
+        timeout=30,
+    )
+    if workflow_id:
         update_workflow_fields(
             db,
             workflow,
             {
                 "stage": "retraining_staged",
                 "training_output_path": body.get("outputPath"),
+                "metadata": {"training_config": body.get("trainingConfig"),
+                             "training_config_origin": body.get("configOriginPath")},
             },
             commit=True,
         )
@@ -2100,12 +2118,6 @@ async def start_model_training(
                 "inputLabelPath": body.get("inputLabelPath"),
             },
         )
-    worker_data = _proxy_to_worker(
-        "post",
-        "/start_model_training",
-        json_body=body,
-        timeout=30,
-    )
     return {
         "message": "Model training started successfully",
         "data": worker_data,
@@ -2309,12 +2321,21 @@ async def start_model_inference(
             workflow,
             mode="inference",
         )
+    worker_data = _proxy_to_worker(
+        "post",
+        "/start_model_inference",
+        json_body=body,
+        timeout=30,
+    )
+    if workflow_id:
         update_workflow_fields(
             db,
             workflow,
             {
                 "stage": "inference",
                 "inference_output_path": body.get("outputPath"),
+                "metadata": {"inference_config": body.get("inferenceConfig"),
+                             "inference_config_origin": body.get("configOriginPath")},
                 "checkpoint_path": (body.get("arguments") or {}).get("checkpoint")
                 or body.get("checkpointPath"),
             },
@@ -2334,12 +2355,6 @@ async def start_model_inference(
                 "configOriginPath": body.get("configOriginPath"),
             },
         )
-    worker_data = _proxy_to_worker(
-        "post",
-        "/start_model_inference",
-        json_body=body,
-        timeout=30,
-    )
     return {
         "message": "Model inference started successfully",
         "data": worker_data,

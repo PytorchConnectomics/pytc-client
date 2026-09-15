@@ -1935,6 +1935,42 @@ class WorkflowRouteTests(unittest.TestCase):
         self.assertTrue(payload["actions"][0]["requires_approval"])
         self.assertTrue(payload["tasks"])
 
+    def test_stage_corrections_requires_saved_artifact_and_is_repeatable(self):
+        workflow, _ = self._current_workflow()
+        root = pathlib.Path(self.temp_dir.name)
+        image, mask = root / "image.tif", root / "mask.tif"
+        labels = np.zeros((2, 8, 8), dtype=np.uint16)
+        labels[0, 1:4, 1:4] = 7
+        labels[0, 5:7, 5:7] = 8
+        tifffile.imwrite(image, np.zeros_like(labels, dtype=np.uint8))
+        tifffile.imwrite(mask, labels)
+        loaded = self.client.post("/eh/detection/load", json={
+            "dataset_path": str(image), "mask_path": str(mask),
+            "project_name": "Stage test", "workflow_id": workflow["id"],
+        })
+        self.assertEqual(loaded.status_code, 200)
+        sid = loaded.json()["session_id"]
+        route = f"/api/workflows/{workflow['id']}/stage-corrections"
+        rejected = self.client.post(route, json={"session_id": sid})
+        self.assertEqual(rejected.status_code, 409)
+        self.assertIsNone(self._current_workflow()[0]["corrected_mask_path"])
+        self.assertEqual(self.client.post(route, json={"session_id": sid + 100}).status_code, 404)
+        edited = (labels[0] == 7).astype(np.uint8) * 255
+        edited[1, 1] = 0
+        saved = self.client.post("/eh/detection/instance-mask", json={
+            "session_id": sid, "instance_id": 7, "axis": "xy", "z_index": 0,
+            "mask_base64": array_to_base64(edited, format="PNG"),
+        })
+        self.assertEqual(saved.status_code, 200)
+        staged = self.client.post(route, json={"session_id": sid})
+        self.assertEqual(staged.status_code, 200, staged.text)
+        payload = staged.json()
+        self.assertEqual(payload["workflow"]["stage"], "retraining_staged")
+        self.assertEqual(payload["client_effects"]["set_training_image_path"], str(image))
+        self.assertNotEqual(payload["workflow"]["corrected_mask_path"], str(mask))
+        repeated = self.client.post(route, json={"session_id": sid})
+        self.assertEqual(repeated.json()["event"]["id"], payload["event"]["id"])
+
     def test_ehtool_load_classify_save_and_export_append_workflow_events(self):
         workflow, _ = self._current_workflow()
         workflow_id = workflow["id"]

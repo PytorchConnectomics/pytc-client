@@ -369,6 +369,26 @@ describe("WorkflowProvider", () => {
     ]);
   });
 
+  it("restores persisted project paths and run configurations into the workbench", async () => {
+    const setCurrentImage = jest.fn(), setCurrentLabel = jest.fn();
+    const setTrainingConfig = jest.fn(), setInferenceConfig = jest.fn();
+    const trainingState = {setInputImage: jest.fn(), setInputLabel: jest.fn()};
+    const inferenceState = {setInputImage: jest.fn(), setCheckpointPath: jest.fn()};
+    getCurrentWorkflow.mockResolvedValueOnce({workflow: {...baseWorkflow,
+      image_path: "/tmp/raw.tif", label_path: "/tmp/reference.tif",
+      corrected_mask_path: "/tmp/saved-edits.tif", checkpoint_path: "/tmp/model.pth.tar",
+      metadata: {training_config: "SYSTEM: {NUM_GPUS: 0}"}}, events: []});
+    renderProvider({setCurrentImage, setCurrentLabel, setTrainingConfig, setInferenceConfig,
+      trainingState, inferenceState});
+    await screen.findByText("setup");
+    expect(setCurrentImage).toHaveBeenCalledWith("/tmp/raw.tif");
+    expect(setCurrentLabel).toHaveBeenCalledWith("/tmp/reference.tif");
+    expect(trainingState.setInputLabel).toHaveBeenCalledWith("/tmp/saved-edits.tif");
+    expect(inferenceState.setCheckpointPath).toHaveBeenCalledWith("/tmp/model.pth.tar");
+    expect(setTrainingConfig).toHaveBeenCalledWith("SYSTEM: {NUM_GPUS: 0}");
+    expect(setInferenceConfig).toHaveBeenCalledWith("SYSTEM: {NUM_GPUS: 0}");
+  });
+
   it("resumes the saved workflow and remounts its project without resetting it", async () => {
     const resetFileState = jest.fn();
     getCurrentWorkflow.mockResolvedValueOnce({

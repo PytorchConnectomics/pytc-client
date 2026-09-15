@@ -8,6 +8,16 @@ from server_pytc.services import model as model_service
 
 
 class WorkerModelServiceTests(unittest.TestCase):
+    def test_cpu_config_uses_one_logical_device_without_changing_batch_size(self):
+        text = "SYSTEM:\n  NUM_GPUS: 0\nINFERENCE:\n  SAMPLES_PER_BATCH: 1\n"
+        self.assertTrue(model_service._requests_cpu(text))
+        sanitized, changes = model_service._sanitize_runtime_config_text(text, None)
+        config = model_service._load_yaml_config(sanitized)
+        self.assertEqual(config["SYSTEM"]["NUM_GPUS"], 1)
+        self.assertEqual(config["INFERENCE"]["SAMPLES_PER_BATCH"], 1)
+        self.assertTrue(changes)
+        self.assertFalse(model_service._requests_cpu("SYSTEM:\n  NUM_GPUS: 2\n"))
+
     def tearDown(self):
         model_service.cleanup_temp_files()
 

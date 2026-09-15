@@ -3798,7 +3798,8 @@ function FilesManager() {
             >
               {previewFile.type?.startsWith("image") ? (
                 <Image
-                  src="https://via.placeholder.com/600x400?text=Image+Preview+Placeholder"
+                  src={getPreviewUrl(previewFile.key)}
+                  preview={false}
                   alt={previewFile.name}
                   style={{ maxWidth: "100%", maxHeight: 600 }}
                 />
@@ -3812,9 +3813,7 @@ function FilesManager() {
                   }}
                 >
                   <pre style={{ whiteSpace: "pre-wrap" }}>
-                    {previewFile.name === "readme.txt"
-                      ? "This is a dummy text file content.\n\nIn a real app, this would fetch the file content from the server."
-                      : "Preview not available for this file type."}
+                    {"Preview not available for this file type."}
                   </pre>
                 </div>
               )}

@@ -122,13 +122,18 @@ function ModelTraining() {
   const refreshTrainingLogs = useCallback(async () => {
     try {
       const runtime = await getTrainingLogs();
+      if (runtime?.metadata?.workflowId && Number(runtime.metadata.workflowId) !== Number(workflowId)) {
+        setTrainingRuntime(null);
+        return null;
+      }
       setTrainingRuntime(runtime);
+      setIsTraining(["running", "starting"].includes(runtime?.phase));
       return runtime;
     } catch (error) {
       console.error("Error loading training logs:", error);
       return null;
     }
-  }, []);
+  }, [workflowId]);
 
   const refreshTrainingRuntime = useCallback(async () => {
     const [status, runtime] = await Promise.all([

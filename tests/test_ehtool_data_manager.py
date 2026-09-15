@@ -115,3 +115,29 @@ def test_hdf5_project_load_accepts_main_and_data_dataset_names(tmp_path):
     assert manager.image_volume.shape == (3, 8, 8)
     assert manager.mask_volume.shape == (3, 8, 8)
     assert manager.mask_volume.dtype == np.uint16
+
+
+@pytest.mark.parametrize("semantic", [False, True])
+def test_erasing_survives_reload_and_preserves_neighbor_and_source(tmp_path, semantic):
+    image = np.zeros((2, 8, 8), dtype=np.uint8)
+    mask = np.zeros_like(image, dtype=np.uint16)
+    mask[0, 1:4, 1:4] = 255 if semantic else 7
+    mask[0, 5:7, 5:7] = 255 if semantic else 8
+    image_path, mask_path = tmp_path / "image.tif", tmp_path / "mask.tif"
+    tifffile.imwrite(image_path, image)
+    tifffile.imwrite(mask_path, mask)
+    manager = DataManager()
+    manager.load_dataset(str(image_path), str(mask_path))
+    manager.ensure_instances()
+    instance_id = int(manager.instance_volume[0, 1, 1])
+    edited = (manager.instance_volume[0] == instance_id).astype(np.uint8) * 255
+    edited[1, 1] = 0
+    result = manager.save_instance_mask_slice(instance_id, "xy", 0, array_to_base64(edited))
+    assert result["pixels_removed"] == 1
+    reloaded = DataManager()
+    reloaded.load_dataset(str(image_path), str(mask_path))
+    reloaded.ensure_instances()
+    assert reloaded.instance_volume[0, 1, 1] == 0
+    assert reloaded.mask_volume[0, 1, 1] == 0
+    assert reloaded.mask_volume[0, 5, 5] == mask[0, 5, 5]
+    assert np.array_equal(tifffile.imread(mask_path), mask)

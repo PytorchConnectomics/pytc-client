@@ -947,6 +947,13 @@ export async function appendWorkflowEvent(workflowId, event) {
   }
 }
 
+export async function stageWorkflowCorrections(workflowId, sessionId) {
+  const res = await apiClient.post(`/api/workflows/${workflowId}/stage-corrections`, {
+    session_id: sessionId,
+  });
+  return res.data;
+}
+
 export async function createAgentAction(workflowId, action) {
   try {
     const res = await apiClient.post(
