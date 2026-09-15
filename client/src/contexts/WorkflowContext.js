@@ -378,14 +378,11 @@ export function WorkflowProvider({ children }) {
 
   useEffect(() => {
     let cancelled = false;
-    const bootFreshSession = async () => {
+    const resumeSession = async () => {
       setLoading(true);
       try {
-        await resetFileWorkspace();
-        await clearLocalWorkflowInputs();
-        const data = await startNewWorkflowApi({
-          metadata: { created_from: "page_reload" },
-        });
+        // Reload resumes persisted work. Starting over is an explicit user action.
+        const data = await getCurrentWorkflow();
         if (cancelled) return;
         applyWorkflowDetail(data);
 
@@ -402,19 +399,19 @@ export function WorkflowProvider({ children }) {
           }
         }
       } catch (error) {
-        console.warn("Fresh workflow boot failed:", error);
+        console.warn("Workflow resume failed:", error);
         if (!cancelled) {
-          message.error("Failed to initialize a fresh workflow session.");
+          message.error("Failed to resume the saved workflow.");
         }
       } finally {
         if (!cancelled) setLoading(false);
       }
     };
-    bootFreshSession();
+    resumeSession();
     return () => {
       cancelled = true;
     };
-  }, [applyWorkflowDetail, clearLocalWorkflowInputs]);
+  }, [applyWorkflowDetail]);
 
   const proposeAgentAction = useCallback(
     async (action) => {

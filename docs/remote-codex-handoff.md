@@ -1,3 +1,5 @@
+> Active direction (2026-09-15): May 5 baseline with project manager/task agents. See [current handoff](agent-reset-handoff.md); older roadmap priorities below are historical.
+
 # Remote Codex Handoff: PyTC Client Agentic Prototype
 
 Use this file to port the current local Codex context to a remote Codex session.

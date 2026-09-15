@@ -1,3 +1,5 @@
+> Active direction (2026-09-15): May 5 baseline with project manager/task agents. See [current handoff](../agent-reset-handoff.md); older roadmap priorities below are historical.
+
 # Codex Working Memory
 
 This directory vendors the local long-term notes from the main Codex session so

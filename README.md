@@ -1,3 +1,5 @@
+> Active direction (2026-09-15): May 5 baseline with project manager/task agents. See [current handoff](docs/agent-reset-handoff.md); older roadmap priorities below are historical.
+
 # PyTC Client
 
 A desktop client that interacts with the `pytorch_connectomics` library for connectomics workflows.

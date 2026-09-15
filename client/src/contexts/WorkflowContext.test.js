@@ -369,9 +369,9 @@ describe("WorkflowProvider", () => {
     ]);
   });
 
-  it("starts a fresh workflow and remounts the boot project on startup", async () => {
+  it("resumes the saved workflow and remounts its project without resetting it", async () => {
     const resetFileState = jest.fn();
-    startNewWorkflow.mockResolvedValueOnce({
+    getCurrentWorkflow.mockResolvedValueOnce({
       workflow: { ...baseWorkflow, dataset_path: "/tmp/boot-project" },
       events: [{ id: 1, event_type: "workflow.created" }],
     });
@@ -399,17 +399,15 @@ describe("WorkflowProvider", () => {
     });
     expect(listWorkflowArtifacts).toHaveBeenCalledWith(1);
     expect(listWorkflowEvaluationResults).toHaveBeenCalledWith(1);
-    expect(resetFileWorkspace).toHaveBeenCalledTimes(1);
-    expect(resetFileState).toHaveBeenCalled();
-    expect(startNewWorkflow).toHaveBeenCalledWith({
-      metadata: { created_from: "page_reload" },
-    });
+    expect(resetFileWorkspace).not.toHaveBeenCalled();
+    expect(resetFileState).not.toHaveBeenCalled();
+    expect(startNewWorkflow).not.toHaveBeenCalled();
     expect(mountProjectDirectory).toHaveBeenCalledWith({
       directoryPath: "/tmp/boot-project",
       mountName: baseWorkflow.title,
       destinationPath: "root",
     });
-    expect(getCurrentWorkflow).not.toHaveBeenCalled();
+    expect(getCurrentWorkflow).toHaveBeenCalledTimes(1);
     expect(getWorkflowAgentRecommendation).toHaveBeenCalledWith(1);
     expect(getWorkflowPreflight).toHaveBeenCalledWith(1);
   });
