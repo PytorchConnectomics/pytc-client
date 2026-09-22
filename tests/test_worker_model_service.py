@@ -110,6 +110,46 @@ class WorkerModelServiceTests(unittest.TestCase):
         self.assertEqual(unloaded, ["qwen3.6:27b"])
         run_mock.assert_called_once()
 
+    def test_terminal_inference_snapshot_retains_correlators_and_artifacts(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            output_dir = pathlib.Path(tmpdir)
+            prediction_path = output_dir / "result_xy.h5"
+            prediction_path.write_text("prediction", encoding="utf-8")
+            model_service._reset_runtime_state(
+                "inference",
+                phase="failed",
+                metadata={
+                    "workflowId": 17,
+                    "workflow_id": 17,
+                    "commandId": 23,
+                    "command_id": 23,
+                    "runId": "workflow-command-23",
+                    "run_id": "workflow-command-23",
+                    "outputPath": str(output_dir),
+                },
+            )
+            model_service._update_runtime_state(
+                "inference",
+                exitCode=2,
+                endedAt="2026-08-04T12:00:00+00:00",
+                lastError=model_service._terminal_runtime_error("inference", 2),
+            )
+
+            snapshot = model_service.get_inference_logs()
+
+        self.assertEqual(snapshot["phase"], "failed")
+        self.assertEqual(snapshot["exitCode"], 2)
+        self.assertIn("exited with code 2", snapshot["lastError"])
+        self.assertEqual(snapshot["metadata"]["workflowId"], 17)
+        self.assertEqual(snapshot["metadata"]["workflow_id"], 17)
+        self.assertEqual(snapshot["metadata"]["commandId"], 23)
+        self.assertEqual(snapshot["metadata"]["command_id"], 23)
+        self.assertEqual(snapshot["metadata"]["runId"], "workflow-command-23")
+        self.assertEqual(snapshot["metadata"]["run_id"], "workflow-command-23")
+        self.assertEqual(
+            snapshot["metadata"]["predictionPath"], str(prediction_path.resolve())
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

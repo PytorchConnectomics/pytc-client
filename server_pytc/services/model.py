@@ -324,6 +324,12 @@ def _set_runtime_error(kind: str, message: str):
     )
 
 
+def _terminal_runtime_error(kind: str, exit_code: int | None) -> str | None:
+    if exit_code in (None, 0):
+        return None
+    return f"{kind.capitalize()} subprocess exited with code {exit_code}"
+
+
 def _get_runtime_snapshot(kind: str) -> dict[str, Any]:
     process = _get_runtime_process(kind)
     is_running = bool(process and process.poll() is None)
@@ -340,6 +346,12 @@ def _get_runtime_snapshot(kind: str) -> dict[str, Any]:
             phase = "finished" if rc == 0 else "failed"
             exit_code = rc
             ended_at = state["endedAt"] or _utc_now()
+            state["phase"] = phase
+            state["exitCode"] = exit_code
+            state["endedAt"] = ended_at
+            if not state["lastError"]:
+                state["lastError"] = _terminal_runtime_error(kind, exit_code)
+            state["lastUpdatedAt"] = _utc_now()
 
         lines = list(state["lines"])
         snapshot = {
@@ -1543,12 +1555,16 @@ def _start_logged_process(
                         level="WARNING",
                         output_path=output_path,
                     )
-            _update_runtime_state(
-                kind,
-                phase="finished" if exit_code == 0 else "failed",
-                exitCode=exit_code,
-                endedAt=_utc_now(),
-            )
+            terminal_updates = {
+                "phase": "finished" if exit_code == 0 else "failed",
+                "exitCode": exit_code,
+                "endedAt": _utc_now(),
+            }
+            if exit_code != 0:
+                terminal_updates["lastError"] = _get_runtime_snapshot(kind).get(
+                    "lastError"
+                ) or _terminal_runtime_error(kind, exit_code)
+            _update_runtime_state(kind, **terminal_updates)
             _append_runtime_event(
                 kind,
                 f"{label} subprocess finished with exit code: {exit_code}",
@@ -1801,8 +1817,11 @@ def start_training(payload: dict):
             "inputLabelPath": payload.get("inputLabelPath"),
             "configOriginPath": config_origin_path,
             "workflowId": payload.get("workflowId") or payload.get("workflow_id"),
+            "workflow_id": payload.get("workflow_id") or payload.get("workflowId"),
             "runId": payload.get("runId") or payload.get("run_id"),
+            "run_id": payload.get("run_id") or payload.get("runId"),
             "commandId": payload.get("command_id") or payload.get("commandId"),
+            "command_id": payload.get("command_id") or payload.get("commandId"),
             "autoParameters": auto_parameters,
         },
     )
@@ -2167,6 +2186,11 @@ def start_inference(payload: dict):
             or (payload.get("arguments") or {}).get("checkpoint"),
             "configOriginPath": config_origin_path,
             "workflowId": payload.get("workflow_id") or payload.get("workflowId"),
+            "workflow_id": payload.get("workflow_id") or payload.get("workflowId"),
+            "runId": payload.get("run_id") or payload.get("runId"),
+            "run_id": payload.get("run_id") or payload.get("runId"),
+            "commandId": payload.get("command_id") or payload.get("commandId"),
+            "command_id": payload.get("command_id") or payload.get("commandId"),
         },
     )
 

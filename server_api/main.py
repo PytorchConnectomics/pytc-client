@@ -54,8 +54,15 @@ from server_api.workflows.db_models import (
 )
 from server_api.workflows.operation_service import (
     create_workflow_operation,
+    get_workflow_operation_or_404,
+    heartbeat_workflow_operation,
     operation_to_dict,
     transition_workflow_operation,
+)
+from server_api.workflows.runtime_reconciliation import (
+    reconcile_runtime_operation,
+    reconciliation_response,
+    runtime_kind_for_operation,
 )
 from server_api.workflows.service import (
     append_event_for_workflow_if_present,
@@ -903,13 +910,18 @@ def _workflow_command_run_response(
     operation: WorkflowOperation,
 ) -> dict[str, Any]:
     result = decode_json(operation.result_json)
+    command_result = decode_json(command.result_json)
+    if not result:
+        result = command_result
     return {
         "workflow_id": workflow.id,
         "command": command_to_dict(command),
         "operation": operation_to_dict(operation),
-        "worker": result.get("worker", {}),
-        "run_id": result.get("run_id"),
-        "started_event_id": result.get("started_event_id"),
+        "worker": result.get("worker", command_result.get("worker", {})),
+        "run_id": result.get("run_id", command_result.get("run_id")),
+        "started_event_id": result.get(
+            "started_event_id", command_result.get("started_event_id")
+        ),
     }
 
 
@@ -2678,21 +2690,21 @@ async def run_workflow_command(
         )
 
     if command.status == "submitted":
-        completed_operation = (
+        submitted_operation = (
             db.query(WorkflowOperation)
             .filter(
                 WorkflowOperation.workflow_id == workflow.id,
                 WorkflowOperation.command_id == command.id,
-                WorkflowOperation.status == "succeeded",
+                WorkflowOperation.status.in_({"running", "succeeded"}),
             )
             .order_by(WorkflowOperation.id.desc())
             .first()
         )
-        if completed_operation is not None:
+        if submitted_operation is not None:
             return _workflow_command_run_response(
                 workflow,
                 command,
-                completed_operation,
+                submitted_operation,
             )
         raise HTTPException(
             status_code=409, detail="Workflow command was already submitted."
@@ -2836,12 +2848,13 @@ async def run_workflow_command(
             result_payload=operation_result,
             commit=False,
         )
-        operation = transition_workflow_operation(
+        operation = heartbeat_workflow_operation(
             db,
             operation,
-            status="succeeded",
-            expected_status="running",
-            result_payload=operation_result,
+            metadata={
+                "worker": worker_data,
+                "worker_submission": {"accepted": True},
+            },
             lease_owner=runner_name,
             commit=False,
         )
@@ -2912,6 +2925,43 @@ async def run_workflow_command(
             idempotency_key=f"workflow-command:{command.id}:{event_prefix}.failed",
         )
         raise HTTPException(status_code=500, detail=error_payload) from exc
+
+
+@app.post("/api/workflows/{workflow_id}/operations/{operation_id}/reconcile-runtime")
+async def reconcile_workflow_runtime_operation(
+    workflow_id: int,
+    operation_id: int,
+    current_user: models.User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Refresh a correlated worker runtime snapshot into one operation record."""
+    workflow = get_user_workflow_or_404(
+        db, workflow_id=int(workflow_id), user_id=current_user.id
+    )
+    operation = get_workflow_operation_or_404(
+        db,
+        workflow_id=workflow.id,
+        operation_id=int(operation_id),
+    )
+    runtime_kind = runtime_kind_for_operation(operation)
+    if runtime_kind is None:
+        raise HTTPException(
+            status_code=400,
+            detail="Workflow operation does not represent a PyTC runtime.",
+        )
+    snapshot = _proxy_to_worker(
+        "get",
+        "/training_logs" if runtime_kind == "training" else "/inference_logs",
+        timeout=5,
+    )
+    return reconciliation_response(
+        reconcile_runtime_operation(
+            db,
+            workflow=workflow,
+            operation=operation,
+            snapshot=snapshot,
+        )
+    )
 
 
 @app.post("/stop_model_training")

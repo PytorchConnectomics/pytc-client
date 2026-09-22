@@ -819,12 +819,16 @@ def create_or_update_model_run_from_event(
         run_type, status = "training", "completed"
     elif event_type == "training.failed":
         run_type, status = "training", "failed"
+    elif event_type == "training.cancelled":
+        run_type, status = "training", "cancelled"
     elif event_type == "inference.started":
         run_type, status = "inference", "running"
     elif event_type == "inference.completed":
         run_type, status = "inference", "completed"
     elif event_type == "inference.failed":
         run_type, status = "inference", "failed"
+    elif event_type == "inference.cancelled":
+        run_type, status = "inference", "cancelled"
     if not run_type:
         return None
 
@@ -853,7 +857,7 @@ def create_or_update_model_run_from_event(
             output_path=output_path,
             fallback_latest=not bool(run_id),
         )
-        if status in {"completed", "failed"}
+        if status in {"completed", "failed", "cancelled"}
         else None
     )
     if status == "running" and run_id:
@@ -901,7 +905,7 @@ def create_or_update_model_run_from_event(
     )
     if status == "running" and not run.started_at:
         run.started_at = now
-    if status in {"completed", "failed"}:
+    if status in {"completed", "failed", "cancelled"}:
         run.completed_at = now
 
     if output_path and run_type == "inference":

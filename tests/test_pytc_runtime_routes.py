@@ -23,7 +23,7 @@ from server_api.main import (
     _resolve_raw_image_shader,
 )
 from server_api.main import _coerce_neuroglancer_scales
-from server_api.workflows.db_models import WorkflowCommand
+from server_api.workflows.db_models import WorkflowCommand, WorkflowOperation
 from server_api.workflows.service import encode_json
 from server_pytc.main import app as server_pytc_app
 from server_pytc.services import model as model_service
@@ -344,6 +344,7 @@ class WorkflowInferenceRuntimeSyncTests(unittest.TestCase):
 
         server_api_app.dependency_overrides[auth_database.get_db] = override_get_db
         self.client = TestClient(server_api_app)
+        self._runtime_operation_sequence = 0
 
     def tearDown(self):
         server_api_app.dependency_overrides.clear()
@@ -354,6 +355,192 @@ class WorkflowInferenceRuntimeSyncTests(unittest.TestCase):
         response = self.client.get("/api/workflows/current")
         self.assertEqual(response.status_code, 200)
         return response.json()["workflow"]["id"]
+
+    def _create_running_runtime_operation(self, runtime_kind):
+        """Create the durable records produced after a worker accepts a command."""
+        self.assertIn(runtime_kind, {"training", "inference"})
+        workflow_id = self._workflow_id()
+        self._runtime_operation_sequence += 1
+        suffix = self._runtime_operation_sequence
+        run_id = f"workflow-command-{runtime_kind}-test-{suffix}"
+        db = self.SessionLocal()
+        try:
+            command = WorkflowCommand(
+                workflow_id=workflow_id,
+                command_type=f"start_{runtime_kind}",
+                status="submitted",
+                idempotency_key=f"test:{runtime_kind}:reconcile-command:{suffix}",
+                actor="agent",
+                input_json=encode_json({"run_id": run_id}),
+                attempt_count=1,
+            )
+            db.add(command)
+            db.flush()
+            operation = WorkflowOperation(
+                workflow_id=workflow_id,
+                command_id=command.id,
+                operation_type=f"start_{runtime_kind}",
+                status="running",
+                idempotency_key=f"test:{runtime_kind}:reconcile-operation:{suffix}",
+                correlation_id=f"test:{runtime_kind}:reconcile:{suffix}",
+                actor="agent",
+                metadata_json=encode_json({"run_id": run_id}),
+                attempt_count=1,
+                lease_owner=f"server_api.{runtime_kind}_runner",
+            )
+            db.add(operation)
+            db.commit()
+            return workflow_id, command.id, operation.id, run_id
+        finally:
+            db.close()
+
+    @staticmethod
+    def _runtime_snapshot(
+        *,
+        workflow_id,
+        command_id,
+        run_id,
+        phase,
+        exit_code=None,
+        last_error=None,
+    ):
+        return {
+            "phase": phase,
+            "pid": 4242,
+            "exitCode": exit_code,
+            "startedAt": "2026-08-04T12:00:00+00:00",
+            "endedAt": "2026-08-04T12:01:00+00:00",
+            "lastError": last_error,
+            "lineCount": 12,
+            "metadata": {
+                "workflowId": workflow_id,
+                "commandId": command_id,
+                "runId": run_id,
+                "outputPath": "/tmp/runtime-output",
+                "checkpointPath": "/tmp/checkpoint.pth.tar",
+                "predictionPath": "/tmp/runtime-output/prediction.h5",
+            },
+        }
+
+    def _reconcile_runtime(self, workflow_id, operation_id, snapshot):
+        with patch("server_api.main._proxy_to_worker", return_value=snapshot):
+            return self.client.post(
+                f"/api/workflows/{workflow_id}/operations/{operation_id}/reconcile-runtime"
+            )
+
+    def test_reconcile_correlated_terminal_runtime_completes_running_operations(self):
+        for runtime_kind in ("training", "inference"):
+            with self.subTest(runtime_kind=runtime_kind):
+                workflow_id, command_id, operation_id, run_id = (
+                    self._create_running_runtime_operation(runtime_kind)
+                )
+                response = self._reconcile_runtime(
+                    workflow_id,
+                    operation_id,
+                    self._runtime_snapshot(
+                        workflow_id=workflow_id,
+                        command_id=command_id,
+                        run_id=run_id,
+                        phase="finished",
+                        exit_code=0,
+                    ),
+                )
+
+                self.assertEqual(response.status_code, 200)
+                payload = response.json()
+                self.assertTrue(payload["reconciled"])
+                self.assertEqual(payload["reason"], "terminal")
+                self.assertEqual(payload["operation"]["status"], "succeeded")
+                self.assertEqual(payload["operation"]["result"]["run_id"], run_id)
+
+    def test_reconcile_refuses_uncorrelated_snapshot_and_is_idempotent(self):
+        workflow_id, command_id, operation_id, run_id = (
+            self._create_running_runtime_operation("inference")
+        )
+        mismatch = self._reconcile_runtime(
+            workflow_id,
+            operation_id,
+            self._runtime_snapshot(
+                workflow_id=workflow_id,
+                command_id=command_id + 1,
+                run_id=run_id,
+                phase="finished",
+                exit_code=0,
+            ),
+        )
+        self.assertEqual(mismatch.status_code, 200)
+        self.assertFalse(mismatch.json()["reconciled"])
+        self.assertEqual(mismatch.json()["reason"], "correlation_mismatch")
+        self.assertEqual(mismatch.json()["operation"]["status"], "running")
+
+        terminal_snapshot = self._runtime_snapshot(
+            workflow_id=workflow_id,
+            command_id=command_id,
+            run_id=run_id,
+            phase="finished",
+            exit_code=0,
+        )
+        first = self._reconcile_runtime(workflow_id, operation_id, terminal_snapshot)
+        second = self._reconcile_runtime(workflow_id, operation_id, terminal_snapshot)
+        self.assertTrue(first.json()["reconciled"])
+        self.assertFalse(second.json()["reconciled"])
+        self.assertEqual(second.json()["reason"], "terminal")
+
+        events = self.client.get(f"/api/workflows/{workflow_id}/events").json()
+        terminal_events = [
+            event
+            for event in events
+            if event["event_type"] == "inference.completed"
+            and event["payload"].get("operation_id") == operation_id
+        ]
+        self.assertEqual(len(terminal_events), 1)
+
+    def test_reconcile_failed_and_stopped_runtime_preserves_terminal_semantics(self):
+        workflow_id, command_id, operation_id, run_id = (
+            self._create_running_runtime_operation("training")
+        )
+        failure = self._reconcile_runtime(
+            workflow_id,
+            operation_id,
+            self._runtime_snapshot(
+                workflow_id=workflow_id,
+                command_id=command_id,
+                run_id=run_id,
+                phase="failed",
+                exit_code=1,
+                last_error="worker crashed",
+            ),
+        )
+        self.assertEqual(failure.status_code, 200)
+        self.assertEqual(failure.json()["operation"]["status"], "failed")
+        self.assertEqual(
+            failure.json()["operation"]["error"]["detail"], "worker crashed"
+        )
+
+        for requested, expected_status in ((True, "cancelled"), (False, "failed")):
+            with self.subTest(cancellation_requested=requested):
+                workflow_id, command_id, operation_id, run_id = (
+                    self._create_running_runtime_operation("inference")
+                )
+                if requested:
+                    cancel = self.client.post(
+                        f"/api/workflows/{workflow_id}/operations/{operation_id}/cancel",
+                        json={"reason": "user requested stop"},
+                    )
+                    self.assertEqual(cancel.status_code, 200)
+                    self.assertEqual(cancel.json()["status"], "running")
+                stopped = self._reconcile_runtime(
+                    workflow_id,
+                    operation_id,
+                    self._runtime_snapshot(
+                        workflow_id=workflow_id,
+                        command_id=command_id,
+                        run_id=run_id,
+                        phase="stopped",
+                    ),
+                )
+                self.assertEqual(stopped.status_code, 200)
+                self.assertEqual(stopped.json()["operation"]["status"], expected_status)
 
     def test_sync_completed_inference_runtime_materializes_prediction_run(self):
         workflow_id = self._workflow_id()
@@ -542,14 +729,14 @@ class WorkflowInferenceRuntimeSyncTests(unittest.TestCase):
         payload = run_response.json()
         self.assertEqual(payload["command"]["status"], "submitted")
         self.assertEqual(payload["command"]["attempt_count"], 1)
-        self.assertEqual(payload["operation"]["status"], "succeeded")
+        self.assertEqual(payload["operation"]["status"], "running")
         self.assertEqual(payload["operation"]["operation_type"], "start_training")
         self.assertEqual(payload["operation"]["command_id"], command["id"])
         self.assertEqual(
             payload["operation"]["idempotency_key"],
             f"workflow-command:{command['id']}:attempt:1",
         )
-        self.assertEqual(payload["operation"]["result"]["worker"]["pid"], 4242)
+        self.assertEqual(payload["operation"]["metadata"]["worker"]["pid"], 4242)
         self.assertEqual(
             duplicate_run_response.json()["operation"]["id"],
             payload["operation"]["id"],
@@ -581,7 +768,7 @@ class WorkflowInferenceRuntimeSyncTests(unittest.TestCase):
         )
         self.assertEqual(operations_response.status_code, 200)
         self.assertEqual(len(operations_response.json()), 1)
-        self.assertEqual(operations_response.json()[0]["status"], "succeeded")
+        self.assertEqual(operations_response.json()[0]["status"], "running")
 
         events_response = self.client.get(f"/api/workflows/{workflow_id}/events")
         self.assertEqual(events_response.status_code, 200)
@@ -658,7 +845,7 @@ class WorkflowInferenceRuntimeSyncTests(unittest.TestCase):
         self.assertEqual(payload["command"]["status"], "submitted")
         self.assertEqual(payload["command"]["attempt_count"], 1)
         self.assertEqual(payload["operation"]["operation_type"], "start_inference")
-        self.assertEqual(payload["operation"]["status"], "succeeded")
+        self.assertEqual(payload["operation"]["status"], "running")
         self.assertEqual(payload["operation"]["command_id"], command_id)
         self.assertEqual(
             payload["operation"]["idempotency_key"],
@@ -764,7 +951,7 @@ class WorkflowInferenceRuntimeSyncTests(unittest.TestCase):
             )
 
         self.assertEqual(retry_response.status_code, 200)
-        self.assertEqual(retry_response.json()["operation"]["status"], "succeeded")
+        self.assertEqual(retry_response.json()["operation"]["status"], "running")
         self.assertEqual(
             retry_response.json()["operation"]["idempotency_key"],
             f"workflow-command:{command_id}:attempt:2",
@@ -841,7 +1028,7 @@ class WorkflowInferenceRuntimeSyncTests(unittest.TestCase):
             )
 
         self.assertEqual(retry_response.status_code, 200)
-        self.assertEqual(retry_response.json()["operation"]["status"], "succeeded")
+        self.assertEqual(retry_response.json()["operation"]["status"], "running")
         self.assertEqual(
             retry_response.json()["operation"]["idempotency_key"],
             f"workflow-command:{command_id}:attempt:2",
