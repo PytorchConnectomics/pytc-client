@@ -1288,6 +1288,23 @@ class WorkflowRouteTests(unittest.TestCase):
         action_ids = [action["id"] for action in payload["recommended_next_actions"]]
         self.assertIn("proofread-draft-masks", action_ids)
         self.assertIn("train-from-ground-truth", action_ids)
+        proofread_action = next(
+            action
+            for action in payload["recommended_next_actions"]
+            if action["id"] == "proofread-draft-masks"
+        )
+        self.assertEqual(
+            proofread_action["client_effects"]["set_proofreading_dataset_path"],
+            str((image_dir / "vol_b_im.h5").resolve()),
+        )
+        self.assertEqual(
+            proofread_action["client_effects"]["set_proofreading_mask_path"],
+            str((label_dir / "vol_b_seg.h5").resolve()),
+        )
+        self.assertEqual(
+            proofread_action["client_effects"]["runtime_action"]["kind"],
+            "start_proofreading",
+        )
         blocker_ids = [blocker["id"] for blocker in payload["blockers"]]
         self.assertIn("draft_masks_need_review", blocker_ids)
 
@@ -2849,6 +2866,10 @@ class WorkflowRouteTests(unittest.TestCase):
         mask[1, 4:6, 4:6] = 3
         tifffile.imwrite(str(image_path), image)
         tifffile.imwrite(str(mask_path), mask)
+        self.client.patch(
+            f"/api/workflows/{workflow_id}",
+            json={"dataset_path": str(data_root)},
+        )
 
         load_response = self.client.post(
             "/eh/detection/load",
@@ -2866,6 +2887,9 @@ class WorkflowRouteTests(unittest.TestCase):
         updated_workflow = workflow_response.json()["workflow"]
         self.assertEqual(updated_workflow["stage"], "proofreading")
         self.assertEqual(updated_workflow["proofreading_session_id"], session_id)
+        self.assertEqual(updated_workflow["dataset_path"], str(data_root))
+        self.assertEqual(updated_workflow["image_path"], str(image_path))
+        self.assertEqual(updated_workflow["label_path"], str(mask_path))
 
         instances_response = self.client.get(
             "/eh/detection/instances", params={"session_id": session_id}

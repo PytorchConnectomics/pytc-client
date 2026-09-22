@@ -23,6 +23,8 @@ from server_api.main import (
     _resolve_raw_image_shader,
 )
 from server_api.main import _coerce_neuroglancer_scales
+from server_api.workflows.db_models import WorkflowCommand
+from server_api.workflows.service import encode_json
 from server_pytc.main import app as server_pytc_app
 from server_pytc.services import model as model_service
 
@@ -521,6 +523,7 @@ class WorkflowInferenceRuntimeSyncTests(unittest.TestCase):
         captured = {}
 
         def fake_worker(method, endpoint, json_body=None, **_kwargs):
+            captured["calls"] = captured.get("calls", 0) + 1
             captured["method"] = method
             captured["endpoint"] = endpoint
             captured["json_body"] = json_body
@@ -530,11 +533,28 @@ class WorkflowInferenceRuntimeSyncTests(unittest.TestCase):
             run_response = self.client.post(
                 f"/api/workflows/{workflow_id}/commands/{command['id']}/run"
             )
+            duplicate_run_response = self.client.post(
+                f"/api/workflows/{workflow_id}/commands/{command['id']}/run"
+            )
 
         self.assertEqual(run_response.status_code, 200)
+        self.assertEqual(duplicate_run_response.status_code, 200)
         payload = run_response.json()
         self.assertEqual(payload["command"]["status"], "submitted")
         self.assertEqual(payload["command"]["attempt_count"], 1)
+        self.assertEqual(payload["operation"]["status"], "succeeded")
+        self.assertEqual(payload["operation"]["operation_type"], "start_training")
+        self.assertEqual(payload["operation"]["command_id"], command["id"])
+        self.assertEqual(
+            payload["operation"]["idempotency_key"],
+            f"workflow-command:{command['id']}:attempt:1",
+        )
+        self.assertEqual(payload["operation"]["result"]["worker"]["pid"], 4242)
+        self.assertEqual(
+            duplicate_run_response.json()["operation"]["id"],
+            payload["operation"]["id"],
+        )
+        self.assertEqual(captured["calls"], 1)
         self.assertEqual(payload["worker"]["pid"], 4242)
         self.assertEqual(captured["method"], "post")
         self.assertEqual(captured["endpoint"], "/start_model_training")
@@ -556,6 +576,13 @@ class WorkflowInferenceRuntimeSyncTests(unittest.TestCase):
         self.assertEqual(commands_response.status_code, 200)
         self.assertEqual(commands_response.json()[0]["status"], "submitted")
 
+        operations_response = self.client.get(
+            f"/api/workflows/{workflow_id}/operations"
+        )
+        self.assertEqual(operations_response.status_code, 200)
+        self.assertEqual(len(operations_response.json()), 1)
+        self.assertEqual(operations_response.json()[0]["status"], "succeeded")
+
         events_response = self.client.get(f"/api/workflows/{workflow_id}/events")
         self.assertEqual(events_response.status_code, 200)
         started_events = [
@@ -568,6 +595,83 @@ class WorkflowInferenceRuntimeSyncTests(unittest.TestCase):
         self.assertEqual(
             started_events[0]["payload"]["run_id"],
             f"workflow-command-{command['id']}",
+        )
+
+    def test_durable_training_command_failure_records_retryable_operation(self):
+        workflow_id = self._workflow_id()
+        project_root = pathlib.Path(self.temp_dir.name) / "failed-command-project"
+        image_path = project_root / "image.h5"
+        label_path = project_root / "label.tif"
+        output_path = project_root / "output"
+        project_root.mkdir(parents=True)
+        output_path.mkdir()
+        image_path.write_text("image", encoding="utf-8")
+        label_path.write_text("label", encoding="utf-8")
+
+        db = self.SessionLocal()
+        try:
+            command = WorkflowCommand(
+                workflow_id=workflow_id,
+                command_type="start_training",
+                status="queued",
+                idempotency_key="test:failed-training-command",
+                actor="user",
+                input_json=encode_json(
+                    {
+                        "trainingConfig": "DATASET: {}\n",
+                        "outputPath": str(output_path),
+                        "logPath": str(output_path),
+                        "inputImagePath": str(image_path),
+                        "inputLabelPath": str(label_path),
+                    }
+                ),
+            )
+            db.add(command)
+            db.commit()
+            db.refresh(command)
+            command_id = command.id
+        finally:
+            db.close()
+
+        with patch(
+            "server_api.main._proxy_to_worker",
+            side_effect=HTTPException(status_code=503, detail="worker unavailable"),
+        ):
+            failed_response = self.client.post(
+                f"/api/workflows/{workflow_id}/commands/{command_id}/run"
+            )
+
+        self.assertEqual(failed_response.status_code, 503)
+        commands_response = self.client.get(f"/api/workflows/{workflow_id}/commands")
+        failed_command = next(
+            item for item in commands_response.json() if item["id"] == command_id
+        )
+        self.assertEqual(failed_command["status"], "retry_pending")
+        self.assertEqual(failed_command["attempt_count"], 1)
+
+        operations_response = self.client.get(
+            f"/api/workflows/{workflow_id}/operations"
+        )
+        self.assertEqual(operations_response.status_code, 200)
+        operations = operations_response.json()
+        self.assertEqual(len(operations), 1)
+        self.assertEqual(operations[0]["status"], "failed")
+        self.assertEqual(operations[0]["command_id"], command_id)
+        self.assertEqual(operations[0]["error"]["status_code"], 503)
+
+        with patch(
+            "server_api.main._proxy_to_worker",
+            return_value={"status": "started", "pid": 4243},
+        ):
+            retry_response = self.client.post(
+                f"/api/workflows/{workflow_id}/commands/{command_id}/run"
+            )
+
+        self.assertEqual(retry_response.status_code, 200)
+        self.assertEqual(retry_response.json()["operation"]["status"], "succeeded")
+        self.assertEqual(
+            retry_response.json()["operation"]["idempotency_key"],
+            f"workflow-command:{command_id}:attempt:2",
         )
 
 
@@ -652,12 +756,14 @@ class ModelServiceTests(unittest.TestCase):
             self.assertEqual(records[1]["stream"], "stdout")
 
     def test_detect_chunk_tile_mismatch_for_direct_h5_volume(self):
-        diagnostic = model_service._detect_chunk_tile_mismatch("""
+        diagnostic = model_service._detect_chunk_tile_mismatch(
+            """
 DATASET:
   DO_CHUNK_TITLE: 1
   IMAGE_NAME: /tmp/train-volume.h5
   LABEL_NAME: /tmp/train-label.h5
-""")
+"""
+        )
 
         self.assertIsNotNone(diagnostic)
         self.assertEqual(diagnostic["code"], "tile_dataset_direct_volume_mismatch")

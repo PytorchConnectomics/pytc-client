@@ -2,6 +2,19 @@
   text-align: center;
 }
 
+.app-error-boundary {
+  align-items: center;
+  background: var(--seg-bg-canvas, #f7f4ed);
+  display: flex;
+  justify-content: center;
+  min-height: 100vh;
+  padding: 24px;
+}
+
+.app-error-boundary .ant-result {
+  max-width: 680px;
+}
+
 :root {
   --seg-bg-canvas: #f7f4ed;
   --seg-bg-panel: #fffdfa;
@@ -190,6 +203,34 @@
 
 .pytc-top-menu .ant-menu-title-content {
   padding-right: 2px;
+}
+
+.pytc-top-nav,
+.pytc-top-menu {
+  min-width: 0;
+}
+
+.pytc-top-nav {
+  max-width: 100vw;
+  overflow: hidden;
+}
+
+.pytc-top-nav-action {
+  flex: 0 0 auto;
+}
+
+@media (max-width: 720px) {
+  .pytc-top-menu .ant-menu-item {
+    padding-inline: 10px 14px !important;
+  }
+
+  .pytc-top-nav-action {
+    padding-inline: 8px;
+  }
+
+  .pytc-top-nav-action__label {
+    display: none;
+  }
 }
 
 .app-logo {

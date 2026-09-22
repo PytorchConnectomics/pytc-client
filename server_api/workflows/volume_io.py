@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+from abc import ABC, abstractmethod
+from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, List, Optional, Sequence, Tuple, Union
+from typing import Any, Callable, List, Optional, Sequence, Tuple, Union
 
 import numpy as np
 
@@ -32,6 +34,128 @@ SUPPORTED_VOLUME_FORMATS = (
     "Optional NIfTI if nibabel is installed: .nii, .nii.gz",
     "Optional MRC if mrcfile is installed: .mrc, .map, .rec",
 )
+
+
+@dataclass(frozen=True)
+class VolumeMetadata:
+    """Storage-level metadata available without materializing voxel data."""
+
+    path: str
+    format: str
+    shape: Tuple[int, ...]
+    dtype: np.dtype
+    dataset_key: Optional[str] = None
+    chunks: Optional[Tuple[int, ...]] = None
+
+    @property
+    def ndim(self) -> int:
+        return len(self.shape)
+
+
+class VolumeStore(ABC):
+    """A bounded region-reader for a single array inside a volume artifact."""
+
+    @property
+    @abstractmethod
+    def metadata(self) -> VolumeMetadata:
+        raise NotImplementedError
+
+    @property
+    def shape(self) -> Tuple[int, ...]:
+        return self.metadata.shape
+
+    @property
+    def dtype(self) -> np.dtype:
+        return self.metadata.dtype
+
+    @property
+    def ndim(self) -> int:
+        return self.metadata.ndim
+
+    @abstractmethod
+    def read(
+        self,
+        crop: CropSpec = None,
+        *,
+        channel: Optional[int] = None,
+        reference_ndim: Optional[int] = None,
+        label: str = "volume",
+    ) -> np.ndarray:
+        raise NotImplementedError
+
+    def close(self) -> None:
+        """Release resources held by the backing artifact."""
+
+    def __enter__(self) -> "VolumeStore":
+        return self
+
+    def __exit__(self, *_exc_info: Any) -> None:
+        self.close()
+
+
+class ArrayVolumeStore(VolumeStore):
+    """VolumeStore adapter for array-like objects supporting basic indexing."""
+
+    def __init__(
+        self,
+        data: Any,
+        *,
+        path: Path,
+        format: str,
+        dataset_key: Optional[str] = None,
+        close: Optional[Callable[[], None]] = None,
+    ) -> None:
+        self._data = data
+        self._close = close
+        self._closed = False
+        chunks = getattr(data, "chunks", None)
+        self._metadata = VolumeMetadata(
+            path=str(path),
+            format=format,
+            shape=tuple(int(value) for value in data.shape),
+            dtype=np.dtype(data.dtype),
+            dataset_key=dataset_key,
+            chunks=(
+                tuple(int(value) for value in chunks)
+                if chunks is not None and all(value is not None for value in chunks)
+                else None
+            ),
+        )
+
+    @property
+    def metadata(self) -> VolumeMetadata:
+        return self._metadata
+
+    def read(
+        self,
+        crop: CropSpec = None,
+        *,
+        channel: Optional[int] = None,
+        reference_ndim: Optional[int] = None,
+        label: str = "volume",
+    ) -> np.ndarray:
+        if self._closed:
+            raise RuntimeError("Volume store is closed")
+        return _as_array(
+            self._data,
+            parse_crop(crop),
+            channel=channel,
+            reference_ndim=reference_ndim,
+            label=label,
+        )
+
+    def __getitem__(self, key: Any) -> Any:
+        """Expose storage-backed slicing to consumers such as Neuroglancer."""
+        if self._closed:
+            raise RuntimeError("Volume store is closed")
+        return self._data[key]
+
+    def close(self) -> None:
+        if self._closed:
+            return
+        self._closed = True
+        if self._close is not None:
+            self._close()
 
 
 def split_dataset_ref(path: str) -> Tuple[str, Optional[str]]:
@@ -216,28 +340,6 @@ def _select_h5_dataset(handle: Any, dataset_key: Optional[str]) -> Any:
     return handle[datasets[0]]
 
 
-def _read_hdf5(
-    path: Path,
-    dataset_key: Optional[str],
-    crop: Optional[Tuple[slice, ...]],
-    *,
-    channel: Optional[int] = None,
-    reference_ndim: Optional[int] = None,
-    label: str = "volume",
-) -> np.ndarray:
-    import h5py
-
-    with h5py.File(path, "r") as handle:
-        dataset = _select_h5_dataset(handle, dataset_key)
-        return _as_array(
-            dataset,
-            crop,
-            channel=channel,
-            reference_ndim=reference_ndim,
-            label=label,
-        )
-
-
 def _is_zarr_array(value: Any) -> bool:
     return (
         hasattr(value, "shape")
@@ -287,103 +389,179 @@ def _select_zarr_array(store: Any, dataset_key: Optional[str]) -> Any:
     return store[arrays[0]]
 
 
-def _read_zarr(
-    path: Path,
-    dataset_key: Optional[str],
-    crop: Optional[Tuple[slice, ...]],
+def _close_all(*resources: Any) -> Callable[[], None]:
+    def close() -> None:
+        first_error: Optional[Exception] = None
+        for resource in resources:
+            close_resource = getattr(resource, "close", None)
+            if not callable(close_resource):
+                continue
+            try:
+                close_resource()
+            except Exception as exc:  # pragma: no cover - defensive cleanup
+                first_error = first_error or exc
+        if first_error is not None:
+            raise first_error
+
+    return close
+
+
+def _select_npz_array(loaded: Any, dataset_key: Optional[str]) -> Tuple[str, Any]:
+    key = dataset_key
+    if not key:
+        for candidate in COMMON_DATASET_NAMES:
+            if candidate in loaded:
+                key = candidate
+                break
+    if not key:
+        keys = list(loaded.keys())
+        if not keys:
+            raise ValueError("NPZ file does not contain any arrays")
+        key = keys[0]
+    if key not in loaded:
+        raise ValueError(f"NPZ array {key!r} not found")
+    return key, loaded[key]
+
+
+def open_volume_store(
+    path: str,
     *,
-    channel: Optional[int] = None,
-    reference_ndim: Optional[int] = None,
-    label: str = "volume",
-) -> np.ndarray:
-    import zarr
+    dataset_key: Optional[str] = None,
+) -> VolumeStore:
+    """Open a volume for metadata inspection and bounded region reads.
 
-    store = zarr.open(str(path), mode="r")
-    array = _select_zarr_array(store, dataset_key)
-    return _as_array(
-        array,
-        crop,
-        channel=channel,
-        reference_ndim=reference_ndim,
-        label=label,
-    )
+    Callers should use this as a context manager. HDF5, NPY, Zarr/N5, NIfTI,
+    MRC, and TIFF expose their backing array directly; indexing therefore occurs
+    before NumPy materialization. Formats without random-access support retain an
+    eager compatibility fallback.
+    """
 
+    file_path, inline_dataset_key = split_dataset_ref(str(path))
+    dataset_key = dataset_key or inline_dataset_key
+    target = Path(file_path).expanduser()
+    if not target.exists():
+        raise FileNotFoundError(f"Volume artifact does not exist: {target}")
 
-def _read_npz(
-    path: Path,
-    dataset_key: Optional[str],
-    crop: Optional[Tuple[slice, ...]],
-    *,
-    channel: Optional[int] = None,
-    reference_ndim: Optional[int] = None,
-    label: str = "volume",
-) -> np.ndarray:
-    with np.load(path) as loaded:
-        key = dataset_key
-        if not key:
-            for candidate in COMMON_DATASET_NAMES:
-                if candidate in loaded:
-                    key = candidate
-                    break
-        if not key:
-            keys = list(loaded.keys())
-            if not keys:
-                raise ValueError("NPZ file does not contain any arrays")
-            key = keys[0]
-        return _as_array(
-            loaded[key],
-            crop,
-            channel=channel,
-            reference_ndim=reference_ndim,
-            label=label,
+    lower_name = target.name.lower()
+    lower_path = str(target).lower()
+
+    if lower_name.endswith((".h5", ".hdf5", ".hdf")):
+        import h5py
+
+        handle = h5py.File(target, "r")
+        try:
+            data = _select_h5_dataset(handle, dataset_key)
+            selected_key = data.name.lstrip("/")
+            return ArrayVolumeStore(
+                data,
+                path=target,
+                format="hdf5",
+                dataset_key=selected_key,
+                close=handle.close,
+            )
+        except Exception:
+            handle.close()
+            raise
+
+    if lower_name.endswith((".tif", ".tiff", ".ome.tif", ".ome.tiff")):
+        import tifffile
+        import zarr
+
+        handle = tifffile.TiffFile(str(target))
+        try:
+            tiff_store = handle.series[0].aszarr()
+            data = zarr.open(tiff_store, mode="r")
+            return ArrayVolumeStore(
+                data,
+                path=target,
+                format="ome-tiff" if ".ome.tif" in lower_name else "tiff",
+                close=_close_all(tiff_store, handle),
+            )
+        except Exception:
+            handle.close()
+            return ArrayVolumeStore(
+                tifffile.imread(str(target)),
+                path=target,
+                format="ome-tiff" if ".ome.tif" in lower_name else "tiff",
+            )
+
+    if lower_name.endswith(".npy"):
+        data = np.load(target, mmap_mode="r")
+        mmap = getattr(data, "_mmap", None)
+        return ArrayVolumeStore(
+            data,
+            path=target,
+            format="npy",
+            close=getattr(mmap, "close", None),
         )
 
+    if lower_name.endswith(".npz"):
+        loaded = np.load(target)
+        try:
+            selected_key, data = _select_npz_array(loaded, dataset_key)
+            return ArrayVolumeStore(
+                data,
+                path=target,
+                format="npz",
+                dataset_key=selected_key,
+                close=loaded.close,
+            )
+        except Exception:
+            loaded.close()
+            raise
 
-def _read_nifti(
-    path: Path,
-    crop: Optional[Tuple[slice, ...]],
-    *,
-    channel: Optional[int] = None,
-    reference_ndim: Optional[int] = None,
-    label: str = "volume",
-) -> np.ndarray:
-    try:
-        import nibabel as nib
-    except Exception as exc:  # pragma: no cover - optional dependency
-        raise RuntimeError("nibabel is required to read NIfTI volumes") from exc
+    if target.is_dir() or lower_name.endswith((".zarr", ".n5")):
+        import zarr
 
-    image = nib.load(str(path))
-    data = image.dataobj
-    return _as_array(
-        data,
-        crop,
-        channel=channel,
-        reference_ndim=reference_ndim,
-        label=label,
-    )
+        root = zarr.open(str(target), mode="r")
+        data = _select_zarr_array(root, dataset_key)
+        selected_key = dataset_key or getattr(data, "path", None) or None
+        return ArrayVolumeStore(
+            data,
+            path=target,
+            format="n5" if lower_name.endswith(".n5") else "zarr",
+            dataset_key=selected_key,
+        )
 
+    if lower_path.endswith((".nii", ".nii.gz")):
+        try:
+            import nibabel as nib
+        except Exception as exc:  # pragma: no cover - optional dependency
+            raise RuntimeError("nibabel is required to read NIfTI volumes") from exc
+        image = nib.load(str(target))
+        return ArrayVolumeStore(
+            image.dataobj,
+            path=target,
+            format="nifti",
+            close=getattr(image, "uncache", None),
+        )
 
-def _read_mrc(
-    path: Path,
-    crop: Optional[Tuple[slice, ...]],
-    *,
-    channel: Optional[int] = None,
-    reference_ndim: Optional[int] = None,
-    label: str = "volume",
-) -> np.ndarray:
-    try:
-        import mrcfile
-    except Exception as exc:  # pragma: no cover - optional dependency
-        raise RuntimeError("mrcfile is required to read MRC/MAP volumes") from exc
-
-    with mrcfile.open(str(path), permissive=True) as handle:
-        return _as_array(
+    if lower_name.endswith((".mrc", ".map", ".rec")):
+        try:
+            import mrcfile
+        except Exception as exc:  # pragma: no cover - optional dependency
+            raise RuntimeError("mrcfile is required to read MRC/MAP volumes") from exc
+        handle = mrcfile.open(str(target), permissive=True)
+        return ArrayVolumeStore(
             handle.data,
-            crop,
-            channel=channel,
-            reference_ndim=reference_ndim,
-            label=label,
+            path=target,
+            format="mrc",
+            close=handle.close,
         )
+
+    if lower_name.endswith((".png", ".jpg", ".jpeg", ".bmp")):
+        import imageio.v3 as iio
+
+        return ArrayVolumeStore(
+            iio.imread(target),
+            path=target,
+            format=target.suffix.lower().lstrip("."),
+        )
+
+    raise ValueError(
+        f"Unsupported volume format for {target}. Supported formats: "
+        + "; ".join(SUPPORTED_VOLUME_FORMATS)
+    )
 
 
 def load_volume(
@@ -395,89 +573,10 @@ def load_volume(
     reference_ndim: Optional[int] = None,
     label: str = "volume",
 ) -> np.ndarray:
-    file_path, inline_dataset_key = split_dataset_ref(str(path))
-    dataset_key = dataset_key or inline_dataset_key
-    target = Path(file_path).expanduser()
-    if not target.exists():
-        raise FileNotFoundError(f"Volume artifact does not exist: {target}")
-
-    crop_slices = parse_crop(crop)
-    lower_name = target.name.lower()
-    lower_path = str(target).lower()
-
-    if lower_name.endswith((".h5", ".hdf5", ".hdf")):
-        return _read_hdf5(
-            target,
-            dataset_key,
-            crop_slices,
+    with open_volume_store(path, dataset_key=dataset_key) as store:
+        return store.read(
+            crop,
             channel=channel,
             reference_ndim=reference_ndim,
             label=label,
         )
-    if lower_name.endswith((".tif", ".tiff", ".ome.tif", ".ome.tiff")):
-        import tifffile
-
-        return _as_array(
-            tifffile.imread(str(target)),
-            crop_slices,
-            channel=channel,
-            reference_ndim=reference_ndim,
-            label=label,
-        )
-    if lower_name.endswith(".npy"):
-        return _as_array(
-            np.load(target, mmap_mode="r"),
-            crop_slices,
-            channel=channel,
-            reference_ndim=reference_ndim,
-            label=label,
-        )
-    if lower_name.endswith(".npz"):
-        return _read_npz(
-            target,
-            dataset_key,
-            crop_slices,
-            channel=channel,
-            reference_ndim=reference_ndim,
-            label=label,
-        )
-    if target.is_dir() or lower_name.endswith((".zarr", ".n5")):
-        return _read_zarr(
-            target,
-            dataset_key,
-            crop_slices,
-            channel=channel,
-            reference_ndim=reference_ndim,
-            label=label,
-        )
-    if lower_path.endswith((".nii", ".nii.gz")):
-        return _read_nifti(
-            target,
-            crop_slices,
-            channel=channel,
-            reference_ndim=reference_ndim,
-            label=label,
-        )
-    if lower_name.endswith((".mrc", ".map", ".rec")):
-        return _read_mrc(
-            target,
-            crop_slices,
-            channel=channel,
-            reference_ndim=reference_ndim,
-            label=label,
-        )
-    if lower_name.endswith((".png", ".jpg", ".jpeg", ".bmp")):
-        import imageio.v3 as iio
-
-        return _as_array(
-            iio.imread(target),
-            crop_slices,
-            channel=channel,
-            reference_ndim=reference_ndim,
-            label=label,
-        )
-
-    raise ValueError(
-        f"Unsupported volume format for {target}. Supported formats: "
-        + "; ".join(SUPPORTED_VOLUME_FORMATS)
-    )

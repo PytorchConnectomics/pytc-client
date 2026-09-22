@@ -40,6 +40,7 @@ import {
 } from "../api";
 import { AppContext } from "./GlobalContext";
 import { logClientEvent } from "../logging/appEventLog";
+import { appQueryClient } from "../queryClient";
 
 export const WorkflowContext = createContext(null);
 
@@ -493,8 +494,24 @@ export function WorkflowProvider({ children }) {
       await resetFileWorkspace();
       await clearLocalWorkflowInputs();
       const data = await startNewWorkflowApi(body);
-      applyWorkflowDetail(data);
-      return data;
+      const projectPath = data?.workflow?.dataset_path;
+      if (!projectPath) {
+        applyWorkflowDetail(data);
+        return data;
+      }
+      try {
+        await mountProjectDirectory({
+          directoryPath: projectPath,
+          mountName: data?.workflow?.title || "",
+          destinationPath: "root",
+        });
+        applyWorkflowDetail(data);
+        return data;
+      } catch (error) {
+        console.error("Fresh workflow project mount failed:", error);
+        applyWorkflowDetail(data);
+        return { ...data, project_mount_failed: true };
+      }
     },
     [applyWorkflowDetail, clearLocalWorkflowInputs],
   );
@@ -918,6 +935,16 @@ export function WorkflowProvider({ children }) {
       if (result?.workflow) {
         setWorkflow(result.workflow);
       }
+      const operationQueryKey = ["workflow", workflow.id, "operations"];
+      if (Number.isFinite(Number(result?.operation?.id))) {
+        appQueryClient.setQueryData(operationQueryKey, (current = []) => [
+          result.operation,
+          ...current.filter(
+            (operation) => operation.id !== result.operation.id,
+          ),
+        ]);
+        appQueryClient.invalidateQueries({ queryKey: operationQueryKey });
+      }
       const durableCommand = result?.commands?.find?.((command) =>
         Number.isFinite(Number(command?.id)),
       );
@@ -952,9 +979,24 @@ export function WorkflowProvider({ children }) {
         ]);
       } else {
         await runClientEffects(result?.client_effects);
+        if (result?.receipt) {
+          await Promise.allSettled([
+            refreshEvidence(),
+            refreshWorkflowOverview(),
+            refreshProjectProgress(),
+            refreshAgentRecommendation(),
+          ]);
+        }
       }
       await refreshEvents();
-      message.success("Agent proposal approved.");
+      if (result?.receipt?.status === "failed") {
+        message.error(
+          result.receipt.error?.message ||
+            "Agent proposal approved, but the operation failed.",
+        );
+      } else {
+        message.success("Agent proposal approved.");
+      }
       return result;
     },
     [

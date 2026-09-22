@@ -10,7 +10,7 @@ from typing import Any, Dict, List, Optional
 
 import requests
 from fastapi import APIRouter, Depends, HTTPException
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, ValidationError
 from sqlalchemy.orm import Session
 
 from app_event_logger import append_app_event
@@ -34,6 +34,7 @@ from .db_models import (
     WorkflowEvent,
     WorkflowModelRun,
     WorkflowModelVersion,
+    WorkflowOperation,
     WorkflowRegionHotspot,
     WorkflowSession,
     WorkflowVolumeState,
@@ -64,7 +65,17 @@ from .service import (
 )
 from .bundle_export import build_export_bundle, write_export_bundle_directory
 from .agent_plan import build_case_study_plan_graph
-from .evaluation import compute_before_after_evaluation, write_evaluation_report
+from .agent_actions import (
+    AgentActionReceipt,
+    resolve_agent_action,
+    validate_agent_proposal,
+)
+from .agent_action_execution import (
+    execute_compute_evaluation_operation,
+    stage_and_execute_compute_evaluation_proposal,
+)
+from .operation_service import operation_to_dict
+from .evaluation_service import create_computed_evaluation_result
 from .metrics import compute_workflow_metrics
 from .volume_pairs import discover_neuroglancer_volume_pairs
 
@@ -298,6 +309,8 @@ class AgentActionResult(BaseModel):
     events: List[WorkflowEventResponse]
     client_effects: Dict[str, Any] = Field(default_factory=dict)
     commands: List[WorkflowCommandResponse] = Field(default_factory=list)
+    operation: Optional[Dict[str, Any]] = None
+    receipt: Optional[AgentActionReceipt] = None
 
 
 class WorkflowHotspotItem(BaseModel):
@@ -885,6 +898,32 @@ def _get_pending_proposal_or_404(
     return event
 
 
+def _related_proposal_event(
+    db: Session,
+    *,
+    workflow_id: int,
+    proposal_id: int,
+    event_type: str,
+) -> Optional[WorkflowEvent]:
+    candidates = (
+        db.query(WorkflowEvent)
+        .filter(
+            WorkflowEvent.workflow_id == workflow_id,
+            WorkflowEvent.event_type == event_type,
+        )
+        .order_by(WorkflowEvent.id.desc())
+        .all()
+    )
+    return next(
+        (
+            event
+            for event in candidates
+            if decode_json(event.payload_json).get("proposal_event_id") == proposal_id
+        ),
+        None,
+    )
+
+
 def _get_agent_plan_or_404(
     db: Session, *, workflow_id: int, plan_id: int
 ) -> WorkflowAgentPlan:
@@ -1390,44 +1429,11 @@ def _client_effects_to_command(client_effects: Dict[str, Any]) -> str:
 
 
 def _infer_action_risk(client_effects: Optional[Dict[str, Any]]) -> str:
-    effects = client_effects or {}
-    runtime_kind = (effects.get("runtime_action") or {}).get("kind")
-    workflow_action_kind = (effects.get("workflow_action") or {}).get("kind")
-    if runtime_kind in {"start_inference", "start_training"}:
-        return "runs_job"
-    if runtime_kind in {"stop_inference", "stop_training"}:
-        return "controls_job"
-    if runtime_kind == "start_proofreading":
-        return "loads_editor"
-    if runtime_kind == "choose_project_data":
-        return "prefills_form"
-    if effects.get("mount_project") or effects.get("reset_workspace"):
-        return "modifies_workspace"
-    if effects.get("start_new_workflow"):
-        return "writes_workflow_record"
-    if workflow_action_kind == "export_bundle":
-        return "exports_evidence"
-    if workflow_action_kind in {"compute_evaluation", "propose_retraining_stage"}:
-        return "writes_workflow_record"
-    if any(key.startswith("set_") for key in effects):
-        return "prefills_form"
-    if effects.get("navigate_to") or effects.get("show_workflow_context"):
-        return "read_only"
-    if effects.get("refresh_insights"):
-        return "read_only"
-    return "read_only"
+    return resolve_agent_action("workflow_action", client_effects).risk_level
 
 
 def _requires_action_approval(client_effects: Optional[Dict[str, Any]]) -> bool:
-    risk = _infer_action_risk(client_effects)
-    return risk in {
-        "runs_job",
-        "controls_job",
-        "loads_editor",
-        "exports_evidence",
-        "writes_workflow_record",
-        "modifies_workspace",
-    }
+    return resolve_agent_action("workflow_action", client_effects).requires_approval
 
 
 def _action_risk_tier(risk_level: str) -> str:
@@ -1540,58 +1546,15 @@ def _agent_trace_kwargs(agent: Dict[str, Any]) -> Dict[str, str]:
 def _specialist_agent_for_action(
     action_type: str, client_effects: Dict[str, Any]
 ) -> Dict[str, Any]:
-    navigate_to = str((client_effects or {}).get("navigate_to") or "")
-    if action_type in {"start_training", "open_training"} or "training" in navigate_to:
-        return _agent_descriptor("training_agent")
-    if (
-        action_type in {"start_inference", "open_inference"}
-        or "inference" in navigate_to
-    ):
-        return _agent_descriptor("inference_agent")
-    if action_type in {"start_proofreading"} or "proofreading" in navigate_to:
-        return _agent_descriptor("proofreading_agent")
-    if "visualization" in navigate_to or action_type.startswith("open_visualization"):
-        return _agent_descriptor("visualization_agent")
-    if action_type in {"export_bundle"}:
-        return _agent_descriptor("evidence_agent")
-    if action_type in {"compute_evaluation"}:
-        return _agent_descriptor("evaluation_agent")
-    if (
-        action_type in {"mount_project", "choose_project_data"}
-        or navigate_to == "files"
-    ):
-        return _agent_descriptor("data_agent")
-    if action_type in {
-        "show_workflow_context",
-        "refresh_context",
-        "open_project-progress",
-    }:
-        return _agent_descriptor("project_manager")
-    return _agent_descriptor("project_manager")
+    definition = resolve_agent_action(action_type, client_effects)
+    return _agent_descriptor(definition.specialist_agent_type)
 
 
 def _action_type_from_effects(
     action_id: str,
     client_effects: Optional[Dict[str, Any]],
 ) -> str:
-    effects = client_effects or {}
-    runtime_kind = (effects.get("runtime_action") or {}).get("kind")
-    workflow_kind = (effects.get("workflow_action") or {}).get("kind")
-    if runtime_kind:
-        return str(runtime_kind)
-    if workflow_kind:
-        return str(workflow_kind)
-    if effects.get("mount_project"):
-        return "mount_project"
-    if effects.get("start_new_workflow"):
-        return "start_new_workflow"
-    if effects.get("show_workflow_context"):
-        return "show_workflow_context"
-    if effects.get("refresh_insights"):
-        return "refresh_context"
-    if effects.get("navigate_to"):
-        return f"open_{effects.get('navigate_to')}"
-    return action_id
+    return resolve_agent_action(action_id, client_effects).action_type
 
 
 def _action_target_from_effects(
@@ -1829,7 +1792,8 @@ def _build_action_card_payload(
     requires_approval: bool,
     disabled_reason: Optional[str],
 ) -> Dict[str, Any]:
-    action_type = _action_type_from_effects(action_id, client_effects)
+    definition = resolve_agent_action(action_id, client_effects)
+    action_type = definition.action_type
     specialist_agent = _specialist_agent_for_action(action_type, client_effects)
     blockers = [disabled_reason] if disabled_reason else []
     return {
@@ -1855,6 +1819,12 @@ def _build_action_card_payload(
         "summary_fields": _summary_fields_from_effects(client_effects),
         "expected_effects": _expected_effects_from_client_effects(client_effects),
         "executor": "bounded_app_routine",
+        "execution_owner": definition.execution_owner,
+        "registry_policy": {
+            "risk_level": definition.risk_level,
+            "requires_approval": definition.requires_approval,
+            "specialist_agent_type": definition.specialist_agent_type,
+        },
     }
 
 
@@ -4996,7 +4966,13 @@ def _project_progress_volume_candidates(
         return []
 
     def is_candidate(child: pathlib.Path) -> bool:
-        if any(part.startswith(".") or part == "__pycache__" for part in child.parts):
+        try:
+            relative_parts = child.relative_to(absolute).parts
+        except ValueError:
+            relative_parts = child.parts
+        if any(
+            part.startswith(".") or part == "__pycache__" for part in relative_parts
+        ):
             return False
         if not child.is_file() and not (
             child.is_dir() and _project_extension(child.name) in {".zarr", ".n5"}
@@ -6078,6 +6054,14 @@ def _workflow_overview_actions(
             )
         )
     if needs_proofreading > 0:
+        draft_volume = next(
+            (
+                volume
+                for volume in progress.get("volumes") or []
+                if volume.get("status") == "needs_proofreading"
+            ),
+            {},
+        )
         actions.append(
             WorkflowOverviewAction(
                 id="proofread-draft-masks",
@@ -6085,7 +6069,13 @@ def _workflow_overview_actions(
                 detail=f"Review {needs_proofreading} volume(s) before treating them as ground truth.",
                 target_view="mask-proofreading",
                 priority="high" if ground_truth <= 0 else "normal",
-                client_effects={"navigate_to": "mask-proofreading"},
+                client_effects={
+                    "navigate_to": "mask-proofreading",
+                    "set_proofreading_dataset_path": draft_volume.get("image_path"),
+                    "set_proofreading_mask_path": draft_volume.get("segmentation_path"),
+                    "set_proofreading_project_name": workflow.title,
+                    "runtime_action": {"kind": "start_proofreading"},
+                },
             )
         )
     if ground_truth > 0 and missing_segmentation > 0:
@@ -8190,7 +8180,9 @@ def compute_evaluation_result(
 ):
     workflow = get_user_workflow_or_404(db, workflow_id=workflow_id, user_id=user.id)
     try:
-        metrics = compute_before_after_evaluation(
+        result = create_computed_evaluation_result(
+            db,
+            workflow_id=workflow.id,
             baseline_prediction_path=body.baseline_prediction_path,
             candidate_prediction_path=body.candidate_prediction_path,
             ground_truth_path=body.ground_truth_path,
@@ -8201,6 +8193,13 @@ def compute_evaluation_result(
             baseline_channel=body.baseline_channel,
             candidate_channel=body.candidate_channel,
             ground_truth_channel=body.ground_truth_channel,
+            name=body.name,
+            baseline_run_id=body.baseline_run_id,
+            candidate_run_id=body.candidate_run_id,
+            model_version_id=body.model_version_id,
+            report_path=body.report_path,
+            metadata=body.metadata,
+            commit=True,
         )
     except FileNotFoundError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
@@ -8208,62 +8207,6 @@ def compute_evaluation_result(
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     except RuntimeError as exc:
         raise HTTPException(status_code=500, detail=str(exc)) from exc
-
-    metadata = {
-        **body.metadata,
-        "baseline_prediction_path": body.baseline_prediction_path,
-        "candidate_prediction_path": body.candidate_prediction_path,
-        "ground_truth_path": body.ground_truth_path,
-        "baseline_dataset": body.baseline_dataset,
-        "candidate_dataset": body.candidate_dataset,
-        "ground_truth_dataset": body.ground_truth_dataset,
-        "crop": body.crop,
-        "baseline_channel": body.baseline_channel,
-        "candidate_channel": body.candidate_channel,
-        "ground_truth_channel": body.ground_truth_channel,
-    }
-    summary = (
-        "Before/after evaluation computed. "
-        f"Dice delta: {metrics.get('summary', {}).get('dice_delta')}."
-    )
-    report_path = body.report_path
-    if report_path:
-        report_payload = {
-            "workflow_id": workflow.id,
-            "name": body.name,
-            "summary": summary,
-            "metrics": metrics,
-            "metadata": metadata,
-        }
-        report_path = write_evaluation_report(report_path, report_payload)
-
-    report_artifact = None
-    if report_path:
-        report_artifact = create_workflow_artifact(
-            db,
-            workflow_id=workflow.id,
-            artifact_type="evaluation_report",
-            role="case_study_evidence",
-            path=report_path,
-            metadata={"source": "computed_evaluation_result"},
-            commit=False,
-        )
-
-    result = WorkflowEvaluationResult(
-        workflow_id=workflow.id,
-        name=body.name or "before-after-evaluation",
-        baseline_run_id=body.baseline_run_id,
-        candidate_run_id=body.candidate_run_id,
-        model_version_id=body.model_version_id,
-        report_artifact_id=report_artifact.id if report_artifact else None,
-        report_path=report_path,
-        summary=summary,
-        metrics_json=encode_json(metrics),
-        metadata_json=encode_json(metadata),
-    )
-    db.add(result)
-    db.commit()
-    db.refresh(result)
     return _evaluation_response(result)
 
 
@@ -8947,6 +8890,10 @@ async def create_agent_action(
     db: Session = Depends(get_db),
 ):
     workflow = get_user_workflow_or_404(db, workflow_id=workflow_id, user_id=user.id)
+    try:
+        definition = validate_agent_proposal(body.action, body.payload)
+    except (ValidationError, ValueError) as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
     summary = body.summary or f"Agent proposed: {body.action}"
     event = append_workflow_event(
         db,
@@ -8955,7 +8902,17 @@ async def create_agent_action(
         event_type="agent.proposal_created",
         stage=workflow.stage,
         summary=summary,
-        payload={"action": body.action, "params": body.payload},
+        payload={
+            "action": body.action,
+            "params": body.payload,
+            "registry": {
+                "action_type": definition.action_type,
+                "risk_level": definition.risk_level,
+                "requires_approval": definition.requires_approval,
+                "execution_owner": definition.execution_owner,
+                "specialist_agent_type": definition.specialist_agent_type,
+            },
+        },
         approval_status="pending",
         commit=True,
     )
@@ -8974,14 +8931,95 @@ async def approve_agent_action(
     db: Session = Depends(get_db),
 ):
     workflow = get_user_workflow_or_404(db, workflow_id=workflow_id, user_id=user.id)
-    proposal = _get_pending_proposal_or_404(
-        db, workflow_id=workflow.id, event_id=event_id
+    proposal = (
+        db.query(WorkflowEvent)
+        .filter(
+            WorkflowEvent.id == event_id,
+            WorkflowEvent.workflow_id == workflow.id,
+            WorkflowEvent.event_type == "agent.proposal_created",
+        )
+        .first()
     )
+    if proposal is None:
+        raise HTTPException(status_code=404, detail="Agent proposal not found")
     action_payload = _proposal_action_payload(proposal)
     action = action_payload.get("action")
     params = action_payload.get("params", {})
     if not isinstance(params, dict):
         params = {}
+    if proposal.approval_status == "approved":
+        client_effects = params.get("client_effects")
+        workflow_action = (
+            client_effects.get("workflow_action")
+            if isinstance(client_effects, dict)
+            else None
+        )
+        if (
+            action != "run_client_effects"
+            or not isinstance(workflow_action, dict)
+            or workflow_action.get("kind") != "compute_evaluation"
+        ):
+            raise HTTPException(status_code=400, detail="Agent proposal is not pending")
+        approved = _related_proposal_event(
+            db,
+            workflow_id=workflow.id,
+            proposal_id=proposal.id,
+            event_type="agent.proposal_approved",
+        )
+        staged = _related_proposal_event(
+            db,
+            workflow_id=workflow.id,
+            proposal_id=proposal.id,
+            event_type="evaluation.agent_action_approved",
+        )
+        if approved is None:
+            raise HTTPException(
+                status_code=409,
+                detail="Approved proposal is missing its decision event",
+            )
+        operation = (
+            db.query(WorkflowOperation)
+            .filter(
+                WorkflowOperation.workflow_id == workflow.id,
+                WorkflowOperation.idempotency_key
+                == f"agent-proposal:{proposal.id}:compute_evaluation",
+            )
+            .first()
+        )
+        if operation is None:
+            requested_correlation_id = params.get("correlation_id")
+            operation, receipt = stage_and_execute_compute_evaluation_proposal(
+                db,
+                workflow_id=workflow.id,
+                proposal=proposal,
+                approval_event=approved,
+                workflow_action=workflow_action,
+                user_id=user.id,
+                correlation_id=(
+                    requested_correlation_id
+                    if isinstance(requested_correlation_id, str)
+                    else None
+                ),
+            )
+        else:
+            receipt = execute_compute_evaluation_operation(db, operation)
+        replay_effects = dict(client_effects)
+        replay_effects.pop("workflow_action", None)
+        return AgentActionResult(
+            workflow=_workflow_response(workflow),
+            proposal=_event_response(proposal),
+            events=[
+                _event_response(event)
+                for event in (approved, staged)
+                if event is not None
+            ],
+            client_effects={**replay_effects, "workflow_stage": workflow.stage},
+            commands=[],
+            operation=operation_to_dict(operation),
+            receipt=receipt,
+        )
+    if proposal.approval_status != "pending":
+        raise HTTPException(status_code=400, detail="Agent proposal is not pending")
     params, applied_overrides = _apply_agent_action_overrides(
         str(action or ""),
         params,
@@ -8997,6 +9035,7 @@ async def approve_agent_action(
 
     if action == "start_training_run":
         client_effects = _training_run_effects_from_proposal(workflow, params)
+        resolve_agent_action(str(action), client_effects)
         corrected_mask_path = (
             client_effects.get("set_training_label_path")
             or params.get("label_path")
@@ -9080,6 +9119,10 @@ async def approve_agent_action(
                 status_code=400,
                 detail="Approved client-effect action is missing client_effects.",
             )
+        try:
+            resolve_agent_action(str(action), client_effects)
+        except ValidationError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
         proposal.approval_status = "approved"
         db.commit()
         db.refresh(proposal)
@@ -9098,13 +9141,26 @@ async def approve_agent_action(
             ),
             commit=True,
         )
+        workflow_action = client_effects.get("workflow_action")
+        server_executes_evaluation = (
+            isinstance(workflow_action, dict)
+            and workflow_action.get("kind") == "compute_evaluation"
+        )
         staged = append_workflow_event(
             db,
             workflow_id=workflow.id,
             actor="system",
-            event_type="agent.client_effects_approved",
+            event_type=(
+                "evaluation.agent_action_approved"
+                if server_executes_evaluation
+                else "agent.client_effects_approved"
+            ),
             stage=workflow.stage,
-            summary="Approved in-app assistant action for client execution.",
+            summary=(
+                "Approved agent evaluation action for server execution."
+                if server_executes_evaluation
+                else "Approved in-app assistant action for client execution."
+            ),
             payload={
                 "proposal_event_id": proposal.id,
                 "item_id": params.get("item_id"),
@@ -9116,12 +9172,37 @@ async def approve_agent_action(
             },
             commit=True,
         )
+        operation_payload = None
+        receipt = None
+        approved_client_effects = dict(client_effects)
+        if server_executes_evaluation:
+            requested_correlation_id = params.get("correlation_id")
+            operation, receipt = stage_and_execute_compute_evaluation_proposal(
+                db,
+                workflow_id=workflow.id,
+                proposal=proposal,
+                approval_event=approved,
+                workflow_action=workflow_action,
+                user_id=user.id,
+                correlation_id=(
+                    requested_correlation_id
+                    if isinstance(requested_correlation_id, str)
+                    else None
+                ),
+            )
+            operation_payload = operation_to_dict(operation)
+            approved_client_effects.pop("workflow_action", None)
         return AgentActionResult(
             workflow=_workflow_response(workflow),
             proposal=_event_response(proposal),
             events=[_event_response(approved), _event_response(staged)],
-            client_effects={**client_effects, "workflow_stage": workflow.stage},
+            client_effects={
+                **approved_client_effects,
+                "workflow_stage": workflow.stage,
+            },
             commands=[],
+            operation=operation_payload,
+            receipt=receipt,
         )
 
     corrected_mask_path = (

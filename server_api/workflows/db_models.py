@@ -1,5 +1,6 @@
 from sqlalchemy import (
     Boolean,
+    CheckConstraint,
     Column,
     DateTime,
     Float,
@@ -99,6 +100,12 @@ class WorkflowSession(Base):
         cascade="all, delete-orphan",
         order_by="WorkflowVolumeState.volume_id",
     )
+    operations = relationship(
+        "WorkflowOperation",
+        back_populates="workflow",
+        cascade="all, delete-orphan",
+        order_by="WorkflowOperation.created_at",
+    )
 
 
 class WorkflowEvent(Base):
@@ -164,6 +171,67 @@ class WorkflowCommand(Base):
     workflow = relationship("WorkflowSession", back_populates="commands")
     source_event = relationship("WorkflowEvent", foreign_keys=[source_event_id])
     approval_event = relationship("WorkflowEvent", foreign_keys=[approval_event_id])
+
+
+class WorkflowOperation(Base):
+    """Durable lifecycle record for asynchronous workflow work.
+
+    Commands capture an approved intent. Operations capture execution state and can
+    therefore outlive the API process that requested or started the work.
+    """
+
+    __tablename__ = "workflow_operations"
+    __table_args__ = (
+        UniqueConstraint(
+            "workflow_id",
+            "idempotency_key",
+            name="uq_workflow_operations_workflow_id_idempotency_key",
+        ),
+        CheckConstraint(
+            "status IN ('queued', 'running', 'succeeded', 'failed', 'cancelled')",
+            name="ck_workflow_operations_status",
+        ),
+        CheckConstraint(
+            "progress IS NULL OR (progress >= 0 AND progress <= 1)",
+            name="ck_workflow_operations_progress",
+        ),
+    )
+
+    id = Column(Integer, primary_key=True, index=True)
+    workflow_id = Column(
+        Integer, ForeignKey("workflow_sessions.id"), nullable=False, index=True
+    )
+    operation_type = Column(String, nullable=False, index=True)
+    status = Column(String, default="queued", nullable=False, index=True)
+    idempotency_key = Column(String, nullable=False, index=True)
+    correlation_id = Column(String, nullable=False, index=True)
+    actor = Column(String, default="system", nullable=False, index=True)
+    command_id = Column(
+        Integer, ForeignKey("workflow_commands.id"), nullable=True, index=True
+    )
+    model_run_id = Column(
+        Integer, ForeignKey("workflow_model_runs.id"), nullable=True, index=True
+    )
+    input_json = Column(Text, nullable=True)
+    result_json = Column(Text, nullable=True)
+    error_json = Column(Text, nullable=True)
+    metadata_json = Column(Text, nullable=True)
+    progress = Column(Float, nullable=True)
+    attempt_count = Column(Integer, default=0, nullable=False)
+    lease_owner = Column(String, nullable=True, index=True)
+    lease_expires_at = Column(DateTime(timezone=True), nullable=True)
+    heartbeat_at = Column(DateTime(timezone=True), nullable=True)
+    cancellation_requested_at = Column(DateTime(timezone=True), nullable=True)
+    started_at = Column(DateTime(timezone=True), nullable=True)
+    completed_at = Column(DateTime(timezone=True), nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )
+
+    workflow = relationship("WorkflowSession", back_populates="operations")
+    command = relationship("WorkflowCommand")
+    model_run = relationship("WorkflowModelRun")
 
 
 class WorkflowArtifact(Base):

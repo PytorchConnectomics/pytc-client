@@ -203,6 +203,14 @@ class FileResponse(FileBase):
         from_attributes = True
 
 
+class FilePageResponse(BaseModel):
+    items: List[FileResponse]
+    total: int
+    offset: int
+    limit: int
+    has_more: bool
+
+
 class Token(BaseModel):
     access_token: str
     token_type: str

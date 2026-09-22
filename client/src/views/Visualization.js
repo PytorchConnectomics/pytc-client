@@ -46,6 +46,11 @@ const getDisplay = (val) => {
   return val.display || val.path || "";
 };
 
+const looksLikeVolumeFile = (value) => {
+  const path = getPath(value).toLowerCase();
+  return /\.(?:h5|hdf5|tif|tiff|npy|npz|nii|nii\.gz|mrc|mrcs)$/.test(path);
+};
+
 const getViewerTitle = (imageValue, labelValue) => {
   const getImageName = (val) => {
     const display = getDisplay(val);
@@ -96,10 +101,24 @@ function Visualization(props) {
   const globalImage = appContext?.currentImage || null;
   const globalLabel = appContext?.currentLabel || null;
   const globalScales = appContext?.visualizationScales || "";
+  const workflow = workflowContext?.workflow;
+  const observedVolumeSets =
+    workflow?.metadata?.project_observation?.volume_sets;
+  const observedVolumeSet = Array.isArray(observedVolumeSets)
+    ? observedVolumeSets.find((item) => item?.is_current) ||
+      observedVolumeSets[0]
+    : null;
+  const workflowImage =
+    observedVolumeSet?.image_path ||
+    (looksLikeVolumeFile(workflow?.image_path) ? workflow.image_path : null);
+  const workflowLabel =
+    observedVolumeSet?.label_path ||
+    (looksLikeVolumeFile(workflow?.label_path) ? workflow.label_path : null);
   const workflowScales =
-    workflowContext?.workflow?.metadata?.visualization_scales ||
-    workflowContext?.workflow?.metadata?.project_context?.voxel_size_nm ||
+    workflow?.metadata?.visualization_scales ||
+    workflow?.metadata?.project_context?.voxel_size_nm ||
     null;
+  const hydratedWorkflowRef = useRef(null);
   const handledRuntimeActionRef = useRef(null);
   const viewerRefreshTimersRef = useRef([]);
   const [activeKey, setActiveKey] = useState(
@@ -107,12 +126,47 @@ function Visualization(props) {
   );
 
   // Input states
-  const [currentImage, setCurrentImage] = useState(globalImage);
-  const [currentLabel, setCurrentLabel] = useState(globalLabel);
+  const [currentImage, setCurrentImage] = useState(
+    globalImage || workflowImage || null,
+  );
+  const [currentLabel, setCurrentLabel] = useState(
+    globalLabel || workflowLabel || null,
+  );
   const [scales, setScales] = useState(
-    formatScales(globalScales) || formatScales(workflowScales) || "",
+    formatScales(workflowScales) || formatScales(globalScales) || "",
   );
   const [isLoading, setIsLoading] = useState(false);
+
+  useEffect(() => {
+    const workflowId = workflow?.id;
+    if (!workflowId || hydratedWorkflowRef.current === workflowId) {
+      return;
+    }
+    const isWorkflowChange = hydratedWorkflowRef.current !== null;
+    hydratedWorkflowRef.current = workflowId;
+
+    if ((isWorkflowChange || !globalImage) && workflowImage) {
+      setCurrentImage(workflowImage);
+      appContext?.setCurrentImage?.(workflowImage);
+    }
+    if ((isWorkflowChange || !globalLabel) && workflowLabel) {
+      setCurrentLabel(workflowLabel);
+      appContext?.setCurrentLabel?.(workflowLabel);
+    }
+    if ((isWorkflowChange || !globalImage) && workflowScales) {
+      const nextScales = formatScales(workflowScales);
+      setScales(nextScales);
+      appContext?.setVisualizationScales?.(nextScales);
+    }
+  }, [
+    appContext,
+    globalImage,
+    globalLabel,
+    workflow?.id,
+    workflowImage,
+    workflowLabel,
+    workflowScales,
+  ]);
 
   useEffect(() => {
     return () => {
@@ -134,23 +188,27 @@ function Visualization(props) {
   };
 
   useEffect(() => {
-    if (globalImage !== currentImage) {
-      setCurrentImage(globalImage);
+    const nextImage = globalImage || workflowImage || null;
+    if (nextImage !== currentImage) {
+      setCurrentImage(nextImage);
     }
-  }, [globalImage, currentImage]);
+  }, [globalImage, workflowImage, currentImage]);
 
   useEffect(() => {
-    if (globalLabel !== currentLabel) {
-      setCurrentLabel(globalLabel);
+    const nextLabel = globalLabel || workflowLabel || null;
+    if (nextLabel !== currentLabel) {
+      setCurrentLabel(nextLabel);
     }
-  }, [globalLabel, currentLabel]);
+  }, [globalLabel, workflowLabel, currentLabel]);
 
   useEffect(() => {
-    const nextScales = formatScales(globalScales || workflowScales);
+    const nextScales = globalImage
+      ? formatScales(globalScales || workflowScales)
+      : formatScales(workflowScales) || formatScales(globalScales);
     if (nextScales !== scales) {
       setScales(nextScales);
     }
-  }, [globalScales, workflowScales, scales]);
+  }, [globalImage, globalScales, workflowScales, scales]);
 
   const handleInputScales = (event) => {
     const nextScales = event.target.value;

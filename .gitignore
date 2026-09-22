@@ -15,6 +15,7 @@ uploads
 pytorch_connectomics
 server_api/chatbot/faiss_index/
 .logs/
+.pytc/
 
 # Local deployment evidence (may contain transient viewer URLs)
 demo-proofread-3d.png
