@@ -50,18 +50,18 @@ system database.
 
 ## Gates
 
-| Gate | Required evidence | Result |
-| --- | --- | --- |
-| Runtime compatibility | Installs on the repository's Python 3.10-3.11 range | **Pass.** DBOS 2.28.0 declares Python >=3.10; the spike ran on 3.11. |
-| Idempotent submission | Submitting the same workflow ID twice executes one workflow and one set of external markers | **Pass.** Both handles have the same ID; every marker is written once. |
-| Durable progress | Progress is queryable outside the worker and remains available after completion or process death | **Pass.** `DBOS.set_event` progress is read through `DBOSClient`. |
-| Queued cancellation | Cancelling enqueued work removes it before any external effect | **Pass.** Status becomes `CANCELLED`; no marker directory is created. |
-| Running cancellation | Cancellation stops work at a documented durable boundary | **Pass with constraint.** Cancellation preempts at the next step boundary; it does not interrupt an ordinary blocking synchronous step. |
-| Single-server restart | A killed process resumes from its last completed step without repeating that step's external effect | **Pass.** A replacement with the same executor identity recovers the `PENDING` workflow and completes the remaining markers. |
-| Mid-step crash safety | Killing a process during a non-transactional external side effect cannot duplicate or corrupt that effect | **Not proven.** The test kills after the step and progress event are durable. Production steps still require idempotent outputs or transactional integration. |
-| Postgres and multiple executors | Recovery, queue concurrency, and cancellation work with the intended production topology | **Not run; production gate fails.** SQLite is explicitly a development/test backend. |
-| PyTC subprocess control | Training/inference subprocesses are killed, reaped, and reconciled correctly on cancel/restart | **Not run; production gate fails.** A blocking `Popen` step is not sufficient. |
-| Product-state projection | DBOS state and `WorkflowOperation` cannot diverge under crashes | **Not designed; production gate fails.** A single source of truth and projection strategy is required. |
+| Gate                            | Required evidence                                                                                         | Result                                                                                                                                                        |
+| ------------------------------- | --------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Runtime compatibility           | Installs on the repository's Python 3.10-3.11 range                                                       | **Pass.** DBOS 2.28.0 declares Python >=3.10; the spike ran on 3.11.                                                                                          |
+| Idempotent submission           | Submitting the same workflow ID twice executes one workflow and one set of external markers               | **Pass.** Both handles have the same ID; every marker is written once.                                                                                        |
+| Durable progress                | Progress is queryable outside the worker and remains available after completion or process death          | **Pass.** `DBOS.set_event` progress is read through `DBOSClient`.                                                                                             |
+| Queued cancellation             | Cancelling enqueued work removes it before any external effect                                            | **Pass.** Status becomes `CANCELLED`; no marker directory is created.                                                                                         |
+| Running cancellation            | Cancellation stops work at a documented durable boundary                                                  | **Pass with constraint.** Cancellation preempts at the next step boundary; it does not interrupt an ordinary blocking synchronous step.                       |
+| Single-server restart           | A killed process resumes from its last completed step without repeating that step's external effect       | **Pass.** A replacement with the same executor identity recovers the `PENDING` workflow and completes the remaining markers.                                  |
+| Mid-step crash safety           | Killing a process during a non-transactional external side effect cannot duplicate or corrupt that effect | **Not proven.** The test kills after the step and progress event are durable. Production steps still require idempotent outputs or transactional integration. |
+| Postgres and multiple executors | Recovery, queue concurrency, and cancellation work with the intended production topology                  | **Not run; production gate fails.** SQLite is explicitly a development/test backend.                                                                          |
+| PyTC subprocess control         | Training/inference subprocesses are killed, reaped, and reconciled correctly on cancel/restart            | **Not run; production gate fails.** A blocking `Popen` step is not sufficient.                                                                                |
+| Product-state projection        | DBOS state and `WorkflowOperation` cannot diverge under crashes                                           | **Not designed; production gate fails.** A single source of truth and projection strategy is required.                                                        |
 
 ## Findings
 

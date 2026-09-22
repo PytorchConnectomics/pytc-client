@@ -6,12 +6,12 @@ The local app now starts with a deterministic synthetic segmentation project by 
 
 The generated project lives at `.pytc/synthetic-core-project` and contains four compressed, chunked HDF5 image volumes:
 
-| Volume | Initial state | Intended workflow role |
-| --- | --- | --- |
-| `train-01` | Ground truth | Training source |
-| `train-02` | Ground truth | Training source |
+| Volume      | Initial state   | Intended workflow role      |
+| ----------- | --------------- | --------------------------- |
+| `train-01`  | Ground truth    | Training source             |
+| `train-02`  | Ground truth    | Training source             |
 | `review-01` | Imperfect draft | Proofreading and correction |
-| `target-01` | Image only | Inference target |
+| `target-01` | Image only      | Inference target            |
 
 The expected progress state is always **4 total / 2 ground truth / 1 needs proofreading / 1 missing segmentation**. Baseline and corrected candidate predictions are prepopulated for comparison. The data are only for interaction and systems testing; they are not scientific evidence or a model-quality benchmark.
 

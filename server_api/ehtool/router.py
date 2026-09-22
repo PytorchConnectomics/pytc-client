@@ -6,9 +6,11 @@ Handles error detection endpoints
 from fastapi import APIRouter, Depends, HTTPException, status, Response
 from sqlalchemy.orm import Session
 from typing import List, Optional
+import json
 import math
 import logging
 import time
+from urllib.parse import quote
 
 logger = logging.getLogger(__name__)
 
@@ -92,6 +94,63 @@ def _append_ehtool_event(event: str, level: str = "INFO", **fields):
         logger.debug("Failed to append EHTool app event", exc_info=True)
 
 
+def _pyramid_response_metadata(perf_meta):
+    """Normalize optional pyramid selection metadata from ``DataManager``.
+
+    Proofreading edits continue to use authoritative, full-resolution voxel
+    coordinates.  This metadata only describes the image representation used
+    to render the response.
+    """
+    perf_meta = perf_meta or {}
+    vector_fields = {
+        "scale": "pyramid_scale",
+        "translation": "pyramid_translation",
+        "base_shape": "pyramid_base_shape",
+    }
+    metadata = {
+        "level": perf_meta.get("pyramid_level"),
+        "dataset_key": perf_meta.get("pyramid_dataset_key"),
+        "source": perf_meta.get("pyramid_source"),
+        "revision": perf_meta.get("pyramid_revision"),
+        "authoritative_level": perf_meta.get("pyramid_authoritative_level"),
+    }
+    for field, perf_key in vector_fields.items():
+        value = perf_meta.get(perf_key)
+        metadata[field] = list(value) if value is not None else None
+    return {key: value for key, value in metadata.items() if value is not None}
+
+
+def _pyramid_response_headers(metadata):
+    """Encode normalized pyramid metadata into compact ASCII-safe headers."""
+    if not metadata:
+        return {}
+    headers = {}
+    scalar_headers = {
+        "level": "X-Pyramid-Level",
+        "authoritative_level": "X-Pyramid-Authoritative-Level",
+    }
+    vector_headers = {
+        "scale": "X-Pyramid-Scale",
+        "translation": "X-Pyramid-Translation",
+        "base_shape": "X-Pyramid-Base-Shape",
+    }
+    encoded_headers = {
+        "dataset_key": "X-Pyramid-Dataset-Key",
+        "source": "X-Pyramid-Source",
+        "revision": "X-Pyramid-Revision",
+    }
+    for field, header in scalar_headers.items():
+        if field in metadata:
+            headers[header] = str(metadata[field])
+    for field, header in vector_headers.items():
+        if field in metadata:
+            headers[header] = json.dumps(metadata[field], separators=(",", ":"))
+    for field, header in encoded_headers.items():
+        if field in metadata:
+            headers[header] = quote(str(metadata[field]), safe="")
+    return headers
+
+
 def get_data_manager(session_id: int, db: Session) -> DataManager:
     """Get or create DataManager for a session"""
     if session_id not in _data_managers:
@@ -129,6 +188,8 @@ async def load_detection_dataset(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
+    data_manager = None
+    manager_cached = False
     try:
         workflow = None
         if request.workflow_id:
@@ -180,6 +241,7 @@ async def load_detection_dataset(
 
         # Cache DataManager
         _data_managers[db_session.id] = data_manager
+        manager_cached = True
 
         if workflow:
             workflow_patch = {
@@ -240,12 +302,18 @@ async def load_detection_dataset(
         )
 
     except FileNotFoundError as e:
+        if data_manager is not None and not manager_cached:
+            data_manager.close()
         _append_ehtool_event("proofreading_load_failed", level="ERROR", error=str(e))
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
     except ValueError as e:
+        if data_manager is not None and not manager_cached:
+            data_manager.close()
         _append_ehtool_event("proofreading_load_failed", level="ERROR", error=str(e))
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
     except Exception as e:
+        if data_manager is not None and not manager_cached:
+            data_manager.close()
         _append_ehtool_event("proofreading_load_failed", level="ERROR", error=str(e))
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
@@ -563,6 +631,7 @@ async def get_instance_image(
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     elapsed_ms = (time.perf_counter() - started_at) * 1000.0
+    pyramid_meta = _pyramid_response_metadata(perf_meta)
     _append_ehtool_event(
         "proofreading_instance_image_served",
         session_id=session_id,
@@ -579,6 +648,8 @@ async def get_instance_image(
         cache_hit=bool(perf_meta.get("cache_hit")),
         decode_ms=round(float(perf_meta.get("decode_ms", 0.0)), 2),
         resize_ms=round(float(perf_meta.get("resize_ms", 0.0)), 2),
+        performance=perf_meta,
+        pyramid=pyramid_meta or None,
     )
 
     headers = {
@@ -588,6 +659,7 @@ async def get_instance_image(
         "X-Cache-Hit": "1" if perf_meta.get("cache_hit") else "0",
         "X-Decode-MS": f"{float(perf_meta.get('decode_ms', 0.0)):.2f}",
         "X-Resize-MS": f"{float(perf_meta.get('resize_ms', 0.0)):.2f}",
+        **_pyramid_response_headers(pyramid_meta),
     }
     return Response(content=image_bytes, media_type=media_type, headers=headers)
 
@@ -857,6 +929,7 @@ async def get_instance_filmstrip(
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     elapsed_ms = (time.perf_counter() - started_at) * 1000.0
+    pyramid_meta = _pyramid_response_metadata(perf_meta)
     _append_ehtool_event(
         "proofreading_instance_filmstrip_served",
         session_id=session_id,
@@ -875,6 +948,8 @@ async def get_instance_filmstrip(
         cache_hit=bool(perf_meta.get("cache_hit")),
         decode_ms=round(float(perf_meta.get("decode_ms", 0.0)), 2),
         resize_ms=round(float(perf_meta.get("resize_ms", 0.0)), 2),
+        performance=perf_meta,
+        pyramid=pyramid_meta or None,
     )
 
     headers = {
@@ -886,6 +961,7 @@ async def get_instance_filmstrip(
         "X-Cache-Hit": "1" if perf_meta.get("cache_hit") else "0",
         "X-Decode-MS": f"{float(perf_meta.get('decode_ms', 0.0)):.2f}",
         "X-Resize-MS": f"{float(perf_meta.get('resize_ms', 0.0)):.2f}",
+        **_pyramid_response_headers(pyramid_meta),
     }
     return Response(content=image_bytes, media_type=media_type, headers=headers)
 
@@ -1057,7 +1133,8 @@ async def delete_detection_session(
         )
 
     if session_id in _data_managers:
-        del _data_managers[session_id]
+        data_manager = _data_managers.pop(session_id)
+        data_manager.close()
 
     db.delete(db_session)
     db.commit()

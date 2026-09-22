@@ -292,7 +292,26 @@ app.add_middleware(
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
-    expose_headers=["x-request-id"],
+    expose_headers=[
+        "x-request-id",
+        "x-axis",
+        "x-cache-hit",
+        "x-decode-ms",
+        "x-frame-height",
+        "x-pyramid-authoritative-level",
+        "x-pyramid-base-shape",
+        "x-pyramid-dataset-key",
+        "x-pyramid-level",
+        "x-pyramid-revision",
+        "x-pyramid-scale",
+        "x-pyramid-source",
+        "x-pyramid-translation",
+        "x-resize-ms",
+        "x-total-layers",
+        "x-z-count",
+        "x-z-index",
+        "x-z-start",
+    ],
 )
 
 logger = logging.getLogger(__name__)

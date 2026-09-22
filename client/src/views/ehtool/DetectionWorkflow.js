@@ -39,6 +39,11 @@ import {
   getProofreadingMaskPath,
   getTrainingReadyCorrectedMask,
 } from "./proofreadingPaths";
+import {
+  isAuthoritativeMaskForPlane,
+  parsePyramidHeaders,
+  resolvePyramidLevelForQuality,
+} from "./pyramidMetadata";
 
 const { Sider, Content } = Layout;
 const { Title, Text } = Typography;
@@ -46,6 +51,12 @@ const { Title, Text } = Typography;
 const parsePositiveInt = (value, fallback) => {
   const parsed = Number.parseInt(value, 10);
   return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
+};
+
+const pyramidCacheIdentity = (pyramid) => {
+  if (!pyramid) return "unresolved";
+  const revision = pyramid.revision || pyramid.source || "unknown-source";
+  return `${encodeURIComponent(revision)}@${Number(pyramid.level) || 0}`;
 };
 
 const PREVIEW_MAX_DIM = parsePositiveInt(
@@ -319,6 +330,7 @@ function DetectionWorkflow({
     maskAllBase64: null,
     maskActiveBase64: null,
     maskRawBase64: null,
+    maskRawAuthoritative: false,
     zIndex: 0,
     axis: "xy",
     total: 0,
@@ -337,6 +349,8 @@ function DetectionWorkflow({
   const filmstripFrameCache = useRef(new Map());
   const filmstripFrameCacheOrder = useRef([]);
   const filmstripFrameCacheLimit = 240;
+  const pyramidRevisionRef = useRef(null);
+  const pyramidLevelByQualityRef = useRef(new Map());
   const isScrubbingRef = useRef(false);
   const scrubTrackRef = useRef({ zIndex: 0, at: 0 });
   const isFastScrubRef = useRef(false);
@@ -860,8 +874,13 @@ function DetectionWorkflow({
     includeActive,
     quality,
     includeRaw = false,
-  }) =>
-    [
+  }) => {
+    const revision = pyramidRevisionRef.current || "unresolved";
+    const level = resolvePyramidLevelForQuality(
+      pyramidLevelByQualityRef.current,
+      quality,
+    );
+    return `${[
       instanceId,
       axis,
       zIndex,
@@ -869,7 +888,8 @@ function DetectionWorkflow({
       includeActive ? "active" : "noactive",
       includeRaw ? "raw" : "noraw",
       quality,
-    ].join(":");
+    ].join(":")}|pyr=${encodeURIComponent(revision)}@${level}`;
+  };
 
   const buildFilmstripBatchKey = ({
     sessionId: sid,
@@ -880,8 +900,13 @@ function DetectionWorkflow({
     kind,
     maxDim,
     quality,
-  }) =>
-    [
+  }) => {
+    const revision = pyramidRevisionRef.current || "unresolved";
+    const level =
+      pyramidLevelByQualityRef.current.get(`${quality}:${kind}`) ??
+      pyramidLevelByQualityRef.current.get(quality) ??
+      "auto";
+    return `${[
       sid,
       instanceId,
       axis,
@@ -890,12 +915,49 @@ function DetectionWorkflow({
       kind,
       maxDim || "full",
       quality,
-    ].join(":");
+    ].join(":")}|pyr=${encodeURIComponent(revision)}@${level}`;
+  };
+
+  const resolvePyramidCacheKey = (key, payload) => {
+    if (!payload?.pyramid) return key;
+    const baseKey = String(key).split("|pyr=")[0];
+    const identity = pyramidCacheIdentity(payload?.pyramid);
+    return `${baseKey}|pyr=${identity}`;
+  };
+
+  const observePyramidMetadata = (pyramid, quality) => {
+    if (!pyramid) return;
+    const revision = pyramid.revision || pyramid.source || null;
+    if (
+      revision &&
+      pyramidRevisionRef.current &&
+      revision !== pyramidRevisionRef.current
+    ) {
+      // A changed source revision invalidates all rendered frame identities;
+      // authoritative edit coordinates and payloads remain untouched.
+      clearFrameCaches();
+      pyramidLevelByQualityRef.current.clear();
+    }
+    if (revision) pyramidRevisionRef.current = revision;
+    if (quality) pyramidLevelByQualityRef.current.set(quality, pyramid.level);
+  };
 
   const cacheFilmstripBatch = (key, batch) => {
-    const existing = filmstripBatchCache.current.get(key);
+    const baseKey = String(key).split("|pyr=")[0];
+    const pyramid = batch?.meta?.pyramid;
+    const revision =
+      pyramidRevisionRef.current ||
+      pyramid?.revision ||
+      pyramid?.source ||
+      "unresolved";
+    const resolvedKey = pyramid
+      ? `${baseKey}|pyr=${encodeURIComponent(revision)}@${
+          Number(pyramid.level) || 0
+        }`
+      : key;
+    const existing = filmstripBatchCache.current.get(resolvedKey);
     if (existing && existing !== batch) {
-      const prefix = `${key}:`;
+      const prefix = `${resolvedKey}:`;
       filmstripFrameCache.current.forEach((_, frameKey) => {
         if (!frameKey.startsWith(prefix)) return;
         filmstripFrameCache.current.delete(frameKey);
@@ -905,8 +967,8 @@ function DetectionWorkflow({
           (frameKey) => !frameKey.startsWith(prefix),
         );
     }
-    filmstripBatchCache.current.set(key, batch);
-    touchCacheOrder(filmstripBatchCacheOrder.current, key);
+    filmstripBatchCache.current.set(resolvedKey, batch);
+    touchCacheOrder(filmstripBatchCacheOrder.current, resolvedKey);
     while (filmstripBatchCacheOrder.current.length > filmstripBatchCacheLimit) {
       const oldest = filmstripBatchCacheOrder.current.shift();
       filmstripBatchCache.current.delete(oldest);
@@ -920,6 +982,7 @@ function DetectionWorkflow({
           (frameKey) => !frameKey.startsWith(prefix),
         );
     }
+    return resolvedKey;
   };
 
   const cacheFilmstripFrame = (key, frameUrl) => {
@@ -932,12 +995,13 @@ function DetectionWorkflow({
   };
 
   const cachePreview = (key, payload) => {
-    const existing = previewCache.current.get(key);
+    const resolvedKey = resolvePyramidCacheKey(key, payload);
+    const existing = previewCache.current.get(resolvedKey);
     if (existing && existing !== payload) {
       revokePayloadUrls(existing);
     }
-    previewCache.current.set(key, payload);
-    touchCacheOrder(previewCacheOrder.current, key);
+    previewCache.current.set(resolvedKey, payload);
+    touchCacheOrder(previewCacheOrder.current, resolvedKey);
     while (previewCacheOrder.current.length > previewCacheLimit) {
       const oldest = previewCacheOrder.current.shift();
       const cached = previewCache.current.get(oldest);
@@ -947,12 +1011,13 @@ function DetectionWorkflow({
   };
 
   const cacheView = (key, payload) => {
-    const existing = viewCache.current.get(key);
+    const resolvedKey = resolvePyramidCacheKey(key, payload);
+    const existing = viewCache.current.get(resolvedKey);
     if (existing && existing !== payload) {
       revokePayloadUrls(existing);
     }
-    viewCache.current.set(key, payload);
-    touchCacheOrder(viewCacheOrder.current, key);
+    viewCache.current.set(resolvedKey, payload);
+    touchCacheOrder(viewCacheOrder.current, resolvedKey);
     while (viewCacheOrder.current.length > viewCacheLimit) {
       const oldest = viewCacheOrder.current.shift();
       const cached = viewCache.current.get(oldest);
@@ -971,16 +1036,23 @@ function DetectionWorkflow({
       maskAllBase64: payload.maskAllBase64 ?? prev.maskAllBase64,
       maskActiveBase64: payload.maskActiveBase64 ?? prev.maskActiveBase64,
       maskRawBase64:
-        payload.maskRawBase64 ??
-        (payload.zIndex === prev.zIndex &&
+        payload.zIndex === prev.zIndex &&
         payload.axis === prev.axis &&
-        payload.instanceId === prev.instanceId
+        payload.instanceId === prev.instanceId &&
+        prev.maskRawAuthoritative
           ? prev.maskRawBase64
-          : null),
+          : null,
+      maskRawAuthoritative:
+        payload.zIndex === prev.zIndex &&
+        payload.axis === prev.axis &&
+        payload.instanceId === prev.instanceId &&
+        prev.maskRawAuthoritative,
       zIndex: payload.zIndex,
       axis: payload.axis,
       total: payload.total,
       instanceId: payload.instanceId ?? prev.instanceId,
+      pyramid: payload.pyramid ?? prev.pyramid ?? null,
+      pyramidByKind: payload.pyramidByKind ?? prev.pyramidByKind ?? {},
     }));
     setAxisTotal(payload.total);
   };
@@ -1153,6 +1225,15 @@ function DetectionWorkflow({
       metaResponse?.headers?.["x-total-layers"] ?? totalLayers ?? 0,
     );
     const resolvedAxis = metaResponse?.headers?.["x-axis"] ?? axis;
+    const pyramidByKind = {};
+    responses.forEach((response, idx) => {
+      const pyramid = parsePyramidHeaders(response?.headers);
+      if (pyramid) pyramidByKind[kinds[idx]] = pyramid;
+    });
+    const pyramid = pyramidByKind.image || pyramidByKind[kinds[0]] || null;
+    if (pyramidByKind.image) {
+      observePyramidMetadata(pyramidByKind.image, quality);
+    }
 
     const payload = {
       imageBase64: null,
@@ -1167,6 +1248,10 @@ function DetectionWorkflow({
       batchCount: 1,
       quality,
       kindSet: kinds,
+      pyramid,
+      pyramidByKind,
+      maskRawAuthoritative:
+        quality === "full" && kinds.includes("mask_active_binary"),
     };
 
     responses.forEach((response, idx) => {
@@ -1240,6 +1325,14 @@ function DetectionWorkflow({
 
       responses.forEach((response, idx) => {
         const { kind, key } = missingKinds[idx];
+        const pyramid = parsePyramidHeaders(response?.headers);
+        if (pyramid) {
+          pyramidLevelByQualityRef.current.set(
+            `${quality}:${kind}`,
+            pyramid.level,
+          );
+          if (kind === "image") observePyramidMetadata(pyramid, quality);
+        }
         const entry = {
           blob: response.data,
           meta: {
@@ -1253,10 +1346,11 @@ function DetectionWorkflow({
             axis: response?.headers?.["x-axis"] ?? axis,
             frameHeight:
               Number(response?.headers?.["x-frame-height"] ?? 0) || null,
+            pyramid,
           },
         };
-        cacheFilmstripBatch(key, entry);
-        entriesByKind.set(kind, { key, ...entry });
+        const resolvedKey = cacheFilmstripBatch(key, entry);
+        entriesByKind.set(kind, { key: resolvedKey, ...entry });
       });
     }
 
@@ -1284,6 +1378,14 @@ function DetectionWorkflow({
       batchCount: resolvedCount,
       quality,
       kindSet: kinds,
+      pyramid: meta?.pyramid || null,
+      pyramidByKind: Object.fromEntries(
+        Array.from(entriesByKind.entries()).map(([kind, entry]) => [
+          kind,
+          entry?.meta?.pyramid || null,
+        ]),
+      ),
+      maskRawAuthoritative: false,
     };
 
     for (let idx = 0; idx < kinds.length; idx += 1) {
@@ -1318,7 +1420,7 @@ function DetectionWorkflow({
     preferFilmstrip = ENABLE_FILMSTRIP_PREVIEW,
     signal,
   }) => {
-    const kinds = ["image", "mask_active_binary"];
+    const kinds = ["image"];
     if (!imageOnly) {
       if (includeActive) kinds.push("mask_active");
       if (includeAll) kinds.push("mask_all");
@@ -1457,6 +1559,7 @@ function DetectionWorkflow({
           maskAllBase64: null,
           maskActiveBase64: null,
           maskRawBase64: null,
+          maskRawAuthoritative: false,
         }));
         setSliderZ(resolvedIndex);
         setCommittedZ(resolvedIndex);
@@ -1793,7 +1896,11 @@ function DetectionWorkflow({
           maxDim: null,
           quality: "full",
         });
-        const merged = { ...cached, maskRawBase64: rawPayload.maskRawBase64 };
+        const merged = {
+          ...cached,
+          maskRawBase64: rawPayload.maskRawBase64,
+          maskRawAuthoritative: true,
+        };
         cacheView(cacheKey, merged);
         lastFullRequestKeyRef.current = requestIdentity;
         setViewState(merged);
@@ -1936,6 +2043,7 @@ function DetectionWorkflow({
       maskAllBase64: null,
       maskActiveBase64: null,
       maskRawBase64: null,
+      maskRawAuthoritative: false,
     }));
     setSliderZ(axisIndex);
     setCommittedZ(axisIndex);
@@ -2158,12 +2266,13 @@ function DetectionWorkflow({
   ) => {
     if (!sessionId || !activeInstanceId) return;
     const targetIndex = clampSliceIndex(zIndex, axisTotal || totalLayers);
-    const rawMaskMatchesCurrentSlice =
-      planeState?.axis === axis &&
-      planeState?.zIndex === targetIndex &&
-      planeState?.instanceId === activeInstanceId &&
-      Boolean(planeState?.maskRawBase64);
-    if (!rawMaskMatchesCurrentSlice) {
+    const authoritativeMaskMatchesCurrentSlice = isAuthoritativeMaskForPlane({
+      planeState,
+      axis,
+      targetIndex,
+      instanceId: activeInstanceId,
+    });
+    if (!authoritativeMaskMatchesCurrentSlice) {
       logProofreadingEvent(
         "proofreading_mask_save_blocked_stale_mask",
         {
@@ -2172,6 +2281,7 @@ function DetectionWorkflow({
           viewStateAxis: planeState?.axis,
           viewStateInstanceId: planeState?.instanceId,
           hasRawMask: Boolean(planeState?.maskRawBase64),
+          maskRawAuthoritative: Boolean(planeState?.maskRawAuthoritative),
         },
         { level: "WARNING" },
       );
