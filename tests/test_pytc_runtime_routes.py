@@ -597,6 +597,179 @@ class WorkflowInferenceRuntimeSyncTests(unittest.TestCase):
             f"workflow-command-{command['id']}",
         )
 
+    def test_durable_inference_command_runner_submits_once_and_replays_result(self):
+        """Inference commands use the server-owned durable submission path."""
+        workflow_id = self._workflow_id()
+        project_root = pathlib.Path(self.temp_dir.name) / "inference-command-project"
+        image_path = project_root / "data" / "image" / "infer_im.h5"
+        checkpoint_path = project_root / "outputs" / "checkpoint_00001.pth.tar"
+        output_path = project_root / "outputs" / "inference"
+        image_path.parent.mkdir(parents=True)
+        checkpoint_path.parent.mkdir(parents=True)
+        output_path.mkdir(parents=True)
+        image_path.write_text("image", encoding="utf-8")
+        checkpoint_path.write_text("checkpoint", encoding="utf-8")
+
+        db = self.SessionLocal()
+        try:
+            command = WorkflowCommand(
+                workflow_id=workflow_id,
+                command_type="start_inference",
+                status="queued",
+                idempotency_key="test:durable-inference-command",
+                actor="agent",
+                input_json=encode_json(
+                    {
+                        "inferenceConfig": "INFERENCE: {}\n",
+                        "configOriginPath": "configs/MitoEM/Mito25-Local-BC.yaml",
+                        "outputPath": str(output_path),
+                        "inputImagePath": str(image_path),
+                        "arguments": {"checkpoint": str(checkpoint_path)},
+                    }
+                ),
+            )
+            db.add(command)
+            db.commit()
+            db.refresh(command)
+            command_id = command.id
+        finally:
+            db.close()
+
+        captured = {}
+
+        def fake_worker(method, endpoint, json_body=None, **_kwargs):
+            captured["calls"] = captured.get("calls", 0) + 1
+            captured["method"] = method
+            captured["endpoint"] = endpoint
+            captured["json_body"] = json_body
+            return {"status": "started", "pid": 4343}
+
+        with patch("server_api.main._proxy_to_worker", side_effect=fake_worker):
+            response = self.client.post(
+                f"/api/workflows/{workflow_id}/commands/{command_id}/run"
+            )
+            replay = self.client.post(
+                f"/api/workflows/{workflow_id}/commands/{command_id}/run"
+            )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(replay.status_code, 200)
+        payload = response.json()
+        self.assertEqual(payload["command"]["status"], "submitted")
+        self.assertEqual(payload["command"]["attempt_count"], 1)
+        self.assertEqual(payload["operation"]["operation_type"], "start_inference")
+        self.assertEqual(payload["operation"]["status"], "succeeded")
+        self.assertEqual(payload["operation"]["command_id"], command_id)
+        self.assertEqual(
+            payload["operation"]["idempotency_key"],
+            f"workflow-command:{command_id}:attempt:1",
+        )
+        self.assertEqual(replay.json()["operation"]["id"], payload["operation"]["id"])
+        self.assertEqual(captured["calls"], 1)
+        self.assertEqual(captured["method"], "post")
+        self.assertEqual(captured["endpoint"], "/start_model_inference")
+        self.assertEqual(captured["json_body"]["workflowId"], workflow_id)
+        self.assertEqual(captured["json_body"]["command_id"], command_id)
+        self.assertEqual(
+            captured["json_body"]["run_id"], f"workflow-command-{command_id}"
+        )
+        self.assertEqual(
+            captured["json_body"]["inputImagePath"], str(image_path.resolve())
+        )
+        self.assertEqual(
+            captured["json_body"]["arguments"]["checkpoint"],
+            str(checkpoint_path.resolve()),
+        )
+
+        events_response = self.client.get(f"/api/workflows/{workflow_id}/events")
+        self.assertEqual(events_response.status_code, 200)
+        started_events = [
+            event
+            for event in events_response.json()
+            if event["event_type"] == "inference.started"
+        ]
+        self.assertEqual(len(started_events), 1)
+        self.assertEqual(started_events[0]["payload"]["command_id"], command_id)
+        self.assertEqual(
+            started_events[0]["payload"]["run_id"],
+            f"workflow-command-{command_id}",
+        )
+
+    def test_durable_inference_command_retry_uses_a_new_operation_attempt(self):
+        workflow_id = self._workflow_id()
+        project_root = pathlib.Path(self.temp_dir.name) / "retry-inference-command"
+        image_path = project_root / "image.h5"
+        checkpoint_path = project_root / "checkpoint.pth.tar"
+        output_path = project_root / "output"
+        project_root.mkdir(parents=True)
+        output_path.mkdir()
+        image_path.write_text("image", encoding="utf-8")
+        checkpoint_path.write_text("checkpoint", encoding="utf-8")
+
+        db = self.SessionLocal()
+        try:
+            command = WorkflowCommand(
+                workflow_id=workflow_id,
+                command_type="start_inference",
+                status="queued",
+                idempotency_key="test:retryable-inference-command",
+                actor="user",
+                input_json=encode_json(
+                    {
+                        "inferenceConfig": "INFERENCE: {}\n",
+                        "outputPath": str(output_path),
+                        "inputImagePath": str(image_path),
+                        "arguments": {"checkpoint": str(checkpoint_path)},
+                    }
+                ),
+            )
+            db.add(command)
+            db.commit()
+            db.refresh(command)
+            command_id = command.id
+        finally:
+            db.close()
+
+        with patch(
+            "server_api.main._proxy_to_worker",
+            side_effect=HTTPException(status_code=503, detail="worker unavailable"),
+        ):
+            failed_response = self.client.post(
+                f"/api/workflows/{workflow_id}/commands/{command_id}/run"
+            )
+
+        self.assertEqual(failed_response.status_code, 503)
+        commands_response = self.client.get(f"/api/workflows/{workflow_id}/commands")
+        command_payload = next(
+            item for item in commands_response.json() if item["id"] == command_id
+        )
+        self.assertEqual(command_payload["status"], "retry_pending")
+        self.assertEqual(command_payload["attempt_count"], 1)
+
+        operations_response = self.client.get(
+            f"/api/workflows/{workflow_id}/operations"
+        )
+        self.assertEqual(operations_response.status_code, 200)
+        failed_operation = operations_response.json()[0]
+        self.assertEqual(failed_operation["operation_type"], "start_inference")
+        self.assertEqual(failed_operation["status"], "failed")
+        self.assertEqual(failed_operation["error"]["status_code"], 503)
+
+        with patch(
+            "server_api.main._proxy_to_worker",
+            return_value={"status": "started", "pid": 4344},
+        ):
+            retry_response = self.client.post(
+                f"/api/workflows/{workflow_id}/commands/{command_id}/run"
+            )
+
+        self.assertEqual(retry_response.status_code, 200)
+        self.assertEqual(retry_response.json()["operation"]["status"], "succeeded")
+        self.assertEqual(
+            retry_response.json()["operation"]["idempotency_key"],
+            f"workflow-command:{command_id}:attempt:2",
+        )
+
     def test_durable_training_command_failure_records_retryable_operation(self):
         workflow_id = self._workflow_id()
         project_root = pathlib.Path(self.temp_dir.name) / "failed-command-project"
@@ -756,14 +929,12 @@ class ModelServiceTests(unittest.TestCase):
             self.assertEqual(records[1]["stream"], "stdout")
 
     def test_detect_chunk_tile_mismatch_for_direct_h5_volume(self):
-        diagnostic = model_service._detect_chunk_tile_mismatch(
-            """
+        diagnostic = model_service._detect_chunk_tile_mismatch("""
 DATASET:
   DO_CHUNK_TITLE: 1
   IMAGE_NAME: /tmp/train-volume.h5
   LABEL_NAME: /tmp/train-label.h5
-"""
-        )
+""")
 
         self.assertIsNotNone(diagnostic)
         self.assertEqual(diagnostic["code"], "tile_dataset_direct_volume_mismatch")

@@ -818,6 +818,85 @@ def _build_training_body_from_command(
     }
 
 
+def _build_inference_body_from_command(
+    command: WorkflowCommand,
+    workflow,
+) -> dict[str, Any]:
+    """Build a worker payload from durable inference-command input.
+
+    Command inputs intentionally retain client effects rather than browser-built
+    YAML.  The server resolves the selected preset at submission time so the
+    worker launch is replayable without requiring an open browser tab.
+    """
+    command_input = decode_json(command.input_json)
+    client_effects = command_input.get("client_effects")
+    if not isinstance(client_effects, dict):
+        client_effects = {}
+    command_arguments = command_input.get("arguments")
+    if not isinstance(command_arguments, dict):
+        command_arguments = {}
+
+    config_origin_path = _first_string(
+        command_input.get("configOriginPath"),
+        command_input.get("config_origin_path"),
+        command_input.get("inference_config_preset"),
+        client_effects.get("set_inference_config_preset"),
+        workflow.config_path,
+    )
+    inference_config = _first_string(
+        command_input.get("inferenceConfig"),
+        command_input.get("inference_config"),
+    )
+    if not inference_config:
+        if not config_origin_path:
+            raise HTTPException(
+                status_code=400,
+                detail="Inference command is missing a config preset or config text.",
+            )
+        config_origin_path, inference_config = _read_pytc_config_content(
+            config_origin_path
+        )
+
+    output_path = _first_string(
+        command_input.get("outputPath"),
+        command_input.get("output_path"),
+        client_effects.get("set_inference_output_path"),
+        workflow.inference_output_path,
+    )
+    image_path = _first_string(
+        command_input.get("inputImagePath"),
+        command_input.get("image_path"),
+        client_effects.get("set_inference_image_path"),
+        workflow.image_path,
+        workflow.dataset_path,
+    )
+    checkpoint_path = _first_string(
+        command_input.get("checkpointPath"),
+        command_input.get("checkpoint_path"),
+        command_arguments.get("checkpoint"),
+        client_effects.get("set_inference_checkpoint_path"),
+        workflow.checkpoint_path,
+    )
+    run_id = _first_string(
+        command_input.get("run_id"),
+        command_input.get("runId"),
+        f"workflow-command-{command.id}",
+    )
+
+    return {
+        "inferenceConfig": inference_config,
+        "configOriginPath": config_origin_path,
+        "outputPath": output_path or "",
+        "inputImagePath": image_path,
+        "checkpointPath": checkpoint_path,
+        "arguments": {"checkpoint": checkpoint_path},
+        "workflowId": workflow.id,
+        "workflow_id": workflow.id,
+        "command_id": command.id,
+        "run_id": run_id,
+    }
+
+
 def _workflow_command_run_response(
     workflow,
     command: WorkflowCommand,
@@ -857,7 +936,7 @@ def _fail_command_operation(
             expected_status=operation.status,
             error_payload=error_payload,
             lease_owner=(
-                "server_api.training_runner" if operation.status == "running" else None
+                operation.lease_owner if operation.status == "running" else None
             ),
             commit=False,
         )
@@ -2592,7 +2671,7 @@ async def run_workflow_command(
     )
     if not command:
         raise HTTPException(status_code=404, detail="Workflow command not found.")
-    if command.command_type != "start_training":
+    if command.command_type not in {"start_training", "start_inference"}:
         raise HTTPException(
             status_code=400,
             detail=f"Unsupported workflow command type: {command.command_type}",
@@ -2619,6 +2698,17 @@ async def run_workflow_command(
             status_code=409, detail="Workflow command was already submitted."
         )
 
+    is_training = command.command_type == "start_training"
+    operation_type = "start_training" if is_training else "start_inference"
+    runtime_mode = "training" if is_training else "inference"
+    runner_name = (
+        "server_api.training_runner" if is_training else "server_api.inference_runner"
+    )
+    worker_endpoint = (
+        "/start_model_training" if is_training else "/start_model_inference"
+    )
+    event_prefix = "training" if is_training else "inference"
+
     operation_query = db.query(WorkflowOperation).filter(
         WorkflowOperation.workflow_id == workflow.id,
         WorkflowOperation.command_id == command.id,
@@ -2634,7 +2724,7 @@ async def run_workflow_command(
         operation = create_workflow_operation(
             db,
             workflow_id=workflow.id,
-            operation_type="start_training",
+            operation_type=operation_type,
             idempotency_key=(
                 f"workflow-command:{command.id}:attempt:{operation_query.count() + 1}"
             ),
@@ -2663,12 +2753,16 @@ async def run_workflow_command(
         )
 
     try:
-        body = _build_training_body_from_command(command, workflow)
-        body = _runtime_body_with_workflow_fallbacks(body, workflow, mode="training")
+        body = (
+            _build_training_body_from_command(command, workflow)
+            if is_training
+            else _build_inference_body_from_command(command, workflow)
+        )
+        body = _runtime_body_with_workflow_fallbacks(body, workflow, mode=runtime_mode)
         command = mark_workflow_command_running(
             db,
             command,
-            lease_owner="server_api.training_runner",
+            lease_owner=runner_name,
             commit=False,
         )
         operation = transition_workflow_operation(
@@ -2676,45 +2770,57 @@ async def run_workflow_command(
             operation,
             status="running",
             expected_status="queued",
-            lease_owner="server_api.training_runner",
+            lease_owner=runner_name,
             metadata={"run_id": body.get("run_id")},
             commit=False,
         )
         db.commit()
         db.refresh(command)
         db.refresh(operation)
-        update_workflow_fields(
-            db,
-            workflow,
-            {
-                "stage": "retraining_staged",
-                "training_output_path": body.get("outputPath"),
-                "config_path": body.get("configOriginPath"),
-            },
-            commit=True,
-        )
+        workflow_updates = {
+            "stage": "retraining_staged" if is_training else "inference",
+            "config_path": body.get("configOriginPath"),
+        }
+        if is_training:
+            workflow_updates["training_output_path"] = body.get("outputPath")
+        else:
+            workflow_updates["inference_output_path"] = body.get("outputPath")
+            workflow_updates["checkpoint_path"] = body.get("checkpointPath")
+        update_workflow_fields(db, workflow, workflow_updates, commit=True)
+        event_payload = {
+            "run_id": body.get("run_id"),
+            "command_id": command.id,
+            "outputPath": body.get("outputPath"),
+            "configOriginPath": body.get("configOriginPath"),
+            "inputImagePath": body.get("inputImagePath"),
+            "source": "workflow_command_runner",
+        }
+        if is_training:
+            event_payload.update(
+                {
+                    "logPath": body.get("logPath"),
+                    "inputLabelPath": body.get("inputLabelPath"),
+                }
+            )
+        else:
+            event_payload["checkpointPath"] = body.get("checkpointPath")
         started_event = append_event_for_workflow_if_present(
             db,
             workflow_id=workflow.id,
             actor="system",
-            event_type="training.started",
+            event_type=f"{event_prefix}.started",
             stage=workflow.stage,
-            summary="Started model training from a durable workflow command.",
-            payload={
-                "run_id": body.get("run_id"),
-                "command_id": command.id,
-                "outputPath": body.get("outputPath"),
-                "logPath": body.get("logPath"),
-                "configOriginPath": body.get("configOriginPath"),
-                "inputImagePath": body.get("inputImagePath"),
-                "inputLabelPath": body.get("inputLabelPath"),
-                "source": "workflow_command_runner",
-            },
-            idempotency_key=f"workflow-command:{command.id}:training.started",
+            summary=(
+                "Started model training from a durable workflow command."
+                if is_training
+                else "Started model inference from a durable workflow command."
+            ),
+            payload=event_payload,
+            idempotency_key=f"workflow-command:{command.id}:{event_prefix}.started",
         )
         worker_data = _proxy_to_worker(
             "post",
-            "/start_model_training",
+            worker_endpoint,
             json_body=body,
             timeout=30,
         )
@@ -2736,7 +2842,7 @@ async def run_workflow_command(
             status="succeeded",
             expected_status="running",
             result_payload=operation_result,
-            lease_owner="server_api.training_runner",
+            lease_owner=runner_name,
             commit=False,
         )
         db.commit()
@@ -2760,15 +2866,19 @@ async def run_workflow_command(
             db,
             workflow_id=workflow.id,
             actor="system",
-            event_type="training.failed",
+            event_type=f"{event_prefix}.failed",
             stage=workflow.stage,
-            summary="Failed to start model training from a durable workflow command.",
+            summary=(
+                "Failed to start model training from a durable workflow command."
+                if is_training
+                else "Failed to start model inference from a durable workflow command."
+            ),
             payload={
                 "command_id": command.id,
                 "source": "workflow_command_runner",
                 **error_payload,
             },
-            idempotency_key=f"workflow-command:{command.id}:training.failed",
+            idempotency_key=f"workflow-command:{command.id}:{event_prefix}.failed",
         )
         raise
     except Exception as exc:
@@ -2787,15 +2897,19 @@ async def run_workflow_command(
             db,
             workflow_id=workflow.id,
             actor="system",
-            event_type="training.failed",
+            event_type=f"{event_prefix}.failed",
             stage=workflow.stage,
-            summary="Failed to start model training from a durable workflow command.",
+            summary=(
+                "Failed to start model training from a durable workflow command."
+                if is_training
+                else "Failed to start model inference from a durable workflow command."
+            ),
             payload={
                 "command_id": command.id,
                 "source": "workflow_command_runner",
                 **error_payload,
             },
-            idempotency_key=f"workflow-command:{command.id}:training.failed",
+            idempotency_key=f"workflow-command:{command.id}:{event_prefix}.failed",
         )
         raise HTTPException(status_code=500, detail=error_payload) from exc
 
