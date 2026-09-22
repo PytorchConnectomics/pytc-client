@@ -10,6 +10,7 @@ permissions:
   pull_request:
     branches:
       - main
+      - "agent/**"
 
 concurrency:
   group: ci-${{ github.workflow }}-${{ github.ref }}

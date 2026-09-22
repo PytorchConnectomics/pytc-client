@@ -37,6 +37,28 @@ SUPPORTED_VOLUME_FORMATS = (
 
 
 @dataclass(frozen=True)
+class VolumeAxis:
+    """A named array axis in canonical multiscale order."""
+
+    name: str
+    type: Optional[str] = None
+    unit: Optional[str] = None
+
+
+@dataclass(frozen=True)
+class VolumeLevel:
+    """Storage and coordinate metadata for one pyramid level."""
+
+    index: int
+    dataset_key: Optional[str]
+    shape: Tuple[int, ...]
+    dtype: np.dtype
+    chunks: Optional[Tuple[int, ...]] = None
+    scale: Tuple[float, ...] = ()
+    translation: Tuple[float, ...] = ()
+
+
+@dataclass(frozen=True)
 class VolumeMetadata:
     """Storage-level metadata available without materializing voxel data."""
 
@@ -46,6 +68,10 @@ class VolumeMetadata:
     dtype: np.dtype
     dataset_key: Optional[str] = None
     chunks: Optional[Tuple[int, ...]] = None
+    axes: Tuple[VolumeAxis, ...] = ()
+    levels: Tuple[VolumeLevel, ...] = ()
+    selected_level: int = 0
+    multiscale_version: Optional[str] = None
 
     @property
     def ndim(self) -> int:
@@ -104,22 +130,44 @@ class ArrayVolumeStore(VolumeStore):
         format: str,
         dataset_key: Optional[str] = None,
         close: Optional[Callable[[], None]] = None,
+        axes: Sequence[VolumeAxis] = (),
+        levels: Sequence[VolumeLevel] = (),
+        selected_level: int = 0,
+        multiscale_version: Optional[str] = None,
     ) -> None:
         self._data = data
         self._close = close
         self._closed = False
         chunks = getattr(data, "chunks", None)
+        shape = tuple(int(value) for value in data.shape)
+        dtype = np.dtype(data.dtype)
+        normalized_chunks = (
+            tuple(int(value) for value in chunks)
+            if chunks is not None and all(value is not None for value in chunks)
+            else None
+        )
+        normalized_levels = tuple(levels) or (
+            VolumeLevel(
+                index=0,
+                dataset_key=dataset_key,
+                shape=shape,
+                dtype=dtype,
+                chunks=normalized_chunks,
+                scale=tuple(1.0 for _ in shape),
+                translation=tuple(0.0 for _ in shape),
+            ),
+        )
         self._metadata = VolumeMetadata(
             path=str(path),
             format=format,
-            shape=tuple(int(value) for value in data.shape),
-            dtype=np.dtype(data.dtype),
+            shape=shape,
+            dtype=dtype,
             dataset_key=dataset_key,
-            chunks=(
-                tuple(int(value) for value in chunks)
-                if chunks is not None and all(value is not None for value in chunks)
-                else None
-            ),
+            chunks=normalized_chunks,
+            axes=tuple(axes),
+            levels=normalized_levels,
+            selected_level=selected_level,
+            multiscale_version=multiscale_version,
         )
 
     @property
@@ -389,6 +437,182 @@ def _select_zarr_array(store: Any, dataset_key: Optional[str]) -> Any:
     return store[arrays[0]]
 
 
+def _normalized_chunks(data: Any) -> Optional[Tuple[int, ...]]:
+    chunks = getattr(data, "chunks", None)
+    if chunks is None or not all(value is not None for value in chunks):
+        return None
+    return tuple(int(value) for value in chunks)
+
+
+def _zarr_attrs(value: Any) -> dict:
+    attrs = getattr(value, "attrs", None)
+    if attrs is None:
+        return {}
+    try:
+        return dict(attrs)
+    except Exception:
+        asdict = getattr(attrs, "asdict", None)
+        return dict(asdict()) if callable(asdict) else {}
+
+
+def _ngff_multiscales(group: Any) -> Tuple[Optional[List[Any]], Optional[str]]:
+    """Return NGFF multiscales for both 0.4 and 0.5 metadata layouts."""
+
+    attrs = _zarr_attrs(group)
+    multiscales = attrs.get("multiscales")
+    version: Optional[str] = None
+    if multiscales is None:
+        ome = attrs.get("ome")
+        if isinstance(ome, dict):
+            multiscales = ome.get("multiscales")
+            if ome.get("version") is not None:
+                version = str(ome["version"])
+    if multiscales is None:
+        return None, version
+    if not isinstance(multiscales, list) or not multiscales:
+        raise ValueError("NGFF multiscales metadata must be a non-empty list")
+    return multiscales, version
+
+
+def _parse_ngff_axes(raw_axes: Any) -> Tuple[VolumeAxis, ...]:
+    if raw_axes is None:
+        return ()
+    if not isinstance(raw_axes, list):
+        raise ValueError("NGFF axes metadata must be a list")
+    axes: List[VolumeAxis] = []
+    for axis in raw_axes:
+        if isinstance(axis, str):
+            axes.append(VolumeAxis(name=axis))
+            continue
+        if not isinstance(axis, dict) or not axis.get("name"):
+            raise ValueError("Each NGFF axis must be a name or an object with a name")
+        axes.append(
+            VolumeAxis(
+                name=str(axis["name"]),
+                type=str(axis["type"]) if axis.get("type") is not None else None,
+                unit=str(axis["unit"]) if axis.get("unit") is not None else None,
+            )
+        )
+    return tuple(axes)
+
+
+def _parse_ngff_transform(
+    transforms: Any, ndim: int, *, dataset_path: str
+) -> Tuple[Tuple[float, ...], Tuple[float, ...]]:
+    scale = [1.0] * ndim
+    translation = [0.0] * ndim
+    if transforms is None:
+        transforms = []
+    if not isinstance(transforms, list):
+        raise ValueError(
+            f"NGFF coordinateTransformations for {dataset_path!r} must be a list"
+        )
+    for transform in transforms:
+        if not isinstance(transform, dict):
+            raise ValueError(f"Invalid NGFF transform for {dataset_path!r}")
+        transform_type = transform.get("type")
+        if transform_type not in {"scale", "translation"}:
+            raise ValueError(
+                f"Unsupported NGFF transform {transform_type!r} for {dataset_path!r}"
+            )
+        values = transform.get(transform_type)
+        if not isinstance(values, (list, tuple)) or len(values) != ndim:
+            raise ValueError(
+                f"NGFF {transform_type} for {dataset_path!r} must have {ndim} values"
+            )
+        vector = [float(value) for value in values]
+        if transform_type == "scale":
+            scale = [current * value for current, value in zip(scale, vector)]
+            translation = [
+                current * value for current, value in zip(translation, vector)
+            ]
+        else:
+            translation = [
+                current + value for current, value in zip(translation, vector)
+            ]
+    return tuple(scale), tuple(translation)
+
+
+def _open_ngff_level(
+    group: Any, *, level: Optional[int]
+) -> Optional[
+    Tuple[Any, Tuple[VolumeAxis, ...], Tuple[VolumeLevel, ...], int, Optional[str]]
+]:
+    multiscales, container_version = _ngff_multiscales(group)
+    if multiscales is None:
+        return None
+
+    multiscale = multiscales[0]
+    if not isinstance(multiscale, dict):
+        raise ValueError("NGFF multiscales entries must be objects")
+    datasets = multiscale.get("datasets")
+    if not isinstance(datasets, list) or not datasets:
+        raise ValueError("NGFF multiscale datasets must be a non-empty list")
+    axes = _parse_ngff_axes(multiscale.get("axes"))
+    selected_level = 0 if level is None else level
+    if isinstance(selected_level, bool) or not isinstance(selected_level, int):
+        raise ValueError("Pyramid level must be an integer")
+    if selected_level < 0 or selected_level >= len(datasets):
+        raise ValueError(
+            f"Pyramid level {selected_level} is out of range; "
+            f"available levels are 0..{len(datasets) - 1}"
+        )
+
+    parsed_levels: List[VolumeLevel] = []
+    arrays: List[Any] = []
+    for index, dataset in enumerate(datasets):
+        if not isinstance(dataset, dict) or not dataset.get("path"):
+            raise ValueError("Each NGFF dataset must provide a non-empty path")
+        dataset_path = str(dataset["path"])
+        try:
+            data = group[dataset_path]
+        except Exception as exc:
+            raise ValueError(f"NGFF dataset {dataset_path!r} was not found") from exc
+        if not _is_zarr_array(data):
+            raise ValueError(f"NGFF dataset {dataset_path!r} is not an array")
+        shape = tuple(int(value) for value in data.shape)
+        if axes and len(axes) != len(shape):
+            raise ValueError(
+                f"NGFF axes has {len(axes)} entries but {dataset_path!r} is {len(shape)}D"
+            )
+        dataset_transforms = dataset.get("coordinateTransformations") or []
+        multiscale_transforms = multiscale.get("coordinateTransformations") or []
+        if not isinstance(dataset_transforms, list) or not isinstance(
+            multiscale_transforms, list
+        ):
+            raise ValueError("NGFF coordinateTransformations must be lists")
+        scale, translation = _parse_ngff_transform(
+            dataset_transforms + multiscale_transforms,
+            len(shape),
+            dataset_path=dataset_path,
+        )
+        arrays.append(data)
+        parsed_levels.append(
+            VolumeLevel(
+                index=index,
+                dataset_key=getattr(data, "path", None) or dataset_path,
+                shape=shape,
+                dtype=np.dtype(data.dtype),
+                chunks=_normalized_chunks(data),
+                scale=scale,
+                translation=translation,
+            )
+        )
+    version = multiscale.get("version") or container_version
+    return (
+        arrays[selected_level],
+        axes,
+        tuple(parsed_levels),
+        selected_level,
+        str(version) if version is not None else None,
+    )
+
+
+def _validate_single_level(level: Optional[int]) -> None:
+    if level not in (None, 0):
+        raise ValueError("This artifact has only pyramid level 0")
+
+
 def _close_all(*resources: Any) -> Callable[[], None]:
     def close() -> None:
         first_error: Optional[Exception] = None
@@ -427,6 +651,7 @@ def open_volume_store(
     path: str,
     *,
     dataset_key: Optional[str] = None,
+    level: Optional[int] = None,
 ) -> VolumeStore:
     """Open a volume for metadata inspection and bounded region reads.
 
@@ -446,6 +671,7 @@ def open_volume_store(
     lower_path = str(target).lower()
 
     if lower_name.endswith((".h5", ".hdf5", ".hdf")):
+        _validate_single_level(level)
         import h5py
 
         handle = h5py.File(target, "r")
@@ -469,16 +695,75 @@ def open_volume_store(
 
         handle = tifffile.TiffFile(str(target))
         try:
-            tiff_store = handle.series[0].aszarr()
+            series = handle.series[0]
+            pyramid = tuple(getattr(series, "levels", ()) or (series,))
+            selected_level = 0 if level is None else level
+            if (
+                isinstance(selected_level, bool)
+                or not isinstance(selected_level, int)
+                or selected_level < 0
+                or selected_level >= len(pyramid)
+            ):
+                raise ValueError(
+                    f"Pyramid level {selected_level} is out of range; "
+                    f"available levels are 0..{len(pyramid) - 1}"
+                )
+            selected_series = pyramid[selected_level]
+            try:
+                # Opening through the base series with an explicit level avoids
+                # receiving a multiscale Zarr group for level 0.
+                tiff_store = series.aszarr(level=selected_level)
+            except TypeError:  # pragma: no cover - older tifffile compatibility
+                tiff_store = selected_series.aszarr()
             data = zarr.open(tiff_store, mode="r")
+            if not _is_zarr_array(data):
+                try:
+                    data = data[str(selected_level)]
+                except Exception:
+                    data = _select_zarr_array(data, None)
+            base_shape = tuple(int(value) for value in pyramid[0].shape)
+            levels: List[VolumeLevel] = []
+            for index, pyramid_series in enumerate(pyramid):
+                shape = tuple(int(value) for value in pyramid_series.shape)
+                scale = tuple(
+                    float(base) / float(current)
+                    for base, current in zip(base_shape, shape)
+                )
+                levels.append(
+                    VolumeLevel(
+                        index=index,
+                        dataset_key=None if index == 0 else f"level/{index}",
+                        shape=shape,
+                        dtype=np.dtype(pyramid_series.dtype),
+                        chunks=(
+                            _normalized_chunks(data)
+                            if index == selected_level
+                            else None
+                        ),
+                        scale=scale,
+                        translation=tuple(0.0 for _ in shape),
+                    )
+                )
+            axis_names = str(getattr(series, "axes", ""))
+            axes = tuple(VolumeAxis(name=name.lower()) for name in axis_names)
             return ArrayVolumeStore(
                 data,
                 path=target,
                 format="ome-tiff" if ".ome.tif" in lower_name else "tiff",
+                dataset_key=(
+                    None if selected_level == 0 else f"level/{selected_level}"
+                ),
                 close=_close_all(tiff_store, handle),
+                axes=axes,
+                levels=levels,
+                selected_level=selected_level,
             )
+        except ValueError:
+            handle.close()
+            raise
         except Exception:
             handle.close()
+            _validate_single_level(level)
             return ArrayVolumeStore(
                 tifffile.imread(str(target)),
                 path=target,
@@ -486,6 +771,7 @@ def open_volume_store(
             )
 
     if lower_name.endswith(".npy"):
+        _validate_single_level(level)
         data = np.load(target, mmap_mode="r")
         mmap = getattr(data, "_mmap", None)
         return ArrayVolumeStore(
@@ -496,6 +782,7 @@ def open_volume_store(
         )
 
     if lower_name.endswith(".npz"):
+        _validate_single_level(level)
         loaded = np.load(target)
         try:
             selected_key, data = _select_npz_array(loaded, dataset_key)
@@ -514,7 +801,40 @@ def open_volume_store(
         import zarr
 
         root = zarr.open(str(target), mode="r")
-        data = _select_zarr_array(root, dataset_key)
+        candidate = root
+        if dataset_key and not _is_zarr_array(root):
+            try:
+                candidate = root[dataset_key]
+            except Exception as exc:
+                raise ValueError(f"Zarr/N5 path {dataset_key!r} not found") from exc
+
+        ngff = (
+            None
+            if _is_zarr_array(candidate)
+            else _open_ngff_level(candidate, level=level)
+        )
+        if ngff is not None:
+            data, axes, levels, selected_level, version = ngff
+            selected_key = (
+                getattr(data, "path", None) or levels[selected_level].dataset_key
+            )
+            return ArrayVolumeStore(
+                data,
+                path=target,
+                format="n5" if lower_name.endswith(".n5") else "zarr",
+                dataset_key=selected_key,
+                axes=axes,
+                levels=levels,
+                selected_level=selected_level,
+                multiscale_version=version,
+            )
+
+        _validate_single_level(level)
+        data = (
+            candidate
+            if _is_zarr_array(candidate)
+            else _select_zarr_array(candidate, None)
+        )
         selected_key = dataset_key or getattr(data, "path", None) or None
         return ArrayVolumeStore(
             data,
@@ -524,6 +844,7 @@ def open_volume_store(
         )
 
     if lower_path.endswith((".nii", ".nii.gz")):
+        _validate_single_level(level)
         try:
             import nibabel as nib
         except Exception as exc:  # pragma: no cover - optional dependency
@@ -537,6 +858,7 @@ def open_volume_store(
         )
 
     if lower_name.endswith((".mrc", ".map", ".rec")):
+        _validate_single_level(level)
         try:
             import mrcfile
         except Exception as exc:  # pragma: no cover - optional dependency
@@ -550,6 +872,7 @@ def open_volume_store(
         )
 
     if lower_name.endswith((".png", ".jpg", ".jpeg", ".bmp")):
+        _validate_single_level(level)
         import imageio.v3 as iio
 
         return ArrayVolumeStore(
@@ -568,12 +891,13 @@ def load_volume(
     path: str,
     *,
     dataset_key: Optional[str] = None,
+    level: Optional[int] = None,
     crop: CropSpec = None,
     channel: Optional[int] = None,
     reference_ndim: Optional[int] = None,
     label: str = "volume",
 ) -> np.ndarray:
-    with open_volume_store(path, dataset_key=dataset_key) as store:
+    with open_volume_store(path, dataset_key=dataset_key, level=level) as store:
         return store.read(
             crop,
             channel=channel,
