@@ -72,3 +72,31 @@ def test_render_round_trips_through_the_checker():
     script, diags = check(text, PRESETS)
     assert codes(diags) == []
     assert script.get("threshold") == 0.4
+
+
+def test_set_lines_change_any_preset_key_and_are_checked():
+    text = TRAIN + "  set SOLVER.BASE_LR 0.001\n  set MODEL.FILTERS [8, 16, 24, 32, 40]\n"
+    script, diags = check(text, PRESETS)
+    assert codes(diags) == []
+    plan = compile_script(script)
+    cfg = yaml.safe_load(plan.files["config.yaml"])
+    assert cfg["SOLVER"]["BASE_LR"] == 0.001
+    assert cfg["MODEL"]["FILTERS"] == [8, 16, 24, 32, 40]
+    assert any(c["key"] == "SOLVER.BASE_LR" and c["source"] == "script" for c in plan.changes)
+
+
+def test_set_lines_reject_typos_wrong_types_and_managed_keys():
+    text = TRAIN + "  set SOLVER.BASE_RL 0.001\n  set SOLVER.BASE_LR fast\n  set SOLVER.ITERATION_TOTAL 5\n"
+    _, diags = check(text, PRESETS)
+    errs = {d.code: d for d in diags if d.severity == "error"}
+    assert "SOLVER.BASE_LR" in errs["meaning.set_key"].hint
+    assert "meaning.set_type" in errs and "meaning.set_managed" in errs
+
+
+def test_render_prints_set_lines_that_parse_back():
+    text = render({"verb": "train", "target": "cluster",
+                   "fields": {"image": "/i.h5", "label": "/l.h5", "output": "/o"},
+                   "sets": [{"key": "SOLVER.BASE_LR", "value": 0.001}, {"key": "MODEL.FILTERS", "value": [8, 16]}]})
+    script, diags = check(text, PRESETS)
+    assert codes(diags) == []
+    assert [(s.key, s.value) for s in script.sets] == [("SOLVER.BASE_LR", 0.001), ("MODEL.FILTERS", [8, 16])]

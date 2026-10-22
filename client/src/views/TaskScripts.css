@@ -1,75 +1,217 @@
-.tds-page { display: grid; gap: 14px; max-width: 1400px; margin: 0 auto; }
-.tds-head { display: flex; justify-content: space-between; align-items: flex-end; gap: 12px; flex-wrap: wrap; }
-.tds-title { margin: 0 0 2px; font-size: 20px; font-weight: 600; }
-.tds-card { border-radius: 8px; }
-.tds-grid { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 14px; align-items: start; }
-@media (max-width: 1100px) { .tds-grid { grid-template-columns: 1fr; } }
-.tds-examples { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px; }
-.tds-example { border: 1px solid #d9dde3; background: #fafbfc; border-radius: 14px; padding: 2px 10px; font-size: 12.5px; cursor: pointer; color: #374151; text-align: left; }
-.tds-example:hover { border-color: #6b7280; }
-.tds-example:disabled { opacity: 0.5; cursor: default; }
-.tds-meta { font-size: 12.5px; }
-.tds-note { color: #6b7280; font-size: 13px; margin-bottom: 8px !important; }
-.tds-summary { font-weight: 500; margin-bottom: 4px !important; }
+@import url("https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:ital,wght@0,400;0,500;0,600;1,400&display=swap");
 
-/* Editor */
-.tds-editor {
-  --tds-font: "SFMono-Regular", Menlo, Consolas, "Liberation Mono", monospace;
-  --tds-lh: 21px;
-  display: grid; grid-template-columns: 38px minmax(0, 1fr);
-  border: 1px solid #d0d5dd; border-radius: 6px; background: #fcfcfd; overflow: hidden;
-  font-family: var(--tds-font); font-size: 13px; line-height: var(--tds-lh); height: 236px;
+/* Task scripts: a protocol sheet under review. The script is the document; problems and AI answers are
+   margin notes level with their line. Color is for status only; indigo marks the AI and the Run action. */
+.ts-page {
+  --ink: #18202b;
+  --ink-2: #4a5566;
+  --ink-3: #7b8595;
+  --rule: #e1e4ea;
+  --rule-2: #eef0f4;
+  --paper: #ffffff;
+  --wash: #f7f8fa;
+  --indigo: #3f37c9;
+  --indigo-wash: #f1f0ff;
+  --bad: #b42318;
+  --bad-wash: #fdf0ee;
+  --warn: #a15c07;
+  --warn-wash: #fdf6e9;
+  --good: #1f7a4d;
+  --sans: "IBM Plex Sans", -apple-system, "Segoe UI", system-ui, sans-serif;
+  --mono: "IBM Plex Mono", "SFMono-Regular", Menlo, Consolas, monospace;
+  --line-h: 22px;
+
+  max-width: 1320px;
+  margin: 0 auto;
+  padding: 8px 8px 48px;
+  font-family: var(--sans);
+  color: var(--ink);
+  font-size: 14px;
+  line-height: 1.5;
 }
-.tds-editor:focus-within { border-color: #4f46e5; box-shadow: 0 0 0 2px rgba(79, 70, 229, 0.15); }
-.tds-gutter { background: #f2f4f7; color: #98a2b3; text-align: right; padding: 8px 6px 8px 0; overflow: hidden; user-select: none; }
-.tds-gutter-line { height: var(--tds-lh); }
-.tds-g-error { color: #d92d20; font-weight: 700; }
-.tds-g-warning { color: #b54708; font-weight: 700; }
-.tds-code { position: relative; overflow: hidden; }
-.tds-backdrop, .tds-textarea {
-  position: absolute; inset: 0; margin: 0; padding: 8px 10px; border: 0;
-  font: inherit; line-height: var(--tds-lh); white-space: pre; tab-size: 2; letter-spacing: 0;
+.ts-page h1,
+.ts-page h2 { font-family: var(--sans); color: var(--ink); margin: 0; }
+.ts-page button { font-family: var(--sans); }
+.ts-page :focus-visible { outline: 2px solid var(--indigo); outline-offset: 2px; }
+.ts-sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); }
+
+/* Header */
+.ts-head { display: flex; justify-content: space-between; align-items: flex-end; gap: 24px; flex-wrap: wrap; padding: 4px 0 18px; }
+.ts-title { font-size: 26px; font-weight: 600; letter-spacing: -0.01em; line-height: 1.15; }
+.ts-lede { margin: 6px 0 0; color: var(--ink-2); max-width: 62ch; }
+.ts-env { display: flex; gap: 28px; margin: 0; }
+.ts-env dt { font-size: 12px; color: var(--ink-3); }
+.ts-env dd { margin: 0; font-size: 13px; color: var(--ink); }
+
+.ts-alert { display: flex; justify-content: space-between; gap: 12px; background: var(--bad-wash); color: var(--bad); padding: 8px 12px; border-radius: 6px; margin-bottom: 12px; }
+.ts-alert button { all: unset; cursor: pointer; text-decoration: underline; }
+
+/* Ask */
+.ts-ask { display: flex; gap: 8px; }
+.ts-ask input { flex: 1; min-width: 0; font: inherit; font-size: 15px; padding: 10px 14px; border: 1px solid #cdd2da; border-radius: 8px; background: var(--paper); color: var(--ink); }
+.ts-ask input:focus { outline: none; border-color: var(--indigo); box-shadow: 0 0 0 3px var(--indigo-wash); }
+.ts-examples { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 14px; margin: 8px 2px 22px; font-size: 13px; color: var(--ink-3); }
+.ts-examples button { all: unset; cursor: pointer; color: var(--ink-2); text-decoration: underline; text-decoration-color: #c4c9d2; text-underline-offset: 3px; }
+.ts-examples button:hover { color: var(--ink); text-decoration-color: var(--ink); }
+.ts-examples button:disabled { opacity: 0.5; cursor: default; }
+
+/* Buttons */
+.ts-btn { font-size: 14px; padding: 8px 14px; border-radius: 7px; border: 1px solid #cdd2da; background: var(--paper); color: var(--ink); cursor: pointer; white-space: nowrap; }
+.ts-btn:hover:not(:disabled) { border-color: var(--ink-3); }
+.ts-btn:disabled { opacity: 0.45; cursor: default; }
+.ts-btn-dark { background: var(--ink); color: #fff; border-color: var(--ink); }
+.ts-btn-dark:hover:not(:disabled) { background: #2c3644; }
+.ts-link { all: unset; cursor: pointer; color: var(--indigo); font-size: 13px; }
+.ts-link:hover { text-decoration: underline; }
+.ts-link.is-danger { color: var(--bad); }
+
+/* Layout */
+.ts-main { display: grid; grid-template-columns: minmax(0, 1fr) 340px; gap: 28px; align-items: start; }
+@media (max-width: 1180px) { .ts-main { grid-template-columns: 1fr; } }
+.ts-sheet h2,
+.ts-plan h2,
+.ts-runs h2 { font-size: 15px; font-weight: 600; }
+.ts-sheet-head { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; flex-wrap: wrap; margin-bottom: 8px; }
+.ts-sheet-meta { display: flex; gap: 14px; font-size: 13px; color: var(--ink-3); }
+.ts-draft-note { margin: 0 0 10px; color: var(--ink-2); font-size: 13.5px; }
+.ts-empty { border: 1px dashed #cdd2da; border-radius: 8px; padding: 28px; color: var(--ink-2); display: grid; gap: 6px; justify-items: start; }
+.ts-empty p { margin: 0; }
+
+/* Editor + margin */
+.ts-editor-row { display: grid; grid-template-columns: minmax(0, 1fr); gap: 18px; }
+.ts-editor-row.has-notes { grid-template-columns: minmax(0, 1fr) 230px; }
+@media (max-width: 860px) { .ts-editor-row.has-notes { grid-template-columns: 1fr; } }
+.ts-editor {
+  display: grid; grid-template-columns: 40px minmax(0, 1fr);
+  border: 1px solid #cdd2da; border-radius: 8px; background: var(--paper); overflow: hidden;
+  font-family: var(--mono); font-size: 13px; line-height: var(--line-h); min-height: 150px;
 }
-.tds-backdrop { overflow: hidden; pointer-events: none; color: #1f2937; }
-.tds-line { height: var(--tds-lh); width: max-content; min-width: 100%; }
-.tds-bg-error { background: rgba(217, 45, 32, 0.11); }
-.tds-bg-warning { background: rgba(247, 144, 9, 0.12); }
-.tds-textarea { resize: none; background: transparent; color: transparent; caret-color: #111827; outline: none; overflow: auto; }
-.tds-textarea::selection { background: rgba(79, 70, 229, 0.22); color: transparent; }
-.tds-kw { color: #7c3aed; font-weight: 600; }
-.tds-verb { color: #1d4ed8; font-weight: 600; }
-.tds-target { color: #0e7490; font-weight: 600; }
-.tds-field { color: #111827; }
-.tds-str { color: #067647; }
-.tds-num { color: #b54708; }
-.tds-ident { color: #6941c6; }
-.tds-comment { color: #98a2b3; font-style: italic; }
-.tds-squiggle { text-decoration: underline wavy; text-decoration-skip-ink: none; text-underline-offset: 3px; }
-.tds-squiggle-error { text-decoration-color: #d92d20; }
-.tds-squiggle-warning { text-decoration-color: #f79009; }
+.ts-editor:focus-within { border-color: var(--indigo); box-shadow: 0 0 0 3px var(--indigo-wash); }
+.ts-gutter { background: var(--wash); border-right: 1px solid var(--rule-2); color: #a3abb8; text-align: right; padding: 10px 8px 10px 0; user-select: none; }
+.ts-gutter-line { height: var(--line-h); }
+.ts-g-error { color: var(--bad); font-weight: 500; }
+.ts-g-warning { color: var(--warn); font-weight: 500; }
+.ts-g-answer { color: var(--indigo); font-weight: 500; }
+.ts-code { position: relative; overflow: hidden; }
+.ts-backdrop,
+.ts-textarea { position: absolute; inset: 0; margin: 0; padding: 10px 12px; border: 0; font: inherit; line-height: var(--line-h); white-space: pre; tab-size: 2; letter-spacing: 0; }
+.ts-backdrop { overflow: hidden; pointer-events: none; color: var(--ink); }
+.ts-line { height: var(--line-h); width: max-content; min-width: 100%; }
+.ts-line-error { background: var(--bad-wash); }
+.ts-line-warning { background: var(--warn-wash); }
+.ts-line-answer { background: var(--indigo-wash); }
+.ts-textarea { resize: none; background: transparent; color: transparent; caret-color: var(--ink); outline: none; overflow-x: auto; overflow-y: hidden; }
+.ts-textarea::selection { background: rgba(63, 55, 201, 0.2); color: transparent; }
+.ts-tk-kw { color: var(--indigo); font-weight: 500; }
+.ts-tk-verb,
+.ts-tk-target { color: var(--ink); font-weight: 500; }
+.ts-tk-field { color: var(--ink-2); }
+.ts-tk-key { color: var(--ink); }
+.ts-tk-str { color: #0f6b4a; }
+.ts-tk-num { color: #8a4b00; }
+.ts-tk-ident { color: #5b3fb0; }
+.ts-tk-comment { color: #9aa2ae; font-style: italic; }
+.ts-squiggle { text-decoration: underline wavy; text-decoration-skip-ink: none; text-underline-offset: 4px; }
+.ts-squiggle-error { text-decoration-color: var(--bad); }
+.ts-squiggle-warning { text-decoration-color: #d98a14; }
 
-.tds-status { margin-top: 8px; font-size: 13px; }
-.tds-diags { list-style: none; margin: 6px 0 0; padding: 0; display: grid; gap: 4px; }
-.tds-diag { all: unset; cursor: pointer; display: grid; grid-template-columns: 16px 52px 1fr; gap: 6px; font-size: 13px; padding: 4px 6px; border-radius: 4px; width: calc(100% - 12px); }
-.tds-diag:hover, .tds-diag:focus-visible { background: #f2f4f7; }
-.tds-diag-error { color: #b42318; }
-.tds-diag-warning, .tds-diag-info { color: #93370d; }
-.tds-diag-line { font-variant-numeric: tabular-nums; color: #667085; }
-.tds-hint { color: #667085; }
+.ts-margin { position: relative; }
+@media (max-width: 860px) { .ts-margin { display: grid; gap: 8px; } .ts-margin .ts-note { position: static !important; } }
+.ts-note { position: absolute; left: 0; right: 0; display: grid; gap: 1px; padding-left: 10px; border-left: 2px solid; font-size: 12.5px; line-height: 1.4; }
+.ts-note-error { border-color: var(--bad); }
+.ts-note-warning { border-color: #d98a14; }
+.ts-note-answer { border-color: var(--indigo); }
+.ts-note-where { color: var(--ink-3); font-size: 11.5px; }
+.ts-note-error .ts-note-text { color: var(--bad); }
+.ts-note-warning .ts-note-text { color: var(--warn); }
+.ts-note-answer .ts-note-text { color: var(--ink); }
+.ts-note-hint { color: var(--ink-2); }
+.ts-note code,
+.ts-reply code,
+.ts-draft-note code { font-family: var(--mono); font-size: 0.92em; background: var(--rule-2); padding: 0 3px; border-radius: 3px; color: inherit; }
 
-.tds-pre { background: #f8f9fb; border: 1px solid #eaecf0; border-radius: 6px; padding: 8px 10px; font-size: 12px; max-height: 300px; overflow: auto; margin: 0; }
-.tds-change { word-break: break-all; font-size: 12.5px; }
-.tds-change s { color: #98a2b3; }
-.tds-key { font-size: 12px; word-break: break-all; }
-.tds-why { color: #475467; font-size: 12.5px; }
-.tds-approve { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin-top: 12px; padding-top: 12px; border-top: 1px solid #eaecf0; }
+.ts-check { margin: 8px 0 0; font-size: 13px; color: var(--ink-3); min-height: 20px; }
+.ts-check.is-bad { color: var(--bad); }
+.ts-check.is-good { color: var(--good); }
 
-.tds-jobs { display: grid; gap: 8px; }
-.tds-job { border: 1px solid #eaecf0; border-radius: 6px; padding: 8px 10px; display: grid; gap: 6px; }
-.tds-job-head { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
-.tds-job-actions { margin-left: auto; display: flex; gap: 6px; }
-.tds-job-req { color: #475467; font-size: 13px; font-style: italic; }
-.tds-metrics { font-weight: 600; color: #067647; }
-.tds-job-body { display: grid; gap: 6px; }
-.tds-log { background: #101828; color: #d0d5dd; border-color: #101828; }
-.tds-script-pre { max-height: 180px; }
+/* Conversation */
+.ts-thread { display: grid; gap: 10px; margin: 18px 0 10px; max-width: 760px; }
+.ts-thread:empty { margin: 10px 0 0; }
+.ts-turn p { margin: 0; }
+.ts-said { justify-self: start; color: var(--ink-2); padding-left: 10px; border-left: 2px solid var(--rule); }
+.ts-reply { display: grid; gap: 8px; padding-left: 10px; border-left: 2px solid var(--indigo); }
+.ts-reply-error { color: var(--bad); }
+.ts-reply-line { color: var(--ink-3); }
+.ts-thinking { margin: 0; color: var(--ink-3); font-style: italic; padding-left: 12px; }
+.ts-proposal { border: 1px solid var(--rule); border-radius: 8px; overflow: hidden; }
+.ts-proposal.is-discarded { opacity: 0.55; }
+.ts-diff { margin: 0; padding: 8px 0; font-family: var(--mono); font-size: 12.5px; line-height: 20px; overflow-x: auto; background: var(--paper); }
+.ts-diff > div { padding: 0 12px; white-space: pre; }
+.ts-diff span { display: inline-block; width: 16px; color: var(--ink-3); }
+.ts-add { background: #eaf6ef; color: #0f5132; }
+.ts-del { background: #fbeceb; color: #842029; text-decoration: line-through; text-decoration-color: rgba(132, 32, 41, 0.35); }
+.ts-proposal-warn { padding: 0 12px 8px; color: var(--warn); font-size: 13px; }
+.ts-proposal-actions { display: flex; gap: 8px; padding: 10px 12px; border-top: 1px solid var(--rule-2); background: var(--wash); }
+.ts-proposal-done { padding: 8px 12px; border-top: 1px solid var(--rule-2); color: var(--ink-3); font-size: 13px; }
+.ts-say { display: flex; gap: 8px; max-width: 760px; }
+.ts-say input { flex: 1; min-width: 0; font: inherit; padding: 8px 12px; border: 1px solid #cdd2da; border-radius: 7px; color: var(--ink); background: var(--paper); }
+.ts-say input:focus { outline: none; border-color: var(--indigo); box-shadow: 0 0 0 3px var(--indigo-wash); }
+
+/* Before it runs */
+.ts-plan { position: sticky; top: 12px; background: var(--paper); border: 1px solid var(--rule); border-radius: 10px; padding: 16px; display: grid; gap: 12px; }
+.ts-plan-summary { margin: 0; font-size: 15px; line-height: 1.45; overflow-wrap: anywhere; }
+.ts-plan-empty { margin: 0; color: var(--ink-3); }
+.ts-change-group h3 { font-family: var(--sans); font-size: 12.5px; font-weight: 500; color: var(--ink-2); margin: 0 0 4px; }
+.ts-changes { list-style: none; margin: 0; padding: 0; display: grid; border-top: 1px solid var(--rule); }
+.ts-change { display: grid; gap: 1px; padding: 7px 0; border-bottom: 1px solid var(--rule); font-size: 13px; }
+.ts-change-key { font-family: var(--mono); font-size: 12px; color: var(--ink); }
+.ts-change-val { font-family: var(--mono); font-size: 12px; overflow-wrap: anywhere; }
+.ts-change-val del { color: var(--ink-3); }
+.ts-change-val ins { text-decoration: none; color: var(--ink); font-weight: 500; }
+.ts-change-why { color: var(--ink-3); font-size: 12px; }
+.ts-change.is-auto-fix .ts-change-why { color: var(--warn); }
+.ts-file { display: grid; gap: 6px; }
+.ts-file-help { margin: 0; font-size: 12.5px; color: var(--ink-2); }
+.ts-yaml { font-family: var(--mono); font-size: 12px; line-height: 20px; background: var(--paper); border: 1px solid var(--rule); border-radius: 6px; padding: 8px 10px; max-height: 320px; overflow: auto; white-space: pre; }
+.ts-yaml-row.is-parent { color: var(--ink-2); }
+.ts-yaml-row.is-fixed { color: var(--ink-3); }
+.ts-yaml-value { all: unset; cursor: pointer; color: var(--ink); border-bottom: 1px dotted #9aa2ae; }
+.ts-yaml-value:hover,
+.ts-yaml-value:focus-visible { color: var(--indigo); border-bottom-color: var(--indigo); }
+.ts-yaml-input { font: inherit; width: 18ch; padding: 0 4px; border: 1px solid var(--indigo); border-radius: 3px; }
+.ts-outputs { margin: 0; display: grid; gap: 4px; font-size: 12.5px; }
+.ts-outputs dt { color: var(--ink-3); }
+.ts-outputs dd { margin: 0; font-family: var(--mono); font-size: 12px; overflow-wrap: anywhere; }
+.ts-run { font-size: 15px; font-weight: 500; padding: 11px 16px; border: 0; border-radius: 8px; background: var(--indigo); color: #fff; cursor: pointer; }
+.ts-run:hover:not(:disabled) { background: #332cad; }
+.ts-run:disabled { background: #c9cbe0; cursor: default; }
+.ts-run-hint { margin: -4px 0 0; font-size: 12.5px; color: var(--ink-3); min-height: 18px; }
+
+/* Runs */
+.ts-runs { margin-top: 36px; }
+.ts-runs h2 { margin-bottom: 8px; }
+.ts-ledger { list-style: none; margin: 0; padding: 0; border-top: 1px solid var(--rule); }
+.ts-run-row { border-bottom: 1px solid var(--rule); }
+.ts-run-line { display: grid; grid-template-columns: 84px minmax(0, 1fr) auto auto; gap: 16px; align-items: baseline; padding: 10px 2px; font-size: 13.5px; }
+@media (max-width: 760px) { .ts-run-line { grid-template-columns: 1fr; gap: 4px; } }
+.ts-state { font-size: 12.5px; font-weight: 500; display: inline-flex; align-items: center; gap: 6px; }
+.ts-state::before { content: ""; width: 7px; height: 7px; border-radius: 50%; background: var(--ink-3); }
+.ts-state.is-done::before { background: var(--good); }
+.ts-state.is-running::before,
+.ts-state.is-queued::before,
+.ts-state.is-submitting::before { background: var(--indigo); animation: ts-pulse 1.4s ease-in-out infinite; }
+.ts-state.is-failed { color: var(--bad); }
+.ts-state.is-failed::before { background: var(--bad); }
+@keyframes ts-pulse { 50% { opacity: 0.3; } }
+@media (prefers-reduced-motion: reduce) { .ts-state::before { animation: none !important; } }
+.ts-run-what { overflow-wrap: anywhere; }
+.ts-metrics { display: block; color: var(--good); font-weight: 500; margin-top: 2px; }
+.ts-run-when { color: var(--ink-3); font-size: 12.5px; white-space: nowrap; font-variant-numeric: tabular-nums; }
+.ts-run-actions { display: flex; gap: 14px; }
+.ts-run-error { margin: 0 0 10px; color: var(--bad); font-size: 13px; }
+.ts-run-detail { padding: 0 2px 14px; display: grid; gap: 8px; }
+.ts-run-request { margin: 0; color: var(--ink-2); font-style: italic; }
+.ts-run-cols { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 12px; }
+@media (max-width: 960px) { .ts-run-cols { grid-template-columns: 1fr; } }
+.ts-pre { margin: 0; font-family: var(--mono); font-size: 12px; line-height: 1.55; background: var(--wash); border: 1px solid var(--rule-2); border-radius: 6px; padding: 10px 12px; overflow: auto; max-height: 300px; white-space: pre; }
+.ts-log { background: #161b24; color: #cfd6e1; border-color: #161b24; }

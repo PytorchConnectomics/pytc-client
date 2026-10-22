@@ -24,7 +24,9 @@ through the same checker as hand-written scripts.
 from __future__ import annotations
 
 import difflib
+import json
 import re
+from pathlib import Path
 from dataclasses import dataclass, field
 from typing import Any, Callable, Optional
 
@@ -50,7 +52,7 @@ SCHEMA: dict[str, tuple[FieldSpec, ...]] = {
         FieldSpec("image", "path", True, "Training image volume (.h5 or .tif)"),
         FieldSpec("label", "path", True, "Ground-truth labels for the image"),
         FieldSpec("preset", "preset", True, "Base model configuration", "synthetic-tiny"),
-        FieldSpec("steps", "int", False, "Training iterations", 200, 1, 200000),
+        FieldSpec("steps", "int", False, "Training iterations", 100, 1, 200000),
         FieldSpec("output", "path", True, "Folder for checkpoints and logs"),
     ),
     "infer": (
@@ -106,11 +108,24 @@ class FieldValue:
 
 
 @dataclass
+class SetLine:
+    """`set SOLVER.BASE_LR 0.001`: change any key of the preset's YAML config."""
+
+    key: str
+    value: Any
+    raw: str
+    line: int
+    key_col: int
+    value_col: int
+
+
+@dataclass
 class TaskScript:
     verb: str
     target: str
     header_line: int
     fields: dict[str, FieldValue] = field(default_factory=dict)
+    sets: list[SetLine] = field(default_factory=list)
 
     def get(self, name: str, default: Any = None) -> Any:
         if name in self.fields:
@@ -125,6 +140,7 @@ class TaskScript:
             "verb": self.verb,
             "target": self.target,
             "fields": {name: f.value for name, f in self.fields.items()},
+            "sets": [{"key": s.key, "value": s.value} for s in self.sets],
         }
 
 
@@ -237,6 +253,9 @@ def parse(text: str) -> tuple[Optional[TaskScript], list[Diagnostic]]:
         name = match.group("name")
         raw = (match.group("value") or "").strip()
         col = len(match.group("indent")) + 1
+        if name == "set":
+            _parse_set(script, raw, line, number, col, diags)
+            continue
         if not raw:
             diags.append(Diagnostic(number, "error", f"`{name}` has no value.",
                                     "Write the value after the field name.", col, col + len(name),
@@ -258,6 +277,114 @@ def parse(text: str) -> tuple[Optional[TaskScript], list[Diagnostic]]:
         diags.append(Diagnostic(1, "error", "The script is empty.",
                                 "Start with a header such as `task train on cluster`.", 1, 1, "syntax.empty"))
     return script, diags
+
+
+_SET_RE = re.compile(r"^(?P<key>[A-Za-z_][\w]*(?:\.[A-Za-z_][\w]*)+)(?:\s+(?P<value>.+))?$")
+
+
+def _parse_set(script: "TaskScript", raw: str, line: str, number: int, col: int, diags: list) -> None:
+    match = _SET_RE.match(raw)
+    if not match:
+        diags.append(Diagnostic(number, "error", "A `set` line needs a config key and a value.",
+                                "For example `set SOLVER.BASE_LR 0.001`.", col, len(line) + 1, "syntax.set"))
+        return
+    key, value_raw = match.group("key"), (match.group("value") or "").strip()
+    key_col = line.index(key, col + 2) + 1
+    if not value_raw:
+        diags.append(Diagnostic(number, "error", f"`set {key}` has no value.", "Write the new value after the key.",
+                                key_col, key_col + len(key), "syntax.set_value"))
+        return
+    value_col = line.index(value_raw, key_col - 1 + len(key)) + 1
+    try:
+        import yaml
+
+        value = yaml.safe_load(value_raw)
+    except Exception:  # noqa: BLE001 - any YAML problem is a syntax error on this line
+        diags.append(Diagnostic(number, "error", f"Could not read the value `{value_raw}`.",
+                                "Use a number, true/false, text, or a list like [8, 16, 32].",
+                                value_col, value_col + len(value_raw), "syntax.set_value"))
+        return
+    for other in script.sets:
+        if other.key == key:
+            diags.append(Diagnostic(number, "error", f"`{key}` is set twice.", f"It was already set on line {other.line}.",
+                                    key_col, key_col + len(key), "syntax.duplicate"))
+            return
+    script.sets.append(SetLine(key, value, value_raw, number, key_col, value_col))
+
+
+# Config keys that a named field already controls. `set` may not override them.
+MANAGED_KEYS = {
+    "train": {"DATASET.IMAGE_NAME": "image", "DATASET.LABEL_NAME": "label", "DATASET.OUTPUT_PATH": "output",
+              "SOLVER.ITERATION_TOTAL": "steps", "SYSTEM.NUM_GPUS": "the `on cluster` / `on laptop` header"},
+    "infer": {"INFERENCE.IMAGE_NAME": "image", "INFERENCE.OUTPUT_PATH": "output",
+              "SYSTEM.NUM_GPUS": "the `on cluster` / `on laptop` header"},
+}
+
+
+def _flatten(cfg: Any, prefix: str = "") -> dict[str, Any]:
+    out: dict[str, Any] = {}
+    if isinstance(cfg, dict):
+        for k, v in cfg.items():
+            key = f"{prefix}.{k}" if prefix else str(k)
+            if isinstance(v, dict):
+                out.update(_flatten(v, key))
+            else:
+                out[key] = v
+    return out
+
+
+def _same_kind(old: Any, new: Any) -> bool:
+    if old is None:
+        return True
+    if isinstance(old, bool) or isinstance(new, bool):
+        return isinstance(old, bool) and isinstance(new, bool)
+    if isinstance(old, (int, float)):
+        return isinstance(new, (int, float))
+    if isinstance(old, list):
+        return isinstance(new, list)
+    if isinstance(old, str):
+        return isinstance(new, str)
+    return True
+
+
+def _kind_name(value: Any) -> str:
+    if isinstance(value, bool):
+        return "true or false"
+    if isinstance(value, (int, float)):
+        return "a number"
+    if isinstance(value, list):
+        return "a list like [1, 2, 3]"
+    return "text"
+
+
+def _check_sets(script: "TaskScript", presets: dict[str, Any], diags: list) -> None:
+    if not script.sets:
+        return
+    if script.verb not in MANAGED_KEYS:
+        for s in script.sets:
+            diags.append(Diagnostic(s.line, "error", f"`set` only works for train and infer tasks.", "",
+                                    s.key_col, s.key_col + len(s.key), "meaning.set_verb"))
+        return
+    preset = script.get("preset")
+    if preset not in presets:
+        return  # the preset line already has an error
+    import yaml
+
+    flat = _flatten(yaml.safe_load(Path(presets[preset]).read_text()) or {})
+    for s in script.sets:
+        end = s.key_col + len(s.key)
+        if s.key in MANAGED_KEYS[script.verb]:
+            diags.append(Diagnostic(s.line, "error", f"`{s.key}` comes from {MANAGED_KEYS[script.verb][s.key]}.",
+                                    "Change that line instead, so the script has one place for each setting.",
+                                    s.key_col, end, "meaning.set_managed"))
+        elif s.key not in flat:
+            diags.append(Diagnostic(s.line, "error", f"`{s.key}` is not in the `{preset}` config.",
+                                    _close(s.key, flat) or "Open the config.yaml tab to see the available keys.",
+                                    s.key_col, end, "meaning.set_key"))
+        elif not _same_kind(flat[s.key], s.value):
+            diags.append(Diagnostic(s.line, "error", f"`{s.key}` should be {_kind_name(flat[s.key])}.",
+                                    f"The preset has `{json.dumps(flat[s.key])}`.", s.value_col,
+                                    s.value_col + len(s.raw), "meaning.set_type"))
 
 
 PathChecker = Callable[[str, list[str]], dict[str, bool]]
@@ -328,6 +455,8 @@ def check(
                                         _close(str(fv.value), presets) or f"Available presets: {', '.join(presets)}.",
                                         fv.col, end, "meaning.preset"))
 
+    _check_sets(script, presets, diags)
+
     if path_checker and paths_to_check:
         try:
             results = path_checker(script.target, [fv.value for fv, _ in paths_to_check])
@@ -392,4 +521,20 @@ def render(task: dict[str, Any], comment: str = "") -> str:
             continue
         text = f'"{value}"' if spec.kind == "path" else str(value)
         lines.append(f"  {spec.name.ljust(width)}  {text}")
+    for item in task.get("sets", []) or []:
+        lines.append(f"  set {item['key']} {format_value(item['value'])}")
     return "\n".join(lines) + "\n"
+
+
+def format_value(value: Any) -> str:
+    """Print a `set` value so the parser reads it back unchanged."""
+    if isinstance(value, bool):
+        return "true" if value else "false"
+    if value is None:
+        return "null"
+    if isinstance(value, (int, float)):
+        return repr(value)
+    if isinstance(value, list):
+        return "[" + ", ".join(format_value(v) for v in value) + "]"
+    text = str(value)
+    return text if re.fullmatch(r"[A-Za-z_][\w.-]*", text) and text not in ("true", "false", "null") else json.dumps(text)

@@ -116,21 +116,25 @@ def compile_script(script: TaskScript) -> Plan:
             _set(cfg, "SOLVER.ITERATION_TOTAL", steps, changes, "script", "`steps` in your script.")
             _set(cfg, "SOLVER.ITERATION_SAVE", steps, changes, "script", "Save one checkpoint at the end.")
             _set(cfg, "SOLVER.ITERATION_VAL", steps * 10, changes, "script", "No validation passes in a short run.")
+            for item in script.sets:
+                _set(cfg, item.key, item.value, changes, "script", f"`set` on line {item.line} of your script.")
             _lint(cfg, changes)
             plan.command = "{python} {pytc}/scripts/main.py --config-file config.yaml"
             plan.outputs = {"checkpoint": f"{out.rstrip('/')}/checkpoint_{steps:05d}.pth.tar", "folder": out}
-            plan.summary = f"Train `{preset}` for {steps} steps, save to {out}"
+            plan.summary = f"Train the {preset} model for {steps} steps on {script.get('image').rsplit('/', 1)[-1]}"
         else:
             out = script.get("output")
             _set(cfg, "INFERENCE.IMAGE_NAME", script.get("image"), changes, "script", "`image` in your script.")
             _set(cfg, "INFERENCE.INPUT_PATH", "", changes, "script", "Paths below are absolute.")
             _set(cfg, "INFERENCE.OUTPUT_PATH", out, changes, "script", "`output` in your script.")
             _set(cfg, "INFERENCE.OUTPUT_NAME", PREDICTION_NAME, changes, "script", "Fixed name so later steps can find it.")
+            for item in script.sets:
+                _set(cfg, item.key, item.value, changes, "script", f"`set` on line {item.line} of your script.")
             _lint(cfg, changes)
             model = script.get("model")
             plan.command = f"{{python}} {{pytc}}/scripts/main.py --config-file config.yaml --inference --checkpoint '{model}'"
             plan.outputs = {"prediction": f"{out.rstrip('/')}/{PREDICTION_NAME}", "folder": out}
-            plan.summary = f"Segment {script.get('image')} with {model.rsplit('/', 1)[-1]}"
+            plan.summary = f"Segment {script.get('image').rsplit('/', 1)[-1]} with {model.rsplit('/', 1)[-1]}"
         plan.files["config.yaml"] = _dump(cfg)
         plan.changes = changes
         plan.needs_gpu = bool(gpus)

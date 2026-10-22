@@ -13,7 +13,7 @@ from pydantic import BaseModel
 
 from . import drafter
 from .compiler import PRESETS, compile_script
-from .language import SCHEMA, TARGETS, check, output_parents
+from .language import MANAGED_KEYS, SCHEMA, TARGETS, check, output_parents
 from .targets import STATE_DIR, TargetError, get_target
 
 router = APIRouter()
@@ -87,6 +87,7 @@ def schema() -> dict[str, Any]:
         "cluster": {"configured": cluster.configured, "host": cluster.host, "root": cluster.root,
                     "partition": cluster.partition},
         "draft_model": drafter.DRAFT_MODEL,
+        "managed_keys": {verb: list(keys) for verb, keys in MANAGED_KEYS.items()},
     }
 
 
@@ -96,6 +97,28 @@ def draft(body: DraftRequest) -> dict[str, Any]:
         raise HTTPException(400, f"Unknown target {body.target}.")
     target = get_target(body.target)
     return drafter.draft(body.request, target, _load_jobs(), _output_root(body.target))
+
+
+class ConverseRequest(BaseModel):
+    request: str = ""
+    script: str
+    message: str
+    thread: list[dict[str, str]] = []
+    draft_note: str = ""
+
+
+@router.post("/converse")
+def converse(body: ConverseRequest) -> dict[str, Any]:
+    """Answer a question about the script, or propose a revised script from feedback."""
+    script, _ = check(body.script, PRESETS)
+    task = script.as_dict() if script else None
+    target = get_target((task or {}).get("target") or "cluster")
+    result = drafter.converse(body.request, body.script, body.message, body.thread, task, target,
+                              _load_jobs(), body.draft_note)
+    if result.get("script"):
+        _, diags, errors, _ = _check(result["script"], True)
+        result["problems"] = [d.as_dict() for d in errors]
+    return result
 
 
 @router.post("/check")

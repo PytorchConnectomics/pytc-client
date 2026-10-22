@@ -75,7 +75,7 @@ class ClusterTarget:
     def list_files(self, folder: str, limit: int = 60) -> list[str]:
         out = self._ssh(
             f"find {shlex.quote(folder)} -maxdepth 4 -type f \\( -name '*.h5' -o -name '*.hdf5' -o -name '*.tif' "
-            f"-o -name '*.tiff' -o -name '*.pth.tar' -o -name '*.yaml' \\) 2>/dev/null | head -n {limit}"
+            f"-o -name '*.tiff' -o -name '*.pth.tar' \\) -not -path '*/pytorch_connectomics/*' 2>/dev/null | head -n {limit}"
         )
         return [line for line in out.splitlines() if line.strip()]
 
@@ -148,7 +148,7 @@ class LaptopTarget:
     def list_files(self, folder: str, limit: int = 60) -> list[str]:
         root = Path(os.path.expanduser(folder))
         found = []
-        for pattern in ("*.h5", "*.hdf5", "*.tif", "*.tiff", "*.pth.tar", "*.yaml"):
+        for pattern in ("*.h5", "*.hdf5", "*.tif", "*.tiff", "*.pth.tar"):
             found.extend(str(p) for p in root.rglob(pattern))
         return sorted(found)[:limit]
 
