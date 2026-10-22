@@ -19,20 +19,24 @@ if ! command -v npm >/dev/null 2>&1; then
 	exit 1
 fi
 
+# Stop a process and everything it started. `npm start` runs the React server as a
+# child process and does not always pass signals on, so killing only npm's PID can
+# leave the server orphaned and still holding port 3000.
+stop_tree() {
+	local pid="$1" child
+	[[ -n "${pid}" ]] || return 0
+	for child in $(pgrep -P "${pid}" 2>/dev/null); do
+		stop_tree "${child}"
+	done
+	kill "${pid}" >/dev/null 2>&1 || true
+}
+
 cleanup() {
 	local exit_code=$?
-	if [[ -n "${API_PID:-}" ]] && ps -p "${API_PID}" >/dev/null 2>&1; then
-		kill "${API_PID}" >/dev/null 2>&1 || true
-	fi
-	if [[ -n "${PYTC_PID:-}" ]] && ps -p "${PYTC_PID}" >/dev/null 2>&1; then
-		kill "${PYTC_PID}" >/dev/null 2>&1 || true
-	fi
-	if [[ -n "${DATA_SERVER_PID:-}" ]] && ps -p "${DATA_SERVER_PID}" >/dev/null 2>&1; then
-		kill "${DATA_SERVER_PID}" >/dev/null 2>&1 || true
-	fi
-	if [[ -n "${REACT_PID:-}" ]] && ps -p "${REACT_PID}" >/dev/null 2>&1; then
-		kill "${REACT_PID}" >/dev/null 2>&1 || true
-	fi
+	stop_tree "${API_PID:-}"
+	stop_tree "${PYTC_PID:-}"
+	stop_tree "${DATA_SERVER_PID:-}"
+	stop_tree "${REACT_PID:-}"
 	wait || true
 	exit "${exit_code}"
 }
