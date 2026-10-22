@@ -11,7 +11,7 @@ from typing import Any, Optional
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
-from . import drafter
+from . import drafter, viewing
 from .compiler import PRESETS, compile_script
 from .language import MANAGED_KEYS, SCHEMA, TARGETS, check, output_parents
 from .targets import STATE_DIR, TargetError, get_target
@@ -198,6 +198,18 @@ def job_status(job_id: str) -> dict[str, Any]:
         except TargetError:
             pass
     return job
+
+
+@router.post("/jobs/{job_id}/viewer")
+def prepare_viewer(job_id: str) -> dict[str, Any]:
+    """Make a finished view task's files viewable: label volumes must be 3D integer labels."""
+    job = next((j for j in _load_jobs() if j["id"] == job_id), None)
+    if job is None or job.get("verb") != "view" or not job.get("local_paths"):
+        raise HTTPException(404, "No viewable files for this run.")
+    try:
+        return viewing.prepare(job["local_paths"])
+    except (ValueError, OSError) as exc:
+        raise HTTPException(422, f"Could not prepare the files for viewing: {exc}") from exc
 
 
 @router.post("/jobs/{job_id}/cancel")

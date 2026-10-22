@@ -387,10 +387,19 @@ function TaskScripts() {
   };
 
   const openViewer = async (job) => {
-    const [image, label] = job.local_paths || [];
-    const res = await getNeuroglancerViewer(image, label || null, [1, 1, 1]);
-    const url = res?.url || res?.neuroglancer_url;
-    if (url) window.open(url, "_blank");
+    setError("");
+    try {
+      const prep = (await axios.post(api(`/jobs/${job.id}/viewer`))).data;
+      setJobs((prev) => prev.map((j) => (j.id === job.id ? { ...j, view_note: prep.view_note } : j)));
+      const [image, label] = prep.local_paths;
+      const res = await getNeuroglancerViewer(image, label || null, prep.scales);
+      const url = res?.url || res?.neuroglancer_url;
+      if (!url) throw new Error("The viewer did not return a link.");
+      window.open(url, "_blank");
+    } catch (e) {
+      const detail = e.response?.data?.detail;
+      setError(`Could not open the viewer. ${typeof detail === "string" ? detail : e.apiError?.message || e.message}`);
+    }
   };
 
   const loadJob = (job) => {
@@ -768,6 +777,7 @@ function TaskScripts() {
                   </span>
                 </div>
                 {job.error && <p className="ts-run-error">{job.error}</p>}
+                {job.view_note && <p className="ts-run-note">{job.view_note}</p>}
                 {openJob === job.id && (
                   <div className="ts-run-detail">
                     {job.request && <p className="ts-run-request">Asked: {job.request}</p>}

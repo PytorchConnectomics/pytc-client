@@ -213,6 +213,7 @@
 .ts-metrics { display: block; color: var(--good); font-weight: 500; margin-top: 2px; }
 .ts-run-when { color: var(--ink-3); font-size: 12.5px; white-space: nowrap; font-variant-numeric: tabular-nums; }
 .ts-run-actions { display: flex; gap: 14px; }
+.ts-run-note { margin: 0 0 10px; color: var(--ink-2); font-size: 13px; }
 .ts-run-error { margin: 0 0 10px; color: var(--bad); font-size: 13px; }
 .ts-run-detail { padding: 0 2px 14px; display: grid; gap: 8px; }
 .ts-run-request { margin: 0; color: var(--ink-2); font-style: italic; }

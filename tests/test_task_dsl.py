@@ -124,3 +124,27 @@ def test_changing_patch_size_keeps_matching_sizes_in_step():
     cfg = yaml.safe_load(compile_script(script).files["config.yaml"])
     assert cfg["MODEL"]["OUTPUT_SIZE"] == [9, 33, 33]
     assert cfg["INFERENCE"]["INPUT_SIZE"] == cfg["INFERENCE"]["OUTPUT_SIZE"] == [9, 33, 33]
+
+
+def test_predictions_are_converted_to_3d_labels_for_the_viewer(tmp_path):
+    import h5py
+    import numpy as np
+
+    from server_api.task_dsl.viewing import labels_for_viewer
+
+    pred = np.zeros((2, 6, 40, 40), dtype=np.uint8)
+    pred[0, 1:5, 5:15, 5:15] = 230   # one real object
+    pred[0, 2, 30, 30] = 255          # a one-voxel speck
+    path = tmp_path / "prediction.h5"
+    with h5py.File(path, "w") as f:
+        f.create_dataset("vol0", data=pred)
+    out, note = labels_for_viewer(str(path))
+    with h5py.File(out) as f:
+        labels = f["main"][:]
+    assert labels.shape == (6, 40, 40) and labels.dtype == np.uint32
+    assert labels.max() == 1 and labels[2, 30, 30] == 0
+    assert "2 channels" in note and "1 specks" in note
+
+    with h5py.File(tmp_path / "seg.h5", "w") as f:
+        f.create_dataset("main", data=labels)
+    assert labels_for_viewer(str(tmp_path / "seg.h5")) == (str(tmp_path / "seg.h5"), "")  # labels pass through
