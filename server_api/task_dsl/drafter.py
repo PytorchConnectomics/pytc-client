@@ -8,6 +8,7 @@ always gets a draft to correct.
 
 from __future__ import annotations
 
+import difflib
 import json
 import os
 import re
@@ -198,155 +199,278 @@ def draft(request: str, target, history: list[dict[str, Any]], output_root: str)
 
 
 
-CLASSIFY_SCHEMA = {
-    "type": "object",
-    "properties": {
-        "kind": {"type": "string", "enum": ["answer", "revise"]},
-        "reply": {"type": "string"},
-        "line": {"type": "integer"},
-    },
-    "required": ["kind", "reply"],
-}
-REVISE_SCHEMA = {
-    "type": "object",
-    "properties": {**{k: v for k, v in FORM_SCHEMA["properties"].items() if k != "note"},
-                   "set_lines": {"type": "string"}},
-    "required": ["verb", "target", "set_lines"],
-}
+# ---------- Conversation: an editing agent with tools, like a coding assistant ----------
+#
+# The model never rewrites the script as text. It calls tools that edit a working copy
+# (set a field, set or remove a config key) or look things up (list a folder, find config
+# keys). After it stops, the checker runs on the working copy and any errors go back to
+# the model once so it can repair its own edit. The user then sees the result as a diff.
 
-
-def _json_from(text: str) -> dict[str, Any]:
-    """Structured output, with a fallback for models that wrap JSON in prose."""
-    try:
-        return json.loads(text)
-    except json.JSONDecodeError:
-        match = re.search(r"\{.*\}", text, re.S)
-        if match:
-            return json.loads(match.group(0))
-        raise
+MAX_TOOL_ROUNDS = 8
+_PROMISE_RE = re.compile(r"\b(i'll|i will|i've|i have|let me|sure)\b.*\b(change|edit|update|set|modify|switch|replace|reduce|increase|lower|raise|add|remove)",
+                         re.I | re.S)
+_LINE_RE = re.compile(r"\bline\s+(\d+)\b", re.I)
 
 
 def _clean_reply(text: str) -> str:
-    text = re.sub(r"\s*[{}]+\s*(Done\.?)?\s*[{}]*\s*$", "", text.strip())
-    return text.replace("\u2011", "-").strip()
+    text = re.sub(r"\s*[{}]+\s*(Done\.?)?\s*[{}]*\s*$", "", (text or "").strip())
+    return text.replace("‑", "-").strip()
 
 
-class UnstructuredReply(ValueError):
-    """The model answered in prose instead of the requested JSON."""
-
-    def __init__(self, content: str, thinking: str) -> None:
-        super().__init__("The model did not return the requested form.")
-        self.content, self.thinking = content, thinking
-
-
-def _chat(messages: list[dict[str, str]], schema: dict[str, Any]) -> dict[str, Any]:
-    body = {"model": DRAFT_MODEL, "stream": False, "format": schema, "think": "low",
-            "options": {"temperature": 0, "num_ctx": 8192}, "messages": messages}
-    content = thinking = ""
-    for attempt in range(2):
-        if attempt:  # gpt-oss sometimes ignores the format; ask again, more firmly
-            body["messages"] = messages + [{"role": "user", "content": "Reply with only the JSON object, nothing else."}]
-        response = requests.post(f"{OLLAMA_URL}/api/chat", json=body, timeout=DRAFT_TIMEOUT)
-        response.raise_for_status()
-        message = response.json().get("message", {})
-        content, thinking = message.get("content", ""), message.get("thinking", "")
-        try:
-            return _json_from(content)
-        except json.JSONDecodeError:
-            continue
-    raise UnstructuredReply(content, thinking)
+def _tool_specs(verb: str) -> list[dict[str, Any]]:
+    field_names = [s.name for s in SCHEMA.get(verb, ())] + ["target"]
+    fn = lambda name, desc, props, req: {"type": "function", "function": {  # noqa: E731
+        "name": name, "description": desc,
+        "parameters": {"type": "object", "properties": props, "required": req}}}
+    return [
+        fn("set_field", "Change one line of the task script (a named field such as steps, image, output, or target).",
+           {"name": {"type": "string", "enum": field_names}, "value": {"type": "string"}}, ["name", "value"]),
+        fn("set_config", "Add or change a `set KEY VALUE` line that overrides one key of the preset's YAML config, "
+                         "e.g. SOLVER.BASE_LR 0.001. Use find_config_keys first if unsure of the key name.",
+           {"key": {"type": "string"}, "value": {"type": "string"}}, ["key", "value"]),
+        fn("remove_config", "Remove a `set` line from the script.", {"key": {"type": "string"}}, ["key"]),
+        fn("find_config_keys", "Search the preset's YAML config for keys by words, e.g. 'batch' or 'learning rate'. "
+                               "Returns matching keys with their current values.",
+           {"query": {"type": "string"}}, ["query"]),
+        fn("list_files", "List data and checkpoint files under a folder on the machine where the task runs.",
+           {"folder": {"type": "string"}}, ["folder"]),
+    ]
 
 
-def _facts_block(context: dict[str, Any], request: str, draft_note: str, script_text: str) -> str:
-    numbered = "\n".join(f"{i:>2} | {line}" for i, line in enumerate(script_text.splitlines(), start=1))
-    return (f"Facts: {json.dumps(context)}\nOriginal request: {request}\nNote from the draft: {draft_note}\n"
-            "How the draft was made: files were picked from the folder listings and recent runs; steps defaults to "
-            "100 and preset to synthetic-tiny unless the user said otherwise; the output folder name is generated "
-            "by code from the date and time.\n"
-            f"Current script (line numbers on the left):\n{numbered}")
+_ALIASES = {"learning rate": "BASE_LR", "lr": "BASE_LR", "batch": "SAMPLES_PER_BATCH", "iterations": "ITERATION",
+            "epochs": "ITERATION", "gpus": "NUM_GPUS", "patch": "INPUT_SIZE", "channels": "FILTERS"}
+
+
+class _Workspace:
+    """A working copy of the task the agent edits through tools."""
+
+    def __init__(self, task: dict[str, Any], target) -> None:
+        self.verb = task.get("verb") or "train"
+        self.target_name = task.get("target") or target.name
+        self.fields = dict(task.get("fields", {}))
+        self.sets = {s["key"]: s["value"] for s in task.get("sets", [])}
+        self.target = target
+        self.edits = 0
+
+    def _flat_config(self) -> dict[str, Any]:
+        import yaml
+
+        from .compiler import PRESETS as _P
+        from .language import _flatten
+
+        preset = self.fields.get("preset") or "synthetic-tiny"
+        if preset not in _P:
+            return {}
+        return _flatten(yaml.safe_load(_P[preset].read_text()) or {})
+
+    def run(self, name: str, args: dict[str, Any]) -> str:
+        import yaml
+
+        from .language import MANAGED_KEYS
+
+        if name == "set_field":
+            field, value = str(args.get("name", "")), str(args.get("value", "")).strip().strip('"')
+            if field == "target":
+                if value not in TARGETS:
+                    return f"Error: target must be one of {', '.join(TARGETS)}."
+                self.target_name = value
+            else:
+                spec = next((s for s in SCHEMA.get(self.verb, ()) if s.name == field), None)
+                if spec is None:
+                    return f"Error: `{field}` is not a field of a {self.verb} task."
+                if spec.kind == "int":
+                    try:
+                        value = int(float(value))
+                    except ValueError:
+                        return f"Error: {field} must be a whole number."
+                elif spec.kind == "float":
+                    try:
+                        value = float(value)
+                    except ValueError:
+                        return f"Error: {field} must be a number."
+                self.fields[field] = value
+            self.edits += 1
+            return f"OK. {field} is now {value}."
+        if name == "set_config":
+            key = str(args.get("key", "")).strip().removeprefix("set ").strip()
+            managed = MANAGED_KEYS.get(self.verb, {})
+            if key in managed:
+                return f"Error: {key} is controlled by {managed[key]}. Use set_field instead."
+            flat = self._flat_config()
+            if key not in flat:
+                close = difflib.get_close_matches(key, list(flat), n=3, cutoff=0.5)
+                return f"Error: {key} is not in the config." + (f" Close matches: {', '.join(close)}." if close else
+                                                                 " Use find_config_keys to search.")
+            raw = str(args.get("value", "")).strip()
+            try:
+                value = yaml.safe_load(raw)
+            except Exception:  # noqa: BLE001
+                return f"Error: could not read the value {raw!r}."
+            self.sets[key] = value
+            self.edits += 1
+            return f"OK. {key} is now {format_value(value)} (preset had {format_value(flat[key])})."
+        if name == "remove_config":
+            key = str(args.get("key", "")).strip()
+            if key not in self.sets:
+                return f"Nothing to remove: there is no set line for {key}."
+            del self.sets[key]
+            self.edits += 1
+            return f"OK. Removed the set line for {key}."
+        if name == "find_config_keys":
+            query = str(args.get("query", "")).lower()
+            words = [_ALIASES.get(query, "")] + [_ALIASES.get(w, w) for w in re.findall(r"[a-z0-9_]+", query)]
+            flat = self._flat_config()
+            hits = [k for k in flat if any(w and w.lower() in k.lower() for w in words)]
+            hits = hits or difflib.get_close_matches(query.upper(), list(flat), n=8, cutoff=0.3)
+            return "\n".join(f"{k} = {format_value(flat[k])}" for k in hits[:15]) or "No matching keys."
+        if name == "list_files":
+            try:
+                files = self.target.list_files(str(args.get("folder", "")), limit=40)
+            except Exception as exc:  # noqa: BLE001
+                return f"Error: could not list the folder ({str(exc)[:120]})."
+            return "\n".join(files) or "No data or checkpoint files found there."
+        return f"Error: unknown tool {name}."
+
+    def task(self) -> dict[str, Any]:
+        return {"verb": self.verb, "target": self.target_name, "fields": self.fields,
+                "sets": [{"key": k, "value": v} for k, v in self.sets.items()]}
+
+
+def _post_chat(messages: list[dict[str, Any]], tools: list[dict[str, Any]]) -> dict[str, Any]:
+    body = {"model": DRAFT_MODEL, "stream": False, "messages": messages, "tools": tools, "think": "low",
+            "options": {"temperature": 0, "num_ctx": 8192}}
+    response = requests.post(f"{OLLAMA_URL}/api/chat", json=body, timeout=DRAFT_TIMEOUT)
+    response.raise_for_status()
+    return response.json().get("message", {})
+
+
+def _system_for_agent() -> str:
+    fields = {verb: [s.name for s in specs] for verb, specs in SCHEMA.items()}
+    return (
+        "You are the assistant inside a task-script editor for a biomedical segmentation app. The user reviews a "
+        "script before it runs and talks to you about it.\n"
+        f"Task kinds and their fields: {json.dumps(fields)}. Presets: {', '.join(PRESETS)}.\n"
+        "`set KEY VALUE` lines override keys of the preset's YAML config.\n"
+        "How the draft was made: files were picked from the folder listings and recent runs; steps defaults to 100 "
+        "and preset to synthetic-tiny unless the user said otherwise; the output folder name is generated by code "
+        "from the date and time.\n"
+        "Rules:\n"
+        "- When the user asks for a change, or agrees to one you suggested (\"do it\", \"yes\", \"go ahead\"), make it "
+        "with the tools. Never say you changed something without calling a tool.\n"
+        "- If you are not sure of a config key, call find_config_keys first. To look for files, call list_files.\n"
+        "- Never invent file paths. Only use paths from the script, the facts, or list_files results.\n"
+        "- When answering a question, be brief (1-3 sentences) and mention the script line number it concerns.\n"
+        "- After editing, reply with one short sentence. The user will review your edits as a diff."
+    )
+
+
+def _step_text(name: str, args: dict[str, Any], out: str) -> dict[str, Any]:
+    """One plain-language line per tool call, shown under the reply so the user can see what the agent did."""
+    ok = not out.startswith("Error")
+    tail = lambda p: "…/" + "/".join(str(p).rstrip("/").split("/")[-2:])  # noqa: E731
+    if name == "set_field":
+        value = args.get("value", "")
+        value = tail(value) if str(value).startswith("/") else value
+        text = f"Changed {args.get('name')} to {value}" if ok else f"Could not change {args.get('name')}: {out[7:]}"
+    elif name == "set_config":
+        reason = ("not in the config" if "not in the config" in out else
+                  "set by a script line instead" if "controlled by" in out else "the value could not be read")
+        text = f"Set {args.get('key')} to {args.get('value')}" if ok else f"Tried {args.get('key')}: {reason}"
+    elif name == "remove_config":
+        text = f"Removed the set line for {args.get('key')}" if ok else out
+    elif name == "find_config_keys":
+        n = 0 if out == "No matching keys." else len(out.splitlines())
+        text = f"Searched the config for \u201c{args.get('query')}\u201d ({n} {'match' if n == 1 else 'matches'})"
+    elif name == "list_files":
+        n = 0 if not ok or out.startswith("No ") else len(out.splitlines())
+        text = f"Listed {tail(args.get('folder', ''))} ({n} files)" if ok else f"Could not list {args.get('folder')}"
+    else:
+        text = f"{name}: {out[:80]}"
+    return {"text": text, "ok": ok}
 
 
 def converse(request: str, script_text: str, message: str, thread: list[dict[str, str]],
              task: dict[str, Any] | None, target, history: list[dict[str, Any]], draft_note: str = "") -> dict[str, Any]:
+    from .compiler import PRESETS as _P
+    from .language import check as _check_script
+
     started = time.time()
-    inputs = {k: v for k, v in (task or {}).get("fields", {}).items() if k not in ("output",)}
+    task = task or {"verb": "train", "target": target.name, "fields": {}, "sets": []}
+    inputs = {k: v for k, v in task.get("fields", {}).items() if k != "output"}
     folder_hint = request + " " + " ".join(
-        str(v).rsplit("/", 1)[0] for v in inputs.values() if isinstance(v, str) and v.startswith("/")
-    )
+        str(v).rsplit("/", 1)[0] for v in inputs.values() if isinstance(v, str) and v.startswith("/"))
     context = gather_context(folder_hint, target, history)
-    facts = _facts_block(context, request, draft_note, script_text)
-    earlier = "\n".join(f"{t.get('role')}: {t.get('text')}" for t in thread[-6:])
+    numbered = "\n".join(f"{i:>2} | {line}" for i, line in enumerate(script_text.splitlines(), start=1))
+
+    messages: list[dict[str, Any]] = [
+        {"role": "system", "content": _system_for_agent()},
+        {"role": "user", "content": f"Facts: {json.dumps(context)}\nOriginal request: {request}\n"
+                                    f"Note from the draft: {draft_note}\n"
+                                    f"Current script (line numbers on the left):\n{numbered}"},
+        {"role": "assistant", "content": "I have the script. What would you like to know or change?"},
+    ]
+    for turn in thread[-8:]:
+        messages.append({"role": "user" if turn.get("role") == "user" else "assistant", "content": turn.get("text", "")})
+    messages.append({"role": "user", "content": message})
+
+    ws = _Workspace(task, target)
+    tools = _tool_specs(ws.verb)
+    steps: list[str] = []
+    final_text = ""
+    nudged = repaired = False
     try:
-        decided = _chat([
-            {"role": "system", "content": (
-                "You review a task script with a biologist before it runs. Decide what their message wants.\n"
-                "kind=answer: a question. reply explains in 1-3 plain sentences, using only the facts. If it is about "
-                "one script line, set `line` to that line number.\n"
-                "kind=revise: feedback or a requested change. reply says in one sentence what you will change.")},
-            {"role": "user", "content": f"{facts}\n\nEarlier conversation:\n{earlier or '(none)'}\n\nMessage: {message}"},
-        ], CLASSIFY_SCHEMA)
-    except UnstructuredReply as exc:
-        # Read the prose instead: the model's reasoning usually names the kind; a question mark settles the rest.
-        said = (exc.thinking + " " + exc.content).lower()
-        is_question = message.strip().endswith("?") or re.match(r"^(why|what|how|which|where|when|who|is|are|does|did|can)\b", message.strip().lower())
-        kind = "revise" if "revise" in said else "answer" if "answer" in said else ("answer" if is_question else "revise")
-        decided = {"kind": kind, "reply": exc.content.strip() or "Working on it."}
+        for _ in range(MAX_TOOL_ROUNDS):
+            reply = _post_chat(messages, tools)
+            calls = reply.get("tool_calls") or []
+            messages.append({"role": "assistant", "content": reply.get("content", ""), "tool_calls": calls})
+            if calls:
+                for call in calls:
+                    fn = call.get("function", {})
+                    name, args = fn.get("name", ""), fn.get("arguments") or {}
+                    if isinstance(args, str):
+                        try:
+                            args = json.loads(args)
+                        except json.JSONDecodeError:
+                            args = {}
+                    out = ws.run(name, args)
+                    steps.append(_step_text(name, args, out))
+                    messages.append({"role": "tool", "tool_name": name, "content": out})
+                continue
+            text = _clean_reply(reply.get("content", ""))
+            if not ws.edits and not nudged and _PROMISE_RE.search(text):
+                nudged = True  # it described a change without making it; ask it to act
+                messages.append({"role": "user", "content": "You described a change but did not make it. "
+                                                            "Make it now with the tools."})
+                continue
+            if ws.edits and not repaired:
+                repaired = True
+                _, diags = _check_script(render(ws.task()), _P)
+                errors = [d for d in diags if d.severity == "error"]
+                if errors:
+                    messages.append({"role": "user", "content": "The checker found problems in your edit:\n" + "\n".join(
+                        f"- line {d.line}: {d.message} {d.hint}" for d in errors) + "\nFix them with the tools."})
+                    continue
+            final_text = text
+            break
     except Exception as exc:  # noqa: BLE001
         return {"kind": "error", "reply": f"Could not reach the drafting model ({str(exc)[:120]}). "
-                                          "You can still edit the script directly.", "seconds": round(time.time() - started, 1)}
-    result: dict[str, Any] = {"kind": decided.get("kind", "answer"), "reply": _clean_reply(decided.get("reply", "")),
-                              "line": decided.get("line"), "seconds": 0}
-    if result["kind"] == "revise":
-        fields_now = (task or {}).get("fields", {})
-        sets_now = "\n".join(f"{s['key']} {format_value(s['value'])}" for s in (task or {}).get("sets", []))
-        try:
-            form = _chat([
-                {"role": "system", "content": (
-                    "Rewrite a task form to apply the user's change. Start from the current values and change only "
-                    "what the user asked for. Keep every other value exactly.\n"
-                    f"Task kinds and fields: {json.dumps({v: [s.name for s in specs] for v, specs in SCHEMA.items()})}\n"
-                    "set_lines: one `KEY VALUE` per line for YAML config changes, e.g. `SOLVER.BASE_LR 0.001`. "
-                    "Learning rate is SOLVER.BASE_LR, batch size is SOLVER.SAMPLES_PER_BATCH. Use '' for none.\n"
-                    "Never invent file paths: only use paths from the current values or the folder listings.")},
-                {"role": "user", "content": (
-                    f"Facts: {json.dumps(context)}\nCurrent values: verb={(task or {}).get('verb')}, "
-                    f"target={(task or {}).get('target')}, fields={json.dumps(fields_now)}\n"
-                    f"Current set_lines:\n{sets_now or '(none)'}\n\nChange requested: {message}")},
-            ], REVISE_SCHEMA)
-        except Exception:  # noqa: BLE001
-            result.update(kind="error", reply="The model described a change but did not write it as a script. "
-                                              "Try rephrasing, or edit the line yourself.")
-            form = None
-        if form:
-            import yaml
+                                          "You can still edit the script directly.",
+                "seconds": round(time.time() - started, 1), "steps": steps}
 
-            verb = form.get("verb") or (task or {}).get("verb") or "train"
-            allowed = {s.name for s in SCHEMA.get(verb, ())}
-            # Start from the current script so nothing the model omits gets lost.
-            fields = dict(fields_now) if verb == (task or {}).get("verb") else {}
-            fields.update({k: v for k, v in form.items() if k in allowed and v not in (None, "")})
-            removing = re.search(r"\b(remove|delete|drop|undo|get rid|without)\b", message.lower())
-            sets_by_key = {} if removing else {s["key"]: s["value"] for s in (task or {}).get("sets", [])}
-            for line in str(form.get("set_lines") or "").splitlines():
-                parts = line.strip().removeprefix("set ").split(None, 1)
-                if len(parts) != 2:
-                    continue
-                key, raw = parts[0], parts[1].strip().strip('"')
-                try:
-                    value = yaml.safe_load(raw)
-                except Exception:  # noqa: BLE001
-                    value = raw
-                if key in allowed:  # the model put a script field here; treat it as a field change
-                    fields[key] = raw if isinstance(value, str) else value
-                elif "." in key:
-                    sets_by_key[key] = value
-            sets = [{"key": k, "value": v} for k, v in sets_by_key.items()]
-            first = script_text.splitlines()[0] if script_text.strip() else ""
-            comment = first[2:] if first.startswith("# ") else ""
-            result["script"] = render({"verb": verb, "target": form.get("target") or (task or {}).get("target"),
-                                       "fields": fields, "sets": sets}, comment=comment)
-            result["reply"] = _describe_change(task or {}, fields, sets) or "No changes were needed."
-    result["seconds"] = round(time.time() - started, 1)
+    result: dict[str, Any] = {"seconds": round(time.time() - started, 1), "steps": steps}
+    if ws.edits:
+        first = script_text.splitlines()[0] if script_text.strip() else ""
+        comment = first[2:] if first.startswith("# ") else ""
+        new_task = ws.task()
+        result["script"] = render(new_task, comment=comment)
+        summary = _describe_change(task, new_task["fields"], new_task["sets"])
+        if new_task["target"] != task.get("target"):
+            summary = f"Proposed: run on the {new_task['target']}." + (f" {summary}" if summary else "")
+        result.update(kind="revise", reply=summary or "No changes were needed.")
+    else:
+        line = _LINE_RE.search(final_text)
+        result.update(kind="answer", reply=final_text or "I could not come up with an answer. Try rephrasing.",
+                      line=int(line.group(1)) if line else None)
     return result
 
 

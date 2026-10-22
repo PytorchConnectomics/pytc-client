@@ -100,3 +100,27 @@ def test_render_prints_set_lines_that_parse_back():
     script, diags = check(text, PRESETS)
     assert codes(diags) == []
     assert [(s.key, s.value) for s in script.sets] == [("SOLVER.BASE_LR", 0.001), ("MODEL.FILTERS", [8, 16])]
+
+
+def test_agent_tools_edit_a_working_copy_and_explain_mistakes():
+    from server_api.task_dsl.drafter import _Workspace
+    from server_api.task_dsl.targets import LaptopTarget
+
+    script, _ = check(TRAIN, PRESETS)
+    ws = _Workspace(script.as_dict(), LaptopTarget())
+    assert ws.run("set_field", {"name": "steps", "value": "20"}).startswith("OK")
+    assert "Close matches" in ws.run("set_config", {"key": "SOLVER.BASE_RL", "value": "0.01"})
+    assert "SOLVER.SAMPLES_PER_BATCH" in ws.run("find_config_keys", {"query": "batch size"})
+    assert ws.run("set_config", {"key": "SOLVER.ITERATION_TOTAL", "value": "5"}).startswith("Error")  # owned by steps
+    assert ws.run("set_config", {"key": "SOLVER.SAMPLES_PER_BATCH", "value": "2"}).startswith("OK")
+    task = ws.task()
+    assert task["fields"]["steps"] == 20 and task["sets"] == [{"key": "SOLVER.SAMPLES_PER_BATCH", "value": 2}]
+    assert ws.edits == 2
+
+
+def test_changing_patch_size_keeps_matching_sizes_in_step():
+    script, diags = check(TRAIN + "  set MODEL.INPUT_SIZE [9, 33, 33]\n", PRESETS)
+    assert codes(diags) == []
+    cfg = yaml.safe_load(compile_script(script).files["config.yaml"])
+    assert cfg["MODEL"]["OUTPUT_SIZE"] == [9, 33, 33]
+    assert cfg["INFERENCE"]["INPUT_SIZE"] == cfg["INFERENCE"]["OUTPUT_SIZE"] == [9, 33, 33]

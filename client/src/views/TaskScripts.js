@@ -252,6 +252,7 @@ function TaskScripts() {
   const [showYaml, setShowYaml] = useState(false);
   const [editingKey, setEditingKey] = useState(null);
   const [editValue, setEditValue] = useState("");
+  const [editOriginal, setEditOriginal] = useState("");
   const editorRef = useRef(null);
   const threadEndRef = useRef(null);
   const checkSeq = useRef(0);
@@ -324,13 +325,16 @@ function TaskScripts() {
     const text = message.trim();
     if (!text || !script) return;
     const priorThread = thread.map((t) => ({ role: t.role, text: t.text }));
-    setThread((prev) => [...prev, { role: "user", text }]);
+    // Follow-ups build on a proposal that is still waiting for review, so "also …" stacks.
+    const pending = [...thread].reverse().find((t) => t.proposal && t.status === "open");
+    const workingScript = pending ? pending.proposal : script;
+    setThread((prev) => [...prev.map((t) => (t === pending ? { ...t, status: "merged" } : t)), { role: "user", text }]);
     setMessage("");
     setAsking(true);
     try {
       const r = await axios.post(api("/converse"), {
         request,
-        script,
+        script: workingScript,
         message: text,
         thread: priorThread,
         draft_note: draftInfo?.note || "",
@@ -338,7 +342,7 @@ function TaskScripts() {
       const d = r.data;
       setThread((prev) => [
         ...prev,
-        { role: "ai", text: d.reply, kind: d.kind, line: d.line, proposal: d.script, base: script, problems: d.problems || [], status: "open" },
+        { role: "ai", text: d.reply, kind: d.kind, line: d.line, proposal: d.script, base: script, problems: d.problems || [], steps: d.steps || [], status: "open" },
       ]);
       setAnswerNote(d.kind === "answer" && d.line ? { line: d.line, message: d.reply } : null);
     } catch (e) {
@@ -400,7 +404,8 @@ function TaskScripts() {
   };
 
   const commitYamlEdit = () => {
-    if (editingKey && editValue.trim()) setScript((s) => upsertSetLine(s, editingKey, editValue.trim()));
+    const next = editValue.trim();
+    if (editingKey && next && next !== editOriginal.trim()) setScript((s) => upsertSetLine(s, editingKey, next));
     setEditingKey(null);
   };
 
@@ -527,6 +532,15 @@ function TaskScripts() {
                           {withCode(t.text)}
                           {t.kind === "answer" && t.line ? <span className="ts-reply-line"> (line {t.line})</span> : null}
                         </p>
+                        {t.steps?.length > 0 && (
+                          <ol className="ts-steps" aria-label="What the assistant did">
+                            {t.steps.map((st, k) => (
+                              <li key={k} className={st.ok ? undefined : "is-miss"}>
+                                {withCode(st.text)}
+                              </li>
+                            ))}
+                          </ol>
+                        )}
                         {t.proposal && (
                           <div className={`ts-proposal is-${t.status}`}>
                             <pre className="ts-diff">
@@ -554,7 +568,9 @@ function TaskScripts() {
                                 </button>
                               </div>
                             ) : (
-                              <p className="ts-proposal-done">{t.status === "accepted" ? "Accepted into the script." : "Discarded."}</p>
+                              <p className="ts-proposal-done">
+                                {{ accepted: "Accepted into the script.", discarded: "Discarded.", merged: "Included in the next proposal below." }[t.status]}
+                              </p>
                             )}
                           </div>
                         )}
@@ -562,7 +578,7 @@ function TaskScripts() {
                     )}
                   </div>
                 ))}
-                {asking && <p className="ts-thinking">Reading the script…</p>}
+                {asking && <p className="ts-thinking">Working on it…</p>}
                 <div ref={threadEndRef} />
               </div>
               <form
@@ -669,6 +685,7 @@ function TaskScripts() {
                                   onClick={() => {
                                     setEditingKey(row.key);
                                     setEditValue(row.value);
+                                    setEditOriginal(row.value);
                                   }}
                                   title={`Change ${row.key}`}
                                 >

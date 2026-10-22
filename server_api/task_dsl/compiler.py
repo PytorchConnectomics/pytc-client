@@ -74,8 +74,20 @@ def load_preset(name: str) -> dict:
     return yaml.safe_load(PRESETS[name].read_text()) or {}
 
 
-def _lint(cfg: dict, changes: list) -> None:
+def _lint(cfg: dict, changes: list, preset: dict | None = None) -> None:
     """Automatic fixes for config combinations PyTorch Connectomics rejects at run time."""
+    preset = preset or {}
+    for section in ("MODEL", "INFERENCE"):
+        size_in, size_out = _get(cfg, f"{section}.INPUT_SIZE"), _get(cfg, f"{section}.OUTPUT_SIZE")
+        if (size_in != size_out and _get(preset, f"{section}.INPUT_SIZE") == _get(preset, f"{section}.OUTPUT_SIZE")
+                and isinstance(size_in, list)):
+            _set(cfg, f"{section}.OUTPUT_SIZE", list(size_in), changes, "auto-fix",
+                 "This preset keeps input and output patch sizes equal; changing only one breaks the model.")
+    if _get(cfg, "MODEL.INPUT_SIZE") != _get(preset, "MODEL.INPUT_SIZE") and isinstance(_get(cfg, "MODEL.INPUT_SIZE"), list):
+        for key in ("INFERENCE.INPUT_SIZE", "INFERENCE.OUTPUT_SIZE"):
+            if _get(cfg, key) == _get(preset, "MODEL.INPUT_SIZE"):
+                _set(cfg, key, list(_get(cfg, "MODEL.INPUT_SIZE")), changes, "auto-fix",
+                     "Inference patches follow the training patch size.")
     filters = _get(cfg, "MODEL.FILTERS")
     if _get(cfg, "MODEL.NORM_MODE") == "gn" and isinstance(filters, list) and any(f % 8 for f in filters):
         fixed = [f if f % 8 == 0 else (f // 8 + 1) * 8 for f in filters]
@@ -118,7 +130,7 @@ def compile_script(script: TaskScript) -> Plan:
             _set(cfg, "SOLVER.ITERATION_VAL", steps * 10, changes, "script", "No validation passes in a short run.")
             for item in script.sets:
                 _set(cfg, item.key, item.value, changes, "script", f"`set` on line {item.line} of your script.")
-            _lint(cfg, changes)
+            _lint(cfg, changes, load_preset(preset))
             plan.command = "{python} {pytc}/scripts/main.py --config-file config.yaml"
             plan.outputs = {"checkpoint": f"{out.rstrip('/')}/checkpoint_{steps:05d}.pth.tar", "folder": out}
             plan.summary = f"Train the {preset} model for {steps} steps on {script.get('image').rsplit('/', 1)[-1]}"
@@ -130,7 +142,7 @@ def compile_script(script: TaskScript) -> Plan:
             _set(cfg, "INFERENCE.OUTPUT_NAME", PREDICTION_NAME, changes, "script", "Fixed name so later steps can find it.")
             for item in script.sets:
                 _set(cfg, item.key, item.value, changes, "script", f"`set` on line {item.line} of your script.")
-            _lint(cfg, changes)
+            _lint(cfg, changes, load_preset(preset))
             model = script.get("model")
             plan.command = f"{{python}} {{pytc}}/scripts/main.py --config-file config.yaml --inference --checkpoint '{model}'"
             plan.outputs = {"prediction": f"{out.rstrip('/')}/{PREDICTION_NAME}", "folder": out}
