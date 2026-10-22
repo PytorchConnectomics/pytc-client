@@ -10,11 +10,13 @@ import {
   PlusOutlined,
   ProjectOutlined,
   QuestionCircleOutlined,
+  CodeOutlined,
 } from "@ant-design/icons";
 import FilesManager from "./FilesManager";
 import Visualization from "./Visualization";
 import ModelTraining from "./ModelTraining";
 import ModelInference from "./ModelInference";
+import TaskScripts from "./TaskScripts";
 import MaskProofreading from "./MaskProofreading";
 import ProjectManager from "./project-manager/ProjectManager";
 import ProjectProgress from "./ProjectProgress";
@@ -32,6 +34,11 @@ const MODULE_ITEMS = [
     label: "Run Model",
     key: "inference",
     icon: <ThunderboltOutlined />,
+  },
+  {
+    label: "Task Scripts",
+    key: "task-scripts",
+    icon: <CodeOutlined />,
   },
   {
     label: "Workflow",
@@ -464,6 +471,7 @@ function Views() {
           <Visualization viewers={viewers} setViewers={setViewers} />,
         )}
         {renderTabContent("training", <ModelTraining />)}
+        {renderTabContent("task-scripts", <TaskScripts />)}
         {renderTabContent("project-progress", <ProjectProgress />)}
         {renderTabContent(
           "inference",

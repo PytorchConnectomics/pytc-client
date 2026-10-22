@@ -22,3 +22,6 @@ demo-proofread-3d.png
 docs/case-studies/yixiao-postdeploy-smoke-report-*.json
 docs/case-studies/yixiao-postdeploy-smoke-report-*.md
 docs/case-studies/yixiao-synthetic-walkthrough-report-*.md
+
+# Local task-script settings (cluster host, paths)
+.task-dsl.env

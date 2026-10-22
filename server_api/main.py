@@ -40,6 +40,7 @@ from server_api.auth import models, database, router as auth_router
 from server_api.auth.database import get_db
 from server_api.auth.router import get_current_user
 from server_api.ehtool import router as ehtool_router
+from server_api.task_dsl import router as task_dsl_router
 from server_api.errors import install_error_handlers
 from server_api.chatbot.logging_utils import (
     log_request_summary,
@@ -285,6 +286,7 @@ app.include_router(
     tags=["workflow-operations"],
 )
 app.include_router(pm_router.router, prefix="/api/pm", tags=["project-manager"])
+app.include_router(task_dsl_router.router, prefix="/api/task-dsl", tags=["task-dsl"])
 
 app.add_middleware(
     CORSMiddleware,
